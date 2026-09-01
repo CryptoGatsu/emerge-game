@@ -1,0 +1,67 @@
+name: Stabilize map
+on:
+  push:
+    branches: [main]
+
+jobs:
+  stabilize:
+    if: "!contains(github.event.head_commit.message, '[map-stabilize]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Fix map structure and styling
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          page = Path('app/page.tsx')
+          text = page.read_text()
+
+          stage = '<div className="mapstage" style={{transform:`translate3d(${view.x}px,${view.y}px,0) scale(${view.zoom})`}}>'
+          first = text.find(stage)
+          second = text.find(stage, first + len(stage)) if first >= 0 else -1
+          if first < 0 or second < 0:
+              raise SystemExit('Expected nested mapstage structure was not found')
+
+          # Keep the first stage and remove everything between it and the nested stage.
+          # This removes the accidental duplicate controls/hint/stage wrapper.
+          text = text[:first + len(stage)] + text[second + len(stage):]
+
+          # The nested stage had a matching extra close.
+          text, n = text.replace('</div></div><div className="maplegend">', '</div><div className="maplegend">', 1), 1
+
+          # Make sure the source contains only one mapstage opening.
+          if text.count(stage) != 1:
+              raise SystemExit(f'mapstage count is {text.count(stage)}, expected 1')
+
+          page.write_text(text)
+
+          css = Path('app/globals.css')
+          styles = css.read_text()
+          styles += '''\n\n/* Stable world-map viewport: one scene layer, fixed UI chrome, full-map citizens. */\n.map{touch-action:none;cursor:grab;overflow:hidden;position:relative;isolation:isolate}\n.map.panning{cursor:grabbing}\n.mapstage{position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;pointer-events:auto}\n.mapstage .terrainbg{position:absolute;inset:0;width:100%;height:100%;z-index:0}\n.mapstage .roads{z-index:1}\n.mapstage .building{z-index:4}\n.mapstage .resource-node{z-index:3}\n.mapstage .market-stall{z-index:5}\n.mapstage .trade-particle{z-index:7}\n.mapstage .citizen{z-index:6}\n.mapcontrols{position:absolute;right:14px;bottom:54px;z-index:18;display:flex;align-items:center;gap:4px;background:#0a100de8;border:1px solid #405148;border-radius:7px;padding:4px;box-shadow:0 8px 20px #0008}\n.mapcontrols button{width:36px;height:36px;border:1px solid #31443a;background:#101a14;color:#d5e4db;border-radius:5px;font-size:19px;line-height:1;cursor:pointer}\n.mapcontrols button:hover{background:#183022;border-color:#5be187;color:#fff}\n.mapcontrols span{min-width:42px;text-align:center;color:#8c9c93;font-size:9px;letter-spacing:.5px}\n.maphint{position:absolute;left:50%;bottom:55px;transform:translateX(-50%);z-index:17;background:#0a100dcf;border:1px solid #314238;color:#84958b;padding:6px 9px;border-radius:5px;font-size:7px;letter-spacing:1px;pointer-events:none;opacity:.8}\n.map:before{content:"";position:absolute;inset:0;z-index:10;pointer-events:none;background:radial-gradient(circle at center,transparent 55%,#06100a44 100%),linear-gradient(180deg,#07110a18,transparent 22%,transparent 78%,#07110a35)}\n@media (max-width:1050px){.worldview{grid-template-columns:1fr}.needs{display:grid;grid-template-columns:repeat(2,1fr);gap:0 16px}.needs h3,.miniweather{grid-column:1/-1}}\n'''
+          css.write_text(styles)
+          PY
+      - name: Validate production build
+        run: npm install --no-audit --no-fund && npm run build
+      - name: Commit clean source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/page.tsx app/globals.css
+          git diff --cached --quiet && echo 'No changes' && exit 0
+          git commit -m '[map-stabilize] Fix map scene and citizen bounds'
+          git push origin HEAD:main
+      - name: Remove one-time workflow
+        if: success()
+        run: |
+          git rm .github/workflows/stabilize-map.yml
+          git commit -m 'Remove one-time map stabilizer'
+          git push origin HEAD:main
