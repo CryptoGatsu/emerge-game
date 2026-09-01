@@ -10,52 +10,59 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Normalize page and remove temporary patch workflows
+      - name: Normalize page completely
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
           p=Path('app/page.tsx')
           s=p.read_text()
+
+          # Keep exactly one inspector state declaration.
           state="const [inspected,setInspected]=useState<{kind:'citizen'|'building';id:string}|null>(null);"
           s=re.sub(re.escape(state), '', s)
-          s=re.sub(r"(const \[marketFocus,setMarketFocus\]=useState<Resource>\('wheat'\);)", r"\1"+state, s, count=1)
+          anchor="const [marketFocus,setMarketFocus]=useState<Resource>('wheat');"
+          s=s.replace(anchor, anchor+state, 1)
+
+          # Keep exactly one map interaction declaration block.
+          block=re.compile(r"const market=world\.buildings\.find\(b=>b\.type==='Market'\);.*?(?=\n return <main)", re.S)
           handler="const market=world.buildings.find(b=>b.type==='Market');const beginPan=(e:React.PointerEvent<HTMLDivElement>)=>{if(e.button!==0)return;e.currentTarget.setPointerCapture(e.pointerId);setDrag({x:e.clientX,y:e.clientY,ox:view.x,oy:view.y});};const pan=(e:React.PointerEvent<HTMLDivElement>)=>{if(!drag)return;setView(v=>({...v,x:drag.ox+(e.clientX-drag.x),y:drag.oy+(e.clientY-drag.y)}));};const endPan=()=>setDrag(null);const zoom=(delta:number)=>setView(v=>({...v,zoom:Math.max(.65,Math.min(2.2,Number((v.zoom+delta).toFixed(2))))}));const resetView=()=>setView({x:0,y:0,zoom:1});"
-          s=re.sub(r"const market=world\.buildings\.find\(b=>b\.type==='Market'\);.*?(?=\n return <main)", handler, s, count=1, flags=re.S)
-          for pat in [r'<div className="mapcontrols">.*?</div>',r'<div className="maphint">.*?</div>',r'<div className="mapstage" style=\{\{transform:`translate3d\(\$\{view\.x\}px,\$\{view\.y\}px,0\) scale\(\$\{view\.zoom\}\)`\}\}>']:
-              matches=list(re.finditer(pat,s,re.S))
-              for m in reversed(matches[1:]): s=s[:m.start()]+s[m.end():]
-          ip=r'\{inspected&&<Inspector world=\{world\} inspected=\{inspected\} onClose=\{\(\)=>setInspected\(null\)\}/>\s*\}'
-          matches=list(re.finditer(ip,s))
-          for m in reversed(matches[1:]): s=s[:m.start()]+s[m.end():]
-          lines=s.splitlines();out=[];seen=False
-          for line in lines:
-              if line.startswith('function Inspector('):
-                  if seen: continue
-                  seen=True
-              out.append(line)
-          s='\n'.join(out)+'\n'
-          for _ in range(5): s=re.sub(r'</div>\s*</div>\s*<div className="maplegend">','</div><div className="maplegend">',s,count=1)
+          s=block.sub(handler, s, count=1)
+
+          # Keep one inspector render.
+          render=re.escape('{inspected&&<Inspector world={world} inspected={inspected} onClose={()=>setInspected(null)}/> }')
+          first=re.search(render,s)
+          if first:
+              tail=s[first.end():]
+              tail=re.sub(render,'',tail)
+              s=s[:first.end()]+tail
+
+          # Inspector is the final component in this file. Keep its first definition only.
+          starts=[m.start() for m in re.finditer(r'^function Inspector\(',s,re.M)]
+          if len(starts)>1:
+              s=s[:starts[1]]+s[starts[0]:starts[1]].rstrip()+"\n"
+
+          # Remove duplicated map controls/hints/stage openings left by prior patches.
+          for pat in [r'<div className="mapcontrols">.*?</div>',r'<div className="maphint">.*?</div>']:
+              ms=list(re.finditer(pat,s,re.S))
+              for m in reversed(ms[1:]): s=s[:m.start()]+s[m.end():]
+          stage=r'<div className="mapstage" style=\{\{transform:`translate3d\(\$\{view\.x\}px,\$\{view\.y\}px,0\) scale\(\$\{view\.zoom\}\)`\}\}>'
+          ms=list(re.finditer(stage,s))
+          for m in reversed(ms[1:]): s=s[:m.start()]+s[m.end():]
+
+          # Remove the extra closing wrapper immediately before the legend.
+          s=re.sub(r'</div>\s*</div>\s*<div className="maplegend">','</div><div className="maplegend">',s,count=1)
           p.write_text(s)
-          for name in ['fix-simulation-job-types.yml','fix-citizen-movement.yml','add-inspector.yml','fix-map-view.yml','repair-page.yml','finalize-repair.yml']:
-              f=Path('.github/workflows')/name
-              if f.exists(): f.unlink()
           PY
-      - name: Validate build
+      - name: Validate production build
         run: |
           npm install
           npm run build
-      - name: Commit final repair
+      - name: Commit normalized source
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/page.tsx app/globals.css .github/workflows
           git diff --cached --quiet && exit 0
-          git commit -m "[finalize-repair] Stabilize map UI and remove patch workflows"
-          for attempt in 1 2 3 4 5; do
-            git fetch origin main
-            git rebase origin/main || { git rebase --abort; git reset --hard origin/main; git add app/page.tsx app/globals.css .github/workflows; git commit -m "[finalize-repair] Stabilize map UI and remove patch workflows"; }
-            git push --force-with-lease && exit 0
-            sleep 3
-          done
-          exit 1
+          git commit -m "[finalize-repair] Stabilize Emerge page source"
+          git push
