@@ -1,0 +1,43 @@
+name: Add world inspector
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch inspector UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/page.tsx')
+          s=p.read_text()
+          old="const [paused,setPaused]=useState(false);const [selected,setSelected]=useState<'overview'|'bank'|'market'|'build'>('overview');const [speed,setSpeed]=useState(1);const [marketFocus,setMarketFocus]=useState<Resource>('wheat');"
+          new="const [paused,setPaused]=useState(false);const [selected,setSelected]=useState<'overview'|'bank'|'market'|'build'>('overview');const [speed,setSpeed]=useState(1);const [marketFocus,setMarketFocus]=useState<Resource>('wheat');const [inspected,setInspected]=useState<{kind:'citizen'|'building';id:string}|null>(null);"
+          s=s.replace(old,new)
+          old="className={`building ${b.workers.length?'operating':''}`} style={{left:`${b.x}%`,top:`${b.y}%`}} data-tooltip="
+          new="className={`building ${b.workers.length?'operating':''}`} style={{left:`${b.x}%`,top:`${b.y}%`}} onClick={()=>setInspected({kind:'building',id:b.id})} data-tooltip="
+          s=s.replace(old,new)
+          old="className={`citizen ${c.activity} ${c.job==='unemployed'?'idle':''}`} style={{left:`${c.x}%`,top:`${c.y}%`}} data-tooltip="
+          new="className={`citizen ${c.activity} ${c.job==='unemployed'?'idle':''}`} style={{left:`${c.x}%`,top:`${c.y}%`}} onClick={()=>setInspected({kind:'citizen',id:c.id})} data-tooltip="
+          s=s.replace(old,new)
+          marker="<div className=\"mapcaption\">Roads guide citizens through the settlement. Watch them enter buildings, work, trade, eat and return home.</div>"
+          insert=marker+"{inspected&&<Inspector world={world} inspected={inspected} onClose={()=>setInspected(null)}/>}"
+          s=s.replace(marker,insert)
+          s=s.replace("function Stat({label,value,sub}:{label:string,value:string,sub:string}){return <div className=\"stat\"><span>{label}</span><strong>{value}</strong><small>{sub}</small></div>}\n", "function Stat({label,value,sub}:{label:string,value:string,sub:string}){return <div className=\"stat\"><span>{label}</span><strong>{value}</strong><small>{sub}</small></div>}\nfunction Inspector({world,inspected,onClose}:{world:World;inspected:{kind:'citizen'|'building';id:string};onClose:()=>void}){const c=inspected.kind==='citizen'?world.citizens.find(x=>x.id===inspected.id):undefined;const b=inspected.kind==='building'?world.buildings.find(x=>x.id===inspected.id):undefined;if(!c&&!b)return null;if(c){const f=world.families.find(x=>x.id===c.familyId);return <div className=\"inspector\"><button className=\"inspectorclose\" onClick={onClose}>×</button><div className=\"inspecteyebrow\">CITIZEN PROFILE</div><h3>{c.name}</h3><div className=\"inspectrole\">{JOB_LABELS[c.job]} · {ACTIVITY_LABELS[c.activity]}</div><div className=\"inspectgrid\"><div><span>AGE</span><b>{c.age}</b></div><div><span>FAMILY</span><b>{f?.name??'Unknown'}</b></div><div><span>HAPPINESS</span><b>{Math.round(c.happiness)}%</b></div><div><span>WALLET</span><b>{Math.floor(c.wallet)} G</b></div><div><span>HUNGER</span><b>{Math.round(c.hunger)}%</b></div><div><span>REST</span><b>{Math.round(c.rest)}%</b></div><div><span>SOCIAL</span><b>{Math.round(c.social)}%</b></div><div><span>PURPOSE</span><b>{Math.round(c.purpose)}%</b></div></div><div className=\"inspectstatus\">{c.inside?'Currently inside a building.':`Walking at ${Math.round(c.x)}, ${Math.round(c.y)}.`}</div></div>}return <div className=\"inspector\"><button className=\"inspectorclose\" onClick={onClose}>×</button><div className=\"inspecteyebrow\">BUILDING PROFILE</div><h3>{b?buildingName(b,world):'Building'}</h3><div className=\"inspectrole\">{b?buildingStatus(b):''}</div><div className=\"inspectgrid\"><div><span>TYPE</span><b>{b?.type}</b></div><div><span>WORKERS</span><b>{b?.workers.length??0}</b></div><div><span>STATUS</span><b>{b?.active?'ACTIVE':'INACTIVE'}</b></div><div><span>POSITION</span><b>{b?`${Math.round(b.x)}, ${Math.round(b.y)}`:''}</b></div></div><div className=\"inspectstatus\">{b?.production?`Production: ${JOB_LABELS[b.production as keyof typeof JOB_LABELS]}`:'No active production right now.'}</div></div>}\n")
+          p.write_text(s)
+          p=Path('app/globals.css')
+          s=p.read_text()
+          s += "\n.inspector{position:absolute;z-index:30;left:14px;top:66px;width:255px;padding:16px;background:#0a100ef5;border:1px solid #456052;border-radius:9px;box-shadow:0 15px 35px #000c;backdrop-filter:blur(10px)}.inspectorclose{position:absolute;right:8px;top:6px;border:0;background:transparent;color:#809187;font-size:20px;cursor:pointer}.inspecteyebrow{font-size:8px;letter-spacing:1.7px;color:#5be187}.inspector h3{margin:5px 0 3px;color:#e4eee8;font-size:19px;font-weight:600}.inspectrole{font-size:10px;color:#8ea096}.inspectgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:13px}.inspectgrid div{padding:8px;background:#101a14;border:1px solid #203027;border-radius:5px}.inspectgrid span{display:block;font-size:7px;letter-spacing:1px;color:#617169}.inspectgrid b{display:block;margin-top:3px;font-size:11px;color:#d9e6de}.inspectstatus{margin-top:10px;padding-top:10px;border-top:1px solid #203027;color:#91a097;font-size:9px;line-height:1.5}.building,.citizen{cursor:pointer}\n"
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/page.tsx app/globals.css
+          git diff --cached --quiet || git commit -m "Add citizen and building inspectors"
+          git push
