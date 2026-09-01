@@ -1,0 +1,11 @@
+const fs=require('fs');
+const p='app/page.tsx';
+let s=fs.readFileSync(p,'utf8');
+const old='<svg className="roads" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Road network"><path d="M29 24 L50 24 L66 24"/><path d="M50 24 L50 46 L28 46 L20 72"/><path d="M50 46 L50 72 L70 82"/><path d="M66 24 L66 58 L84 72"/><path d="M28 46 L50 72"/><path d="M34 34 L50 46"/></svg>';
+const next='<svg className="roads" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Road network"><g className="road-base"><path d="M29 24 C36 24 43 24 50 24 C56 24 61 24 66 24"/><path d="M50 24 C50 31 50 39 50 46 C42 46 35 46 28 46 C25 54 22 63 20 72"/><path d="M50 46 C50 55 50 64 50 72 C57 75 64 79 70 82"/><path d="M66 24 C66 35 66 47 66 58 C73 63 79 68 84 72"/><path d="M28 46 C35 52 43 62 50 72"/><path d="M34 34 C40 38 45 42 50 46"/></g><g className="road-surface"><path d="M29 24 C36 24 43 24 50 24 C56 24 61 24 66 24"/><path d="M50 24 C50 31 50 39 50 46 C42 46 35 46 28 46 C25 54 22 63 20 72"/><path d="M50 46 C50 55 50 64 50 72 C57 75 64 79 70 82"/><path d="M66 24 C66 35 66 47 66 58 C73 63 79 68 84 72"/><path d="M28 46 C35 52 43 62 50 72"/><path d="M34 34 C40 38 45 42 50 46"/></g></svg>';
+if(!s.includes(old))throw new Error('road SVG anchor not found');
+s=s.replace(old,next);
+fs.writeFileSync(p,s);
+let css=fs.readFileSync('app/globals.css','utf8');
+css+=`\n/* Stone road treatment */\n.roads{z-index:4!important;overflow:visible!important}\n.road-base path{fill:none;stroke:#292a20;stroke-width:5.8;stroke-linecap:round;stroke-linejoin:round;opacity:.95;filter:drop-shadow(0 2px 2px #000b)}\n.road-surface path{fill:none;stroke:#d6c07c;stroke-width:3.1;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1.8 1.2;opacity:.92;filter:drop-shadow(0 1px 1px #fff2)}\n`;
+fs.writeFileSync('app/globals.css',css);
