@@ -14,13 +14,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
       - name: Fix map structure and styling
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import re
 
           page = Path('app/page.tsx')
           text = page.read_text()
@@ -31,17 +29,11 @@ jobs:
           if first < 0 or second < 0:
               raise SystemExit('Expected nested mapstage structure was not found')
 
-          # Keep the first stage and remove everything between it and the nested stage.
-          # This removes the accidental duplicate controls/hint/stage wrapper.
           text = text[:first + len(stage)] + text[second + len(stage):]
+          text = text.replace('</div></div><div className="maplegend">', '</div><div className="maplegend">', 1)
 
-          # The nested stage had a matching extra close.
-          text, n = text.replace('</div></div><div className="maplegend">', '</div><div className="maplegend">', 1), 1
-
-          # Make sure the source contains only one mapstage opening.
           if text.count(stage) != 1:
               raise SystemExit(f'mapstage count is {text.count(stage)}, expected 1')
-
           page.write_text(text)
 
           css = Path('app/globals.css')
