@@ -21,3 +21,23 @@
 .inspector{position:absolute;z-index:30;left:14px;top:66px;width:255px;padding:16px;background:#0a100ef5;border:1px solid #456052;border-radius:9px;box-shadow:0 15px 35px #000c;backdrop-filter:blur(10px)}.inspectorclose{position:absolute;right:8px;top:6px;border:0;background:transparent;color:#809187;font-size:20px;cursor:pointer}.inspecteyebrow{font-size:8px;letter-spacing:1.7px;color:#5be187}.inspector h3{margin:5px 0 3px;color:#e4eee8;font-size:19px;font-weight:600}.inspectrole{font-size:10px;color:#8ea096}.inspectgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:13px}.inspectgrid div{padding:8px;background:#101a14;border:1px solid #203027;border-radius:5px}.inspectgrid span{display:block;font-size:7px;letter-spacing:1px;color:#617169}.inspectgrid b{display:block;margin-top:3px;font-size:11px;color:#d9e6de}.inspectstatus{margin-top:10px;padding-top:10px;border-top:1px solid #203027;color:#91a097;font-size:9px;line-height:1.5}.building,.citizen{cursor:pointer}
 
 .inspector{position:absolute;z-index:30;left:14px;top:66px;width:255px;padding:16px;background:#0a100ef5;border:1px solid #456052;border-radius:9px;box-shadow:0 15px 35px #000c;backdrop-filter:blur(10px)}.inspectorclose{position:absolute;right:8px;top:6px;border:0;background:transparent;color:#809187;font-size:20px;cursor:pointer}.inspecteyebrow{font-size:8px;letter-spacing:1.7px;color:#5be187}.inspector h3{margin:5px 0 3px;color:#e4eee8;font-size:19px;font-weight:600}.inspectrole{font-size:10px;color:#8ea096}.inspectgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:13px}.inspectgrid div{padding:8px;background:#101a14;border:1px solid #203027;border-radius:5px}.inspectgrid span{display:block;font-size:7px;letter-spacing:1px;color:#617169}.inspectgrid b{display:block;margin-top:3px;font-size:11px;color:#d9e6de}.inspectstatus{margin-top:10px;padding-top:10px;border-top:1px solid #203027;color:#91a097;font-size:9px;line-height:1.5}.building,.citizen{cursor:pointer}
+
+
+/* Stable world-map viewport: one scene layer, fixed UI chrome, full-map citizens. */
+.map{touch-action:none;cursor:grab;overflow:hidden;position:relative;isolation:isolate}
+.map.panning{cursor:grabbing}
+.mapstage{position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;pointer-events:auto}
+.mapstage .terrainbg{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+.mapstage .roads{z-index:1}
+.mapstage .building{z-index:4}
+.mapstage .resource-node{z-index:3}
+.mapstage .market-stall{z-index:5}
+.mapstage .trade-particle{z-index:7}
+.mapstage .citizen{z-index:6}
+.mapcontrols{position:absolute;right:14px;bottom:54px;z-index:18;display:flex;align-items:center;gap:4px;background:#0a100de8;border:1px solid #405148;border-radius:7px;padding:4px;box-shadow:0 8px 20px #0008}
+.mapcontrols button{width:36px;height:36px;border:1px solid #31443a;background:#101a14;color:#d5e4db;border-radius:5px;font-size:19px;line-height:1;cursor:pointer}
+.mapcontrols button:hover{background:#183022;border-color:#5be187;color:#fff}
+.mapcontrols span{min-width:42px;text-align:center;color:#8c9c93;font-size:9px;letter-spacing:.5px}
+.maphint{position:absolute;left:50%;bottom:55px;transform:translateX(-50%);z-index:17;background:#0a100dcf;border:1px solid #314238;color:#84958b;padding:6px 9px;border-radius:5px;font-size:7px;letter-spacing:1px;pointer-events:none;opacity:.8}
+.map:before{content:"";position:absolute;inset:0;z-index:10;pointer-events:none;background:radial-gradient(circle at center,transparent 55%,#06100a44 100%),linear-gradient(180deg,#07110a18,transparent 22%,transparent 78%,#07110a35)}
+@media (max-width:1050px){.worldview{grid-template-columns:1fr}.needs{display:grid;grid-template-columns:repeat(2,1fr);gap:0 16px}.needs h3,.miniweather{grid-column:1/-1}}
