@@ -1,0 +1,76 @@
+name: Fix AI visibility and roads
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path('app/page.tsx')
+          s=p.read_text()
+          old="""const [inspected,setInspected]=useState<{kind:'citizen'|'building';id:string}|null>(null);const [view,setView]=useState({x:0,y:0,zoom:1});const [drag,setDrag]=useState<{x:number;y:number;ox:number;oy:number}|null>(null);const mapRef=useRef<HTMLDivElement>(null);"""
+          new="""const [inspected,setInspected]=useState<{kind:'citizen'|'building';id:string}|null>(null);const [hovered,setHovered]=useState<{kind:'citizen'|'building';id:string}|null>(null);const [view,setView]=useState({x:0,y:0,zoom:1});const [drag,setDrag]=useState<{x:number;y:number;ox:number;oy:number}|null>(null);const mapRef=useRef<HTMLDivElement>(null);"""
+          if old not in s: raise SystemExit('state anchor not found')
+          s=s.replace(old,new,1)
+          old="""{world.citizens.map(c=>{const family=world.families.find(f=>f.id===c.familyId);if(c.inside)return null;return <div key={c.id} className={`citizen ${c.activity} ${c.job==='unemployed'?'idle':''}`} style={{left:`${c.x}%`,top:`${c.y}%`}} onPointerDown={e=>e.stopPropagation()} onClick={()=>setInspected({kind:'citizen',id:c.id})} data-tooltip={`${c.name}\\n${JOB_LABELS[c.job]} · ${ACTIVITY_LABELS[c.activity]}\\n${family?.name??'Unknown'} family · age ${c.age}`}><span/></div>})}"""
+          new="""{world.citizens.map(c=>{const family=world.families.find(f=>f.id===c.familyId);const home=world.buildings.find(b=>b.id===world.families.find(f=>f.id===c.familyId)?.homeId);const target=c.targetBuildingId?world.buildings.find(b=>b.id===c.targetBuildingId):undefined;const vx=c.inside&&target?target.x+(c.id.charCodeAt(1)%3-1)*1.7:c.x;const vy=c.inside&&target?target.y+3.8:c.y;return <div key={c.id} className={`citizen ${c.activity} ${c.job==='unemployed'?'idle':''} ${c.inside?'inside':''}`} style={{left:`${vx}%`,top:`${vy}%`}} onPointerDown={e=>e.stopPropagation()} onMouseEnter={()=>setHovered({kind:'citizen',id:c.id})} onMouseLeave={()=>setHovered(null)} onClick={()=>setInspected({kind:'citizen',id:c.id})} data-tooltip={`${c.name}\\n${JOB_LABELS[c.job]} · ${ACTIVITY_LABELS[c.activity]}\\n${family?.name??'Unknown'} family · age ${c.age}`}><span/></div>})}"""
+          if old not in s: raise SystemExit('citizen anchor not found')
+          s=s.replace(old,new,1)
+          old="""onClick={()=>setInspected({kind:'building',id:b.id})} data-tooltip={`${buildingName(b,world)}\\n${buildingStatus(b)}\\nWorkers inside: ${b.workers.length}`}"""
+          new="""onMouseEnter={()=>setHovered({kind:'building',id:b.id})} onMouseLeave={()=>setHovered(null)} onClick={()=>setInspected({kind:'building',id:b.id})} data-tooltip={`${buildingName(b,world)}\\n${buildingStatus(b)}\\nWorkers inside: ${b.workers.length}`}"""
+          if old not in s: raise SystemExit('building anchor not found')
+          s=s.replace(old,new,1)
+          anchor="""<div className=\"maplegend map-ui\"><span><b className=\"dot citizen-dot\"/> CITIZENS</span>"""
+          tooltip="""{hovered&&(()=>{const e=hovered.kind==='building'?world.buildings.find(b=>b.id===hovered.id):world.citizens.find(c=>c.id===hovered.id);if(!e)return null;const x='x' in e?e.x:0;const y='y' in e?e.y:0;return <div className=\"world-tooltip map-ui\" style={{left:`calc(${x}% * ${view.zoom} + ${view.x}px)`,top:`calc(${y}% * ${view.zoom} + ${view.y}px)`}}>{hovered.kind==='building'?<><b>{buildingName(e as World['buildings'][number],world)}</b><span>{buildingStatus(e as World['buildings'][number])}</span><span>Workers inside: {(e as World['buildings'][number]).workers.length}</span></>:<><b>{(e as World['citizens'][number]).name}</b><span>{JOB_LABELS[(e as World['citizens'][number]).job]} · {ACTIVITY_LABELS[(e as World['citizens'][number]).activity]}</span></>}</div>})()}<div className=\"maplegend map-ui\"><span><b className=\"dot citizen-dot\"/> CITIZENS</span>"""
+          if anchor not in s: raise SystemExit('legend anchor not found')
+          s=s.replace(anchor,tooltip,1)
+          p.write_text(s)
+
+          css=Path('app/globals.css')
+          c=css.read_text()
+          c += r'''
+/* AI WORLD VISIBILITY + POLISHED ROADS */
+.mapstage{z-index:2!important}
+.roads{z-index:4!important;overflow:visible}
+.roads path{stroke:#302b1f!important;stroke-width:4.8!important;opacity:.92!important;filter:drop-shadow(0 2px 2px #000b)!important}
+.roads path::after{content:""}
+/* Use a warm stone surface over the dark road base. */
+.roads path{stroke-dasharray:none!important}
+.roads path:nth-child(1){stroke:#d9bf78!important;stroke-width:3.1!important}
+.roads path:nth-child(2),.roads path:nth-child(3),.roads path:nth-child(4),.roads path:nth-child(5),.roads path:nth-child(6){stroke:#cbb579!important;stroke-width:2.8!important}
+.citizen{z-index:8!important;width:24px!important;height:24px!important;transition:left 50ms linear,top 50ms linear,transform 110ms ease-out!important;filter:drop-shadow(0 2px 3px #000c)!important}
+.citizen span{width:16px!important;height:16px!important;border-width:2px!important;box-shadow:0 0 0 3px #0b1b10aa,0 0 13px #8bf16b88!important}
+.citizen.working span{background:#a8ff82!important}.citizen.trading span{background:#f5d56c!important;box-shadow:0 0 0 3px #332914aa,0 0 15px #f5d56caa!important}.citizen.eating span{background:#efbe69!important}.citizen.resting span{background:#9eb8e6!important}.citizen.idle span{background:#c0cbc4!important}
+.citizen.inside{opacity:.9!important;transform:translate(-50%,-50%) scale(.72)!important}
+.citizen.inside span{box-shadow:0 0 0 2px #172719aa,0 0 8px #9df27c66!important}
+.world-tooltip{position:absolute!important;z-index:200!important;transform:translate(-50%,-115%)!important;min-width:150px;max-width:230px;padding:9px 11px;border:1px solid #7d9d61;border-radius:8px;background:linear-gradient(145deg,#07140deF,#0b1d12f5);box-shadow:0 10px 28px #000d,inset 0 1px #d8ffb826;color:#dcebd3;pointer-events:none;display:grid;gap:3px;font-size:10px;line-height:1.35}
+.world-tooltip b{font-size:11px;color:#c5f6a7}.world-tooltip span{color:#8fa88b}.map>.world-tooltip{z-index:500!important}
+.maplabel,.weatherbadge,.maplegend,.maphint,.mapcontrols,.mapcaption{z-index:30!important}
+/* Keep tooltip above the decorative HUD without allowing it to intercept map input. */
+[data-tooltip]:hover:after,[data-tooltip]:hover:before{display:none!important}
+'''
+          css.write_text(c)
+          PY
+          npm ci
+          npm run build
+      - name: Commit and remove workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/page.tsx app/globals.css .github/workflows/fix-ai-visibility-roads.yml
+          git commit -m "Fix AI visibility, tooltips, and road presentation"
+          git push
+          git rm .github/workflows/fix-ai-visibility-roads.yml
+          git commit -m "Remove one-time AI visibility fix workflow"
+          git push
