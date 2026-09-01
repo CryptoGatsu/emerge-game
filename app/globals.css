@@ -41,3 +41,9 @@
 .maphint{position:absolute;left:50%;bottom:55px;transform:translateX(-50%);z-index:17;background:#0a100dcf;border:1px solid #314238;color:#84958b;padding:6px 9px;border-radius:5px;font-size:7px;letter-spacing:1px;pointer-events:none;opacity:.8}
 .map:before{content:"";position:absolute;inset:0;z-index:10;pointer-events:none;background:radial-gradient(circle at center,transparent 55%,#06100a44 100%),linear-gradient(180deg,#07110a18,transparent 22%,transparent 78%,#07110a35)}
 @media (max-width:1050px){.worldview{grid-template-columns:1fr}.needs{display:grid;grid-template-columns:repeat(2,1fr);gap:0 16px}.needs h3,.miniweather{grid-column:1/-1}}
+
+
+/* Realtime world rendering: the simulation advances in small slices while the browser paints every frame. */
+.mapstage .terrainbg{display:grid!important;position:absolute!important;inset:0!important;width:100%!important;height:100%!important;grid-template-columns:repeat(16,1fr)!important;grid-template-rows:repeat(12,1fr)!important;overflow:hidden}
+.mapstage .citizen{transition:left 90ms linear,top 90ms linear,transform 180ms ease-out;will-change:left,top,transform}
+.mapstage .building,.mapstage .resource-node,.mapstage .market-stall{will-change:transform}
