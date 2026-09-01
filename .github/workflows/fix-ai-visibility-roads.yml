@@ -16,7 +16,7 @@ jobs:
       - name: Apply fix
         run: node scripts/fix-ai-visibility.js
       - name: Build
-        run: npm ci && npm run build
+        run: npm install && npm run build
       - name: Commit fix and remove workflow
         run: |
           git config user.name github-actions[bot]
