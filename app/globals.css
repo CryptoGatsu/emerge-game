@@ -47,3 +47,12 @@
 .mapstage .terrainbg{display:grid!important;position:absolute!important;inset:0!important;width:100%!important;height:100%!important;grid-template-columns:repeat(16,1fr)!important;grid-template-rows:repeat(12,1fr)!important;overflow:hidden}
 .mapstage .citizen{transition:left 90ms linear,top 90ms linear,transform 180ms ease-out;will-change:left,top,transform}
 .mapstage .building,.mapstage .resource-node,.mapstage .market-stall{will-change:transform}
+
+
+/* HARD MAP COORDINATE SYSTEM */
+.mapstage{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;transform-origin:center center!important;will-change:transform!important;overflow:visible!important}
+.mapstage .terrainbg{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:grid!important;grid-template-columns:repeat(16,1fr)!important;grid-template-rows:repeat(12,1fr)!important}
+.mapstage .roads{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
+.mapstage .building,.mapstage .resource-node,.mapstage .market-stall,.mapstage .citizen,.mapstage .trade-particle{position:absolute!important}
+.mapstage .citizen{transition:left 55ms linear,top 55ms linear,transform 120ms ease-out!important;will-change:left,top,transform!important}
+.mapstage .building{will-change:left,top,transform}
