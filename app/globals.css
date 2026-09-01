@@ -14,3 +14,8 @@
 .world-tooltip b{font-size:11px;color:#c5f6a7}.world-tooltip span{color:#8fa88b}
 [data-tooltip]:hover:after,[data-tooltip]:hover:before{display:none!important}
 .maplabel,.weatherbadge,.maplegend,.maphint,.mapcontrols,.mapcaption{z-index:30!important}
+
+/* Stone road treatment */
+.roads{z-index:4!important;overflow:visible!important}
+.road-base path{fill:none;stroke:#292a20;stroke-width:5.8;stroke-linecap:round;stroke-linejoin:round;opacity:.95;filter:drop-shadow(0 2px 2px #000b)}
+.road-surface path{fill:none;stroke:#d6c07c;stroke-width:3.1;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1.8 1.2;opacity:.92;filter:drop-shadow(0 1px 1px #fff2)}
