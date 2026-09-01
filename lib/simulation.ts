@@ -1,6 +1,6 @@
 export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 'river';
 export type Job = 'farmer' | 'woodcutter' | 'miner' | 'quarry' | 'miller' | 'baker' | 'carpenter' | 'blacksmith' | 'tailor' | 'unemployed';
-export type Resource = 'wheat' | 'vegetables' | 'wood' | 'stone' | 'ironOre' | 'flour' | 'bread' | 'furniture' | 'tools' | 'clothing';
+export type Resource = 'wheat' | 'vegetables' | 'wood' | 'stone' | 'ironOre' | 'wool' | 'flour' | 'bread' | 'furniture' | 'tools' | 'clothing';
 
 export interface Citizen { id: string; name: string; familyId: string; age: number; job: Job; hunger: number; rest: number; social: number; clothing: number; purpose: number; happiness: number; wage: number; x: number; y: number; }
 export interface Family { id: string; name: string; members: string[]; homeId: string; wealth: number; }
@@ -31,7 +31,7 @@ export function createWorld(seed = Math.floor(Math.random()*2**31)): World {
     {id:'bank',type:'Bank',x:24,y:24,workers:[],active:true},{id:'market',type:'Market',x:29,y:24,workers:[],active:true},{id:'storage',type:'Storage',x:34,y:24,workers:[],active:true}
   ];
   families.forEach((f,i)=>buildings.push({id:f.homeId,type:'House',x:20+(i%4)*5,y:32+Math.floor(i/4)*5,workers:[],active:true}));
-  return {id:`world-${seed.toString(36)}`,seed,day:1,hour:8,terrain,treasury:1000,population:count,families,citizens,buildings,resources:{wheat:60,vegetables:30,wood:50,stone:20,ironOre:10,flour:0,bread:20,furniture:0,tools:5,clothing:10},lastEvents:['Your world has emerged.']};
+  return {id:`world-${seed.toString(36)}`,seed,day:1,hour:8,terrain,treasury:1000,population:count,families,citizens,buildings,resources:{wheat:60,vegetables:30,wood:50,stone:20,ironOre:10,wool:8,flour:0,bread:20,furniture:0,tools:5,clothing:10},lastEvents:['Your world has emerged.']};
 }
 
 export function tick(world: World, hours=1): World {
@@ -56,4 +56,4 @@ function terrainMultiplier(world:World,job:Job){return world.terrain.reduce((s,t
 function consume(world:World,events:string[]){const foodNeed=world.citizens.reduce((s,c)=>s+(c.age<16?.5:.9),0); let bread=Math.min(world.resources.bread,foodNeed); world.resources.bread-=bread; let remaining=foodNeed-bread; let wheat=Math.min(world.resources.wheat,remaining); world.resources.wheat-=wheat; remaining-=wheat; let veg=Math.min(world.resources.vegetables,remaining); world.resources.vegetables-=veg; remaining-=veg; if(remaining>0) events.push('Food is running low. The AI is searching the market.'); }
 function maintenance(type:string){return ({Bank:0,Market:15,Storage:3,House:1,Farm:3,Woodcutter:2,Quarry:4,Mine:6,Mill:5,Bakery:6,Carpenter:5,Blacksmith:8,Tailor:6,Tavern:7,'Town Hall':10} as Record<string,number>)[type]||2;}
 
-export const RESOURCE_LABELS: Record<Resource,string>={wheat:'Wheat',vegetables:'Vegetables',wood:'Wood',stone:'Stone',ironOre:'Iron Ore',flour:'Flour',bread:'Bread',furniture:'Furniture',tools:'Tools',clothing:'Clothing'};
+export const RESOURCE_LABELS: Record<Resource,string>={wheat:'Wheat',vegetables:'Vegetables',wood:'Wood',stone:'Stone',ironOre:'Iron Ore',wool:'Wool',flour:'Flour',bread:'Bread',furniture:'Furniture',tools:'Tools',clothing:'Clothing'};
