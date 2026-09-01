@@ -22,14 +22,19 @@ jobs:
           s=re.sub(r"(const \[marketFocus,setMarketFocus\]=useState<Resource>\('wheat'\);)", r"\1"+state, s, count=1)
           handler="const market=world.buildings.find(b=>b.type==='Market');const beginPan=(e:React.PointerEvent<HTMLDivElement>)=>{if(e.button!==0)return;e.currentTarget.setPointerCapture(e.pointerId);setDrag({x:e.clientX,y:e.clientY,ox:view.x,oy:view.y});};const pan=(e:React.PointerEvent<HTMLDivElement>)=>{if(!drag)return;setView(v=>({...v,x:drag.ox+(e.clientX-drag.x),y:drag.oy+(e.clientY-drag.y)}));};const endPan=()=>setDrag(null);const zoom=(delta:number)=>setView(v=>({...v,zoom:Math.max(.65,Math.min(2.2,Number((v.zoom+delta).toFixed(2))))}));const resetView=()=>setView({x:0,y:0,zoom:1});"
           s=re.sub(r"const market=world\.buildings\.find\(b=>b\.type==='Market'\);.*?(?=\n return <main)", handler, s, count=1, flags=re.S)
-          controls=r'<div className="mapcontrols">.*?</div>'
-          hints=r'<div className="maphint">.*?</div>'
-          stages=r'<div className="mapstage" style=\{\{transform:`translate3d\(\$\{view\.x\}px,\$\{view\.y\}px,0\) scale\(\$\{view\.zoom\}\)`\}\}>'
-          for pat in (controls,hints,stages):
+          for pat in [r'<div className="mapcontrols">.*?</div>',r'<div className="maphint">.*?</div>',r'<div className="mapstage" style=\{\{transform:`translate3d\(\$\{view\.x\}px,\$\{view\.y\}px,0\) scale\(\$\{view\.zoom\}\)`\}\}>']:
               matches=list(re.finditer(pat,s,re.S))
               for m in reversed(matches[1:]): s=s[:m.start()]+s[m.end():]
-          inspector=r'{inspected&&<Inspector world={world} inspected={inspected} onClose={()=>setInspected(null)}/> }'
-          s=re.sub(r'(?:'+re.escape(inspector)+r'\s*)+', inspector, s)
+          ip=r'\{inspected&&<Inspector world=\{world\} inspected=\{inspected\} onClose=\{\(\)=>setInspected\(null\)\}/>\s*\}'
+          matches=list(re.finditer(ip,s))
+          for m in reversed(matches[1:]): s=s[:m.start()]+s[m.end():]
+          lines=s.splitlines();out=[];seen=False
+          for line in lines:
+              if line.startswith('function Inspector('):
+                  if seen: continue
+                  seen=True
+              out.append(line)
+          s='\n'.join(out)+'\n'
           for _ in range(5): s=re.sub(r'</div>\s*</div>\s*<div className="maplegend">','</div><div className="maplegend">',s,count=1)
           p.write_text(s)
           for name in ['fix-simulation-job-types.yml','fix-citizen-movement.yml','add-inspector.yml','fix-map-view.yml','repair-page.yml','finalize-repair.yml']:
