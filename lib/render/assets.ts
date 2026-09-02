@@ -170,6 +170,18 @@ function activityIcon(kind: 'work' | 'eat' | 'social' | 'sleep' | 'trade'): Pixe
   return p;
 }
 
+/** Screen-space vignette, stretched over the viewport to settle the edges. */
+function vignette(): Pixels {
+  const p = surface(256, 256);
+  const g = p.ctx.createRadialGradient(128, 128, 40, 128, 128, 150);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.62, 'rgba(214,224,208,1)');
+  g.addColorStop(1, 'rgba(120,140,120,1)');
+  p.ctx.fillStyle = g;
+  p.ctx.fillRect(0, 0, 256, 256);
+  return p;
+}
+
 /** A bird in silhouette, two frames of wingbeat. */
 function bird(frame: number): Pixels {
   const p = surface(14, 10);
@@ -294,6 +306,7 @@ export function loadAssets(): AssetLibrary {
   put('fx.select', selectionRing(UI.emerald, 2));
   put('fx.hover', selectionRing(UI.cream, 1));
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
+  put('fx.vignette', vignette());
   put('fx.bird.0', bird(0));
   put('fx.bird.1', bird(1));
   put('fx.leaf.0', leafMote('#c98a3a'));

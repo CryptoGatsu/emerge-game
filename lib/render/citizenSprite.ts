@@ -159,15 +159,12 @@ export class CitizenSprite {
     const travelled = Math.hypot(dx, dy);
     const moving = travelled > 0.004 && !citizen.inside;
 
-    // Facing follows real render movement, falling back to the simulation's
-    // facing when standing still, so citizens never moonwalk.
+    // Facing is only ever changed while actually walking, and then held. Reading
+    // the simulation's facing while standing still made idle citizens spin on
+    // the spot, because steering keeps nudging it as they settle.
     if (moving) {
       if (Math.abs(dx) > Math.abs(dy)) { this.dir = 'e'; this.flipped = dx < 0; }
       else { this.dir = dy > 0 ? 's' : 'n'; this.flipped = false; }
-    } else {
-      const f = citizen.facing;
-      if (f === 'e' || f === 'w') { this.dir = 'e'; this.flipped = f === 'w'; }
-      else { this.dir = f; this.flipped = false; }
     }
 
     const nextState = this.stateFor(citizen, moving);

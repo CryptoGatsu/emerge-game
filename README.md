@@ -45,10 +45,13 @@ lib/render/           The body. Procedural pixel art, generated at boot:
   scene.ts             The window. Pixi application, camera, depth sorting, weather,
                        time-of-day light, speech bubbles, picking, build placement.
 
-lib/chain/emerge.ts   Robinhood Chain config, $EMERGE identity and wallet connection.
+lib/chain/emerge.ts   Robinhood Chain config, $EMERGE identity, EIP-6963 wallet
+                      discovery and connection.
+lib/chain/vault.ts    The $EMERGE <-> Gold bridge: rates, the withdrawal burn and
+                      the ledger held against a claimed world.
 
-components/           PlotSelect (the land office), EmergeClient (world loop + scene
-                      lifecycle), Hud, Panels.
+components/           PlotSelect (the land office), WalletPicker, EmergeClient (world
+                      loop + scene lifecycle), Hud, Panels.
 ```
 
 ### Three clocks, deliberately separate
@@ -117,6 +120,35 @@ transaction hash for something that did not happen. `claimPlot()` in
 `lib/chain/emerge.ts` is where the $EMERGE transfer and plot registration go once the
 contract exists. "Choose another plot" in the Connect panel releases the current world.
 
+## The vault
+
+Gold is the world's currency; $EMERGE is the token behind it.
+
+| | |
+| --- | --- |
+| Rate | 10,000 $EMERGE = 1 Gold, so 1,000,000 $EMERGE = 100 Gold |
+| Deposit | $EMERGE buys Gold, which lands in the settlement's treasury |
+| Earn | The settlement's own economy grows the treasury over time |
+| Withdraw | Treasury Gold converts back to $EMERGE, burning 5% |
+| Rename | Naming a world again costs 50,000 $EMERGE |
+
+Deposit and withdraw live in the Bank panel, which also shows what has moved through
+the vault and what has been burned.
+
+None of this settles on chain yet. With no vault contract deployed the balance is held
+locally against the claimed world, a new world opens with a clearly-labelled local
+development allocation, and every message says plainly that the movement was local.
+`deposit()` and `withdraw()` in `lib/chain/vault.ts` are where the transfer and burn go
+once the contract exists.
+
+## Wallets
+
+Wallets are discovered through EIP-6963, so a browser with both MetaMask and Trust
+Wallet installed offers a choice rather than silently using whichever extension won the
+injection race. `window.ethereum` is still read as a fallback for wallets that do not
+announce themselves. Both MetaMask and Trust Wallet work with Robinhood Chain; the
+Connect panel can also add or switch to the configured network.
+
 ## Blockchain
 
 Emerge is hybrid by design. The living world — movement, needs, production ticks, every
@@ -151,6 +183,6 @@ layer is designed around rather than pretending to be wired up.
 - Relationships track co-presence and friendship only — no rivalries, families across
   generations, or memory.
 - No contracts are deployed; the chain layer is connection and configuration only, so
-  plot claims are local to the browser.
+  plot claims and vault balances are local to the browser and labelled as such.
 - A claimed world lives in `localStorage` and is not synced anywhere, so clearing site
   data loses it.

@@ -8,6 +8,7 @@
  */
 
 import { createWorld, type Terrain } from '../simulation';
+import { NEW_LEDGER, normaliseLedger, type VaultLedger } from '../chain/vault';
 import { GRID, TILE_H, TILE_W, tileToScreen } from './iso';
 import { TILE_COLOR, Tile, generateWorldMap } from './terrain';
 
@@ -130,7 +131,11 @@ export interface ClaimedWorld {
   owner: string | null;
   /** Transaction hash, once claims actually settle on chain. */
   txHash: string | null;
+  /** $EMERGE held against this world, and what has moved through the vault. */
+  ledger: VaultLedger;
 }
+
+export const newLedger = () => ({ ...NEW_LEDGER });
 
 const STORAGE_KEY = 'emerge.world.v1';
 
@@ -140,7 +145,9 @@ export function loadClaimedWorld(): ClaimedWorld | null {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ClaimedWorld;
-    return typeof parsed?.seed === 'number' && typeof parsed?.name === 'string' ? parsed : null;
+    if (typeof parsed?.seed !== 'number' || typeof parsed?.name !== 'string') return null;
+    // Worlds saved before the vault existed still load; they just get a ledger.
+    return { ...parsed, ledger: normaliseLedger(parsed.ledger) };
   } catch {
     // A corrupt or unreadable entry should send the player to the plot view,
     // never crash the app on boot.

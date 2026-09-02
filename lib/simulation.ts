@@ -362,8 +362,12 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[]) {
     if (d < 0.0001) { if (final) break; c.path.shift(); continue; }
 
     const [sx, sy] = avoid(c, dx / d, dy / d, obstacles, tx, ty, c.destId);
-    if (Math.abs(sx) > Math.abs(sy)) c.facing = sx > 0 ? 'e' : 'w'; else c.facing = sy > 0 ? 's' : 'n';
     const step = Math.min(d, budget);
+    // Only a real step turns someone. Updating facing on every sub-pixel nudge
+    // leaves citizens pivoting while they stand still.
+    if (step > 0.05) {
+      if (Math.abs(sx) > Math.abs(sy)) c.facing = sx > 0 ? 'e' : 'w'; else c.facing = sy > 0 ? 's' : 'n';
+    }
     c.x = clamp(c.x + sx * step, 2, 98);
     c.y = clamp(c.y + sy * step, 4, 96);
     c.moving = true;
@@ -955,6 +959,21 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold.`);
   checkUnlocks(world);
   return building;
+}
+
+/** Add Gold to the treasury from outside the settlement's own economy. */
+export function fundTreasury(world: World, gold: number, note: string) {
+  if (!(gold > 0)) return;
+  world.treasury += gold;
+  pushFeed(world, 'market', note);
+}
+
+/** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
+export function drawFromTreasury(world: World, gold: number, note: string) {
+  if (!(gold > 0) || world.treasury < gold) return false;
+  world.treasury -= gold;
+  pushFeed(world, 'market', note);
+  return true;
 }
 
 /**

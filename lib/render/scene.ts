@@ -120,10 +120,12 @@ export class EmergeScene {
   private groundLayer = new Container();
   private waterLayer = new Container();
   private objectLayer = new Container();
+  private fxLayer = new Container();
   private lightsRoot = new Container();
   private hudRoot = new Container();
   private weatherLayer = new Container();
   private ambient = new Sprite(Texture.WHITE);
+  private vignette = new Sprite();
   private seasonWash = new Sprite(Texture.WHITE);
 
   private citizens = new Map<string, CitizenSprite>();
@@ -136,8 +138,9 @@ export class EmergeScene {
   private smoke: Particle[] = [];
   private weatherParticles: Particle[] = [];
   private motes: Particle[] = [];
-  private selectRing = new Sprite();
-  private hoverRing = new Sprite();
+  private splashes: Particle[] = [];
+  private selectRing!: Sprite;
+  private hoverRing!: Sprite;
 
   private camera = { x: 0, y: 0, zoom: 1 };
   private minZoom = 0.5;
@@ -164,8 +167,10 @@ export class EmergeScene {
       resizeTo: host,
       antialias: false,
       backgroundColor: 0x0a1610,
-      // Pixel art is sampled 1:1; a higher device resolution just blurs it.
-      resolution: 1,
+      // Render at the device pixel grid. With a backing store smaller than the
+      // display, the browser upscales the canvas with smoothing and every sprite
+      // goes soft — the one thing pixel art cannot survive.
+      resolution: Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1),
       autoDensity: true,
       preference: 'webgl',
       sharedTicker: false,
@@ -173,13 +178,17 @@ export class EmergeScene {
     if (this.disposed) { this.app.destroy(true); return; }
     host.appendChild(this.app.canvas);
     this.app.canvas.style.display = 'block';
+    this.app.canvas.style.imageRendering = 'pixelated';
     this.app.canvas.style.touchAction = 'none';
     this.app.canvas.style.cursor = 'grab';
 
     this.assets = loadAssets();
     this.map = generateWorldMap(world);
 
-    this.app.stage.addChild(this.worldRoot, this.ambient, this.lightsRoot, this.weatherLayer, this.hudRoot);
+    this.vignette.texture = this.assets.get('fx.vignette');
+    this.vignette.blendMode = 'multiply';
+    this.vignette.alpha = 0.5;
+    this.app.stage.addChild(this.worldRoot, this.vignette, this.ambient, this.lightsRoot, this.weatherLayer, this.hudRoot);
     // Distant forest behind everything, so the diamond edge of the tile field
     // never shows as empty space at the corners of the viewport.
     const pad = 900;
@@ -190,7 +199,7 @@ export class EmergeScene {
       width: SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX + pad * 2,
       height: SCENE_BOUNDS.maxY - SCENE_BOUNDS.minY + pad * 2,
     });
-    this.worldRoot.addChild(this.backdrop, this.groundLayer, this.waterLayer, this.objectLayer);
+    this.worldRoot.addChild(this.backdrop, this.groundLayer, this.waterLayer, this.objectLayer, this.fxLayer);
     this.objectLayer.sortableChildren = true;
     this.lightsRoot.blendMode = 'add';
 
@@ -316,8 +325,8 @@ export class EmergeScene {
   private followId: string | null = null;
 
   private buildRings() {
-    this.selectRing.texture = this.assets.get('fx.select');
-    this.hoverRing.texture = this.assets.get('fx.hover');
+    this.selectRing = new Sprite(this.assets.get('fx.select'));
+    this.hoverRing = new Sprite(this.assets.get('fx.hover'));
     for (const ring of [this.hoverRing, this.selectRing]) {
       ring.anchor.set(0.5, 0.5);
       ring.visible = false;
@@ -466,7 +475,7 @@ export class EmergeScene {
       const sprite = new Sprite(this.assets.get('fx.smoke'));
       sprite.anchor.set(0.5, 0.5);
       sprite.visible = false;
-      this.worldRoot.addChild(sprite);
+      this.fxLayer.addChild(sprite);
       this.smoke.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
     }
     for (let i = 0; i < WEATHER_POOL; i++) {
@@ -480,14 +489,21 @@ export class EmergeScene {
       const sprite = new Sprite(this.assets.get('fx.bird.0'));
       sprite.anchor.set(0.5, 0.5);
       sprite.visible = false;
-      this.worldRoot.addChild(sprite);
+      this.fxLayer.addChild(sprite);
       this.birds.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
+    for (let i = 0; i < 40; i++) {
+      const sprite = new Sprite(this.assets.get('fx.splash.0'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.fxLayer.addChild(sprite);
+      this.splashes.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
     }
     for (let i = 0; i < 46; i++) {
       const sprite = new Sprite(this.assets.get('fx.firefly'));
       sprite.anchor.set(0.5, 0.5);
       sprite.visible = false;
-      this.worldRoot.addChild(sprite);
+      this.fxLayer.addChild(sprite);
       this.motes.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
     }
   }
@@ -504,6 +520,7 @@ export class EmergeScene {
     // Never zoom out past the point where the world stops filling the viewport.
     this.minZoom = Math.max(w / sceneW, h / sceneH, 0.35);
     this.ambient.width = w; this.ambient.height = h;
+    this.vignette.width = w; this.vignette.height = h;
     this.seasonWash.width = w; this.seasonWash.height = h;
     this.applyCamera();
   }
@@ -521,8 +538,12 @@ export class EmergeScene {
     this.camera.x = maxX - minX <= halfW * 2 ? (minX + maxX) / 2 : Math.max(minX + halfW, Math.min(maxX - halfW, this.camera.x));
     this.camera.y = maxY - minY <= halfH * 2 ? (minY + maxY) / 2 : Math.max(minY + halfH, Math.min(maxY - halfH, this.camera.y));
 
-    const px = w / 2 - this.camera.x * zoom;
-    const py = h / 2 - this.camera.y * zoom;
+    // Snap the world to whole device pixels. A fractional offset makes every
+    // texel straddle two pixels, which reads as a permanent shimmer.
+    const res = this.app.renderer.resolution || 1;
+    const snap = (v: number) => Math.round(v * res) / res;
+    const px = snap(w / 2 - this.camera.x * zoom);
+    const py = snap(h / 2 - this.camera.y * zoom);
     for (const root of [this.worldRoot, this.lightsRoot]) {
       root.position.set(px, py);
       root.scale.set(zoom);
@@ -645,9 +666,59 @@ export class EmergeScene {
    * Frame
    * ---------------------------------------------------------------- */
 
-  /** Swap in a new world object (after a reseed) without rebuilding the app. */
+  /** Swap in a new world object without rebuilding the app. */
   setWorld(world: World) {
     this.world = world;
+  }
+
+  /**
+   * Point the renderer at a different world.
+   *
+   * The Pixi application, its WebGL context and the generated texture atlas are
+   * all kept: destroying and recreating a renderer leaves the cached textures
+   * holding released GPU resources, and browsers cap how many live WebGL
+   * contexts a page may have. So the scene graph is emptied and rebuilt instead.
+   */
+  reset(world: World) {
+    this.world = world;
+    this.map = generateWorldMap(world);
+
+    for (const layer of [this.groundLayer, this.waterLayer, this.objectLayer, this.fxLayer, this.lightsRoot, this.hudRoot, this.weatherLayer]) {
+      for (const child of layer.removeChildren()) child.destroy({ children: true });
+    }
+
+    this.citizens.clear();
+    this.buildings.clear();
+    this.propSprites = [];
+    this.trees = [];
+    this.foliage = [];
+    this.waterSprites = [];
+    this.waterfallSprites = [];
+    this.campfires = [];
+    this.lampGlows = [];
+    this.bubbles = [];
+    this.smoke = [];
+    this.weatherParticles = [];
+    this.motes = [];
+    this.splashes = [];
+    this.birds = [];
+    this.minimapBase = null;
+    this.selected = null;
+    this.hovered = null;
+    this.followId = null;
+    this.lastDay = 0;
+    this.lastSeason = '';
+    this.waterFrame = -1;
+    this.time = 0;
+
+    this.buildTerrain();
+    this.buildProps();
+    this.buildRings();
+    this.syncBuildings();
+    this.syncCitizens();
+    this.buildBubbles();
+    this.buildParticles();
+    this.centreOn(50, 49, 1.05);
   }
 
   private update(dt: number) {
@@ -664,6 +735,7 @@ export class EmergeScene {
     this.updateSmoke(clamped);
     this.updateWeather(clamped);
     this.updateMotes(clamped);
+    this.updateSplashes(clamped);
     this.updateBirds(clamped);
     this.updateForestry(clamped);
     this.updateSeason();
@@ -859,6 +931,32 @@ export class EmergeScene {
         p.sprite.scale.set(1, 0.8 + Math.random() * 0.7);
       }
       p.life = 12;
+    }
+  }
+
+  /**
+   * Splashes where rain lands. Weather that only falls in front of the camera
+   * never quite convinces; a few rings on the ground tie it to the world.
+   */
+  private updateSplashes(dt: number) {
+    const raining = this.world.weather === 'Rain' || this.world.weather === 'Storm';
+    for (const p of this.splashes) {
+      if (p.life > 0) {
+        p.life -= dt;
+        const k = 1 - p.life / p.max;
+        p.sprite.texture = this.assets.get(`fx.splash.${Math.min(2, Math.floor(k * 3))}`);
+        p.sprite.alpha = 0.7 * (1 - k);
+        if (p.life <= 0) p.sprite.visible = false;
+        continue;
+      }
+      if (!raining || Math.random() > dt * (this.world.weather === 'Storm' ? 26 : 12)) continue;
+      const wx = 4 + Math.random() * 92;
+      const wy = 6 + Math.random() * 88;
+      const pos = worldToScreen(wx, wy, this.map.heightAt(wx, wy));
+      p.sprite.visible = true;
+      p.sprite.position.set(pos.x, pos.y);
+      p.max = 0.45;
+      p.life = p.max;
     }
   }
 
@@ -1326,10 +1424,26 @@ export class EmergeScene {
 
   destroy() {
     this.disposed = true;
-    for (const sprite of this.citizens.values()) sprite.destroy();
+    this.cancelPlacement();
+    // Drop our own references but do not destroy the display objects here: the
+    // application owns the scene graph and destroying it twice throws on the
+    // second pass, which is what used to crash the app on leaving a world.
     this.citizens.clear();
     this.buildings.clear();
-    if (this.app.renderer) this.app.destroy(true, { children: true });
+    this.propSprites = [];
+    this.trees = [];
+    this.foliage = [];
+    this.waterSprites = [];
+    this.waterfallSprites = [];
+    this.campfires = [];
+    this.lampGlows = [];
+    this.bubbles = [];
+    this.smoke = [];
+    this.weatherParticles = [];
+    this.motes = [];
+    this.splashes = [];
+    this.birds = [];
+    if (this.app.renderer) this.app.destroy({ removeView: true }, { children: true });
   }
 }
 

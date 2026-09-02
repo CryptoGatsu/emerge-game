@@ -20,10 +20,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { advance, constructBuilding, createWorld, inspireWorld, renameWorld, type World } from '@/lib/simulation';
+import { advance, constructBuilding, createWorld, drawFromTreasury, fundTreasury, inspireWorld, renameWorld, type World } from '@/lib/simulation';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
 import { clearClaimedWorld, loadClaimedWorld, saveClaimedWorld, type ClaimedWorld } from '@/lib/world/plots';
+import { payForRename, type VaultLedger } from '@/lib/chain/vault';
 import PlotSelect from './PlotSelect';
 import { Hud } from './Hud';
 import { Panels, type PanelKey } from './Panels';
@@ -40,12 +41,21 @@ export default function EmergeClient() {
   // `undefined` means we have not looked in storage yet, which avoids flashing
   // the land office at a player who already owns a world.
   const [claimed, setClaimed] = useState<ClaimedWorld | null | undefined>(undefined);
+  // The last world we rendered. Kept after the player leaves so the renderer,
+  // its WebGL context and the generated texture atlas survive a trip back to
+  // the land office instead of being torn down and rebuilt.
+  const [mounted, setMounted] = useState<ClaimedWorld | null>(null);
 
-  useEffect(() => { setClaimed(loadClaimedWorld()); }, []);
+  useEffect(() => {
+    const stored = loadClaimedWorld();
+    setClaimed(stored);
+    if (stored) setMounted(stored);
+  }, []);
 
   const enter = useCallback((world: ClaimedWorld) => {
     saveClaimedWorld(world);
     setClaimed(world);
+    setMounted(world);
   }, []);
 
   const leave = useCallback(() => {
@@ -54,12 +64,26 @@ export default function EmergeClient() {
   }, []);
 
   if (claimed === undefined) return <main className="stage" />;
-  if (claimed === null) return <PlotSelect onEnter={enter} />;
-  return <WorldView key={`${claimed.seed}`} claimed={claimed} onLeave={leave} onRename={enter} />;
+
+  return (
+    <>
+      {mounted && (
+        <WorldView
+          claimed={mounted}
+          hidden={claimed === null}
+          onLeave={leave}
+          onRename={enter}
+        />
+      )}
+      {claimed === null && <PlotSelect onEnter={enter} />}
+    </>
+  );
 }
 
-function WorldView({ claimed, onLeave, onRename }: {
+function WorldView({ claimed, hidden, onLeave, onRename }: {
   claimed: ClaimedWorld;
+  /** True while the land office is open over the top of a running world. */
+  hidden: boolean;
   onLeave: () => void;
   onRename: (world: ClaimedWorld) => void;
 }) {
@@ -134,6 +158,28 @@ function WorldView({ claimed, onLeave, onRename }: {
     };
   }, []);
 
+  const seedRef = useRef(claimed.seed);
+  useEffect(() => {
+    if (seedRef.current === claimed.seed) return;
+    seedRef.current = claimed.seed;
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const next = createWorld(claimed.seed, claimed.name);
+    worldRef.current = next;
+    setSelected(null);
+    setFollowing(null);
+    scene.reset(next);
+    setView(snapshot(next, null));
+  }, [claimed.seed, claimed.name]);
+
+  // The world keeps running behind the land office, but there is no reason to
+  // spend frames drawing it while nobody can see it.
+  useEffect(() => {
+    const app = sceneRef.current?.app;
+    if (!app?.renderer) return;
+    if (hidden) app.stop(); else app.start();
+  }, [hidden]);
+
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { speedRef.current = speed; }, [speed]);
   useEffect(() => { selectedRef.current = selected; sceneRef.current?.select(selected); }, [selected]);
@@ -199,8 +245,22 @@ function WorldView({ claimed, onLeave, onRename }: {
   const rename = useCallback((next: string) => {
     const world = worldRef.current;
     if (!world) return;
+    // A name costs tokens, so refuse rather than rename for free if it cannot
+    // be paid for.
+    const paid = payForRename(claimed.ledger);
+    if (!paid) return;
     renameWorld(world, next);
-    onRename({ ...claimed, name: world.name });
+    onRename({ ...claimed, name: world.name, ledger: paid });
+    setView(snapshot(world, selectedRef.current));
+  }, [claimed, onRename]);
+
+  /** Move Gold in or out of the treasury and persist the vault ledger. */
+  const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    if (goldDelta > 0) fundTreasury(world, goldDelta, note);
+    else if (goldDelta < 0 && !drawFromTreasury(world, -goldDelta, note)) return;
+    onRename({ ...claimed, ledger });
     setView(snapshot(world, selectedRef.current));
   }, [claimed, onRename]);
 
@@ -230,7 +290,7 @@ function WorldView({ claimed, onLeave, onRename }: {
   const hoverInfo = useMemo(() => (hovered ? sceneRef.current?.describe(hovered) ?? null : null), [hovered]);
 
   return (
-    <main className="stage">
+    <main className="stage" aria-hidden={hidden} style={hidden ? { visibility: 'hidden' } : undefined}>
       <div ref={hostRef} className="canvas-host" aria-label={`${claimed.name} settlement`} />
 
       {!ready && (
@@ -273,6 +333,7 @@ function WorldView({ claimed, onLeave, onRename }: {
             onBuild={beginBuild}
             onRename={rename}
             onLeave={onLeave}
+            onVault={vault}
           />
         </>
       )}

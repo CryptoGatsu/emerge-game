@@ -15,12 +15,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
-  catalogue, drawPlotPreview, type ClaimedWorld, type Plot,
+  catalogue, drawPlotPreview, newLedger, type ClaimedWorld, type Plot,
 } from '@/lib/world/plots';
-import {
-  ACTIVE_CHAIN, INITIAL_WALLET, TOKEN, chainConfigured, claimPlot, connectWallet,
-  shortAddress, walletAvailable, type WalletState,
-} from '@/lib/chain/emerge';
+import { ACTIVE_CHAIN, TOKEN, chainConfigured, claimPlot } from '@/lib/chain/emerge';
+import { LOCAL_TEST_ALLOCATION } from '@/lib/chain/vault';
+import { WalletPicker, useWallet } from './WalletPicker';
 
 function PlotPreview({ seed, size = 240 }: { seed: number; size?: number }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -39,19 +38,10 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
   const plots = useMemo(() => catalogue(), []);
   const [selected, setSelected] = useState<Plot>(plots[0]);
   const [name, setName] = useState('');
-  const [wallet, setWallet] = useState<WalletState>(INITIAL_WALLET);
+  const { wallet } = useWallet();
   const [claiming, setClaiming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const configured = chainConfigured();
-
-  useEffect(() => {
-    if (!walletAvailable()) setWallet({ status: 'unsupported', address: null, chainId: null, error: null });
-  }, []);
-
-  const connect = useCallback(async () => {
-    setWallet((w) => ({ ...w, status: 'connecting' }));
-    setWallet(await connectWallet());
-  }, []);
 
   const claim = useCallback(async () => {
     setClaiming(true);
@@ -74,6 +64,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
       claimedAt: Date.now(),
       owner: wallet.address,
       txHash: result.txHash,
+      ledger: newLedger(),
     });
   }, [name, selected, wallet.address, onEnter]);
 
@@ -140,17 +131,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
               <em>{TOKEN.ticker}</em>
             </div>
 
-            <div className="claim-wallet">
-              {wallet.status === 'connected' ? (
-                <span className="wallet-ok">◈ {shortAddress(wallet.address)}</span>
-              ) : wallet.status === 'unsupported' ? (
-                <span className="muted small">No browser wallet detected — you can still claim and play.</span>
-              ) : (
-                <button className="ghost" onClick={connect} disabled={wallet.status === 'connecting'}>
-                  {wallet.status === 'connecting' ? 'Connecting…' : 'Connect wallet'}
-                </button>
-              )}
-            </div>
+            <div className="claim-wallet"><WalletPicker compact /></div>
 
             <button className="claim-button" onClick={claim} disabled={claiming}>
               {claiming ? 'Claiming…' : `Claim ${selected.region}`}
@@ -159,7 +140,9 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
             {!configured && (
               <p className="muted small">
                 {ACTIVE_CHAIN.label} is not configured in this build, so claims are recorded in this
-                browser rather than on chain. Your world is yours to play either way.
+                browser rather than on chain, and the world opens with a local development
+                allocation of {LOCAL_TEST_ALLOCATION.toLocaleString()} {TOKEN.ticker} to spend in
+                the vault. Neither is a token transfer.
               </p>
             )}
             {notice && <p className="warn">{notice}</p>}

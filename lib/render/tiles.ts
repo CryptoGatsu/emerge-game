@@ -147,13 +147,14 @@ function cropTile(seed: number, kind: 'wheat' | 'veg'): Pixels {
   return p;
 }
 
-function pathTile(seed: number, wide: boolean): Pixels {
+function pathTile(seed: number): Pixels {
   const p = tile();
   fillDiamond(p, GROUND.path);
   speckle(p, seed, 200, [GROUND.pathDark, GROUND.pathLight, shade(GROUND.path, -0.08)], clip);
-  // Irregular cobbles rather than a repeating grid.
+  // Irregular cobbles rather than a repeating grid. Every variant carries the
+  // same number of stones and differs only in where they fall.
   const r = rng(seed + 313);
-  const stones = wide ? 26 : 18;
+  const stones = 22;
   for (let i = 0; i < stones; i++) {
     const cx = 4 + Math.floor(r() * (TILE_W - 8));
     const cy = 3 + Math.floor(r() * (TILE_H - 6));
@@ -352,7 +353,7 @@ export function buildTiles(): TileArt[] {
   for (let i = 0; i < 2; i++) add(`tile.tilled.${i}`, soilTile(2100 + i * 29, true));
   add('tile.crop.wheat', cropTile(2200, 'wheat'));
   add('tile.crop.veg', cropTile(2300, 'veg'));
-  for (let i = 0; i < 3; i++) add(`tile.path.${i}`, pathTile(2400 + i * 43, i === 0));
+  for (let i = 0; i < 3; i++) add(`tile.path.${i}`, pathTile(2400 + i * 43));
   for (let i = 0; i < 2; i++) add(`tile.plaza.${i}`, plazaTile(2600 + i * 31));
   for (let i = 0; i < 2; i++) add(`tile.rock.${i}`, rockTile(2800 + i * 47));
   add('tile.sand.0', sandTile(3000));

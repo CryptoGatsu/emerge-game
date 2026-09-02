@@ -68,24 +68,96 @@ export const chainConfigured = (config: ChainConfig = ACTIVE_CHAIN) =>
  * Wallet
  * ------------------------------------------------------------------ */
 
-interface Eip1193Provider {
+export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
   on?(event: string, handler: (...args: unknown[]) => void): void;
   removeListener?(event: string, handler: (...args: unknown[]) => void): void;
 }
 
+interface Eip6963ProviderInfo { uuid: string; name: string; icon: string; rdns: string }
+interface Eip6963AnnounceEvent extends Event { detail: { info: Eip6963ProviderInfo; provider: Eip1193Provider } }
+
 declare global {
-  interface Window { ethereum?: Eip1193Provider }
+  interface Window { ethereum?: Eip1193Provider & { providers?: Eip1193Provider[]; isMetaMask?: boolean; isTrust?: boolean; isTrustWallet?: boolean } }
+}
+
+export interface DiscoveredWallet {
+  id: string;
+  name: string;
+  icon: string | null;
+  rdns: string | null;
+  provider: Eip1193Provider;
+}
+
+/** Wallets we name explicitly, because they are the ones Robinhood Chain users have. */
+export const PREFERRED_WALLETS = ['MetaMask', 'Trust Wallet'] as const;
+
+const nameFromLegacy = (provider: Window['ethereum']) => {
+  if (!provider) return 'Browser wallet';
+  if (provider.isMetaMask) return 'MetaMask';
+  if (provider.isTrust || provider.isTrustWallet) return 'Trust Wallet';
+  return 'Browser wallet';
+};
+
+/**
+ * Find the wallets installed in this browser.
+ *
+ * Uses EIP-6963 announcements, which is how MetaMask and Trust Wallet both
+ * advertise themselves when more than one extension is present — reading
+ * `window.ethereum` alone silently picks whichever one won the injection race.
+ * The legacy object is still used as a fallback for older wallets.
+ *
+ * Returns an unsubscribe function; call it on unmount.
+ */
+export function discoverWallets(onChange: (wallets: DiscoveredWallet[]) => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const found = new Map<string, DiscoveredWallet>();
+
+  const publish = () => onChange([...found.values()]);
+
+  const onAnnounce = (event: Event) => {
+    const { info, provider } = (event as Eip6963AnnounceEvent).detail;
+    if (!info || !provider) return;
+    found.set(info.rdns || info.uuid, {
+      id: info.rdns || info.uuid,
+      name: info.name,
+      icon: info.icon ?? null,
+      rdns: info.rdns ?? null,
+      provider,
+    });
+    publish();
+  };
+
+  window.addEventListener('eip6963:announceProvider', onAnnounce);
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+  // Fall back to the injected object for wallets that do not announce.
+  const legacy = window.ethereum;
+  if (legacy) {
+    const list = legacy.providers?.length ? legacy.providers : [legacy];
+    list.forEach((provider, i) => {
+      const named = nameFromLegacy(provider as Window['ethereum']);
+      const id = `legacy:${named}:${i}`;
+      if (![...found.values()].some((w) => w.name === named)) {
+        found.set(id, { id, name: named, icon: null, rdns: null, provider });
+      }
+    });
+    publish();
+  }
+
+  return () => window.removeEventListener('eip6963:announceProvider', onAnnounce);
 }
 
 export interface WalletState {
   status: 'unsupported' | 'disconnected' | 'connecting' | 'connected' | 'error';
   address: string | null;
   chainId: number | null;
+  /** Which wallet is connected, for the interface to show. */
+  wallet: string | null;
   error: string | null;
 }
 
-export const INITIAL_WALLET: WalletState = { status: 'disconnected', address: null, chainId: null, error: null };
+export const INITIAL_WALLET: WalletState = { status: 'disconnected', address: null, chainId: null, wallet: null, error: null };
 
 export function walletAvailable() {
   return typeof window !== 'undefined' && !!window.ethereum;
@@ -97,14 +169,15 @@ export function shortAddress(address: string | null) {
 }
 
 /**
- * Request accounts from an injected wallet. Any failure resolves to an error
- * state rather than throwing, so a rejected prompt is never a crash mid-game.
+ * Request accounts from a wallet. Any failure resolves to an error state rather
+ * than throwing, so a rejected prompt is never a crash mid-game.
  */
-export async function connectWallet(): Promise<WalletState> {
-  if (!walletAvailable()) {
-    return { status: 'unsupported', address: null, chainId: null, error: 'No browser wallet detected.' };
+export async function connectWallet(wallet?: DiscoveredWallet): Promise<WalletState> {
+  const provider = wallet?.provider ?? (typeof window !== 'undefined' ? window.ethereum : undefined);
+  const label = wallet?.name ?? nameFromLegacy(typeof window !== 'undefined' ? window.ethereum : undefined);
+  if (!provider) {
+    return { status: 'unsupported', address: null, chainId: null, wallet: null, error: 'No browser wallet detected.' };
   }
-  const provider = window.ethereum!;
   try {
     const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[];
     const rawChain = (await provider.request({ method: 'eth_chainId' })) as string;
@@ -112,11 +185,12 @@ export async function connectWallet(): Promise<WalletState> {
       status: accounts?.length ? 'connected' : 'disconnected',
       address: accounts?.[0] ?? null,
       chainId: Number.parseInt(rawChain, 16) || null,
+      wallet: label,
       error: null,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Wallet connection was rejected.';
-    return { status: 'error', address: null, chainId: null, error: message };
+    return { status: 'error', address: null, chainId: null, wallet: label, error: message };
   }
 }
 
