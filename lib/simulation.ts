@@ -314,6 +314,14 @@ export interface World {
    */
   flow: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>> };
   /**
+   * The same figures for the day that just closed.
+   *
+   * Job choice needs them: today's flow is empty at the moment work is handed
+   * out, and a stock figure on its own cannot tell a full barn from a barn
+   * that is being emptied.
+   */
+  flowYesterday: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>> };
+  /**
    * Where the settlement's Gold came from and went, today and on the last full
    * day. Every movement in or out of the treasury is booked against a heading,
    * so the player can read a day's trading rather than watch one number drift.
@@ -1889,7 +1897,32 @@ function starterBuildings(seed: number, layout: WorldLayout, population: number)
   // exports could never cover, and the treasury drained to nothing by the third
   // week. The rest is ground for the player to build on.
   const affordable = Math.max(2, Math.round(population / 4));
-  const trades = biomeFor(seed).trades.slice(0, affordable);
+  const profile = biomeFor(seed);
+  const trades = profile.trades.slice(0, affordable);
+
+  /*
+   * Whatever else it does, a settlement must be able to feed itself.
+   *
+   * Each biome's list is ordered by what the land is best at, and only the
+   * first two or three are affordable to open — so a highland shelf opened
+   * with two mines, a deep wood with two woodcutters, and the Farm further
+   * down the list never got built. Four of the nine biomes started with no
+   * food production of any kind. They did not fail loudly: the opening store
+   * of grain lasted months, so the settlement read as healthy while it ate
+   * through the last of it, and then died over the following hundred days
+   * whatever the player did. Measured on a highland seed: eight people down to
+   * none by day 106.
+   *
+   * So the last affordable trade gives way to the best food trade the land
+   * supports. The character survives — a highland plot still opens with a mine
+   * and reads as a mining town, and its farm is a poor one because the terrain
+   * bonuses say so — but every plot can now eat.
+   */
+  if (!trades.includes('Farm')) {
+    const farm = profile.trades.find((type) => type === 'Farm');
+    if (farm) trades[trades.length - 1] = farm;
+  }
+
   trades.forEach((type, i) => {
     const [x, y] = sites[i % sites.length];
     buildings.push(make(`w${i}`, type, x, y));
@@ -2173,6 +2206,7 @@ export function createWorld(seed = 481516, name?: string): World {
     resolution: null, artworks: [],
     unlockedAreas: ['Settlement'],
     marketClock: 0, flow: { produced: {}, consumed: {} },
+    flowYesterday: { produced: {}, consumed: {} },
     ledger: emptyLedger(), ledgerYesterday: emptyLedger(),
     stewardship: {
       score: 0, attention: 1, lastActionDay: 1, lastActionAt: Date.now(),
@@ -2531,6 +2565,18 @@ function terrainMultiplier(world: World, job: WorkingJob) { return world.terrain
  * inputs are missing, since a baker with no flour is not what a shortage of
  * bread calls for.
  */
+/**
+ * How much the settlement wants one more person doing this work.
+ *
+ * Demand reads two things about every resource the trade makes: how much is in
+ * store, and what happened to it yesterday. The second half is not decoration.
+ * Judged on stock alone, a barn holding a hundred wheat reads as "we have
+ * plenty" even when nobody is farming and the hundred is being eaten — so a
+ * settlement would put its last farmer down the mine, keep reading a full barn
+ * every morning, and starve over the following hundred days with the granary
+ * figure sliding one loaf at a time. A trade whose output is draining is wanted
+ * however full the store looks; one with a surplus flow is not, however empty.
+ */
 function jobScore(world: World, j: WorkingJob) {
   const spec = world.terrain.map((t) => terrainBonuses[t][j] || 1).reduce((a, b) => a + b, 0) / world.terrain.length;
   const recipe = jobs[j];
@@ -2538,7 +2584,13 @@ function jobScore(world: World, j: WorkingJob) {
   let demand = 0.6;
   for (const key of Object.keys(recipe.output) as Resource[]) {
     const buffer = Math.max(1, marketBuffers[key]);
-    demand += clamp((buffer - world.resources[key]) / buffer, -0.4, 1.5) * 1.3;
+    const stock = clamp((buffer - world.resources[key]) / buffer, -0.4, 1.5);
+    const made = world.flowYesterday?.produced[key] ?? 0;
+    const used = world.flowYesterday?.consumed[key] ?? 0;
+    // Weighted above the stock reading, because the flow is the half that says
+    // where the settlement is heading rather than where it has been.
+    const drain = clamp((used - made) / buffer, -0.5, 1.5);
+    demand += (stock + drain * 1.8) * 1.3;
   }
 
   let feasible = 1;
@@ -3594,21 +3646,53 @@ const SETTLER_NAMES = [
  * point: a plot begins as a handful of families and becomes a town because the
  * player made it somewhere worth moving to.
  */
+/**
+ * How few people a settlement can fall to before word gets out that there is
+ * land going spare.
+ */
+const LAST_RESORT_POPULATION = 3;
+
 function migration(world: World, rand: () => number) {
   const houses = world.buildings.filter((b) => b.type === 'House' && b.active).length;
   // A spare roof. Nobody moves to a place they would have to sleep outside in.
   if (world.citizens.length >= houses * 3.2) return;
   const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
-  if (food < world.citizens.length * 4) return;
-  // And a settlement that can pay them.
-  const payroll = world.citizens.filter((c) => c.age >= 16 && c.job !== 'unemployed')
-    .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
-  if (world.treasury < payroll * 4 + 120) return;
-  // Word travels on how the place is doing, so a miserable town attracts nobody.
-  const content = world.citizens.reduce((s, c) => s + c.happiness, 0) / Math.max(1, world.citizens.length);
-  if (content < 55) return;
-  // Bigger places draw more people, but never more than one a day.
-  const draw = 0.18 + Math.min(0.32, world.buildings.length * 0.02);
+  if (food < Math.max(12, world.citizens.length * 4)) return;
+
+  /*
+   * Below a handful of people, a roof and a meal are the whole test.
+   *
+   * The gates underneath are a prosperity test — a treasury four days deep and
+   * a contented population — and they are the right test for whether a healthy
+   * place keeps growing. They are the wrong test for a place in trouble,
+   * because a settlement whose treasury has been thin for a season can never
+   * pass them again. Births need two parents of an age in one household, which
+   * a shrinking settlement also stops being able to supply, so nothing comes
+   * in at all: it loses its elders one at a time and arrives at zero, and a
+   * plot at zero is finished for good — no work, no yield, nothing the player
+   * can do from inside the game to restart it. Measured on the opening seeds,
+   * two of nine went from eight people to none inside a hundred and ten days.
+   *
+   * Hard times should be survivable and recoverable, not terminal. Somebody
+   * will always try their luck on standing houses with grain in the store,
+   * whatever the books look like.
+   */
+  const desperate = world.citizens.length <= LAST_RESORT_POPULATION;
+
+  if (!desperate) {
+    // A settlement that can pay them.
+    const payroll = world.citizens.filter((c) => c.age >= 16 && c.job !== 'unemployed')
+      .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
+    if (world.treasury < payroll * 4 + 120) return;
+    // Word travels on how the place is doing, so a miserable town attracts nobody.
+    const content = world.citizens.reduce((s, c) => s + c.happiness, 0) / Math.max(1, world.citizens.length);
+    if (content < 55) return;
+  }
+
+  // Bigger places draw more people, but never more than one a day. A settlement
+  // down to its last few draws steadily rather than quickly: enough to come
+  // back from, not enough to make neglect free.
+  const draw = desperate ? 0.22 : 0.18 + Math.min(0.32, world.buildings.length * 0.02);
   if (rand() > draw) return;
 
   const hash = world.counter * 37 + 11;
@@ -3851,6 +3935,7 @@ export function collectYield(world: World) {
 }
 
 function daily(world: World) {
+  world.flowYesterday = world.flow;
   world.flow = { produced: {}, consumed: {} };
   // Yesterday's books close before today's wages are drawn, so the figures the
   // player reads are a whole day rather than a day and a morning.
@@ -3864,7 +3949,15 @@ function daily(world: World) {
   const tally: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) {
     if (c.age < 16) { c.job = 'unemployed'; c.wage = 0; continue; }
-    const need = Math.min(c.hunger, c.rest, c.social, c.clothing, c.purpose, c.warmth);
+    // Whether this person wants to try something else.
+    //
+    // This used to be the lowest of every need they have, warmth and clothing
+    // included — so the first cold week of winter had the entire settlement
+    // change trade at once, all of them picking whatever scored highest that
+    // morning. Being cold is a reason to want a coat and a fire, not a reason
+    // to give up farming. Only the two needs that are actually about the work
+    // count: whether it feels worth doing, and whether it is feeding them.
+    const need = Math.min(c.purpose, c.hunger);
     // Order matters: the capacity check reads the recipe for the citizen's
     // current job, and 'unemployed' has no recipe. Before citizens could be
     // born, everyone over sixteen already had a trade and this never came up;

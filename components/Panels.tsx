@@ -763,7 +763,7 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
       <div className="books">
         <div className="books-col earning">
           <div className="books-head">
-            <span>EARNED</span>
+            <span>EARNED YESTERDAY</span>
             <b>+{Math.round(view.earnedYesterday).toLocaleString()}</b>
           </div>
           {view.incomeLines.length ? view.incomeLines.map((line) => (
@@ -775,7 +775,7 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
         </div>
         <div className="books-col spending">
           <div className="books-head">
-            <span>SPENT</span>
+            <span>SPENT YESTERDAY</span>
             <b>−{Math.round(view.spentYesterday).toLocaleString()}</b>
           </div>
           {view.outgoingLines.length ? view.outgoingLines.map((line) => (
@@ -992,7 +992,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
           <span className="eyebrow">YOUR PLOT</span>
           <h3>{claimed.region}</h3>
           <p className="muted">
-            Claimed for {claimed.price} {TOKEN.ticker} · seed {view.seed} · day {view.day}
+            Claimed for {claimed.price.toLocaleString()} {TOKEN.ticker} · seed {view.seed} · day {view.day}
           </p>
           <p className="muted small">
             {claimed.txHash

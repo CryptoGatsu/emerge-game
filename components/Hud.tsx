@@ -439,11 +439,9 @@ function EconomyRow({ view, activePanel, onPanel }: {
 }) {
   return (
     <div className="economy-row">
-      <button className="treasury-chip" onClick={() => onPanel(activePanel === 'bank' ? null : 'bank')}>
-        <span>TREASURY</span>
-        <b>{Math.floor(view.treasury).toLocaleString()}</b>
-        <em>GOLD</em>
-      </button>
+      {/* The treasury chip that used to sit here printed the same Gold as the
+          purse and opened the same panel — two of the same button, one of them
+          always redundant. */}
       <button className="market-chip" onClick={() => onPanel(activePanel === 'market' ? null : 'market')}>
         <span>MARKET</span>
         <b>{view.food}</b>
@@ -482,13 +480,20 @@ function Purse({ view, player, onPanel }: {
   );
 }
 
-const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; blurb: string }[] = [
-  { key: 'guide', icon: '◎', label: 'GAME GUIDE', blurb: 'How all of this works' },
-  { key: 'build', icon: '⚒', label: 'BUILD', blurb: 'Create places and resources' },
-  { key: 'market', icon: '◍', label: 'MARKET', blurb: 'Prices, flow and what is scarce' },
-  { key: 'chat', icon: '✎', label: 'CHAT', blurb: 'Talk to other players' },
-  { key: 'gacha', icon: '⛏', label: 'PROSPECT', blurb: 'Send a party out for a day' },
-  { key: 'connect', icon: '◈', label: 'ON-CHAIN', blurb: 'Your plot, wallet and vault' },
+/**
+ * The action bar.
+ *
+ * `short` is what a phone shows. Six full labels do not fit across 390px at
+ * any legible size — they used to run off both edges, with ON-CHAIN half
+ * cut off — so the narrow layout uses one word each and drops the blurb.
+ */
+const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; short: string; blurb: string }[] = [
+  { key: 'guide', icon: '◎', label: 'GAME GUIDE', short: 'GUIDE', blurb: 'How all of this works' },
+  { key: 'build', icon: '⚒', label: 'BUILD', short: 'BUILD', blurb: 'Places and resources' },
+  { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
+  { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
+  { key: 'gacha', icon: '⛏', label: 'PROSPECT', short: 'DIG', blurb: 'Send a party out' },
+  { key: 'connect', icon: '◈', label: 'ON-CHAIN', short: 'CHAIN', blurb: 'Plot, wallet and vault' },
 ];
 
 export function Hud(props: HudProps) {
@@ -623,7 +628,7 @@ export function Hud(props: HudProps) {
                 }}
               >
                 <b>{action.icon}</b>
-                <span>{action.label}</span>
+                <span>{compact ? action.short : action.label}</span>
                 <small>{action.blurb}</small>
               </button>
             );
@@ -659,7 +664,9 @@ export function Hud(props: HudProps) {
 
       {placing && (
         <div className="placement-bar">
-          <span>Placing <b>{placing}</b> — click open ground to build, Esc to cancel.</span>
+          <span>
+            Placing <b>{placing}</b> — {compact ? 'tap open ground to build.' : 'click open ground to build, Esc to cancel.'}
+          </span>
           <button onClick={props.onCancelBuild}>Cancel</button>
         </div>
       )}

@@ -684,16 +684,25 @@ button {
 .person-chip:hover { border-color: var(--panel-edge); color: var(--cream); }
 .person-chip em { font-style: normal; color: var(--muted); }
 
-.hint-card p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.6; color: #b6cdac; }
-
 /* ------------------------------------------------------------------ *
  * Action bar
  * ------------------------------------------------------------------ */
 
+/*
+ * The action bar lives between the two side columns, not across them.
+ *
+ * Centred on the viewport with a fixed-width row, it climbed on top of the
+ * observe card on the left and the minimap column on the right at every
+ * laptop width below about 1600px — which is where most people play. Anchored
+ * to both gutters instead, it can never reach either, and the buttons share
+ * whatever room is left.
+ */
 .action-bar {
   position: absolute;
-  bottom: 24px; left: 50%;
-  transform: translateX(-50%);
+  bottom: 24px;
+  left: 362px;
+  right: 300px;
+  transform: none;
   background: var(--panel);
   border: 1px solid var(--panel-edge);
   border-radius: var(--radius);
@@ -702,10 +711,12 @@ button {
   padding: 11px 14px 13px;
 }
 .action-title { text-align: center; font-size: 10px; letter-spacing: 2.6px; color: var(--muted); margin-bottom: 10px; }
-.action-row { display: flex; gap: 8px; }
+.action-row { display: flex; gap: 8px; justify-content: center; }
 
 .action {
-  width: 152px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 168px;
   padding: 12px 10px;
   border-radius: 10px;
   border: 1px solid var(--panel-edge-soft);
@@ -716,9 +727,25 @@ button {
 }
 .action:hover { border-color: var(--panel-edge); background: rgba(139, 241, 107, 0.07); transform: translateY(-2px); }
 .action.active { border-color: var(--emerald); background: rgba(139, 241, 107, 0.12); }
-.action b { font-size: 20px; color: var(--emerald); font-weight: 400; }
-.action span { font-size: 11px; letter-spacing: 1.6px; color: var(--cream); }
-.action small { font-size: 10px; color: var(--muted); line-height: 1.35; }
+/* A fixed box for the glyph. The six icons come from different fallback fonts
+   with different line boxes, so left to themselves they pushed each button's
+   label to a slightly different height and the row read as ragged. */
+.action b {
+  font-size: 20px; color: var(--emerald); font-weight: 400;
+  line-height: 1; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+}
+.action span {
+  font-size: 11px; letter-spacing: 1.6px; color: var(--cream);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.action small {
+  font-size: 10px; color: var(--muted); line-height: 1.35;
+  /* Two lines for every button, so the row keeps one baseline whatever the
+     blurb says. */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; min-height: 27px;
+}
 .action.inspire b { color: #b98ce8; }
 .action.build b { color: #7fc9e8; }
 .action.connect b { color: var(--gold); }
@@ -758,7 +785,7 @@ button {
 .map-tools span { margin-left: auto; font-size: 10px; color: var(--muted); letter-spacing: 1px; }
 
 .economy-row { display: flex; gap: 8px; }
-.treasury-chip, .market-chip {
+.market-chip {
   flex: 1;
   display: flex; flex-direction: column; gap: 1px;
   padding: 10px 13px;
@@ -769,11 +796,10 @@ button {
   backdrop-filter: blur(9px);
   text-align: left;
 }
-.treasury-chip span, .market-chip span { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
-.treasury-chip b { font-size: 19px; color: var(--gold); }
+.market-chip span { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
 .market-chip b { font-size: 19px; color: var(--emerald); }
-.treasury-chip em, .market-chip em { font-style: normal; font-size: 9px; letter-spacing: 1.4px; color: var(--muted); }
-.treasury-chip:hover, .market-chip:hover { border-color: rgba(232, 193, 105, 0.55); }
+.market-chip em { font-style: normal; font-size: 9px; letter-spacing: 1.4px; color: var(--muted); }
+.market-chip:hover { border-color: rgba(232, 193, 105, 0.55); }
 
 /* ------------------------------------------------------------------ *
  * Hover tooltip and placement
@@ -920,9 +946,12 @@ button {
 @media (max-width: 720px) {
   .market-row.head { display: none; }
   .market-row {
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px 10px;
-    padding: 11px 12px;
+    /* Four figures on one line under the name. At three columns the flow
+       dangled on a second row of its own and every resource cost 215px of
+       scroll — thirteen of those is a very long way to the bottom. */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px 8px;
+    padding: 10px 12px;
   }
   .market-row .cell { display: flex; flex-direction: column; gap: 1px; }
   .market-row .cell i {
@@ -934,9 +963,11 @@ button {
   .market-row .cell.name {
     grid-column: 1 / -1;
     font-size: 13.5px; font-weight: 600; color: var(--cream);
+    margin-bottom: 1px;
   }
+  .market-row .cell b, .market-row .cell { font-size: 12px; }
   .market-row .cell.spark { display: none; }
-  .market-row .buy, .market-row .sell { font-size: 11px; letter-spacing: 0.4px; }
+  .market-row .buy, .market-row .sell { font-size: 10.5px; letter-spacing: 0.2px; }
 }
 
 .bank-balance { font-size: 40px; font-weight: 700; color: var(--gold); }
@@ -1394,18 +1425,28 @@ button.fold:hover { color: var(--emerald); }
  * Narrow viewports
  * ------------------------------------------------------------------ */
 
+@media (max-width: 1200px) {
+  /* The blurb is the first thing to go: six of them do not fit beside the
+     side columns once the middle drops under about six hundred pixels. */
+  .action small { display: none; }
+  .action { padding: 10px 8px; }
+}
+
 @media (max-width: 1280px) {
   .brand-copy { display: none; }
   .right-rail, .bottom-right { width: 226px; }
-  .action { width: 124px; }
+  .action-bar { right: 264px; }
+  /* Tighter tracking so "GAME GUIDE" still fits its button rather than
+     ellipsing. */
+  .action span { font-size: 10.5px; letter-spacing: 1px; }
 }
 
 @media (max-width: 1000px) {
   .brand-block { max-width: 200px; }
   .right-rail { bottom: 360px; }
   .bottom-left { width: 260px; }
-  .action small { display: none; }
-  .action { width: 96px; }
+  .action-bar { left: 300px; }
+  .action span { font-size: 10px; letter-spacing: 1px; }
 }
 
 /*
@@ -1422,12 +1463,74 @@ button.fold:hover { color: var(--emerald); }
    identical: they decide the same thing from two different places. */
 @media (max-width: 780px), (max-height: 520px) {
   .brand-copy { display: none; }
-  .bottom-left { left: 12px; right: 12px; width: auto; bottom: 128px; }
+  /* Stops short of the zoom column on the right, which sits at the same
+     height — full width, the observe card ran underneath the three buttons. */
+  .bottom-left { left: 12px; right: 68px; width: auto; bottom: 84px; }
+  .hint-card p { font-size: 12px; line-height: 1.5; }
   .being-card { max-height: 40vh; overflow-y: auto; }
-  .action-bar { bottom: calc(10px + env(safe-area-inset-bottom)); padding: 9px 8px 11px; }
+  /*
+   * The action bar is a tab bar on a phone, not a floating card.
+   *
+   * Six fixed-width buttons centred on the screen came to 524px against a
+   * 390px viewport, so the row ran off both edges at once — GAME GUIDE was
+   * clipped on the left and ON-CHAIN on the right, with no way to reach
+   * either. It now spans the full width and the six share it equally, which
+   * is both what fits and what a phone user already knows how to read.
+   */
+  .action-bar {
+    left: 0; right: 0;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    border-radius: 0;
+    border-left: none; border-right: none; border-bottom: none;
+    background: rgba(9, 22, 15, 0.94);
+    padding: 7px 6px calc(7px + env(safe-area-inset-bottom));
+  }
   .action-title { display: none; }
-  .action { width: 78px; padding: 10px 6px; min-height: 56px; }
-  .action span { font-size: 9.5px; letter-spacing: 1px; }
+  .action-row { gap: 2px; }
+  .action {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding: 7px 2px 6px;
+    min-height: 52px;
+    gap: 2px;
+    border: none;
+    background: none;
+    border-radius: 9px;
+  }
+  .action b { font-size: 17px; line-height: 1; }
+  .action span {
+    font-size: 8.5px;
+    letter-spacing: 0.4px;
+    /* One word each, and it must not wrap or the row loses its baseline. */
+    white-space: nowrap;
+  }
+  .action.active { background: rgba(139, 241, 107, 0.13); border: none; }
+  .action:hover { transform: none; background: rgba(139, 241, 107, 0.07); }
+
+  /*
+   * The placement prompt sits above the action bar, not at the top.
+   *
+   * At `top: 96px` it landed underneath the clock and the purse on a phone —
+   * the one instruction a player needs at that moment, printed behind two
+   * other things. Down here it is beside the thumb that is about to tap, and
+   * the space is otherwise empty while placing.
+   */
+  .placement-bar {
+    top: auto;
+    bottom: calc(74px + env(safe-area-inset-bottom));
+    left: 10px; right: 10px;
+    transform: none;
+    justify-content: space-between;
+    gap: 8px;
+    border-radius: 12px;
+    padding: 9px 12px;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .placement-bar button { flex: none; }
   .brand-block { top: 12px; left: 12px; max-width: 62vw; }
   .wordmark { font-size: 22px; letter-spacing: 5px; }
 
@@ -1500,7 +1603,7 @@ button.fold:hover { color: var(--emerald); }
   .touch-zoom {
     position: absolute;
     right: 12px;
-    bottom: 200px;
+    bottom: 88px;
     z-index: 25;
     display: flex; flex-direction: column; gap: 6px;
   }
@@ -1523,8 +1626,8 @@ button.fold:hover { color: var(--emerald); }
      the sheet scrolls underneath it. */
   .phone-sheet .feed-panel { order: -1; }
   .phone-sheet .feed-scroll { max-height: 42vh; }
-  .bottom-left { bottom: 104px; }
-  .touch-zoom { bottom: 148px; }
+  .bottom-left { bottom: 76px; }
+  .touch-zoom { bottom: 80px; }
 }
 
 /*
@@ -1647,7 +1750,32 @@ button.fold:hover { color: var(--emerald); }
   .bank-grid, .books { grid-template-columns: 1fr 1fr; }
   .steward-grid { grid-template-columns: 1fr 1fr; }
   .vault-grid, .connect-grid { grid-template-columns: 1fr; }
-  .build-grid { grid-template-columns: 1fr 1fr; }
+  /*
+   * The build card lays out across the phone rather than down it. Stacked —
+   * icon, name, blurb, cost, materials, button, each on its own line — one
+   * building came to 450px and the list of thirteen was nearly six thousand
+   * pixels of scrolling to reach the Tavern.
+   */
+  .build-grid { grid-template-columns: 1fr; gap: 8px; }
+  .build-card {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'icon name  cost'
+      'icon blurb cost'
+      'mats mats  place';
+    align-items: center;
+    gap: 3px 10px;
+    padding: 12px 13px;
+  }
+  .build-icon { grid-area: icon; align-self: start; font-size: 20px; }
+  .build-card h3 { grid-area: name; margin: 0; font-size: 14px; }
+  .build-card p { grid-area: blurb; margin: 0; font-size: 11px; line-height: 1.35; }
+  .build-cost { grid-area: cost; text-align: right; display: flex; flex-direction: column; gap: 1px; }
+  .build-cost b { font-size: 13px; }
+  .build-cost small { font-size: 9.5px; }
+  .build-materials { grid-area: mats; margin-top: 4px; }
+  .build-card button { grid-area: place; margin-top: 4px; padding: 7px 16px; font-size: 12px; }
   .token-grid { grid-template-columns: 1fr; }
   .resource-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
   .bank-balance { font-size: 32px; }
@@ -1670,5 +1798,15 @@ button.fold:hover { color: var(--emerald); }
 }
 
 @media (max-width: 400px) {
-  .bank-grid, .books, .steward-grid, .build-grid { grid-template-columns: 1fr; }
+  /*
+   * The short tiles keep two columns even here: a label and a number do not
+   * need 340px of width, and one per row turned the Bank into four screens of
+   * scrolling to read eight numbers.
+   */
+  .bank-grid, .steward-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bank-grid > div, .steward-grid > div { padding: 10px 11px; }
+  .bank-grid b { font-size: 16px; }
+  .steward-grid em { font-size: 9.5px; }
+  /* The books carry sentences rather than figures, so they do stack. */
+  .books { grid-template-columns: 1fr; }
 }
