@@ -42,11 +42,14 @@ import { useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import {
   EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  type VaultLedger,
+  liveToken, type VaultLedger,
 } from '@/lib/chain/vault';
+import { tokenBalance } from '@/lib/chain/emerge';
+import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
 import PlotSelect from './PlotSelect';
+import Landing from './Landing';
 import { Hud } from './Hud';
 import { Panels, type PanelKey } from './Panels';
 
@@ -74,6 +77,15 @@ const HUD_INTERVAL = 180;
  * kilobytes rather than a field update.
  */
 const PUBLISH_INTERVAL = 45_000;
+
+/**
+ * How often the wallet's real token balance is re-read, in milliseconds.
+ *
+ * Only runs when a token contract is configured. Slow, because a balance
+ * changes when the player does something rather than on its own, and every
+ * read is an RPC call.
+ */
+const BALANCE_POLL = 30_000;
 
 /**
  * The speeds on offer.
@@ -122,13 +134,16 @@ export default function EmergeClient() {
   const claimedSeedRef = useRef<number | null>(null);
   // Somebody else's settlement, when the player has gone to look at one.
   const [visit, setVisit] = useState<Visit | null>(null);
+  // Whether this session has been past the front door. A player who owns a
+  // world has, by definition.
+  const [entered, setEntered] = useState(false);
   const { wallet } = useWallet();
   const address = wallet.address;
 
   useEffect(() => {
     const stored = loadClaimedWorld();
     setClaimed(stored);
-    if (stored) { setMounted(stored); claimedSeedRef.current = stored.seed; }
+    if (stored) { setMounted(stored); claimedSeedRef.current = stored.seed; setEntered(true); }
   }, []);
 
   /*
@@ -152,6 +167,33 @@ export default function EmergeClient() {
 
   const addressRef = useRef<string | null>(address);
   addressRef.current = address;
+
+  /*
+   * The balance, when there is a real token to read it from.
+   *
+   * With a contract configured the wallet is the authority on what somebody
+   * holds, not this browser: a locally stored number would drift the moment
+   * they traded anywhere else, and it would still be sitting there after they
+   * spent the lot. Without a contract this does nothing and the development
+   * allocation stands, which is the state every panel is already labelled for.
+   */
+  useEffect(() => {
+    if (!address || !liveToken()) return;
+    let live = true;
+    const read = async () => {
+      const held = await tokenBalance(address);
+      if (!live || held === null) return;
+      setPlayer((prev) => {
+        if (!prev || prev.ledger.balance === held) return prev;
+        const next = { ...prev, ledger: { ...prev.ledger, balance: held } };
+        savePlayer(next, address);
+        return next;
+      });
+    };
+    read();
+    const timer = window.setInterval(read, BALANCE_POLL);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [address]);
 
   const updatePlayer = useCallback((next: PlayerRecord) => {
     savePlayer(next, addressRef.current);
@@ -195,6 +237,7 @@ export default function EmergeClient() {
       return next;
     });
     setVisit(null);
+    setEntered(true);
     setClaimed(world);
     setMounted(world);
   }, []);
@@ -256,6 +299,16 @@ export default function EmergeClient() {
 
   if (claimed === undefined || !player) return <main className="stage" />;
 
+  /*
+   * The front door.
+   *
+   * Shown until somebody has both read what this is and connected a wallet.
+   * A player already standing in a world does not see it again — coming back
+   * to a settlement you own should not put a marketing page in the way — and a
+   * connected wallet that has stepped out to the map goes straight there.
+   */
+  const wantsLanding = !claimed && !visit && (!address || !entered);
+
   return (
     <>
       {mounted && (
@@ -298,7 +351,8 @@ export default function EmergeClient() {
           onVisit={goVisit}
         />
       )}
-      {claimed === null && !visit && (
+      {wantsLanding && <Landing onEnter={() => setEntered(true)} />}
+      {claimed === null && !visit && !wantsLanding && (
         <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} />
       )}
     </>
@@ -598,11 +652,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   const gift = useCallback(async (gold: number): Promise<string | null> => {
     if (!visit || !wallet.address) return 'Connect a wallet to send Gold.';
     const cost = gold * EMERGE_PER_GOLD;
-    const paid = charge(player.ledger, cost);
-    if (!paid) {
-      return `That is ${cost.toLocaleString()} $EMERGE and you hold `
-        + `${Math.floor(player.ledger.balance).toLocaleString()}.`;
-    }
+    const paid = await spend(player.ledger, cost, wallet.address);
+    if (!paid.ok) return paid.refused;
     const result = await sendGift({
       seed: visit.seed,
       gold,
@@ -612,7 +663,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // Only charged once the registry has the gift: a refusal must not cost the
     // sender anything.
     if (!result.ok) return result.reason;
-    onPlayer({ ...player, ledger: paid });
+    onPlayer({ ...player, ledger: paid.ledger });
     return null;
   }, [visit, wallet.address, player, onPlayer]);
 
@@ -740,18 +791,18 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, [claimed.seed, wallet.address, spectating, hidden, refresh, announce]);
 
   /** Naming costs tokens, so refuse rather than rename for free. */
-  const renameWorldFor = useCallback((next: string) => {
+  const renameWorldFor = useCallback(async (next: string) => {
     const world = worldRef.current;
     if (!world) return;
-    const paid = charge(player.ledger, RENAME_COST_EMERGE);
-    if (!paid) return;
+    const paid = await spend(player.ledger, RENAME_COST_EMERGE, wallet.address);
+    if (!paid.ok) return;
     renameWorld(world, next);
-    onPlayer({ ...player, ledger: paid });
+    onPlayer({ ...player, ledger: paid.ledger });
     onRename({ ...claimed, name: world.name });
     refresh();
-  }, [claimed, onRename, onPlayer, player, refresh]);
+  }, [claimed, onRename, onPlayer, player, refresh, wallet.address]);
 
-  const renameCitizenFor = useCallback((id: string, next: string) => {
+  const renameCitizenFor = useCallback(async (id: string, next: string) => {
     const world = worldRef.current;
     if (!world) return;
     // Naming rights won from a dig are spent before the player's balance is
@@ -762,12 +813,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       refresh();
       return;
     }
-    const paid = charge(player.ledger, RENAME_CITIZEN_EMERGE);
-    if (!paid) return;
+    const paid = await spend(player.ledger, RENAME_CITIZEN_EMERGE, wallet.address);
+    if (!paid.ok) return;
     if (!renameCitizen(world, id, next)) return;
-    onPlayer({ ...player, ledger: paid });
+    onPlayer({ ...player, ledger: paid.ledger });
     refresh();
-  }, [onPlayer, player, refresh]);
+  }, [onPlayer, player, refresh, wallet.address]);
 
   /**
    * Send out a prospecting party.
@@ -775,14 +826,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * The cost is charged and burned before the draw, so a refused charge cannot
    * pay out, and the prize is applied to the world the player is standing in.
    */
-  const dig = useCallback((): { prize: Prize; story: string } | string => {
+  const dig = useCallback(async (): Promise<{ prize: Prize; story: string } | string> => {
     const world = worldRef.current;
     if (!world) return 'The settlement is still waking up. Try again in a moment.';
-    const paid = charge(player.ledger, DIG_COST_EMERGE);
-    if (!paid) {
-      return `A party costs ${DIG_COST_EMERGE.toLocaleString()} $EMERGE and you hold `
-        + `${Math.floor(player.ledger.balance).toLocaleString()}.`;
-    }
+    const paid = await spend(player.ledger, DIG_COST_EMERGE, wallet.address);
+    if (!paid.ok) return paid.refused ?? 'The party could not be paid for.';
     const prize = drawPrize();
     const story = prizeStory(prize);
 
@@ -792,12 +840,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
 
     onPlayer({
       ...player,
-      ledger: paid,
+      ledger: paid.ledger,
       nameTokens: player.nameTokens + (prize.naming ?? 0),
     });
     refresh();
     return { prize, story };
-  }, [onPlayer, player, refresh]);
+  }, [onPlayer, player, refresh, wallet.address]);
 
   /** Move Gold in or out of the treasury and persist the vault ledger. */
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {

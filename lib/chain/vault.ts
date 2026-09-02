@@ -27,7 +27,7 @@
  * exists, `deposit` and `withdraw` are where the transfer and burn go.
  */
 
-import { ACTIVE_CHAIN, TOKEN, chainConfigured, type ChainConfig } from './emerge';
+import { ACTIVE_CHAIN, TOKEN, chainConfigured, tokenLive, type ChainConfig } from './emerge';
 
 /** $EMERGE per unit of in-world Gold. */
 export const EMERGE_PER_GOLD = 10_000;
@@ -43,13 +43,28 @@ export const PROSPECT_COST_EMERGE = 120_000;
 export const RENAME_PLAYER_EMERGE = 30_000;
 
 /**
- * What a new world starts with while claims are local.
+ * What a player starts with while there is no token to hold.
  *
- * This is a development allocation, not a token grant, and the interface labels
- * it as such. Once the vault settles on chain this goes away and the balance is
- * read from the wallet.
+ * A development allocation, not a token grant, and the interface says so
+ * wherever it appears. It exists **only** while `NEXT_PUBLIC_EMERGE_TOKEN` is
+ * unset: the moment a real contract is configured this is zero and the balance
+ * on screen is whatever the wallet actually holds, read from the chain.
+ *
+ * That switch is load-bearing rather than cosmetic. Two million free tokens
+ * handed to every visitor is harmless against a token that does not exist and
+ * ruinous against one that does — nobody would need to buy any, every burn
+ * would burn nothing, and every price in the game would be theatre.
  */
-export const LOCAL_TEST_ALLOCATION = 2_000_000;
+export const LOCAL_TEST_ALLOCATION = tokenLive() ? 0 : 2_000_000;
+
+/**
+ * True when balances, prices and burns refer to a real token.
+ *
+ * Everything downstream of this reads differently: the balance comes from the
+ * chain rather than this browser, a charge asks the player to sign, and the
+ * panels stop saying "recorded locally".
+ */
+export const liveToken = () => tokenLive();
 
 export interface VaultLedger {
   /** Local, unsettled $EMERGE balance for this world. */

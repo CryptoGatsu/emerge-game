@@ -33,7 +33,7 @@
  * at; a gift applied there would vanish with the visit.
  */
 
-import { MAX_GIFT_GOLD } from '../limits';
+import { MAX_GIFT_GOLD, serverKey } from '../limits';
 import { clear, getValue, hdel, hget, hgetall, hset, push, range, setValue, shared } from './kv';
 
 export { MAX_GIFT_GOLD };
@@ -58,7 +58,7 @@ export interface Claim {
   at: number;
 }
 
-const CLAIMS = 'emerge:claims';
+const CLAIMS = serverKey('claims');
 
 /** Every claim on record, newest first. */
 export async function allClaims(): Promise<Claim[]> {
@@ -136,7 +136,7 @@ export interface Find {
   at: number;
 }
 
-const FINDS = 'emerge:finds';
+const FINDS = serverKey('finds');
 const findKey = (chart: number, slot: number) => `${chart}:${slot}`;
 
 /** Every plot anybody has surveyed into existence. */
@@ -211,7 +211,7 @@ export interface Gift {
   at: number;
 }
 
-const giftKey = (seed: number) => `emerge:gifts:${seed}`;
+const giftKey = (seed: number) => serverKey(`gifts:${seed}`);
 
 
 
@@ -262,8 +262,8 @@ export async function collectGifts(seed: number): Promise<Gift[]> {
  */
 const WORLD_TTL_SECONDS = 36 * 3600;
 
-const WORLDS_INDEX = 'emerge:worlds';
-const worldKey = (seed: number) => `emerge:world:${seed}`;
+const WORLDS_INDEX = serverKey('worlds');
+const worldKey = (seed: number) => serverKey(`world:${seed}`);
 
 export interface PublishedWorld {
   seed: number;
@@ -309,7 +309,7 @@ export async function readWorld(seed: number): Promise<PublishedWorld | null> {
  */
 const PRESENCE_TTL_MS = 50_000;
 
-const presenceKey = (seed: number) => `emerge:seen:${seed}`;
+const presenceKey = (seed: number) => serverKey(`seen:${seed}`);
 
 /**
  * Say that somebody is looking at a world, and return who else is.

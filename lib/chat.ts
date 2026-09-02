@@ -15,7 +15,10 @@
  * survives a serverless deployment — which a long-lived connection does not.
  */
 
-const KEY = 'emerge.chat.v1';
+import { clientKey } from './limits';
+
+const KEY = clientKey('chat.v1');
+
 
 /** How many messages a channel keeps. Older ones fall off the top. */
 const HISTORY = 120;

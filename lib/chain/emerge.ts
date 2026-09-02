@@ -412,6 +412,128 @@ export async function plotOwner(seed: number, config: ChainConfig = ACTIVE_CHAIN
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * The token itself
+ * ------------------------------------------------------------------ */
+
+/**
+ * Where burned tokens go.
+ *
+ * A real ERC-20 has no `burn` a stranger may call, so the honest way to
+ * destroy a token you hold is to send it somewhere nobody holds the key to.
+ * `0x…dEaD` is the address the whole ecosystem reads as burnt, it is visible
+ * on any explorer, and it needs no contract of ours to exist — which is the
+ * point: every charge in this game becomes a real, checkable burn the moment a
+ * token address is configured, with nothing else to deploy.
+ */
+export const BURN_ADDRESS = '0x000000000000000000000000000000000000dEaD';
+
+/** One `eth_call` against the configured RPC, returning the raw hex word. */
+async function ethCall(to: string, data: string, config: ChainConfig): Promise<string | null> {
+  try {
+    const response = await fetch(config.rpcUrl!, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'eth_call',
+        params: [{ to, data }, 'latest'],
+      }),
+    });
+    const json = (await response.json()) as { result?: string; error?: { message?: string } };
+    if (json.error || typeof json.result !== 'string') return null;
+    return json.result;
+  } catch {
+    return null;
+  }
+}
+
+const hexWord = (value: string) => value.replace(/^0x/, '').padStart(64, '0');
+
+/**
+ * How many decimals the token uses.
+ *
+ * Read rather than assumed. Eighteen is the usual answer and the fallback, but
+ * a token with six would make every balance on screen wrong by a factor of a
+ * million, and that is not a thing to guess at.
+ */
+export async function tokenDecimals(config: ChainConfig = ACTIVE_CHAIN): Promise<number> {
+  if (!tokenLive(config)) return 18;
+  // decimals()
+  const result = await ethCall(config.tokenAddress!, '0x313ce567', config);
+  const parsed = result ? Number.parseInt(result, 16) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 36 ? parsed : 18;
+}
+
+/**
+ * What a wallet actually holds, in whole tokens.
+ *
+ * Returns null when there is no token deployed to ask, which is what tells the
+ * rest of the game to fall back to the development allocation and say so.
+ */
+export async function tokenBalance(
+  address: string,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<number | null> {
+  if (!tokenLive(config) || !/^0x[0-9a-fA-F]{40}$/.test(address)) return null;
+  // balanceOf(address)
+  const data = '0x70a08231' + hexWord(address.toLowerCase());
+  const result = await ethCall(config.tokenAddress!, data, config);
+  if (!result) return null;
+  try {
+    const raw = BigInt(result);
+    const scale = 10n ** BigInt(await tokenDecimals(config));
+    // Whole tokens plus four places, which is finer than anything the game
+    // charges and avoids losing a fractional balance to integer division.
+    const scaled = Number((raw * 10_000n) / scale) / 10_000;
+    return Number.isFinite(scaled) ? scaled : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface BurnResult {
+  ok: boolean;
+  txHash: string | null;
+  message: string;
+}
+
+/**
+ * Actually destroy tokens, by transferring them to the burn address.
+ *
+ * The player signs it, because it is their money: there is no custody here and
+ * no approval to grant. A rejected signature is not an error, it is a player
+ * changing their mind, and the caller must not charge them for it.
+ */
+export async function burnTokens(
+  from: string,
+  whole: number,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<BurnResult> {
+  if (!tokenLive(config)) {
+    return { ok: false, txHash: null, message: `The ${TOKEN.ticker} contract is not deployed yet.` };
+  }
+  if (!walletAvailable()) {
+    return { ok: false, txHash: null, message: 'No wallet to sign with.' };
+  }
+  try {
+    const decimals = await tokenDecimals(config);
+    // Through a string, not a float: 120,000 tokens at eighteen decimals is far
+    // past what a double can hold exactly, and a rounding error here is real
+    // money.
+    const units = BigInt(Math.round(whole)) * 10n ** BigInt(decimals);
+    // transfer(address,uint256)
+    const data = '0xa9059cbb' + hexWord(BURN_ADDRESS) + units.toString(16).padStart(64, '0');
+    const txHash = (await window.ethereum!.request({
+      method: 'eth_sendTransaction',
+      params: [{ from, to: config.tokenAddress, data }],
+    })) as string;
+    return { ok: true, txHash, message: `Burned ${whole.toLocaleString()} ${TOKEN.ticker}.` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The transaction was rejected.';
+    return { ok: false, txHash: null, message };
+  }
+}
+
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {
   const ready = tokenLive(config);
   return [

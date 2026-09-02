@@ -9,6 +9,7 @@
 
 import { createWorld } from '../simulation';
 import { biomeFor, type BiomeKind } from './biomes';
+import { clientKey } from '../limits';
 import { HOME_CHART_INDEX, chartCapacity, islandOf, islandsFor, type Island } from './charts';
 import { normaliseLedger, type VaultLedger } from '../chain/vault';
 import { GRID, TILE_H, TILE_W, tileToScreen } from './iso';
@@ -396,7 +397,7 @@ export function newPlayerName() {
   return `${word}${Math.floor(Math.random() * 900) + 100}`;
 }
 
-const WORLD_KEY = 'emerge.world.v1';
+const WORLD_KEY = clientKey('world.v1');
 /**
  * Where a player's holdings are kept.
  *
@@ -407,9 +408,9 @@ const WORLD_KEY = 'emerge.world.v1';
  * were made with. The wallet-less key still exists so somebody can look around
  * before connecting; nothing bought with it, because claiming needs a wallet.
  */
-const PLAYER_KEY = 'emerge.player.v1';
+const PLAYER_KEY = clientKey('player.v1');
 const playerKeyFor = (address: string | null) =>
-  address ? `emerge.player.${address.toLowerCase()}.v1` : PLAYER_KEY;
+  address ? clientKey(`player.${address.toLowerCase()}.v1`) : PLAYER_KEY;
 
 function readJson<T>(key: string): T | null {
   if (typeof window === 'undefined') return null;

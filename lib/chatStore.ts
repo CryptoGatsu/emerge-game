@@ -7,6 +7,7 @@
  * the chat route needs.
  */
 
+import { serverKey } from './limits';
 import { push, range, shared } from './server/kv';
 
 export interface RelayMessage {
@@ -25,7 +26,7 @@ const HISTORY = 200;
 /** True when messages typed by one player can actually reach another. */
 export const relayShared = shared;
 
-const keyFor = (channel: string) => `emerge:chat:${channel}`;
+const keyFor = (channel: string) => serverKey(`chat:${channel}`);
 
 /** Append a message and trim the channel back to its limit. */
 export async function append(message: RelayMessage): Promise<void> {

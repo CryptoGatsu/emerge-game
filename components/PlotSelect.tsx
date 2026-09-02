@@ -31,7 +31,8 @@ import {
   ACTIVE_CHAIN, TOKEN, claimPlot, plotOwner, registryLive, shortAddress, tokenLive,
   type PlotOwnership,
 } from '@/lib/chain/emerge';
-import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, charge } from '@/lib/chain/vault';
+import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
+import { spend } from '@/lib/chain/spend';
 import { fetchClaims, surveyPlot, takePlot, type Claim, type Find } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 
@@ -263,15 +264,16 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
       return;
     }
 
-    // Surveying burns its fee. Nothing the game charges is collected.
-    const paid = charge(player.ledger, PROSPECT_COST_EMERGE);
-    if (!paid) return;
+    // Surveying burns its fee. Nothing the game charges is collected — and
+    // with a token deployed the burn is a real transfer the player signs.
+    const paid = await spend(player.ledger, PROSPECT_COST_EMERGE, wallet.address);
+    if (!paid.ok) { setNotice(paid.refused); return; }
     const { find } = result;
     const found = inspectPlot(find.seed, find.slot, find.chart);
     setFinds((held) => [...held.filter((f) => f.seed !== find.seed), find]);
     onPlayer({
       ...player,
-      ledger: paid,
+      ledger: paid.ledger,
       prospected: [...player.prospected, { seed: find.seed, chart: find.chart, slot: find.slot }],
     });
     setSelectedSeed(find.seed);
@@ -349,9 +351,12 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
 
     // Claiming costs what the plot is priced at, and the price is burned — it
     // used to cost nothing at all, the price being shown and never charged.
-    const paid = charge(player.ledger, selected.price);
-    if (!paid) { setNotice(`Not enough ${TOKEN.ticker} to claim ${selected.region}.`); return; }
-    onPlayer({ ...player, ledger: paid });
+    const paid = await spend(player.ledger, selected.price, wallet.address);
+    if (!paid.ok) {
+      setNotice(paid.refused ?? `Not enough ${TOKEN.ticker} to claim ${selected.region}.`);
+      return;
+    }
+    onPlayer({ ...player, ledger: paid.ledger });
     onEnter({
       seed: selected.seed,
       name: worldName,
@@ -594,11 +599,18 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
               </>
             )}
 
-            {!configured && (
+            {configured ? (
+              <p className="muted small">
+                Prices are real. Your balance is read from your wallet on {ACTIVE_CHAIN.label}, and
+                claiming asks you to sign a transfer that destroys the {TOKEN.ticker} it costs.
+                Ownership is recorded in the shared registry until the land contract is deployed,
+                so a claim is enforced for every player but is not yet an on-chain title.
+              </p>
+            ) : (
               <p className="muted small">
                 This build talks to {ACTIVE_CHAIN.label} (chain {ACTIVE_CHAIN.chainId}), but the
-                {' '}{TOKEN.ticker} contract is not deployed there yet, so claims are recorded in this browser
-                rather than on chain and you start with a local development allocation of
+                {' '}{TOKEN.ticker} contract is not deployed there yet, so claims are recorded in the shared
+                registry rather than on chain and you start with a local development allocation of
                 {' '}{LOCAL_TEST_ALLOCATION.toLocaleString()} {TOKEN.ticker}. Neither is a token transfer.
               </p>
             )}

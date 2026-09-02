@@ -15,7 +15,7 @@ import { ACTIVE_CHAIN, TOKEN, shortAddress, tokenActions, tokenLive } from '@/li
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
-  charge, claimEarnings, deposit, quoteWithdraw, withdraw, type VaultLedger,
+  claimEarnings, deposit, liveToken, quoteWithdraw, withdraw, type VaultLedger,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import {
@@ -25,6 +25,7 @@ import {
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | null;
@@ -51,7 +52,7 @@ interface PanelsProps {
    * Spend on one dig. Returns what the party found, or a sentence explaining
    * why they did not go.
    */
-  onDig: () => { prize: Prize; story: string } | string;
+  onDig: () => Promise<{ prize: Prize; story: string } | string>;
   /** Travel to somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
   /** True when this is somebody else's world, being looked at. */
@@ -533,6 +534,12 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         <section>
           <h4>The chain</h4>
           <p>
+            <b>A wallet is not optional.</b> Your plots, your balance, your name and everything you
+            earn belong to an address rather than to this browser, so the map does not open until
+            one is connected. Connect the same wallet on another device and your holdings are
+            there.
+          </p>
+          <p>
             Emerge is hybrid by design. The living world runs off-chain so it is always responsive;
             {' '}{ACTIVE_CHAIN.label} carries ownership and value. This build reaches the network and your
             wallet can switch to it. What does not exist yet is the {TOKEN.ticker} contract and the
@@ -667,13 +674,18 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
       setNaming(false);
       return;
     }
-    const paid = charge(player.ledger, RENAME_PLAYER_EMERGE);
-    if (!paid) {
-      setNotice(`Changing your name again costs ${RENAME_PLAYER_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
-      return;
-    }
-    onPlayer({ ...player, name: trimmed, nameChanges: player.nameChanges + 1, ledger: paid });
-    setNaming(false);
+    void (async () => {
+      const paid = await spend(player.ledger, RENAME_PLAYER_EMERGE, wallet.address);
+      if (!paid.ok) {
+        setNotice(paid.refused
+          ?? `Changing your name again costs ${RENAME_PLAYER_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
+        return;
+      }
+      onPlayer({
+        ...player, name: trimmed, nameChanges: player.nameChanges + 1, ledger: paid.ledger,
+      });
+      setNaming(false);
+    })();
   };
 
   const who = wallet.address ? shortAddress(wallet.address) : player.name;
@@ -798,15 +810,20 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
  */
 function GachaPanel({ player, onClose, onDig }: {
   player: PlayerRecord; onClose: () => void;
-  onDig: () => { prize: Prize; story: string } | string;
+  onDig: () => Promise<{ prize: Prize; story: string } | string>;
 }) {
   const [last, setLast] = useState<{ prize: Prize; story: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const table = odds();
   const affordable = player.ledger.balance >= DIG_COST_EMERGE;
 
-  const pull = () => {
-    const result = onDig();
+  const [digging, setDigging] = useState(false);
+  const pull = async () => {
+    // With a token deployed this asks the player to sign, so the button has to
+    // say something while the wallet is open rather than looking dead.
+    setDigging(true);
+    const result = await onDig();
+    setDigging(false);
     if (typeof result === 'string') { setNotice(result); return; }
     setNotice(null);
     setLast(result);
@@ -820,8 +837,8 @@ function GachaPanel({ player, onClose, onDig }: {
       wide
     >
       <div className="dig">
-        <button className="dig-button" onClick={pull} disabled={!affordable}>
-          <span>{affordable ? 'SEND THEM OUT' : `NOT ENOUGH ${TOKEN.ticker}`}</span>
+        <button className="dig-button" onClick={pull} disabled={digging || !affordable}>
+          <span>{digging ? 'SENDING…' : affordable ? 'SEND THEM OUT' : `NOT ENOUGH ${TOKEN.ticker}`}</span>
           <b>{DIG_COST_EMERGE.toLocaleString()} {TOKEN.ticker}</b>
           <i>burned, not collected</i>
         </button>
@@ -1082,6 +1099,16 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
           {' '}{TOKEN.ticker} — this one is yours to build in, and everything you do here still
           counts towards the settlement, just not towards your balance. Give up one of the four and
           the next in line starts earning.
+        </p>
+      )}
+
+      {liveToken() && (
+        <p className="warn">
+          Earnings are still unsettled. The {TOKEN.ticker} contract is deployed, so what you
+          <em>spend</em> is burned on chain and your balance is read from your wallet — but paying
+          stewardship out needs a vault contract holding tokens, and there is not one yet. What you
+          collect here is recorded against this world and will be settled when that contract exists.
+          It is not in your wallet today, and nothing on this panel pretends otherwise.
         </p>
       )}
 

@@ -457,6 +457,68 @@ reports an authorisation already given and never prompts. Everything a player
 owns is keyed by that address, so a connection that lasted only as long as the
 tab meant their holdings appeared to vanish on every refresh.
 
+## Going to mainnet
+
+The build targets Robinhood Chain **mainnet** (chain 4663) by default; set
+`NEXT_PUBLIC_CHAIN_TARGET=testnet` to point at the test network instead.
+
+**One variable turns the economy real.** Setting `NEXT_PUBLIC_EMERGE_TOKEN` to
+the deployed token address changes four things at once, with no other edit:
+
+1. The development allocation becomes **zero**. Every visitor currently starts
+   with two million $EMERGE held in `localStorage`. Harmless against a token
+   that does not exist and ruinous against one that does — nobody would need to
+   buy any, every burn would burn nothing, and every price in the game would be
+   theatre. `LOCAL_TEST_ALLOCATION` is defined as `tokenLive() ? 0 : 2_000_000`
+   for exactly this reason.
+2. Balances are read from the chain. `balanceOf` against the configured address,
+   with `decimals` read rather than assumed, polled every thirty seconds and
+   re-read after every spend.
+3. **Every charge becomes a real burn.** A claim, a survey, a rename, a dig or a
+   gift asks the player to sign a `transfer` to `0x…dEaD` — a genuine,
+   explorer-visible destruction of supply that needs no contract of ours. All
+   seven charge sites go through one `spend()` in `lib/chain/spend.ts`, so the
+   two worlds cannot drift apart.
+4. The panels change what they say. "Recorded in this browser" becomes "your
+   balance, read from your wallet", and the world map says claiming will ask for
+   a signature.
+
+**What the token alone does not fix**, and what the panels keep saying plainly:
+
+- **Ownership** is still the relay's word. One owner per plot is enforced for
+  every player, but it is not an on-chain title until a registry contract
+  exists. `plotOwner()` already reads `ownerOf(uint256)` against
+  `NEXT_PUBLIC_EMERGE_REGISTRY`, keyed on the plot seed as the token id, so
+  deploying one is configuration rather than code.
+- **Stewardship earnings** cannot be paid out. Spending is a burn, which needs
+  nobody's permission; paying somebody requires a contract holding tokens. Until
+  a vault exists, earnings accrue against the world and the Bank says outright
+  that they are unsettled and not in the player's wallet.
+
+**Clearing the world.** `DATA_EPOCH` in `lib/limits.ts` namespaces every key
+that holds game state, on the server and in the browser. Raising it by one
+abandons the previous generation wholesale — claims, surveyed islands, published
+worlds, saved settlements, chat — and the game starts from empty land. It is a
+code change rather than an endpoint because an endpoint that wipes the game can
+be called by accident or by somebody else, and because the old generation is
+still there if a reset was a mistake. Preferences deliberately do not carry the
+epoch: clearing the world should not disconnect somebody's wallet or forget that
+they turned chat alerts off.
+
+## The front door
+
+`components/Landing.tsx` is what a new visitor sees: what the game is, in the
+order somebody deciding whether to play needs it, and one thing to do at the end
+of it. **A wallet is required to go any further.** Nothing past this point works
+without one — a plot belongs to an address, and so do the balance, the name and
+everything earned — so the page asks at the end rather than letting somebody
+choose land and then telling them.
+
+It is deliberately not a wall: everything on it reads without connecting,
+because a person who has never heard of this should be able to find out what it
+is before being asked for anything. Somebody who already owns a world skips it
+entirely; coming back to a settlement should not put a pitch in the way.
+
 ## Sound
 
 There are no audio files. Wind is filtered noise whose cutoff drifts, rain is the same
@@ -713,10 +775,8 @@ becomes a button that travels to the world they built.
   twenty-four, against none at nine.
 - The highland shelf exists in the elevation field and drives the terrace plan, but its
   cliffs read weakly on screen; the relief deserves more than one elevation step.
-- No contracts are deployed. The build targets Robinhood Chain **mainnet** (chain 4663);
-  set `NEXT_PUBLIC_CHAIN_TARGET=testnet` to point at the test network instead. Ownership is
-  enforced by the relay rather than by a registry contract, and balances are local to the
-  wallet's record in this browser. Every panel says so.
+- The land registry and the vault are still relay-side rather than contracts. See
+  **Going to mainnet** for exactly what the token address does and does not switch on.
 - A settlement lives in `localStorage`, so clearing site data loses it. The snapshot
   other players visit is a copy sent out while you play, not a backup — it is never read
   back into the owner's own game.

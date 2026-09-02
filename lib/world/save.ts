@@ -21,6 +21,7 @@
  */
 
 import { createWorld, type World } from '../simulation';
+import { clientKey } from '../limits';
 
 /**
  * Bump when the shape of a saved world changes incompatibly. An older save is
@@ -28,7 +29,7 @@ import { createWorld, type World } from '../simulation';
  */
 const SAVE_VERSION = 1;
 
-const keyFor = (seed: number) => `emerge.save.${seed}.v${SAVE_VERSION}`;
+const keyFor = (seed: number) => clientKey(`save.${seed}.v${SAVE_VERSION}`);
 
 export interface SavedWorld {
   version: number;
