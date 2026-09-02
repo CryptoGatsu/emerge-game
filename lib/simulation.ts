@@ -182,7 +182,69 @@ export interface World {
    * throughput rather than a guess from stock levels.
    */
   flow: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>> };
+  /**
+   * Where the settlement's Gold came from and went, today and on the last full
+   * day. Every movement in or out of the treasury is booked against a heading,
+   * so the player can read a day's trading rather than watch one number drift.
+   */
+  ledger: DayLedger;
+  ledgerYesterday: DayLedger;
   counter: number;
+}
+
+/** The headings a day's Gold is booked under. */
+export type LedgerLine =
+  | 'wages' | 'upkeep' | 'imports' | 'building' | 'works'
+  | 'exports' | 'households' | 'food' | 'vault';
+
+export const LEDGER_LABELS: Record<LedgerLine, string> = {
+  wages: 'Wages',
+  upkeep: 'Upkeep',
+  imports: 'Imports',
+  building: 'Building',
+  works: 'Public works',
+  exports: 'Exports',
+  households: 'Household spending',
+  food: 'Food sales',
+  vault: 'Vault',
+};
+
+export interface DayLedger {
+  in: Partial<Record<LedgerLine, number>>;
+  out: Partial<Record<LedgerLine, number>>;
+}
+
+const emptyLedger = (): DayLedger => ({ in: {}, out: {} });
+
+/**
+ * Gold into the treasury, booked under a heading.
+ *
+ * Every treasury movement goes through `earn` or `spend`, and a day's headings
+ * add up to exactly the day's change in the treasury — which is checkable, and
+ * is checked: an unbooked movement would show as a discrepancy rather than
+ * quietly making the ledger a decoration.
+ */
+function earn(world: World, line: LedgerLine, amount: number) {
+  if (!(amount > 0)) return 0;
+  world.treasury += amount;
+  world.ledger.in[line] = (world.ledger.in[line] ?? 0) + amount;
+  return amount;
+}
+
+/** Gold out, booked under a heading. Never spends past empty; returns what moved. */
+function spend(world: World, line: LedgerLine, amount: number) {
+  if (!(amount > 0)) return 0;
+  const paid = Math.min(amount, world.treasury);
+  world.treasury -= paid;
+  world.ledger.out[line] = (world.ledger.out[line] ?? 0) + paid;
+  return paid;
+}
+
+/** What a day's headings add up to, in and out. */
+export function ledgerTotals(ledger: DayLedger) {
+  const sum = (side: Partial<Record<LedgerLine, number>>) =>
+    Object.values(side).reduce((t: number, v) => t + (v ?? 0), 0);
+  return { earned: sum(ledger.in), spent: sum(ledger.out) };
 }
 
 export const RESOURCE_LABELS: Record<Resource, string> = { wheat: 'Wheat', vegetables: 'Vegetables', wood: 'Wood', stone: 'Stone', ironOre: 'Iron Ore', wool: 'Wool', flour: 'Flour', bread: 'Bread', furniture: 'Furniture', tools: 'Tools', clothing: 'Clothing' };
@@ -1410,7 +1472,8 @@ export function createWorld(seed = 481516, name?: string): World {
     resources: { wheat: 60, vegetables: 30, wood: 50, stone: 20, ironOre: 10, wool: 8, flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10 },
     market: createMarket(),
     feed: [], gatherings: [], bonds: {}, projects: [], unlockedAreas: ['Settlement'],
-    marketClock: 0, flow: { produced: {}, consumed: {} }, counter: 0,
+    marketClock: 0, flow: { produced: {}, consumed: {} },
+    ledger: emptyLedger(), ledgerYesterday: emptyLedger(), counter: 0,
   };
   pushFeed(world, 'world', `${world.name} has emerged.`);
   pushFeed(world, 'world', 'Families are settling into their homes.');
@@ -1448,7 +1511,7 @@ function householdTrade(world: World) {
     if (c.clothing < 60 && world.resources.clothing >= 1) {
       const price = world.market.clothing.price;
       if (c.wallet >= price) {
-        c.wallet -= price; world.treasury += price; world.resources.clothing -= 1;
+        c.wallet -= price; earn(world, 'households', price); world.resources.clothing -= 1;
         note(world, 'consumed', 'clothing', 1);
         c.clothing = Math.min(100, c.clothing + 34);
       }
@@ -1458,7 +1521,7 @@ function householdTrade(world: World) {
     if (c.wallet > 130 && world.resources.furniture >= 1 && c.hash % 6 === Math.floor(world.hour) % 6) {
       const price = world.market.furniture.price;
       if (c.wallet >= price) {
-        c.wallet -= price; world.treasury += price; world.resources.furniture -= 1;
+        c.wallet -= price; earn(world, 'households', price); world.resources.furniture -= 1;
         note(world, 'consumed', 'furniture', 1);
         c.purpose = Math.min(100, c.purpose + 2.5);
       }
@@ -1467,7 +1530,7 @@ function householdTrade(world: World) {
     if (c.wallet > 200 && world.resources.tools >= 1 && c.job !== 'unemployed' && c.hash % 11 === Math.floor(world.hour) % 11) {
       const price = world.market.tools.price;
       if (c.wallet >= price) {
-        c.wallet -= price; world.treasury += price; world.resources.tools -= 1;
+        c.wallet -= price; earn(world, 'households', price); world.resources.tools -= 1;
         note(world, 'consumed', 'tools', 1);
         c.purpose = Math.min(100, c.purpose + 4);
       }
@@ -1514,13 +1577,13 @@ function marketStep(world: World, hours: number) {
     if (stock < buffer * (importer ? 0.65 : 0.3)) {
       const qty = Math.min(Math.max(1, Math.round((buffer - stock) * .2 * hours)), Math.max(0, buffer - stock)), cost = qty * q.price;
       if (qty > 0 && world.treasury >= cost) {
-        world.resources[r] += qty; world.treasury -= cost; q.volume += qty;
+        world.resources[r] += qty; spend(world, 'imports', cost); q.volume += qty;
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market bought ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${cost.toFixed(0)} Gold.`); }
       }
     } else if (stock > buffer * 1.2) {
       const qty = Math.min(Math.max(1, Math.round((stock - buffer) * .25 * hours)), Math.floor(stock - buffer));
       if (qty > 0) {
-        const revenue = qty * q.price; world.resources[r] -= qty; world.treasury += revenue; q.volume += qty;
+        const revenue = qty * q.price; world.resources[r] -= qty; earn(world, 'exports', revenue); q.volume += qty;
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market sold ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${revenue.toFixed(0)} Gold.`); }
       }
     }
@@ -1728,7 +1791,7 @@ function consume(world: World) {
     if (c.age >= 16) {
       const paid = Math.min(c.wallet, bill);
       c.wallet -= paid;
-      world.treasury += paid;
+      earn(world, 'food', paid);
     }
   }
 
@@ -1831,7 +1894,7 @@ function bridgeBuilding(world: World) {
     }
     world.resources.wood -= timber;
     note(world, 'consumed', 'wood', timber);
-    world.treasury -= 40;
+    spend(world, 'works', 40);
     works.progress += 1;
     if (works.progress < works.length) {
       if (works.progress === 1 || works.progress === Math.floor(works.length / 2)) {
@@ -2005,6 +2068,54 @@ const TRADE_BUILD_COST: Record<string, number> = {
 };
 
 /**
+ * What a building is made of, on top of what it costs.
+ *
+ * Gold alone made the woodcutter's whole output an abstraction: a settlement
+ * with a full timber yard and one with an empty one built at exactly the same
+ * rate, and the only thing wood was ever really *for* was the bakery's ovens
+ * and the hearths in winter. Now a house is timber and a forge is stone, so
+ * the yard is a thing the town watches, and a settlement that has felled its
+ * last tree has to wait for it to grow back before it raises another roof.
+ *
+ * The quantities are deliberately modest against a woodcutter's twelve and a
+ * half loads a day: this is meant to be a real constraint in a bad season, not
+ * a wall that stops a healthy town growing.
+ */
+export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = {
+  House: { wood: 14, stone: 4 },
+  Farm: { wood: 12, stone: 2 },
+  Woodcutter: { wood: 8, stone: 2 },
+  Storage: { wood: 12, stone: 3 },
+  Quarry: { wood: 10, stone: 0 },
+  Mine: { wood: 16, stone: 6 },
+  Mill: { wood: 18, stone: 10 },
+  Bakery: { wood: 12, stone: 16 },
+  Carpenter: { wood: 20, stone: 4 },
+  Blacksmith: { wood: 12, stone: 20 },
+  Tailor: { wood: 14, stone: 6 },
+  Tavern: { wood: 24, stone: 10 },
+};
+
+/** What this kind of building takes to raise. Anything unlisted is a modest shed. */
+export function buildMaterials(type: string) {
+  return BUILD_MATERIALS[type] ?? { wood: 10, stone: 4 };
+}
+
+/** Whether the stores can cover a building of this kind. */
+export function materialsInStore(world: World, type: string) {
+  const need = buildMaterials(type);
+  return world.resources.wood >= need.wood && world.resources.stone >= need.stone;
+}
+
+function drawMaterials(world: World, type: string) {
+  const need = buildMaterials(type);
+  world.resources.wood -= need.wood;
+  world.resources.stone -= need.stone;
+  note(world, 'consumed', 'wood', need.wood);
+  note(world, 'consumed', 'stone', need.stone);
+}
+
+/**
  * The settlement builds for itself.
  *
  * Housing is the ceiling on population — a household needs somewhere to live —
@@ -2047,11 +2158,22 @@ function settlementBuilds(world: World) {
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
   const upkeep = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + maintenanceCost(b.type), 0);
   if (world.treasury < cost * 3 || world.treasury < (payroll + upkeep) * 14) return;
+  // Gold is not enough: the timber and stone have to be in the yard. A town
+  // that has run its forest down waits for it to grow rather than conjuring a
+  // house out of its treasury.
+  if (!materialsInStore(world, want)) {
+    if (world.hour < 1) {
+      const need = buildMaterials(want);
+      pushFeed(world, 'build', `A ${want.toLowerCase()} is wanted, but the yard is short of timber and stone — ${need.wood} wood and ${need.stone} stone are needed.`);
+    }
+    return;
+  }
 
   const site = freeSite(world, want === 'House');
   if (!site) return;
 
-  world.treasury -= cost;
+  spend(world, 'building', cost);
+  drawMaterials(world, want);
   world.buildings.push({ id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true });
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   pushFeed(world, 'build', want === 'House'
@@ -2259,6 +2381,10 @@ function heatTheHomes(world: World) {
 
 function daily(world: World) {
   world.flow = { produced: {}, consumed: {} };
+  // Yesterday's books close before today's wages are drawn, so the figures the
+  // player reads are a whole day rather than a day and a morning.
+  world.ledgerYesterday = world.ledger;
+  world.ledger = emptyLedger();
   const workers = world.citizens.filter((c) => c.age >= 16);
   const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + maintenanceCost(b.type), 0);
 
@@ -2302,7 +2428,8 @@ function daily(world: World) {
     // Unpaid work erodes a sense of purpose; paid work slowly builds it.
     c.purpose = clamp(c.purpose + (ratio > 0.5 ? 0.5 : -1.5), 0, 100);
   }
-  world.treasury = Math.max(0, world.treasury - payroll * ratio - upkeep);
+  spend(world, 'wages', payroll * ratio);
+  spend(world, 'upkeep', upkeep);
 
   for (const r of Object.keys(marketPrices) as Resource[]) {
     const q = world.market[r];
@@ -2401,14 +2528,20 @@ export function tick(world: World, hours = 1): World {
 /** Player-driven construction. Returns the new building, or null if unaffordable. */
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {
   if (world.treasury < cost) return null;
+  // A building is Gold and materials both. The panel already greys out what the
+  // yard cannot cover, so reaching here without them means the stores moved
+  // between the click and the placement.
+  if (!materialsInStore(world, type)) return null;
   // Refuse the river rather than quietly moving the building somewhere else:
   // a player who clicked on water should be told no, not have their choice
   // silently overridden.
   if (waterOf(world).blocks(x, y)) return null;
+  const need = buildMaterials(type);
   const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, 6, 94), y: clamp(y, 8, 92), workers: [], active: true };
-  world.treasury -= cost;
+  spend(world, 'building', cost);
+  drawMaterials(world, type);
   world.buildings.push(building);
-  pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold.`);
+  pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
   checkUnlocks(world);
   return building;
 }
@@ -2416,14 +2549,14 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
 /** Add Gold to the treasury from outside the settlement's own economy. */
 export function fundTreasury(world: World, gold: number, note: string) {
   if (!(gold > 0)) return;
-  world.treasury += gold;
+  earn(world, 'vault', gold);
   pushFeed(world, 'market', note);
 }
 
 /** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
 export function drawFromTreasury(world: World, gold: number, note: string) {
   if (!(gold > 0) || world.treasury < gold) return false;
-  world.treasury -= gold;
+  spend(world, 'vault', gold);
   pushFeed(world, 'market', note);
   return true;
 }

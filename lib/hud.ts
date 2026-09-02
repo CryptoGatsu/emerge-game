@@ -8,9 +8,9 @@
  */
 
 import {
-  ACTIVITY_LABELS, JOB_LABELS, PHASE_LABELS, RESOURCE_LABELS,
-  activeGathering, describeTemperature, friendsOf,
-  type FeedEntry, type Gathering, type MarketQuote, type Resource, type World,
+  ACTIVITY_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS, RESOURCE_LABELS,
+  activeGathering, describeTemperature, friendsOf, ledgerTotals,
+  type FeedEntry, type Gathering, type LedgerLine, type MarketQuote, type Resource, type World,
 } from './simulation';
 import { statusLine } from './speech';
 
@@ -64,6 +64,17 @@ export interface Snapshot {
   householdWealth: number;
   dailyWages: number;
   upkeep: number;
+  /**
+   * Yesterday's books: what the settlement earned and what it spent, by
+   * heading. Today's totals move under the player's eye, so the panel shows
+   * both — the running day, and the last one that finished.
+   */
+  earnedToday: number;
+  spentToday: number;
+  earnedYesterday: number;
+  spentYesterday: number;
+  incomeLines: { key: LedgerLine; label: string; amount: number }[];
+  outgoingLines: { key: LedgerLine; label: string; amount: number }[];
   feed: FeedEntry[];
   events: EventCard[];
   resources: { key: Resource; label: string; amount: number }[];
@@ -146,10 +157,20 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
 }
 
 /** Build the snapshot the interface renders from. */
+/** One side of a day's books, biggest heading first and the empty ones dropped. */
+function ledgerLines(side: Partial<Record<LedgerLine, number>>) {
+  return (Object.keys(side) as LedgerLine[])
+    .filter((key) => (side[key] ?? 0) >= 0.5)
+    .map((key) => ({ key, label: LEDGER_LABELS[key], amount: side[key] ?? 0 }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 export function snapshot(world: World, target: { kind: 'citizen' | 'building'; id: string } | null): Snapshot {
   const people = world.citizens;
   const count = Math.max(1, people.length);
   const avg = (pick: (c: (typeof people)[number]) => number) => people.reduce((s, c) => s + pick(c), 0) / count;
+  const today = ledgerTotals(world.ledger);
+  const closed = ledgerTotals(world.ledgerYesterday);
 
   return {
     name: world.name,
@@ -176,6 +197,12 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     householdWealth: world.families.reduce((s, f) => s + f.wealth, 0),
     dailyWages: people.reduce((s, c) => s + c.wage, 0),
     upkeep: world.buildings.filter((b) => b.active).length,
+    earnedToday: today.earned,
+    spentToday: today.spent,
+    earnedYesterday: closed.earned,
+    spentYesterday: closed.spent,
+    incomeLines: ledgerLines(world.ledgerYesterday.in),
+    outgoingLines: ledgerLines(world.ledgerYesterday.out),
     feed: world.feed.slice(0, 14),
     events: eventCards(world),
     resources: (Object.keys(RESOURCE_LABELS) as Resource[]).map((key) => ({ key, label: RESOURCE_LABELS[key], amount: world.resources[key] })),

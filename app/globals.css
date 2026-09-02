@@ -830,6 +830,54 @@ button {
 .bank-grid span { display: block; font-size: 9px; letter-spacing: 1.8px; color: var(--muted); }
 .bank-grid b { font-size: 18px; color: var(--cream); }
 
+/* The day's books: what came in on the left, what went out on the right. */
+.books { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.books-col {
+  padding: 13px 14px;
+  border-radius: 11px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(255, 255, 255, 0.03);
+}
+.books-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-bottom: 8px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--panel-edge-soft);
+}
+.books-head span { font-size: 9px; letter-spacing: 1.8px; color: var(--muted); }
+.books-head b { font-size: 17px; }
+.books-col.earning .books-head b { color: var(--emerald); }
+.books-col.spending .books-head b { color: var(--gold); }
+.books-line { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 3px 0; }
+.books-line span { color: var(--muted); }
+.books-line b { color: var(--cream); font-weight: 500; }
+.books-line.empty span { font-style: italic; }
+.books-line.today {
+  margin-top: 7px; padding-top: 7px;
+  border-top: 1px dashed var(--panel-edge-soft);
+}
+.books-line.today span { color: var(--text); }
+.books-col.earning .books-line.today b { color: var(--emerald); }
+.books-col.spending .books-line.today b { color: var(--gold); }
+@media (max-width: 620px) { .books { grid-template-columns: 1fr; } }
+
+/* What the yard holds, above the buildings it can pay for. */
+.build-stores {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(255, 255, 255, 0.03);
+}
+.build-stores span { font-size: 9px; letter-spacing: 1.8px; color: var(--muted); }
+.build-stores b { font-size: 13px; color: var(--cream); font-weight: 500; }
+.build-materials { display: flex; gap: 8px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); }
+.build-materials span {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.build-materials span.short { color: var(--gold); background: rgba(232, 193, 105, 0.12); }
+
 .resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 7px; }
 .resource-cell {
   display: flex; justify-content: space-between; align-items: baseline;

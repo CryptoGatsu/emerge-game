@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
-import { maintenanceCost } from '@/lib/simulation';
+import { buildMaterials, maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import { ACTIVE_CHAIN, TOKEN, tokenActions, tokenLive } from '@/lib/chain/emerge';
 import {
@@ -152,6 +152,8 @@ function BankPanel({ view, player, onClose, onVault }: {
     if (result.ok) onVault(result.ledger, depositGold, `${depositGold} Gold arrived from the ${TOKEN.ticker} vault.`);
   };
 
+  const netYesterday = view.earnedYesterday - view.spentYesterday;
+
   const doWithdraw = () => {
     const result = withdraw(ledger, Math.floor(Number(withdrawAmount) || 0), view.treasury);
     setMessage(result.message);
@@ -166,6 +168,39 @@ function BankPanel({ view, player, onClose, onVault }: {
         <div><span>WAGES PER DAY</span><b>{Math.floor(view.dailyWages).toLocaleString()}</b></div>
         <div><span>FAMILIES</span><b>{view.familyCount}</b></div>
         <div><span>BUILDINGS ON UPKEEP</span><b>{view.upkeep}</b></div>
+      </div>
+
+      <h4>The day's books</h4>
+      <p className="muted small">
+        Every Gold in or out of the treasury is booked under a heading, and the headings add up to
+        the change in the balance above. Yesterday closed {netYesterday >= 0 ? 'up' : 'down'}
+        {' '}{Math.abs(Math.round(netYesterday)).toLocaleString()} Gold.
+      </p>
+      <div className="books">
+        <div className="books-col earning">
+          <div className="books-head">
+            <span>EARNED</span>
+            <b>+{Math.round(view.earnedYesterday).toLocaleString()}</b>
+          </div>
+          {view.incomeLines.length ? view.incomeLines.map((line) => (
+            <div key={line.key} className="books-line">
+              <span>{line.label}</span><b>{Math.round(line.amount).toLocaleString()}</b>
+            </div>
+          )) : <div className="books-line empty"><span>Nothing came in</span></div>}
+          <div className="books-line today"><span>So far today</span><b>+{Math.round(view.earnedToday).toLocaleString()}</b></div>
+        </div>
+        <div className="books-col spending">
+          <div className="books-head">
+            <span>SPENT</span>
+            <b>−{Math.round(view.spentYesterday).toLocaleString()}</b>
+          </div>
+          {view.outgoingLines.length ? view.outgoingLines.map((line) => (
+            <div key={line.key} className="books-line">
+              <span>{line.label}</span><b>{Math.round(line.amount).toLocaleString()}</b>
+            </div>
+          )) : <div className="books-line empty"><span>Nothing went out</span></div>}
+          <div className="books-line today"><span>So far today</span><b>−{Math.round(view.spentToday).toLocaleString()}</b></div>
+        </div>
       </div>
 
       <h4>{TOKEN.ticker} vault</h4>
@@ -223,13 +258,29 @@ function BankPanel({ view, player, onClose, onVault }: {
 }
 
 function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void }) {
+  const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
+  const wood = stock('wood');
+  const stone = stock('stone');
   return (
-    <Shell title="Build" subtitle="Invest Gold into the settlement. New places become part of the citizens' routines." onClose={onClose} wide>
+    <Shell
+      title="Build"
+      subtitle="Gold and materials both. A building takes timber and stone out of the yard, so what the settlement can raise depends on what it has cut and quarried."
+      onClose={onClose}
+      wide
+    >
+      <div className="build-stores">
+        <span>IN THE YARD</span>
+        <b>{Math.floor(wood)} wood</b>
+        <b>{Math.floor(stone)} stone</b>
+      </div>
       <div className="build-grid">
         {BUILDABLE.map((option) => {
-          const affordable = view.treasury >= option.cost;
+          const need = buildMaterials(option.type);
+          const paid = view.treasury >= option.cost;
+          const stocked = wood >= need.wood && stone >= need.stone;
+          const ready = paid && stocked;
           return (
-            <div key={option.type} className={`build-card ${affordable ? '' : 'locked'}`}>
+            <div key={option.type} className={`build-card ${ready ? '' : 'locked'}`}>
               <div className="build-icon">{option.icon}</div>
               <h3>{option.type}</h3>
               <p>{option.blurb}</p>
@@ -237,8 +288,12 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
                 <b>{option.cost} Gold</b>
                 <small>{maintenanceCost(option.type)}/day upkeep</small>
               </div>
-              <button disabled={!affordable} onClick={() => onBuild(option.type, option.cost)}>
-                {affordable ? 'Place' : 'Not enough Gold'}
+              <div className="build-materials">
+                <span className={wood >= need.wood ? '' : 'short'}>{need.wood} wood</span>
+                <span className={stone >= need.stone ? '' : 'short'}>{need.stone} stone</span>
+              </div>
+              <button disabled={!ready} onClick={() => onBuild(option.type, option.cost)}>
+                {ready ? 'Place' : !paid ? 'Not enough Gold' : 'Not enough materials'}
               </button>
             </div>
           );
