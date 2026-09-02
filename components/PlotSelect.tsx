@@ -21,13 +21,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
-  CHART_COUNT, HOME_CHART_INDEX, chartName, chartRoom, drawPlotPreview, drawRegionMap, islandsFor,
-  loadPlayer, marketPlots, prospectPlot, savePlayer, usedSlots,
+  CHART_COUNT, HOME_CHART_INDEX, chartName, chartRoom, claimOf, drawPlotPreview, drawRegionMap,
+  islandsFor, marketPlots, prospectPlot, usedSlots,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
-import { ACTIVE_CHAIN, TOKEN, claimPlot, tokenLive } from '@/lib/chain/emerge';
+import {
+  ACTIVE_CHAIN, TOKEN, claimPlot, plotOwner, registryLive, shortAddress, tokenLive,
+  type PlotOwnership,
+} from '@/lib/chain/emerge';
 import { LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { WalletPicker, useWallet } from './WalletPicker';
+
+/**
+ * Ask the land registry who owns a plot.
+ *
+ * A claim made in another player's browser is invisible here by construction —
+ * two browsers share no storage — so this is the only route to seeing anybody
+ * else's land, and it needs the registry contract. Until that exists the hook
+ * reports why rather than pretending the plot is unclaimed.
+ */
+function useRegistry(seed: number | null) {
+  const [state, setState] = useState<PlotOwnership | null>(null);
+  useEffect(() => {
+    if (seed === null || !registryLive()) { setState(null); return; }
+    let live = true;
+    setState(null);
+    plotOwner(seed).then((result) => { if (live) setState(result); });
+    return () => { live = false; };
+  }, [seed]);
+  return state;
+}
 
 function PlotPreview({ seed }: { seed: number }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -49,10 +72,12 @@ function PlotPreview({ seed }: { seed: number }) {
  * the markers are real buttons laid over it, so they can be tabbed to, focused
  * and read by a screen reader instead of being pixels with a hit test.
  */
-function RegionMap({ plots, selected, chart, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, onSelect }: {
   plots: Plot[];
   selected: Plot | null;
   chart: number;
+  /** Seeds this player holds, so their own land is marked on the map. */
+  owned: Set<number>;
   onSelect: (plot: Plot) => void;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -81,14 +106,14 @@ function RegionMap({ plots, selected, chart, onSelect }: {
             key={plot.id}
             // A marker on the right-hand side of the map hangs its label to the
             // left, or it runs off the edge.
-            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''}`}
+            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''} ${owned.has(plot.seed) ? 'owned' : ''}`}
             style={{ left: `${plot.mapX * 100}%`, top: `${plot.mapY * 100}%` }}
             onClick={() => onSelect(plot)}
             aria-pressed={plot.seed === selected?.seed}
           >
             <span className="pin-dot" aria-hidden />
             <span className="pin-label">
-              <b>{plot.region}</b>
+              <b>{plot.region}{owned.has(plot.seed) && <i className="yours">yours</i>}</b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}
               {plot.seed === selected?.seed && <em>{plot.biomeLabel}</em>}
@@ -106,8 +131,11 @@ function RegionMap({ plots, selected, chart, onSelect }: {
   );
 }
 
-export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld) => void }) {
-  const [player, setPlayer] = useState<PlayerRecord | null>(null);
+export default function PlotSelect({ player, onPlayer, onEnter }: {
+  player: PlayerRecord;
+  onPlayer: (record: PlayerRecord) => void;
+  onEnter: (world: ClaimedWorld) => void;
+}) {
   const [chart, setChart] = useState(HOME_CHART_INDEX);
   const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
   const [name, setName] = useState('');
@@ -119,11 +147,12 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
   const [sheetOpen, setSheetOpen] = useState(false);
   const configured = tokenLive();
 
-  useEffect(() => { setPlayer(loadPlayer()); }, []);
-
-  const plots = useMemo(() => (player ? marketPlots(player, chart) : []), [player, chart]);
-  const room = useMemo(() => (player ? chartRoom(player, chart) : { capacity: 0, used: 0, free: 0 }), [player, chart]);
+  const plots = useMemo(() => marketPlots(player, chart), [player, chart]);
+  const room = useMemo(() => chartRoom(player, chart), [player, chart]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
+  const held = selected ? claimOf(player, selected.seed) : null;
+  const registry = useRegistry(selected?.seed ?? null);
+  const ownedSeeds = useMemo(() => new Set(player.claims.map((c) => c.seed)), [player.claims]);
 
   const choose = useCallback((plot: Plot) => {
     setSelectedSeed(plot.seed);
@@ -131,7 +160,6 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
   }, []);
 
   const prospect = useCallback(() => {
-    if (!player) return;
     if (player.ledger.balance < PROSPECT_COST_EMERGE) {
       setNotice(`Prospecting costs ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
       return;
@@ -148,12 +176,11 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
       ledger: { ...player.ledger, balance: player.ledger.balance - PROSPECT_COST_EMERGE },
       prospected: [...player.prospected, { seed: found.seed, chart: found.chart, slot: found.slot }],
     };
-    savePlayer(next);
-    setPlayer(next);
+    onPlayer(next);
     setSelectedSeed(found.seed);
     setSheetOpen(true);
     setNotice(`Surveyed ${found.region} on ${found.island} — ${found.biomeLabel.toLowerCase()}.`);
-  }, [player, chart]);
+  }, [player, chart, onPlayer]);
 
   const sail = useCallback((delta: number) => {
     setChart((c) => (c + delta + CHART_COUNT) % CHART_COUNT);
@@ -164,6 +191,13 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
 
   const claim = useCallback(async () => {
     if (!selected) return;
+    // Already yours: this is the door back in, not a second purchase.
+    const held = claimOf(player, selected.seed);
+    if (held) { onEnter(held); return; }
+    if (player.ledger.balance < selected.price) {
+      setNotice(`${selected.region} costs ${selected.price.toLocaleString()} ${TOKEN.ticker}.`);
+      return;
+    }
     setClaiming(true);
     setNotice(null);
     const worldName = name.trim() || defaultWorldName(selected.seed);
@@ -176,6 +210,9 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
     });
     setClaiming(false);
     if (result.reason) setNotice(result.reason);
+    // Claiming costs what the plot is priced at. It used to cost nothing at
+    // all: the price was shown and never charged.
+    onPlayer({ ...player, ledger: { ...player.ledger, balance: player.ledger.balance - selected.price } });
     onEnter({
       seed: selected.seed,
       name: worldName,
@@ -185,16 +222,12 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
       owner: wallet.address,
       txHash: result.txHash,
     });
-  }, [name, selected, wallet.address, onEnter]);
+  }, [name, selected, wallet.address, onEnter, onPlayer, player]);
 
   const unlist = useCallback((seed: number) => {
-    if (!player) return;
-    const next = { ...player, listings: player.listings.filter((l) => l.seed !== seed) };
-    savePlayer(next);
-    setPlayer(next);
-  }, [player]);
+    onPlayer({ ...player, listings: player.listings.filter((l) => l.seed !== seed) });
+  }, [player, onPlayer]);
 
-  if (!player) return <main className="land-office" />;
 
   return (
     <main className="land-office">
@@ -244,7 +277,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
         </nav>
 
         <div className="land-body">
-          <RegionMap plots={plots} selected={selected} chart={chart} onSelect={choose} />
+          <RegionMap plots={plots} selected={selected} chart={chart} owned={ownedSeeds} onSelect={choose} />
 
           {!selected ? (
             <aside className="land-claim empty">
@@ -266,13 +299,34 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
           ) : (
           <aside className={`land-claim ${sheetOpen ? 'open' : ''}`}>
             <button className="sheet-close" onClick={() => setSheetOpen(false)} aria-label="Back to the map">×</button>
-            <span className="eyebrow">CLAIM</span>
-            <h2>{selected.region}</h2>
+            <span className="eyebrow">{held ? 'YOUR WORLD' : 'CLAIM'}</span>
+            <h2>{held ? held.name : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{selected.biomeLabel}</span>
               <span>{selected.island}</span>
               <span>{selected.population} beings</span>
+              {held && <span className="owned-tag">Yours</span>}
             </div>
+            {held && (
+              <p className="muted small">
+                Claimed {new Date(held.claimedAt).toLocaleDateString()} for {held.price.toLocaleString()} {TOKEN.ticker}
+                {held.owner ? ` by ${shortAddress(held.owner)}` : ' with no wallet connected'}.
+                {held.txHash ? ` Settled on chain: ${held.txHash}.` : ' Recorded in this browser, not on chain.'}
+              </p>
+            )}
+            {/* Who else holds this land. Only the chain can answer that — a
+                claim in another player's browser is invisible from here. */}
+            {registry?.onChain && registry.owner && !held && (
+              <p className="muted small">
+                Held on {ACTIVE_CHAIN.label} by <b>{shortAddress(registry.owner)}</b>.
+              </p>
+            )}
+            {!registryLive() && !held && (
+              <p className="muted small">
+                Unclaimed as far as this browser knows. Claims by other players become visible once the land
+                registry is deployed on {ACTIVE_CHAIN.label}; until then each browser sees only its own.
+              </p>
+            )}
 
             <PlotPreview seed={selected.seed} />
             <p className="muted">{selected.blurb}</p>
@@ -282,27 +336,54 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
               {selected.trades.map((t) => <span key={t}>{t}</span>)}
             </div>
 
-            <label className="name-field">
-              <span>NAME YOUR WORLD</span>
-              <input
-                value={name}
-                maxLength={24}
-                placeholder={defaultWorldName(selected.seed)}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
+            {!held && (
+              <label className="name-field">
+                <span>NAME YOUR WORLD</span>
+                <input
+                  value={name}
+                  maxLength={24}
+                  placeholder={defaultWorldName(selected.seed)}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+            )}
 
             <div className="claim-price">
-              <span>PRICE</span>
-              <b>{selected.price}</b>
+              <span>{held ? 'PAID' : 'PRICE'}</span>
+              <b>{selected.price.toLocaleString()}</b>
               <em>{TOKEN.ticker}</em>
             </div>
 
             <div className="claim-wallet"><WalletPicker compact /></div>
 
-            <button className="claim-button" onClick={claim} disabled={claiming}>
-              {claiming ? 'Claiming…' : `Claim ${selected.region}`}
+            <button
+              className="claim-button"
+              onClick={claim}
+              disabled={claiming || (!held && player.ledger.balance < selected.price)}
+            >
+              {claiming
+                ? 'Claiming…'
+                : held
+                  ? `Enter ${held.name}`
+                  : player.ledger.balance < selected.price
+                    ? `Not enough ${TOKEN.ticker}`
+                    : `Claim ${selected.region} · ${selected.price.toLocaleString()} ${TOKEN.ticker}`}
             </button>
+
+            {player.claims.length > 0 && (
+              <>
+                <span className="eyebrow">WORLDS YOU OWN</span>
+                <div className="listing-list">
+                  {player.claims.map((c) => (
+                    <div key={c.seed} className={`listing-row ${c.seed === selected.seed ? 'here' : ''}`}>
+                      <span>{c.name}</span>
+                      <b>{c.region}</b>
+                      <button className="ghost" onClick={() => onEnter(c)}>Enter</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
             {player.listings.length > 0 && (
               <>

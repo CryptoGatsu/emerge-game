@@ -20,14 +20,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { advance, constructBuilding, createWorld, drawFromTreasury, fundTreasury, renameCitizen, renameWorld, type World } from '@/lib/simulation';
+import {
+  advance, carryCitizenTo, collectYield, constructBuilding, createWorld, demolishBuilding,
+  dropCitizen, drawFromTreasury, fundTreasury, pickUpCitizen, renameCitizen, renameWorld,
+  type World,
+} from '@/lib/simulation';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
 import {
-  clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld,
+  clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld, withClaim, withoutClaim,
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
-import { RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, charge, type VaultLedger } from '@/lib/chain/vault';
+import { RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge, type VaultLedger } from '@/lib/chain/vault';
 import { Soundscape } from '@/lib/audio/soundscape';
 import PlotSelect from './PlotSelect';
 import { Hud } from './Hud';
@@ -73,14 +77,57 @@ export default function EmergeClient() {
     setPlayer(next);
   }, []);
 
+  /**
+   * Credit a day's stewardship yield.
+   *
+   * Functional, because this is called from the sampling timer, which is set up
+   * once at mount and would otherwise be adding to whichever ledger existed
+   * then — every day's earnings landing on the same stale balance.
+   */
+  const earn = useCallback((emerge: number) => {
+    if (!(emerge > 0)) return;
+    setPlayer((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ledger: accrue(prev.ledger, emerge) };
+      savePlayer(next);
+      return next;
+    });
+  }, []);
+
   const enter = useCallback((world: ClaimedWorld) => {
     saveClaimedWorld(world);
+    // A claim is a purchase, so it goes into the player's holdings and stays
+    // there. `emerge.world.v1` only records which of them is open right now.
+    setPlayer((prev) => {
+      if (!prev) return prev;
+      const next = withClaim(prev, world);
+      savePlayer(next);
+      return next;
+    });
     setClaimed(world);
     setMounted(world);
   }, []);
 
+  /**
+   * Back to the land office, still owning the place.
+   *
+   * This used to delete the claim, so a player who looked at the map had to buy
+   * their own world back off the shelf.
+   */
   const leave = useCallback(() => {
     clearClaimedWorld();
+    setClaimed(null);
+  }, []);
+
+  /** Give a plot up for good. The land goes back on the market. */
+  const release = useCallback((seed: number) => {
+    clearClaimedWorld();
+    setPlayer((prev) => {
+      if (!prev) return prev;
+      const next = withoutClaim(prev, seed);
+      savePlayer(next);
+      return next;
+    });
     setClaimed(null);
   }, []);
 
@@ -94,23 +141,29 @@ export default function EmergeClient() {
           player={player}
           hidden={claimed === null}
           onLeave={leave}
+          onRelease={() => release(mounted.seed)}
           onRename={enter}
           onPlayer={updatePlayer}
+          onEarn={earn}
         />
       )}
-      {claimed === null && <PlotSelect onEnter={enter} />}
+      {claimed === null && <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} />}
     </>
   );
 }
 
-function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
+function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPlayer, onEarn }: {
   claimed: ClaimedWorld;
   player: PlayerRecord;
   /** True while the land office is open over the top of a running world. */
   hidden: boolean;
   onLeave: () => void;
+  /** Give this plot up entirely, rather than merely stepping out of it. */
+  onRelease: () => void;
   onRename: (world: ClaimedWorld) => void;
   onPlayer: (record: PlayerRecord) => void;
+  /** Credit stewardship yield the simulation has accrued. */
+  onEarn: (emerge: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<World | null>(null);
@@ -118,6 +171,10 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
   const pausedRef = useRef(false);
   const speedRef = useRef<Speed>(1);
   const selectedRef = useRef<PickTarget>(null);
+  // The sampling timer is set up once; this keeps it calling the current
+  // callback rather than the one that existed at mount.
+  const onEarnRef = useRef(onEarn);
+  onEarnRef.current = onEarn;
 
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -153,6 +210,18 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
           selectedRef.current = target;
           setSelected(target);
         },
+        onCarry: (id, phase, at) => {
+          const live = worldRef.current;
+          if (!live) return;
+          if (phase === 'start') pickUpCitizen(live, id);
+          else if (phase === 'move') carryCitizenTo(live, id, at.x, at.y);
+          else if (phase === 'drop') dropCitizen(live, id, at.x, at.y);
+          else {
+            // A tap, not a carry: put them back where they were standing.
+            const c = live.citizens.find((x) => x.id === id);
+            if (c) dropCitizen(live, id, c.x, c.y);
+          }
+        },
       })
       .then(() => {
         setReady(true);
@@ -182,7 +251,14 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
 
     const hudTimer = window.setInterval(() => {
       const live = worldRef.current;
-      if (live) setView(snapshot(live, selectedRef.current));
+      if (live) {
+        setView(snapshot(live, selectedRef.current));
+        // The world is regenerated from its seed every time it is opened, so
+        // the running total cannot live in it: drain what it has accrued into
+        // the player's ledger, which is what persists.
+        const earned = collectYield(live);
+        if (earned > 0) onEarnRef.current(earned);
+      }
       setWoodland(sceneRef.current?.woodland() ?? null);
     }, HUD_INTERVAL);
 
@@ -294,6 +370,18 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
     });
   }, []);
 
+  /** Pull a building down. Half the materials come back; the Gold does not. */
+  const demolish = useCallback((id: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = demolishBuilding(world, id);
+    if (!result.ok) return;
+    sceneRef.current?.syncBuildings();
+    setSelected(null);
+    selectedRef.current = null;
+    setView(snapshot(world, null));
+  }, []);
+
   const cancelBuild = useCallback(() => {
     sceneRef.current?.cancelPlacement();
     setPlacing(null);
@@ -395,6 +483,7 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
             onToggleSound={() => setSound((on) => !on)}
             player={player}
             onRenameCitizen={renameCitizenFor}
+            onDemolish={demolish}
             hover={hoverInfo}
             activePanel={panel}
             onTogglePause={() => setPaused((p) => !p)}
@@ -419,6 +508,7 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
             onRenameWorld={renameWorldFor}
             onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}
+            onRelease={onRelease}
             onVault={vault}
             onList={listPlot}
           />

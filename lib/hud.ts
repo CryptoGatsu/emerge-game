@@ -8,8 +8,9 @@
  */
 
 import {
-  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS, RESOURCE_LABELS,
-  activeGathering, describeTemperature, friendsOf, ledgerTotals, readiness, talkingWith,
+  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS,
+  RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
+  activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals, readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource, type World,
 } from './simulation';
 import { statusLine } from './speech';
@@ -30,6 +31,9 @@ export interface FocusBuilding {
   id: string; type: string; occupants: number; production: string | null;
   x: number; y: number; upkeep: number; active: boolean;
   people: { id: string; name: string; doing: string }[];
+  /** Whether it can be pulled down, and what comes back if it is. */
+  demolishable: boolean;
+  salvage: { wood: number; stone: number };
 }
 
 export type Focus = FocusCitizen | FocusBuilding;
@@ -83,6 +87,20 @@ export interface Snapshot {
   resolution: { text: string; voters: number; day: number } | null;
   /** What the settlement's showcases have produced, newest first. */
   artworks: { id: string; title: string; maker: string; day: number }[];
+  /**
+   * What the player is earning by running this place, and why.
+   *
+   * Kept visible rather than buried in the Bank, because the point of the
+   * figure is that it responds to what the player does.
+   */
+  stewardship: {
+    score: number;
+    attention: number;
+    dailyYield: number;
+    lifetime: number;
+    idleDays: number;
+    cap: number;
+  };
   /** What is going wrong right now, and what it is doing. */
   hazards: { id: string; kind: HazardKind; label: string; effect: string; days: number }[];
   /**
@@ -175,6 +193,13 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       const c = world.citizens.find((x) => x.id === id);
       return { id, name: c?.name ?? 'Someone', doing: c ? ACTIVITY_LABELS[c.activity] : '' };
     }),
+    // The market is the settlement's heart and a lived-in house is somebody's
+    // home; neither offers the button.
+    demolishable: b.type !== 'Market' && !(family && family.members.length > 0),
+    salvage: (() => {
+      const need = buildMaterials(b.type);
+      return { wood: Math.floor(need.wood / 2), stone: Math.floor(need.stone / 2) };
+    })(),
   };
 }
 
@@ -230,6 +255,14 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       ? { text: world.resolution.text, voters: world.resolution.voters, day: world.resolution.day }
       : null,
     artworks: world.artworks.slice(0, 8).map((a) => ({ id: a.id, title: a.title, maker: a.maker, day: a.day })),
+    stewardship: {
+      score: world.stewardship.score,
+      attention: world.stewardship.attention,
+      dailyYield: world.stewardship.dailyYield,
+      lifetime: world.stewardship.lifetime,
+      idleDays: Math.max(0, world.day - world.stewardship.lastActionDay),
+      cap: STEWARDSHIP_DAILY_CAP,
+    },
     hazards: world.hazards.map((h) => ({ id: h.id, kind: h.kind, label: h.label, effect: h.effect, days: h.days })),
     readiness: (Object.entries(ready) as [HazardKind, number][])
       .map(([kind, value]) => ({

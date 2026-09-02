@@ -38,6 +38,8 @@ export interface ChainConfig {
   rpcUrl: string | null;
   explorerUrl: string | null;
   tokenAddress: string | null;
+  /** The land registry, once one is deployed. Ownership is read from here. */
+  registryAddress: string | null;
 }
 
 const envNumber = (value: string | undefined, fallback: number | null = null) => {
@@ -60,6 +62,7 @@ export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
     rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ?? MAINNET_RPC,
     explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_EXPLORER ?? null,
     tokenAddress: process.env.NEXT_PUBLIC_EMERGE_TOKEN ?? null,
+    registryAddress: process.env.NEXT_PUBLIC_EMERGE_REGISTRY ?? null,
   },
   'robinhood-testnet': {
     key: 'robinhood-testnet',
@@ -68,6 +71,7 @@ export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
     rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL ?? TESTNET_RPC,
     explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_EXPLORER ?? null,
     tokenAddress: process.env.NEXT_PUBLIC_EMERGE_TOKEN_TESTNET ?? null,
+    registryAddress: process.env.NEXT_PUBLIC_EMERGE_REGISTRY_TESTNET ?? null,
   },
 };
 
@@ -305,6 +309,66 @@ export async function claimPlot(request: ClaimRequest, config: ChainConfig = ACT
     txHash: null,
     reason: 'The land registry contract is not deployed yet. Your world is saved locally and can be re-claimed on chain later.',
   };
+}
+
+/** True once a land registry exists to read ownership from. */
+export const registryLive = (config: ChainConfig = ACTIVE_CHAIN) =>
+  chainConfigured(config) && !!config.registryAddress;
+
+export interface PlotOwnership {
+  /** The owning wallet, when the registry knows one. */
+  owner: string | null;
+  /** True when this came from the chain rather than from local storage. */
+  onChain: boolean;
+  /** Why it is not on chain, in words a player can act on. */
+  reason: string | null;
+}
+
+/**
+ * Who owns a plot.
+ *
+ * This is the call that makes one player's claims visible to another, and it
+ * cannot work without a deployed registry: two browsers share no storage, so a
+ * claim recorded locally is invisible to everybody else by construction. The
+ * shape is here, the read goes through the configured RPC, and until the
+ * contract exists this returns `onChain: false` with the reason rather than
+ * implying a registry that is not there.
+ */
+export async function plotOwner(seed: number, config: ChainConfig = ACTIVE_CHAIN): Promise<PlotOwnership> {
+  if (!registryLive(config)) {
+    return {
+      owner: null,
+      onChain: false,
+      reason: `The land registry is not deployed on ${config.label} yet, so claims are only visible in the browser that made them.`,
+    };
+  }
+  try {
+    // `ownerOf(uint256)` — the seed is the token id, so a plot's identity on
+    // chain is the same number that generates its terrain.
+    const selector = '0x6352211e';
+    const data = selector + seed.toString(16).padStart(64, '0');
+    const response = await fetch(config.rpcUrl!, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'eth_call',
+        params: [{ to: config.registryAddress, data }, 'latest'],
+      }),
+    });
+    const json = (await response.json()) as { result?: string; error?: { message?: string } };
+    if (json.error) return { owner: null, onChain: false, reason: json.error.message ?? 'The registry call failed.' };
+    const word = json.result?.replace(/^0x/, '') ?? '';
+    if (word.length < 64) return { owner: null, onChain: true, reason: null };
+    const address = `0x${word.slice(-40)}`;
+    const empty = /^0x0+$/.test(address);
+    return { owner: empty ? null : address, onChain: true, reason: null };
+  } catch (error) {
+    return {
+      owner: null,
+      onChain: false,
+      reason: error instanceof Error ? error.message : 'Could not reach the registry.',
+    };
+  }
 }
 
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {

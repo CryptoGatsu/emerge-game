@@ -14,7 +14,7 @@ import type { Snapshot } from '@/lib/hud';
 import { ACTIVE_CHAIN, TOKEN, tokenActions, tokenLive } from '@/lib/chain/emerge';
 import {
   EMERGE_PER_GOLD, RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
-  deposit, quoteWithdraw, withdraw, type VaultLedger,
+  claimEarnings, deposit, quoteWithdraw, withdraw, type VaultLedger,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import { WalletPicker } from './WalletPicker';
@@ -31,6 +31,8 @@ interface PanelsProps {
   onRenameWorld: (name: string) => void;
   onRenameCitizen: (id: string, name: string) => void;
   onLeave: () => void;
+  /** Give the plot up entirely, as opposed to stepping out of it. */
+  onRelease: () => void;
   /** Move Gold in or out of the treasury and record it against the player. */
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
   /** List this plot for resale at a price, or pass null to withdraw it. */
@@ -140,8 +142,10 @@ function BankPanel({ view, player, onClose, onVault }: {
 }) {
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
+  const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const ledger = player.ledger;
+  const steward = view.stewardship;
 
   const depositGold = Math.floor((Number(depositAmount) || 0) / EMERGE_PER_GOLD * 100) / 100;
   const quote = quoteWithdraw(Math.floor(Number(withdrawAmount) || 0));
@@ -157,7 +161,16 @@ function BankPanel({ view, player, onClose, onVault }: {
   const doWithdraw = () => {
     const result = withdraw(ledger, Math.floor(Number(withdrawAmount) || 0), view.treasury);
     setMessage(result.message);
-    if (result.ok) onVault(result.ledger, -quote.gold, `${quote.gold} Gold was withdrawn to ${TOKEN.ticker}.`);
+    if (result.ok) onVault(result.ledger, -quote.gold, `${quote.gold} Gold of principal was withdrawn to ${TOKEN.ticker}.`);
+  };
+
+  const doClaim = () => {
+    const amount = Math.floor(Number(claimAmount) || 0) || Math.floor(ledger.earnedEmerge);
+    const result = claimEarnings(ledger, amount);
+    setMessage(result.message);
+    // Collecting earnings does not touch the treasury: the settlement's Gold is
+    // the settlement's, and what the player earned is for their work.
+    if (result.ok) onVault(result.ledger, 0, `${amount.toLocaleString()} ${TOKEN.ticker} of earnings was collected.`);
   };
 
   return (
@@ -203,10 +216,62 @@ function BankPanel({ view, player, onClose, onVault }: {
         </div>
       </div>
 
+      <h4>What you are earning</h4>
+      <p className="muted small">
+        Gold is the settlement&rsquo;s money and stays in the settlement. The {TOKEN.ticker} you earn is minted
+        against how well you run the place: a daily ceiling of {steward.cap.toLocaleString()}, multiplied by how
+        the settlement is doing and by how recently you did anything about it. A world nobody touches earns a
+        fraction of one that is being run.
+      </p>
+      <div className="steward-grid">
+        <div>
+          <span>HOW IT IS RUN</span>
+          <b>{Math.round(steward.score * 100)}%</b>
+          <em>Housed, fed, employed, content and safe</em>
+        </div>
+        <div className={steward.attention < 0.5 ? 'fading' : ''}>
+          <span>YOUR ATTENTION</span>
+          <b>{Math.round(steward.attention * 100)}%</b>
+          <em>
+            {steward.idleDays === 0
+              ? 'Acted on today'
+              : `Nothing done for ${steward.idleDays} ${steward.idleDays === 1 ? 'day' : 'days'}`}
+          </em>
+        </div>
+        <div>
+          <span>EARNING PER DAY</span>
+          <b>{steward.dailyYield.toLocaleString()}</b>
+          <em>{TOKEN.ticker}, of {steward.cap.toLocaleString()} possible</em>
+        </div>
+        <div>
+          <span>EARNED HERE</span>
+          <b>{Math.floor(ledger.lifetimeEarned).toLocaleString()}</b>
+          <em>{Math.floor(ledger.earnedEmerge).toLocaleString()} uncollected</em>
+        </div>
+      </div>
+
+      <div className="vault-card claim-card">
+        <span className="eyebrow">COLLECT EARNINGS</span>
+        <label className="name-field">
+          <span>{TOKEN.ticker} TO COLLECT</span>
+          <input
+            value={claimAmount}
+            inputMode="numeric"
+            placeholder={String(Math.floor(ledger.earnedEmerge))}
+            onChange={(e) => setClaimAmount(e.target.value.replace(/[^0-9]/g, ''))}
+          />
+        </label>
+        <div className="vault-line"><span>Available</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
+        <div className="vault-line burn"><span>Burn</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
+        <button onClick={doClaim} disabled={ledger.earnedEmerge < 1}>Collect</button>
+      </div>
+
       <h4>{TOKEN.ticker} vault</h4>
       <p className="muted small">
         {EMERGE_PER_GOLD.toLocaleString()} {TOKEN.ticker} buys 1 Gold, so 1,000,000 {TOKEN.ticker} is 100 Gold.
-        A settlement that runs a surplus can be drawn back out; withdrawals burn {Math.round(WITHDRAW_BURN_RATE * 100)}%.
+        Deposits fund the treasury, and the same Gold can be taken back out — that is your own money and moving
+        it mints nothing. Withdrawals burn {Math.round(WITHDRAW_BURN_RATE * 100)}%. The settlement&rsquo;s own
+        surplus is not withdrawable: it is what the town pays its people with.
       </p>
 
       <div className="vault-grid">
@@ -231,7 +296,11 @@ function BankPanel({ view, player, onClose, onVault }: {
           </label>
           <div className="vault-line"><span>You receive</span><b>{quote.received.toLocaleString()} {TOKEN.ticker}</b></div>
           <div className="vault-line burn"><span>Burned</span><b>{quote.burned.toLocaleString()} {TOKEN.ticker}</b></div>
-          <button onClick={doWithdraw} disabled={quote.gold < 1 || quote.gold > Math.floor(view.treasury)}>
+          <div className="vault-line"><span>Principal standing</span><b>{Math.floor(ledger.principalGold).toLocaleString()} Gold</b></div>
+          <button
+            onClick={doWithdraw}
+            disabled={quote.gold < 1 || quote.gold > Math.floor(view.treasury) || quote.gold > Math.floor(ledger.principalGold)}
+          >
             Withdraw
           </button>
         </div>
@@ -240,6 +309,7 @@ function BankPanel({ view, player, onClose, onVault }: {
       {message && <p className="warn">{message}</p>}
       <div className="vault-ledger">
         <span>Deposited {ledger.depositedGold.toLocaleString()} Gold</span>
+        <span>Earned {Math.floor(ledger.lifetimeEarned).toLocaleString()} {TOKEN.ticker}</span>
         <span>Withdrawn {ledger.withdrawnEmerge.toLocaleString()} {TOKEN.ticker}</span>
         <span>Burned {ledger.burnedEmerge.toLocaleString()} {TOKEN.ticker}</span>
       </div>
@@ -303,10 +373,12 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
   );
 }
 
-function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, onList }: {
+function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
-  onRenameWorld: (name: string) => void; onLeave: () => void; onList: (price: number | null) => void;
+  onRenameWorld: (name: string) => void; onLeave: () => void; onRelease: () => void;
+  onList: (price: number | null) => void;
 }) {
+  const [releasing, setReleasing] = useState(false);
   const [draftName, setDraftName] = useState(view.name);
   const [askPrice, setAskPrice] = useState(String(Math.round(claimed.price * 1.25)));
   const configured = tokenLive();
@@ -372,7 +444,22 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
               </button>
             </>
           )}
-          <button className="danger" onClick={onLeave}>Leave for the land office</button>
+          {/* Leaving is not selling. It used to be: stepping out of a world
+              deleted the claim, so a player who wanted a look at the map had to
+              buy their own land back. */}
+          <button className="ghost" onClick={onLeave}>Back to the land office</button>
+          <button className="danger" onClick={() => {
+            if (releasing) onRelease();
+            else setReleasing(true);
+          }}>
+            {releasing ? 'Give it up for good — tap again' : 'Give up this plot'}
+          </button>
+          {releasing && (
+            <p className="muted small">
+              {claimed.region} goes back on the market and the {claimed.price.toLocaleString()} {TOKEN.ticker}
+              {' '}is not refunded. Your world keeps running until you do.
+            </p>
+          )}
         </div>
       </div>
 
@@ -398,7 +485,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onVault, onList }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'bank') return <BankPanel view={view} player={player} onClose={onClose} onVault={onVault} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;
@@ -406,7 +493,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenam
     return (
       <ConnectPanel
         view={view} claimed={claimed} player={player} onClose={onClose}
-        onRenameWorld={onRenameWorld} onLeave={onLeave} onList={onList}
+        onRenameWorld={onRenameWorld} onLeave={onLeave} onRelease={onRelease} onList={onList}
       />
     );
   }

@@ -1,9 +1,22 @@
 /**
  * The $EMERGE vault.
  *
- * The bridge between the token and the world's Gold. Deposits fund a
- * settlement's treasury; a settlement that runs a surplus can be drawn back out
- * to $EMERGE, minus a burn.
+ * There are two doors here and they are deliberately different sizes.
+ *
+ * **Principal.** $EMERGE deposited becomes Gold in a settlement's treasury at a
+ * fixed rate, and the same Gold can be taken back out again, minus a burn. That
+ * is the player's own money and moving it mints nothing.
+ *
+ * **Yield.** The only new $EMERGE a player can earn is the stewardship yield
+ * the simulation accrues, capped per day and scaled by how well the settlement
+ * is run and how recently the player did anything about it.
+ *
+ * The treasury itself is *not* a withdrawal source. It used to be: any Gold the
+ * town had piled up converted straight to tokens, and a settlement nobody was
+ * watching ran a surplus of up to three hundred and sixty Gold a day. An
+ * untouched grassland minted eighty million $EMERGE in sixty game days. Gold is
+ * the settlement's money — what it pays its people and buys its grain with —
+ * and letting it out of the world was the whole problem.
  *
  *   1,000,000 $EMERGE = 100 Gold        (10,000 $EMERGE per Gold)
  *   withdrawals burn 5%
@@ -39,7 +52,18 @@ export const LOCAL_TEST_ALLOCATION = 2_000_000;
 export interface VaultLedger {
   /** Local, unsettled $EMERGE balance for this world. */
   balance: number;
+  /** Gold deposited over all time, for the record. */
   depositedGold: number;
+  /**
+   * Gold still standing as principal: what the player put in and has not taken
+   * back. This is the ceiling on principal withdrawals, and it is the reason
+   * the treasury's own surplus is not one.
+   */
+  principalGold: number;
+  /** $EMERGE earned from stewardship and not yet withdrawn. */
+  earnedEmerge: number;
+  /** $EMERGE earned from stewardship over all time. */
+  lifetimeEarned: number;
   withdrawnEmerge: number;
   burnedEmerge: number;
 }
@@ -47,17 +71,37 @@ export interface VaultLedger {
 export const NEW_LEDGER: VaultLedger = {
   balance: LOCAL_TEST_ALLOCATION,
   depositedGold: 0,
+  principalGold: 0,
+  earnedEmerge: 0,
+  lifetimeEarned: 0,
   withdrawnEmerge: 0,
   burnedEmerge: 0,
 };
 
 /** Tolerate ledgers saved before this feature existed. */
 export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null): VaultLedger {
+  const deposited = Number(ledger?.depositedGold) || 0;
   return {
     balance: Number.isFinite(ledger?.balance) ? Number(ledger!.balance) : LOCAL_TEST_ALLOCATION,
-    depositedGold: Number(ledger?.depositedGold) || 0,
+    depositedGold: deposited,
+    // A save written before principal was tracked has its whole deposit history
+    // treated as principal still standing. That is the generous reading, and it
+    // errs toward letting a player take back money they really did put in.
+    principalGold: Number.isFinite(ledger?.principalGold) ? Number(ledger!.principalGold) : deposited,
+    earnedEmerge: Number(ledger?.earnedEmerge) || 0,
+    lifetimeEarned: Number(ledger?.lifetimeEarned) || 0,
     withdrawnEmerge: Number(ledger?.withdrawnEmerge) || 0,
     burnedEmerge: Number(ledger?.burnedEmerge) || 0,
+  };
+}
+
+/** Credit a day's stewardship yield. */
+export function accrue(ledger: VaultLedger, emerge: number): VaultLedger {
+  if (!(emerge > 0)) return ledger;
+  return {
+    ...ledger,
+    earnedEmerge: ledger.earnedEmerge + emerge,
+    lifetimeEarned: ledger.lifetimeEarned + emerge,
   };
 }
 
@@ -115,15 +159,31 @@ export function deposit(ledger: VaultLedger, emerge: number, config: ChainConfig
       ...ledger,
       balance: ledger.balance - amount,
       depositedGold: ledger.depositedGold + gold,
+      principalGold: ledger.principalGold + gold,
     },
   };
 }
 
-/** Convert a world's Gold back into $EMERGE, burning a share of it. */
+/**
+ * Take principal back out: Gold the player put in, converted to $EMERGE and
+ * burned at the usual rate.
+ *
+ * Two ceilings, and both matter. The principal still standing, because this
+ * door returns your own money and not the town's; and the treasury, because
+ * you cannot take Gold out of a purse that does not hold it.
+ */
 export function withdraw(ledger: VaultLedger, gold: number, treasury: number, config: ChainConfig = ACTIVE_CHAIN): VaultResult {
   const amount = Math.floor(gold);
   if (!(amount > 0)) {
     return { ok: false, settled: false, txHash: null, message: 'Enter an amount to withdraw.', ledger };
+  }
+  if (amount > Math.floor(ledger.principalGold)) {
+    return {
+      ok: false, settled: false, txHash: null, ledger,
+      message: ledger.principalGold < 1
+        ? `Nothing to withdraw here: this door returns Gold you deposited, and you have not deposited any. ${TOKEN.ticker} you earn by running the world is collected below.`
+        : `You have ${Math.floor(ledger.principalGold)} Gold of principal standing. The settlement's own Gold stays in the settlement.`,
+    };
   }
   if (amount > Math.floor(treasury)) {
     return { ok: false, settled: false, txHash: null, message: 'The treasury does not hold that much Gold.', ledger };
@@ -133,12 +193,49 @@ export function withdraw(ledger: VaultLedger, gold: number, treasury: number, co
     ok: true,
     settled: false,
     txHash: null,
-    message: `Withdrew ${amount} Gold for ${quote.received.toLocaleString()} ${TOKEN.ticker}, burning ${quote.burned.toLocaleString()}. ${unsettledNote(config)}`,
+    message: `Withdrew ${amount} Gold of principal for ${quote.received.toLocaleString()} ${TOKEN.ticker}, burning ${quote.burned.toLocaleString()}. ${unsettledNote(config)}`,
     ledger: {
       ...ledger,
       balance: ledger.balance + quote.received,
+      principalGold: ledger.principalGold - amount,
       withdrawnEmerge: ledger.withdrawnEmerge + quote.received,
       burnedEmerge: ledger.burnedEmerge + quote.burned,
+    },
+  };
+}
+
+/**
+ * Collect stewardship earnings as spendable $EMERGE.
+ *
+ * This is the only door that puts new tokens in a player's hands, and what
+ * comes through it was minted a day at a time against how well the world was
+ * run. It does not touch the treasury: the settlement's Gold is the
+ * settlement's, and the player's earnings are for their work.
+ */
+export function claimEarnings(ledger: VaultLedger, emerge: number, config: ChainConfig = ACTIVE_CHAIN): VaultResult {
+  const amount = Math.floor(emerge);
+  if (!(amount > 0)) {
+    return { ok: false, settled: false, txHash: null, message: 'Enter an amount to collect.', ledger };
+  }
+  if (amount > Math.floor(ledger.earnedEmerge)) {
+    return {
+      ok: false, settled: false, txHash: null, ledger,
+      message: `You have earned ${Math.floor(ledger.earnedEmerge).toLocaleString()} ${TOKEN.ticker} here so far.`,
+    };
+  }
+  const burned = Math.round(amount * WITHDRAW_BURN_RATE);
+  const received = amount - burned;
+  return {
+    ok: true,
+    settled: false,
+    txHash: null,
+    message: `Collected ${received.toLocaleString()} ${TOKEN.ticker} of earnings, burning ${burned.toLocaleString()}. ${unsettledNote(config)}`,
+    ledger: {
+      ...ledger,
+      balance: ledger.balance + received,
+      earnedEmerge: ledger.earnedEmerge - amount,
+      withdrawnEmerge: ledger.withdrawnEmerge + received,
+      burnedEmerge: ledger.burnedEmerge + burned,
     },
   };
 }

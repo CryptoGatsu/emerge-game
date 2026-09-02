@@ -146,6 +146,17 @@ button {
 .land-head-side { grid-area: side; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .ghost.prospect { white-space: nowrap; }
 
+/* Land you already own, on the map and in the panel. */
+.region-pin.owned .pin-dot { box-shadow: 0 0 0 3px rgba(139, 241, 107, 0.35); }
+.pin-label i.yours {
+  margin-left: 5px;
+  font-style: normal;
+  font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--emerald);
+}
+.owned-tag { color: var(--emerald) !important; border-color: var(--panel-edge) !important; }
+.listing-row.here { border-color: var(--panel-edge); }
+
 /* Sailing between charts: which water you are looking at, and how much of it
    is left to survey. */
 .charts {
@@ -895,6 +906,25 @@ button {
 }
 .bank-grid span { display: block; font-size: 9px; letter-spacing: 1.8px; color: var(--muted); }
 .bank-grid b { font-size: 18px; color: var(--cream); }
+
+/* Pulling a building down. */
+.demolish { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.demolish button.danger.armed { background: rgba(217, 122, 90, 0.22); border-color: rgba(217, 122, 90, 0.5); }
+
+/* What the player is earning, and why. */
+.steward-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.steward-grid > div {
+  padding: 12px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(255, 255, 255, 0.03);
+}
+.steward-grid span { display: block; font-size: 8.5px; letter-spacing: 1.7px; color: var(--muted); }
+.steward-grid b { display: block; margin: 3px 0 2px; font-size: 20px; color: var(--emerald); }
+.steward-grid em { font-size: 10px; font-style: normal; line-height: 1.4; color: var(--muted); }
+.steward-grid > div.fading { border-color: rgba(232, 193, 105, 0.3); }
+.steward-grid > div.fading b { color: var(--gold); }
+.claim-card { margin-top: 12px; }
 
 /* The day's books: what came in on the left, what went out on the right. */
 .books { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

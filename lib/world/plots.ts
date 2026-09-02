@@ -56,6 +56,16 @@ const REGION_NAMES: Record<BiomeKind, string[]> = {
   grassland: ['Hollowmere', 'Greenhale', 'Meadowlark', 'Broadfield', 'Larkmoor', 'Summerlea'],
 };
 
+/**
+ * $EMERGE per point of a plot's raw score.
+ *
+ * A plot lands between about three hundred and four hundred thousand $EMERGE,
+ * against a starting allocation of two million and a survey fee of a hundred
+ * and twenty thousand — so the allocation is five or six plots, and a plot is
+ * roughly a fortnight of running a world well.
+ */
+const PRICE_SCALE = 800;
+
 /** What each biome is worth, since land that supports more trades is worth more. */
 const BIOME_PREMIUM: Record<BiomeKind, number> = {
   valley: 190, highland: 165, woodland: 120, wetland: 110, coast: 130,
@@ -228,7 +238,11 @@ export function inspectPlot(seed: number, slot: number, chart = HOME_CHART_INDEX
   const trades = [...new Set(world.buildings
     .filter((b) => !['Market', 'Bank', 'Storage', 'Tavern', 'House'].includes(b.type))
     .map((b) => b.type))];
-  const price = 180 + BIOME_PREMIUM[profile.kind] + world.population * 4 + trades.length * 12;
+  // Priced on the same scale as everything else the token buys. It used to
+  // come out at four or five hundred $EMERGE — less than a hundredth of what
+  // surveying a new plot costs — which made claiming land the cheapest thing
+  // in the game by three orders of magnitude.
+  const price = (180 + BIOME_PREMIUM[profile.kind] + world.population * 4 + trades.length * 12) * PRICE_SCALE;
   return {
     id: `plot-${seed.toString(36)}`,
     seed,
@@ -236,7 +250,7 @@ export function inspectPlot(seed: number, slot: number, chart = HOME_CHART_INDEX
     // keeps its name wherever it ends up and two plots of the same biome only
     // collide by chance rather than every sixth time.
     region: REGION_NAMES[profile.kind][Math.abs(seed) % REGION_NAMES[profile.kind].length],
-    price: Math.round(price / 10) * 10,
+    price: Math.round(price / 5_000) * 5_000,
     biome: profile.kind,
     biomeLabel: profile.label,
     population: world.population,
@@ -483,6 +497,14 @@ export interface PlayerRecord {
   ledger: VaultLedger;
   /** Plots this player prospected into existence. */
   prospected: FoundPlot[];
+  /**
+   * Plots this player owns.
+   *
+   * Leaving a world used to delete the claim outright, so walking back to the
+   * land office meant paying for the same land again. A claim is a purchase; it
+   * survives leaving, and a player can hold several and move between them.
+   */
+  claims: ClaimedWorld[];
   /** Plots they have put up for resale. */
   listings: Listing[];
 }
@@ -530,8 +552,37 @@ export function loadPlayer(): PlayerRecord {
   return {
     ledger: normaliseLedger(parsed?.ledger),
     prospected: readProspected(parsed?.prospected),
+    claims: readClaims(parsed?.claims),
     listings: Array.isArray(parsed?.listings) ? parsed!.listings! : [],
   };
+}
+
+function readClaims(raw: unknown): ClaimedWorld[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c): c is ClaimedWorld =>
+    !!c && typeof c === 'object'
+    && Number.isFinite((c as ClaimedWorld).seed)
+    && typeof (c as ClaimedWorld).name === 'string');
+}
+
+/** Record a claim, or update the one already held on that seed. */
+export function withClaim(record: PlayerRecord, claim: ClaimedWorld): PlayerRecord {
+  const rest = record.claims.filter((c) => c.seed !== claim.seed);
+  return { ...record, claims: [...rest, claim] };
+}
+
+/** Give a plot up: it leaves the player's holdings and can be claimed again. */
+export function withoutClaim(record: PlayerRecord, seed: number): PlayerRecord {
+  return {
+    ...record,
+    claims: record.claims.filter((c) => c.seed !== seed),
+    listings: record.listings.filter((l) => l.seed !== seed),
+  };
+}
+
+/** The claim this player holds on a plot, if any. */
+export function claimOf(record: PlayerRecord, seed: number): ClaimedWorld | null {
+  return record.claims.find((c) => c.seed === seed) ?? null;
 }
 
 export const savePlayer = (record: PlayerRecord) => writeJson(PLAYER_KEY, record);

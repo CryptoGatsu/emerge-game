@@ -175,6 +175,16 @@ export interface Citizen {
    * re-picks a destination and never goes.
    */
   calledTo?: string;
+  /** Held by the player right now: they go where the pointer goes. */
+  carried?: boolean;
+  /**
+   * Swimming back to shore after being set down in the water.
+   *
+   * Somebody dropped in a river should not stand on it, and should not vanish
+   * either. They swim — slowly, in a straight line for the nearest dry ground —
+   * and are cold and unhappy about it when they get there.
+   */
+  swimming?: boolean;
   /** True while sat on a bench or crouched at a fire, which the renderer draws. */
   seated: boolean;
   /**
@@ -285,7 +295,45 @@ export interface World {
    */
   ledger: DayLedger;
   ledgerYesterday: DayLedger;
+  /**
+   * What the player has earned by looking after this place, and why.
+   *
+   * Gold is the settlement's own money and always was; what changed is that it
+   * is no longer a tap into the token. A world left alone used to pile up gold
+   * at up to three hundred and sixty a day, every coin of it withdrawable — an
+   * untouched grassland made eighty million $EMERGE in sixty game days. That is
+   * not a game, it is a faucet, and it would have buried the token in sell
+   * pressure from people who never opened the tab.
+   *
+   * So $EMERGE is now minted only against stewardship: how well the settlement
+   * is actually run, times how recently the player did anything about it, times
+   * a hard daily ceiling.
+   */
+  stewardship: Stewardship;
   counter: number;
+}
+
+/** The day the player last did something here, and what it is worth. */
+export interface Stewardship {
+  /**
+   * How well the place is run, 0 to 1: housed, fed, employed, content and safe,
+   * weighted and then squared, so a mediocre settlement earns markedly less
+   * than a good one rather than slightly less.
+   */
+  score: number;
+  /**
+   * How recently the player intervened, 1 down to ATTENTION_FLOOR. This is the
+   * term that makes an idle world nearly worthless to farm.
+   */
+  attention: number;
+  /** The last day a player action touched this world. */
+  lastActionDay: number;
+  /** $EMERGE earned yesterday. */
+  dailyYield: number;
+  /** $EMERGE earned and not yet collected by the client. */
+  pending: number;
+  /** $EMERGE this world has earned in total, for the panel. */
+  lifetime: number;
 }
 
 /** The headings a day's Gold is booked under. */
@@ -965,6 +1013,9 @@ function moveCitizens(world: World, hours: number) {
   const obstacles = buildObstacles(world);
   const water = waterOf(world);
   for (const c of world.citizens) {
+    // Held by the player, or swimming for the bank: both are handled elsewhere
+    // and every rule below is about walking on land.
+    if (c.carried || c.swimming) continue;
     if (c.age < 16) c.job = 'unemployed';
     let phase = phaseFor(c, world.hour);
     if (c.hunger < 35 && phase !== 'sleeping') phase = 'eating';
@@ -1540,6 +1591,7 @@ export function renameCitizen(world: World, id: string, name: string) {
   const was = citizen.name;
   citizen.name = trimmed;
   citizen.handle = `@${trimmed.toLowerCase().replace(/[^a-z0-9]/g, '')}${(citizen.hash % 90) + 10}`;
+  noteAttention(world);
   pushFeed(world, 'social', `${was} goes by ${trimmed} now.`);
   return true;
 }
@@ -1549,6 +1601,7 @@ export function renameWorld(world: World, name: string) {
   const trimmed = name.trim().slice(0, 24);
   if (!trimmed) return;
   world.name = trimmed;
+  noteAttention(world);
   pushFeed(world, 'world', `This place is called ${trimmed} now.`);
 }
 
@@ -1857,7 +1910,9 @@ export function createWorld(seed = 481516, name?: string): World {
     resolution: null, artworks: [],
     unlockedAreas: ['Settlement'],
     marketClock: 0, flow: { produced: {}, consumed: {} },
-    ledger: emptyLedger(), ledgerYesterday: emptyLedger(), counter: 0,
+    ledger: emptyLedger(), ledgerYesterday: emptyLedger(),
+    stewardship: { score: 0, attention: 1, lastActionDay: 1, dailyYield: 0, pending: 0, lifetime: 0 },
+    counter: 0,
   };
   pushFeed(world, 'world', `${world.name} has emerged.`);
   pushFeed(world, 'world', 'Families are settling into their homes.');
@@ -2706,8 +2761,33 @@ function bridgeBuilding(world: World) {
     return;
   }
 
-  // Only worth starting when there is somewhere worth reaching and the
-  // settlement is comfortable enough to spare the timber.
+  // A building people cannot walk to is the most urgent reason to bridge, and
+  // it beats every threshold below.
+  //
+  // A player can place a building anywhere they can see, including across the
+  // water; the settlement then routed people at it, they walked to the bank,
+  // found the water in the way, and shuffled there. Now the town treats a
+  // stranded building as a reason to start a crossing, and it will spend down
+  // to its last few loads of timber to do it, because the alternative is a
+  // building nobody can use and people stuck on a shore.
+  const stranded = strandedBuilding(world);
+  if (stranded !== null) {
+    const reach = narrowestCrossing(world, stranded);
+    if (reach && world.resources.wood >= 12) {
+      world.bridgeWorks = {
+        island: stranded,
+        fromX: reach.fromX, fromY: reach.fromY,
+        toX: reach.toX, toY: reach.toY,
+        progress: 0,
+        length: Math.max(3, Math.round(reach.gap / 2.5)),
+      };
+      pushFeed(world, 'build', 'There are buildings across the water nobody can reach. Work has begun on a crossing.');
+      return;
+    }
+  }
+
+  // Otherwise: only worth starting when there is somewhere worth reaching and
+  // the settlement is comfortable enough to spare the timber.
   if (world.treasury < 900 || world.resources.wood < 45) return;
   const target = water.islands.find((i) =>
     i.id !== water.mainland && i.cells >= 40 && !world.connectedIslands.includes(i.id));
@@ -2724,6 +2804,26 @@ function bridgeBuilding(world: World) {
     length: Math.max(3, Math.round(crossing.gap / 2.5)),
   };
   pushFeed(world, 'build', 'The settlement has begun a bridge to the far shore.');
+}
+
+/**
+ * An island the settlement has a building on and cannot walk to.
+ *
+ * Returns the island id, or null when everything is reachable. The mainland is
+ * by definition reachable, and an island already on the connected list has a
+ * deck: this is looking for the case where somebody built across water that
+ * nothing spans.
+ */
+function strandedBuilding(world: World): number | null {
+  const water = waterOf(world);
+  for (const b of world.buildings) {
+    const island = water.landAt(b.x, b.y);
+    if (island === water.mainland) continue;
+    if (island < 0) continue;
+    if (world.connectedIslands.includes(island)) continue;
+    return island;
+  }
+  return null;
 }
 
 /**
@@ -2998,6 +3098,48 @@ function settlementBuilds(world: World) {
       : `The settlement built a ${want.toLowerCase()}.`);
 }
 
+/**
+ * Put somebody in a building that has nobody in it.
+ *
+ * Jobs are only re-rolled for a citizen whose needs have dipped or whose trade
+ * is over capacity, which is right for a settled town and wrong the moment a
+ * new building goes up: a contented, fully employed settlement would raise a
+ * bakery and leave it dark, because nobody was unhappy enough to change trade.
+ * A player who has just spent Gold and timber on a building should see somebody
+ * walk into it.
+ *
+ * The person who moves is taken from the most crowded trade, so filling the new
+ * place does not empty an old one.
+ */
+function fillEmptyTrades(world: World, tally: Partial<Record<Job, number>>) {
+  const workers = world.citizens.filter((c) => c.age >= 16);
+  for (const job of Object.keys(jobs) as WorkingJob[]) {
+    if (!jobCapacity(world, job)) continue;
+    if ((tally[job] ?? 0) > 0) continue;
+
+    // The trade with the most people beyond what its buildings can use, or
+    // failing that simply the most crowded one.
+    let from: WorkingJob | null = null;
+    let surplus = 0;
+    for (const other of Object.keys(jobs) as WorkingJob[]) {
+      const have = tally[other] ?? 0;
+      if (have < 2) continue;
+      const over = have - jobCapacity(world, other);
+      const score = over > 0 ? over + 10 : have;
+      if (score > surplus) { surplus = score; from = other; }
+    }
+    const mover = from
+      ? workers.find((c) => c.job === from)
+      : workers.find((c) => c.job === 'unemployed');
+    if (!mover) continue;
+
+    tally[mover.job] = (tally[mover.job] ?? 1) - 1;
+    mover.job = job;
+    tally[job] = (tally[job] ?? 0) + 1;
+    pushFeed(world, 'work', `${mover.name} took up ${JOB_LABELS[job].toLowerCase()} at the new ${jobs[job].building.toLowerCase()}.`);
+  }
+}
+
 /** A legal, empty plot from the settlement's own plan. */
 function freeSite(world: World, housing: boolean): [number, number] | null {
   const water = waterOf(world);
@@ -3196,12 +3338,92 @@ function heatTheHomes(world: World) {
   }
 }
 
+/**
+ * The most $EMERGE one world can mint in a day, at a perfectly run settlement
+ * the player is actively managing.
+ *
+ * Set against what a plot costs — a few hundred thousand — so a fortnight or
+ * so of real attention earns back a plot, and sixty days of leaving the tab
+ * open earns a fraction of one. The old arrangement paid eighty million for
+ * the latter.
+ */
+export const STEWARDSHIP_DAILY_CAP = 25_000;
+
+/** How many days of neglect it takes to fall to the floor. */
+const ATTENTION_DAYS = 3;
+
+/**
+ * What a wholly neglected world still earns, as a share of an attended one.
+ *
+ * Not zero: a settlement the player set up well and left running is worth
+ * something, and a hard zero would make the whole thing feel punitive. Eight
+ * per cent of the ceiling, times whatever score a drifting town holds, comes
+ * to about a thousand a day — enough to notice, nowhere near enough to farm.
+ */
+const ATTENTION_FLOOR = 0.08;
+
+/**
+ * Mark that the player did something here.
+ *
+ * Called from every player-driven action: raising a building, pulling one
+ * down, picking a citizen up, funding the treasury, renaming. This is the
+ * whole anti-farming mechanism, so it is deliberately not called from anything
+ * the simulation does by itself.
+ */
+export function noteAttention(world: World) {
+  world.stewardship.lastActionDay = world.day;
+}
+
+/** How well this settlement is being run, 0 to 1. */
+export function stewardshipScore(world: World) {
+  const adults = world.citizens.filter((c) => c.age >= 16);
+  if (!adults.length) return 0;
+  const housed = adults.filter((c) => homeOf(world, c)).length / adults.length;
+  const employed = adults.filter((c) => c.job !== 'unemployed').length / adults.length;
+  const content = world.citizens.reduce((s, c) => s + c.happiness, 0) / (world.citizens.length * 100);
+  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+  const fed = clamp(food / (world.citizens.length * 6), 0, 1);
+  // An unanswered hazard is the clearest sign nobody is minding the place.
+  const ready = readiness(world);
+  const safe = world.hazards.length
+    ? world.hazards.reduce((s, h) => s + ready[h.kind], 0) / world.hazards.length
+    : 1;
+  const quality = housed * 0.25 + fed * 0.25 + employed * 0.2 + content * 0.2 + safe * 0.1;
+  // Squared, so running a place well is worth much more than running it.
+  return clamp(quality * quality, 0, 1);
+}
+
+/** Accrue the day's stewardship yield. */
+function accrueYield(world: World) {
+  const s = world.stewardship;
+  const idleDays = Math.max(0, world.day - s.lastActionDay);
+  s.attention = Math.max(ATTENTION_FLOOR, 1 - idleDays / ATTENTION_DAYS);
+  s.score = stewardshipScore(world);
+  s.dailyYield = Math.round(STEWARDSHIP_DAILY_CAP * s.score * s.attention);
+  s.pending += s.dailyYield;
+  s.lifetime += s.dailyYield;
+}
+
+/**
+ * Hand the accrued yield to the caller, once.
+ *
+ * The world is regenerated from its seed each time the player opens it, so the
+ * running total cannot live here — the client drains this into the player's
+ * ledger, which is what persists.
+ */
+export function collectYield(world: World) {
+  const amount = Math.round(world.stewardship.pending);
+  world.stewardship.pending = 0;
+  return amount;
+}
+
 function daily(world: World) {
   world.flow = { produced: {}, consumed: {} };
   // Yesterday's books close before today's wages are drawn, so the figures the
   // player reads are a whole day rather than a day and a morning.
   world.ledgerYesterday = world.ledger;
   world.ledger = emptyLedger();
+  accrueYield(world);
   const workers = world.citizens.filter((c) => c.age >= 16);
   const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + maintenanceCost(b.type), 0);
 
@@ -3226,6 +3448,8 @@ function daily(world: World) {
     c.job = jobKey;
     tally[jobKey] = (tally[jobKey] ?? 0) + 1;
   }
+
+  fillEmptyTrades(world, tally);
 
   // Payroll is paid from the treasury, pro rata when it cannot cover the bill.
   const payroll = workers.reduce((s, c) => s + jobs[c.job as WorkingJob].wage, 0);
@@ -3283,6 +3507,7 @@ function daily(world: World) {
 export function advance(world: World, hours: number): World {
   if (!(hours > 0)) return world;
   world.hour += hours;
+  swimmers(world, hours);
   moveCitizens(world, hours);
   runMarket(world, hours);
   let guard = 0;
@@ -3340,6 +3565,103 @@ export function advance(world: World, hours: number): World {
   return world;
 }
 
+/* ------------------------------------------------------------------ *
+ * Picking people up
+ * ------------------------------------------------------------------ */
+
+/** Lift a citizen out of their day. They stop where they are until set down. */
+export function pickUpCitizen(world: World, id: string) {
+  const c = world.citizens.find((x) => x.id === id);
+  if (!c) return false;
+  releaseAmenity(world, c);
+  c.carried = true;
+  c.swimming = false;
+  c.path = [];
+  c.inside = false;
+  c.moving = false;
+  c.activity = 'idle';
+  return true;
+}
+
+/** Move somebody who is being carried. Nothing else about them changes. */
+export function carryCitizenTo(world: World, id: string, x: number, y: number) {
+  const c = world.citizens.find((x2) => x2.id === id);
+  if (!c?.carried) return;
+  c.x = clamp(x, 2, 98);
+  c.y = clamp(y, 4, 96);
+  c.destX = c.x;
+  c.destY = c.y;
+}
+
+/**
+ * Set a carried citizen down.
+ *
+ * On land they simply pick their day back up from where they are. In the water
+ * they start swimming for the nearest bank, which is the honest answer to being
+ * dropped in a river: not standing on it, and not disappearing.
+ */
+export function dropCitizen(world: World, id: string, x: number, y: number) {
+  const c = world.citizens.find((x2) => x2.id === id);
+  if (!c?.carried) return;
+  c.carried = false;
+  c.x = clamp(x, 2, 98);
+  c.y = clamp(y, 4, 96);
+  const water = waterOf(world);
+  if (water.blocks(c.x, c.y)) {
+    c.swimming = true;
+    c.happiness = Math.max(0, c.happiness - 8);
+    pushFeed(world, 'social', `${c.name} went into the water and is swimming for the bank.`);
+  } else {
+    c.path = [];
+    c.dwell = 0;
+    assignDestination(world, c, phaseFor(c, world.hour));
+  }
+  noteAttention(world);
+}
+
+/** How fast somebody swims, in world units per game hour. Slower than walking. */
+const SWIM_SPEED = 5.5;
+
+/**
+ * Move anyone in the water toward dry ground.
+ *
+ * Runs ahead of the ordinary movement step and takes those citizens out of it
+ * entirely, because every rule in there is about walking: the water mask
+ * refuses the ground they are standing on, and the escape nudge would fight
+ * their own progress.
+ */
+function swimmers(world: World, hours: number) {
+  const water = waterOf(world);
+  for (const c of world.citizens) {
+    if (!c.swimming) continue;
+    c.activity = 'walking';
+    c.inside = false;
+    c.moving = true;
+    if (!water.blocks(c.x, c.y)) {
+      // Ashore. Shake off the water and get on with the day.
+      c.swimming = false;
+      c.warmth = Math.max(0, c.warmth - 12);
+      c.path = [];
+      c.dwell = 0;
+      assignDestination(world, c, phaseFor(c, world.hour));
+      pushFeed(world, 'social', `${c.name} made it back to dry land.`);
+      continue;
+    }
+    // The nearest unblocked cell, which is what `toClear` is for. `toLand` only
+    // answers for someone in the mask's own water, and the margin around it is
+    // exactly where a dropped citizen tends to land.
+    const out = water.toClear(c.x, c.y);
+    const dir = out.d > 0 ? out : water.toLand(c.x, c.y);
+    if (!(dir.d > 0)) { c.swimming = false; continue; }
+    const stepLen = Math.min(SWIM_SPEED * hours, dir.d + 0.4);
+    c.x = clamp(c.x + dir.x * stepLen, 2, 98);
+    c.y = clamp(c.y + dir.y * stepLen, 4, 96);
+    c.destX = c.x;
+    c.destY = c.y;
+    c.facing = Math.abs(dir.x) > Math.abs(dir.y) ? (dir.x > 0 ? 'e' : 'w') : (dir.y > 0 ? 's' : 'n');
+  }
+}
+
 /** Immutable wrapper around `advance`, kept for callers that want snapshots. */
 export function tick(world: World, hours = 1): World {
   return advance(structuredClone(world), hours);
@@ -3358,17 +3680,72 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   if (waterOf(world).blocks(x, y)) return null;
   const need = buildMaterials(type);
   const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, 6, 94), y: clamp(y, 8, 92), workers: [], active: true };
+  noteAttention(world);
   spend(world, 'building', cost);
   drawMaterials(world, type);
   world.buildings.push(building);
+  // The settlement notices it straight away rather than at the next day roll:
+  // amenities are laid out around it, and somebody changes trade to work in it.
+  world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  staffNow(world);
   pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
   checkUnlocks(world);
   return building;
 }
 
+/** Fill any trade a building has just opened, without waiting for the day to turn. */
+function staffNow(world: World) {
+  const tally: Partial<Record<Job, number>> = {};
+  for (const c of world.citizens) if (c.age >= 16) tally[c.job] = (tally[c.job] ?? 0) + 1;
+  fillEmptyTrades(world, tally);
+}
+
+/**
+ * Pull a building down.
+ *
+ * Half the timber and stone come back — salvage, not a refund — and the Gold
+ * does not, because the Gold went on wages and haulage and those were spent.
+ * Anyone working there changes trade at once rather than walking to a building
+ * that is no longer standing.
+ */
+export function demolishBuilding(world: World, id: string): { ok: boolean; message: string } {
+  const building = world.buildings.find((b) => b.id === id);
+  if (!building) return { ok: false, message: 'That building is not there.' };
+  // The market is where the settlement eats and trades; pulling it down strands
+  // everybody at once, and no amount of salvage is worth that.
+  if (building.type === 'Market') {
+    return { ok: false, message: 'The market is the heart of the settlement. It cannot be pulled down.' };
+  }
+  const home = world.families.find((f) => f.homeId === building.id);
+  if (home && home.members.length) {
+    return { ok: false, message: `The ${home.name} family lives there. Rehouse them first.` };
+  }
+
+  const need = buildMaterials(building.type);
+  const wood = Math.floor(need.wood / 2);
+  const stone = Math.floor(need.stone / 2);
+  world.resources.wood += wood;
+  world.resources.stone += stone;
+  note(world, 'produced', 'wood', wood);
+  note(world, 'produced', 'stone', stone);
+
+  world.buildings = world.buildings.filter((b) => b.id !== id);
+  // Anyone who was heading there needs somewhere else to be, now.
+  for (const c of world.citizens) {
+    if (c.destId === id) { c.destId = undefined; c.path = []; c.dwell = 0; }
+    if (c.targetBuildingId === id) c.targetBuildingId = undefined;
+  }
+  world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  staffNow(world);
+  noteAttention(world);
+  pushFeed(world, 'build', `The ${building.type.toLowerCase()} was pulled down. ${wood} timber and ${stone} stone were salvaged.`);
+  return { ok: true, message: `Salvaged ${wood} timber and ${stone} stone. The Gold is gone.` };
+}
+
 /** Add Gold to the treasury from outside the settlement's own economy. */
 export function fundTreasury(world: World, gold: number, note: string) {
   if (!(gold > 0)) return;
+  noteAttention(world);
   earn(world, 'vault', gold);
   pushFeed(world, 'market', note);
 }
@@ -3376,6 +3753,7 @@ export function fundTreasury(world: World, gold: number, note: string) {
 /** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
 export function drawFromTreasury(world: World, gold: number, note: string) {
   if (!(gold > 0) || world.treasury < gold) return false;
+  noteAttention(world);
   spend(world, 'vault', gold);
   pushFeed(world, 'market', note);
   return true;

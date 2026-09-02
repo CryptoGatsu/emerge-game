@@ -36,6 +36,8 @@ interface HudProps {
   onFocus: (target: PickTarget) => void;
   onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
+  /** Pull a building down for half its materials. */
+  onDemolish: (id: string) => void;
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
   onResetView: () => void;
@@ -143,13 +145,15 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow, onRenameCitizen }: {
+function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish }: {
   focus: Focus; following: string | null; player: PlayerRecord;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
+  onDemolish: (id: string) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
+  const [confirming, setConfirming] = useState<string | null>(null);
   const affordable = player.ledger.balance >= RENAME_CITIZEN_EMERGE;
   if (focus.kind === 'building') {
     return (
@@ -171,6 +175,22 @@ function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow,
             </button>
           ))}
         </div>
+        {focus.demolishable && (
+          <div className="demolish">
+            <button
+              className={confirming === focus.id ? 'danger armed' : 'danger'}
+              onClick={() => {
+                if (confirming === focus.id) { onDemolish(focus.id); setConfirming(null); }
+                else setConfirming(focus.id);
+              }}
+            >
+              {confirming === focus.id ? 'Pull it down — tap again' : 'Pull down'}
+            </button>
+            <span className="muted small">
+              Salvages {focus.salvage.wood} timber and {focus.salvage.stone} stone. The Gold does not come back.
+            </span>
+          </div>
+        )}
       </section>
     );
   }
@@ -497,6 +517,7 @@ export function Hud(props: HudProps) {
               onFocus={props.onFocus}
               onToggleFollow={props.onToggleFollow}
               onRenameCitizen={props.onRenameCitizen}
+              onDemolish={props.onDemolish}
             />
           )
           : (

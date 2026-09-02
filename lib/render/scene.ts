@@ -33,6 +33,13 @@ export type PickTarget = { kind: 'citizen' | 'building'; id: string } | null;
 export interface SceneCallbacks {
   onHover?: (target: PickTarget) => void;
   onSelect?: (target: PickTarget) => void;
+  /**
+   * The player has hold of somebody.
+   *
+   * `start` when they grab, `move` while the pointer travels, `drop` where they
+   * let go, and `cancel` for a grab that never moved — a click, not a carry.
+   */
+  onCarry?: (id: string, phase: 'start' | 'move' | 'drop' | 'cancel', at: { x: number; y: number }) => void;
   onCamera?: (zoom: number) => void;
 }
 
@@ -459,6 +466,12 @@ export class EmergeScene {
       sprite.container.eventMode = 'static';
       sprite.container.cursor = 'pointer';
       sprite.container.hitArea = new Rectangle(-9, -32, 18, 34);
+      sprite.container.on('pointerdown', (e: FederatedPointerEvent) => {
+        // Grabbing a person is not panning the map. The camera handler runs on
+        // the canvas, so this stops the event reaching it.
+        e.stopPropagation();
+        this.beginCarry(citizen.id, e.global.x, e.global.y);
+      });
       sprite.container.on('pointerover', () => this.setHover({ kind: 'citizen', id: citizen.id }));
       sprite.container.on('pointerout', () => this.setHover(null));
       sprite.container.on('pointertap', () => this.tap({ kind: 'citizen', id: citizen.id }));
@@ -682,6 +695,15 @@ export class EmergeScene {
         return;
       }
 
+      // Carrying somebody: the pointer moves the person, not the camera.
+      if (this.carrying) {
+        this.carryMoved += Math.abs(e.clientX - this.lastPointer.x) + Math.abs(e.clientY - this.lastPointer.y);
+        this.lastPointer = { x: e.clientX, y: e.clientY };
+        const at = this.pointerWorld(e.clientX, e.clientY);
+        this.callbacks.onCarry?.(this.carrying, 'move', at);
+        return;
+      }
+
       if (!this.dragging) return;
       const dx = e.clientX - this.lastPointer.x;
       const dy = e.clientY - this.lastPointer.y;
@@ -691,6 +713,18 @@ export class EmergeScene {
     });
 
     const end = (e: PointerEvent) => {
+      if (this.carrying) {
+        const id = this.carrying;
+        this.carrying = null;
+        const at = this.pointerWorld(e.clientX, e.clientY);
+        // A grab that never moved is a tap: put them straight back and select
+        // them, which is what a player who clicked on somebody expects.
+        this.callbacks.onCarry?.(id, this.carryMoved > 6 ? 'drop' : 'cancel', at);
+        if (this.carryMoved <= 6) this.tap({ kind: 'citizen', id });
+        points.delete(e.pointerId);
+        if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+        return;
+      }
       points.delete(e.pointerId);
       if (points.size < 2) pinchDistance = 0;
       if (points.size === 1) {
@@ -730,8 +764,32 @@ export class EmergeScene {
     }) as EventListener);
   }
 
+  /* ---------------------------------------------------------------- *
+   * Picking people up
+   * ---------------------------------------------------------------- */
+
+  /** Whoever the player currently has hold of, and whether they have moved. */
+  private carrying: string | null = null;
+  private carryMoved = 0;
+
+  private beginCarry(id: string, sx: number, sy: number) {
+    if (!this.callbacks.onCarry) return;
+    this.carrying = id;
+    this.carryMoved = 0;
+    this.dragging = false;
+    this.lastPointer = { x: sx, y: sy };
+    this.callbacks.onCarry(id, 'start', this.pointerWorld(sx, sy));
+  }
+
+  /** Where a screen point lands in the world, allowing for pan and zoom. */
+  private pointerWorld(sx: number, sy: number) {
+    const rect = this.app.canvas.getBoundingClientRect();
+    const scene = this.screenToScene(sx - rect.left, sy - rect.top);
+    return screenToWorld(scene.x, scene.y);
+  }
+
   private setHover(target: PickTarget) {
-    if (this.dragging) return;
+    if (this.dragging || this.carrying) return;
     this.hovered = target;
     this.callbacks.onHover?.(target);
   }
