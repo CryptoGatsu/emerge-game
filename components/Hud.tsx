@@ -515,9 +515,6 @@ export function Hud(props: HudProps) {
         </button>
       )}
 
-      {/* What the player has, without opening anything. */}
-      <Purse view={view} player={props.player} onPanel={props.onPanel} />
-
       <header className={`brand-block ${introShown ? '' : 'hidden'}`} aria-hidden={!introShown}>
         <div className="brand-line">
           <div className="brand-mark">✦</div>
@@ -530,6 +527,10 @@ export function Hud(props: HudProps) {
         <p className="brand-copy accent">You don&apos;t control them.<br />You discover them.<br />You shape the world they live in.</p>
       </header>
 
+      {/* One centred column: population, then the clock, then what the player
+          has. Laid out as separate absolute boxes these sat on top of each
+          other the moment the window was narrow enough — the purse covered the
+          population pill and the speed controls both. */}
       <div className="top-centre">
         <div className="beings-pill">
           <span className="spark">✦</span>
@@ -551,6 +552,7 @@ export function Hud(props: HudProps) {
             {props.sound ? '♪' : '♪̸'}
           </button>
         </div>
+        <Purse view={view} player={props.player} onPanel={props.onPanel} />
       </div>
 
       {compact

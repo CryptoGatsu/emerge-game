@@ -25,6 +25,7 @@ import {
   dropCitizen, drawFromTreasury, fundTreasury, pickUpCitizen, renameCitizen, renameWorld,
   type World,
 } from '@/lib/simulation';
+import { clearWorld, loadWorld, saveWorld } from '@/lib/world/save';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
 import {
@@ -47,6 +48,9 @@ import { Panels, type PanelKey } from './Panels';
  * and nothing needed rebalancing to match.
  */
 const HOURS_PER_SECOND = 0.15;
+
+/** How often the settlement is written down, in milliseconds. */
+const SAVE_INTERVAL = 15_000;
 /** How often the interface refreshes from the world. */
 const HUD_INTERVAL = 180;
 
@@ -122,6 +126,7 @@ export default function EmergeClient() {
   /** Give a plot up for good. The land goes back on the market. */
   const release = useCallback((seed: number) => {
     clearClaimedWorld();
+    clearWorld(seed);
     setPlayer((prev) => {
       if (!prev) return prev;
       const next = withoutClaim(prev, seed);
@@ -189,7 +194,8 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
   const soundRef = useRef<Soundscape | null>(null);
   const [sound, setSound] = useState(false);
 
-  if (!worldRef.current) worldRef.current = createWorld(claimed.seed, claimed.name);
+  // The settlement as it was left, or a new one if there is nothing to read.
+  if (!worldRef.current) worldRef.current = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
 
   /* -------------------------------------------------------------- *
    * Boot: renderer, simulation loop and HUD sampling
@@ -245,9 +251,21 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
       // went on advancing the old one — so the new settlement stood perfectly
       // still until the page was reloaded.
       const live = worldRef.current;
-      if (live && !pausedRef.current) advance(live, dt * HOURS_PER_SECOND * speedRef.current);
+      // The real seconds are passed alongside the game hours: the yield is paid
+      // against the wall clock, so running at 6x shows the player more of the
+      // settlement's life without paying them six times as much for it.
+      if (live && !pausedRef.current) advance(live, dt * HOURS_PER_SECOND * speedRef.current, dt);
     };
     frame = requestAnimationFrame(step);
+
+    // Write the settlement down every so often, and again the moment the tab
+    // goes away — a phone backgrounding the page never runs another timer.
+    const saveTimer = window.setInterval(() => {
+      if (worldRef.current) saveWorld(worldRef.current);
+    }, SAVE_INTERVAL);
+    const persist = () => { if (worldRef.current) saveWorld(worldRef.current); };
+    document.addEventListener('visibilitychange', persist);
+    window.addEventListener('pagehide', persist);
 
     const hudTimer = window.setInterval(() => {
       const live = worldRef.current;
@@ -263,6 +281,10 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
     }, HUD_INTERVAL);
 
     return () => {
+      persist();
+      window.clearInterval(saveTimer);
+      document.removeEventListener('visibilitychange', persist);
+      window.removeEventListener('pagehide', persist);
       cancelAnimationFrame(frame);
       window.clearInterval(hudTimer);
       scene.destroy();
@@ -303,7 +325,7 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
     seedRef.current = claimed.seed;
     const scene = sceneRef.current;
     if (!scene) return;
-    const next = createWorld(claimed.seed, claimed.name);
+    const next = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
     worldRef.current = next;
     setSelected(null);
     setFollowing(null);

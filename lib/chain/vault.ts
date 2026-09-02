@@ -66,7 +66,23 @@ export interface VaultLedger {
   lifetimeEarned: number;
   withdrawnEmerge: number;
   burnedEmerge: number;
+  /**
+   * How much has been minted today, and which day that was.
+   *
+   * The per-world pacing already ties yield to the wall clock, but a player
+   * holding several plots would otherwise collect that rate once per plot.
+   * This is the backstop: a ceiling on what one player can mint in a real day,
+   * across everything they own.
+   */
+  earnedToday: number;
+  earnedOn: string;
 }
+
+/** The most one player can mint in a real day, across every world they hold. */
+export const DAILY_EARN_CEILING = 30_000;
+
+/** Today, as a plain date key in the player's own timezone. */
+const todayKey = () => new Date().toISOString().slice(0, 10);
 
 export const NEW_LEDGER: VaultLedger = {
   balance: LOCAL_TEST_ALLOCATION,
@@ -76,6 +92,8 @@ export const NEW_LEDGER: VaultLedger = {
   lifetimeEarned: 0,
   withdrawnEmerge: 0,
   burnedEmerge: 0,
+  earnedToday: 0,
+  earnedOn: '',
 };
 
 /** Tolerate ledgers saved before this feature existed. */
@@ -92,17 +110,39 @@ export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null)
     lifetimeEarned: Number(ledger?.lifetimeEarned) || 0,
     withdrawnEmerge: Number(ledger?.withdrawnEmerge) || 0,
     burnedEmerge: Number(ledger?.burnedEmerge) || 0,
+    earnedToday: Number(ledger?.earnedToday) || 0,
+    earnedOn: typeof ledger?.earnedOn === 'string' ? ledger.earnedOn : '',
   };
 }
 
-/** Credit a day's stewardship yield. */
+/**
+ * Credit stewardship yield, up to the player's ceiling for the real day.
+ *
+ * Anything past the ceiling is not banked for later — it is simply not minted.
+ * The point of a daily ceiling is that a day is a day.
+ */
 export function accrue(ledger: VaultLedger, emerge: number): VaultLedger {
   if (!(emerge > 0)) return ledger;
+  const today = todayKey();
+  const spentToday = ledger.earnedOn === today ? ledger.earnedToday : 0;
+  const room = Math.max(0, DAILY_EARN_CEILING - spentToday);
+  const minted = Math.min(emerge, room);
+  if (minted <= 0) {
+    return { ...ledger, earnedOn: today, earnedToday: spentToday };
+  }
   return {
     ...ledger,
-    earnedEmerge: ledger.earnedEmerge + emerge,
-    lifetimeEarned: ledger.lifetimeEarned + emerge,
+    earnedEmerge: ledger.earnedEmerge + minted,
+    lifetimeEarned: ledger.lifetimeEarned + minted,
+    earnedToday: spentToday + minted,
+    earnedOn: today,
   };
+}
+
+/** How much of today's ceiling is left. */
+export function earnRoomToday(ledger: VaultLedger) {
+  const spent = ledger.earnedOn === todayKey() ? ledger.earnedToday : 0;
+  return { spent, ceiling: DAILY_EARN_CEILING, left: Math.max(0, DAILY_EARN_CEILING - spent) };
 }
 
 export const goldForEmerge = (emerge: number) => Math.floor((emerge / EMERGE_PER_GOLD) * 100) / 100;

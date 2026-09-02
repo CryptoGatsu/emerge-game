@@ -13,7 +13,8 @@ import { buildMaterials, maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import { ACTIVE_CHAIN, TOKEN, shortAddress, tokenActions, tokenLive } from '@/lib/chain/emerge';
 import {
-  EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
+  DAILY_EARN_CEILING, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
+  RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, deposit, quoteWithdraw, withdraw, type VaultLedger,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
@@ -98,9 +99,23 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
             <h3>{row.label}</h3>
             <strong>{row.quote.price.toFixed(2)} <small>GOLD / UNIT</small></strong>
           </div>
+          {/* A chart of one point is an empty box the height of a chart, which
+              is what a brand-new world shows on its first day. Say so instead
+              until there is a second day to draw a line between. */}
           <div className="market-chart">
-            <span className="eyebrow">LAST {row.quote.history.length} DAYS</span>
-            <Sparkline values={row.quote.history} width={260} height={54} />
+            {row.quote.history.length > 1 ? (
+              <>
+                <span className="eyebrow">
+                  LAST {row.quote.history.length} {row.quote.history.length === 1 ? 'DAY' : 'DAYS'}
+                </span>
+                <Sparkline values={row.quote.history} width={260} height={54} />
+              </>
+            ) : (
+              <>
+                <span className="eyebrow">PRICE HISTORY</span>
+                <p className="muted small no-history">Nothing to plot yet — come back tomorrow.</p>
+              </>
+            )}
           </div>
           <div className="market-figures">
             <div><span>IN STORE</span><b>{store(row.key)}</b></div>
@@ -318,8 +333,8 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
               burn. That is your own money; moving it mints nothing.
             </li>
             <li>
-              <b>Stewardship yield.</b> The only new {TOKEN.ticker}. Up to {steward.cap.toLocaleString()} a
-              day, multiplied by two things.
+              <b>Stewardship yield.</b> The only new {TOKEN.ticker}. Up to {steward.cap.toLocaleString()} per
+              <em>real</em> day — not per settlement day — multiplied by two things.
             </li>
           </ul>
           <p>The two multipliers are the whole game:</p>
@@ -330,18 +345,40 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
               running a place <em>well</em> is worth much more than running it.
             </li>
             <li>
-              <b>Your attention</b> — this decays from full to eight per cent over three days in which
-              you do nothing. Building, pulling down, moving somebody, funding the treasury and
-              renaming all count.
+              <b>Your attention</b> — full if you have done something in the last hour, sliding to
+              eight per cent over a day and a half of nothing. Building, pulling down, moving
+              somebody, funding the treasury and renaming all count.
             </li>
           </ul>
           <p>
-            So: a world you leave running earns a trickle. A world you actually run earns about ten
-            times as much. Collect it in the Bank panel whenever you like.
+            <b>The speed control does not pay.</b> At 6× a settlement lives a hundred and thirty-six
+            days in a real hour, and paying against that clock would have made the fast-forward
+            button worth millions an hour. Yield is paced by the wall clock, so speed is a way to see
+            more of your world sooner and nothing else.
+          </p>
+          <p>
+            So: a world you have not touched for two days earns about 1,700 {TOKEN.ticker} a day. One
+            you are actually running earns around 21,000. Collect it in the Bank panel whenever you
+            like — and there is a ceiling of {DAILY_EARN_CEILING.toLocaleString()} a real day across
+            everything you own, so holding six plots is six worlds to enjoy rather than six times
+            the income.
           </p>
           <p>
             <b>You are being paid for judgement, not for uptime.</b> Nobody gets rich here by opening
             a tab and going to lunch.
+          </p>
+        </section>
+
+        <section>
+          <h4>Your world is saved</h4>
+          <p>
+            Everything the settlement is — the people, what they have built, who they are friends
+            with, the treasury, the date — is written down as you play and restored when you come
+            back. Close the tab mid-winter and you return to that winter.
+          </p>
+          <p>
+            It is kept in this browser, so clearing your site data loses it, and it does not follow
+            you to another device. Giving a plot up erases its settlement for good.
           </p>
         </section>
 
@@ -585,15 +622,17 @@ function BankPanel({ view, player, onClose, onVault }: {
           <span>YOUR ATTENTION</span>
           <b>{Math.round(steward.attention * 100)}%</b>
           <em>
-            {steward.idleDays === 0
-              ? 'Acted on today'
-              : `Nothing done for ${steward.idleDays} ${steward.idleDays === 1 ? 'day' : 'days'}`}
+            {steward.idleHours < 1
+              ? 'Acted on just now'
+              : steward.idleHours < 24
+                ? `Nothing done for ${Math.floor(steward.idleHours)}h`
+                : `Nothing done for ${Math.floor(steward.idleHours / 24)} ${Math.floor(steward.idleHours / 24) === 1 ? 'day' : 'days'}`}
           </em>
         </div>
         <div>
           <span>EARNING PER DAY</span>
           <b>{steward.dailyYield.toLocaleString()}</b>
-          <em>{TOKEN.ticker}, of {steward.cap.toLocaleString()} possible</em>
+          <em>{TOKEN.ticker} a real day, of {steward.cap.toLocaleString()} possible</em>
         </div>
         <div>
           <span>EARNED HERE</span>

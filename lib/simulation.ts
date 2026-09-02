@@ -341,6 +341,19 @@ export interface World {
 /** The day the player last did something here, and what it is worth. */
 export interface Stewardship {
   /**
+   * Wall-clock time the player last acted here, and real seconds banked toward
+   * the next payout.
+   *
+   * Both are real time on purpose. Everything else in this simulation runs on
+   * the game clock, which the player controls: at six times speed a settlement
+   * lives a hundred and thirty-five days in a real hour. Paying a daily yield
+   * against *that* clock meant the fast-forward button was worth about two and
+   * three quarter million $EMERGE an hour. Speed is a way to watch the world
+   * sooner, not a way to earn faster.
+   */
+  lastActionAt: number;
+  banked: number;
+  /**
    * How well the place is run, 0 to 1: housed, fed, employed, content and safe,
    * weighted and then squared, so a mediocre settlement earns markedly less
    * than a good one rather than slightly less.
@@ -1847,6 +1860,14 @@ export function renameWorld(world: World, name: string) {
  */
 export const OPENING_TREASURY = 400;
 
+/**
+ * Game hours per real second at ordinary speed, mirrored from the client.
+ *
+ * Only used to guess how much real time a caller meant when it did not say —
+ * the client always says.
+ */
+const HOURS_PER_SECOND_BASE = 0.15;
+
 function starterBuildings(seed: number, layout: WorldLayout, population: number): Building[] {
   const make = (id: string, type: string, x: number, y: number): Building => ({ id, type, x, y, workers: [], active: true });
   const civic = layout.civic;
@@ -2153,7 +2174,10 @@ export function createWorld(seed = 481516, name?: string): World {
     unlockedAreas: ['Settlement'],
     marketClock: 0, flow: { produced: {}, consumed: {} },
     ledger: emptyLedger(), ledgerYesterday: emptyLedger(),
-    stewardship: { score: 0, attention: 1, lastActionDay: 1, dailyYield: 0, pending: 0, lifetime: 0 },
+    stewardship: {
+      score: 0, attention: 1, lastActionDay: 1, lastActionAt: Date.now(),
+      banked: 0, dailyYield: 0, pending: 0, lifetime: 0,
+    },
     counter: 0,
   };
   pushFeed(world, 'world', `${world.name} has emerged.`);
@@ -3664,18 +3688,27 @@ function heatTheHomes(world: World) {
 }
 
 /**
- * The most $EMERGE one world can mint in a day, at a perfectly run settlement
- * the player is actively managing.
+ * The most $EMERGE one world can mint in a **real** day, at a perfectly run
+ * settlement the player is actively managing.
  *
- * Set against what a plot costs — a few hundred thousand — so a fortnight or
- * so of real attention earns back a plot, and sixty days of leaving the tab
- * open earns a fraction of one. The old arrangement paid eighty million for
- * the latter.
+ * Set against what a plot costs — a few hundred thousand — so a couple of weeks
+ * of real attention earns back a plot. The rate is per day of wall-clock time,
+ * not per day of settlement time, because those differ by two orders of
+ * magnitude and the player picks which.
  */
 export const STEWARDSHIP_DAILY_CAP = 25_000;
 
-/** How many days of neglect it takes to fall to the floor. */
-const ATTENTION_DAYS = 3;
+/** Real seconds in a day, which is what the yield is paced against. */
+const REAL_DAY = 86_400;
+
+/**
+ * How many hours of real neglect it takes to fall to the attention floor.
+ *
+ * A day and a half: somebody who looks in on their settlement daily keeps the
+ * full rate, and somebody who set one up last week and forgot about it does
+ * not.
+ */
+const ATTENTION_HOURS = 36;
 
 /**
  * What a wholly neglected world still earns, as a share of an attended one.
@@ -3697,6 +3730,7 @@ const ATTENTION_FLOOR = 0.08;
  */
 export function noteAttention(world: World) {
   world.stewardship.lastActionDay = world.day;
+  world.stewardship.lastActionAt = Date.now();
 }
 
 /** How well this settlement is being run, 0 to 1. */
@@ -3718,15 +3752,30 @@ export function stewardshipScore(world: World) {
   return clamp(quality * quality, 0, 1);
 }
 
-/** Accrue the day's stewardship yield. */
-function accrueYield(world: World) {
+/**
+ * Accrue stewardship yield for a slice of real time.
+ *
+ * Called from the tick rather than the day roll, and paid in proportion to the
+ * wall-clock seconds that actually passed. Running the settlement faster shows
+ * the player more of its life in the same minute; it does not pay them more.
+ */
+function accrueYield(world: World, realSeconds: number) {
   const s = world.stewardship;
-  const idleDays = Math.max(0, world.day - s.lastActionDay);
-  s.attention = Math.max(ATTENTION_FLOOR, 1 - idleDays / ATTENTION_DAYS);
+  if (!(realSeconds > 0)) return;
+  const idleHours = Math.max(0, (Date.now() - s.lastActionAt) / 3_600_000);
+  s.attention = Math.max(ATTENTION_FLOOR, 1 - idleHours / ATTENTION_HOURS);
   s.score = stewardshipScore(world);
+  // What a full real day at this rate would come to, which is the figure worth
+  // showing: "you are earning this much a day, if you keep this up".
   s.dailyYield = Math.round(STEWARDSHIP_DAILY_CAP * s.score * s.attention);
-  s.pending += s.dailyYield;
-  s.lifetime += s.dailyYield;
+  s.banked += (s.dailyYield * realSeconds) / REAL_DAY;
+  // Hand over whole tokens only, and keep the remainder banked, so a tick of a
+  // sixtieth of a second is not silently rounded away to nothing.
+  const whole = Math.floor(s.banked);
+  if (whole <= 0) return;
+  s.banked -= whole;
+  s.pending += whole;
+  s.lifetime += whole;
 }
 
 /**
@@ -3748,7 +3797,6 @@ function daily(world: World) {
   // player reads are a whole day rather than a day and a morning.
   world.ledgerYesterday = world.ledger;
   world.ledger = emptyLedger();
-  accrueYield(world);
   const workers = world.citizens.filter((c) => c.age >= 16);
   const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + maintenanceCost(b.type), 0);
 
@@ -3830,8 +3878,12 @@ function daily(world: World) {
  * Advance the world in place by `hours` of game time. Called every animation
  * frame by the client; safe to call with very small deltas.
  */
-export function advance(world: World, hours: number): World {
+export function advance(world: World, hours: number, realSeconds?: number): World {
   if (!(hours > 0)) return world;
+  // Yield is paid against the wall clock. A caller that does not say how much
+  // real time passed is assumed to be running at ordinary speed, which is what
+  // the probes do.
+  accrueYield(world, realSeconds ?? hours / HOURS_PER_SECOND_BASE);
   world.hour += hours;
   swimmers(world, hours);
   moveCitizens(world, hours);

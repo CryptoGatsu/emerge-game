@@ -834,6 +834,15 @@ button {
 
 .overlay-panel {
   width: min(560px, 100%);
+  /*
+   * A grid item's default `min-width: auto` is the width of its widest
+   * unbreakable content, and it overrides `width`. So a panel holding a
+   * sparkline and a six-column table simply grew past the phone it was on and
+   * ran off the right-hand edge — the width above was never being honoured.
+   * Every container down the panel needs this, not just the panel.
+   */
+  min-width: 0;
+  max-width: 100%;
   max-height: min(78vh, 760px);
   display: flex; flex-direction: column;
   background: linear-gradient(180deg, rgba(12, 27, 17, 0.97), rgba(7, 17, 11, 0.97));
@@ -852,7 +861,16 @@ button {
 .overlay-panel header p { margin: 5px 0 0; font-size: 12px; max-width: 62ch; line-height: 1.55; }
 .overlay-panel .panel-close { position: static; font-size: 22px; }
 
-.overlay-body { padding: 18px 22px 22px; overflow-y: auto; }
+.overlay-body { padding: 18px 22px 22px; overflow-y: auto; overflow-x: hidden; min-width: 0; }
+
+/* Every grid and flex container inside a panel, for the same reason. */
+.market-focus, .market-row, .market-rows, .bank-grid, .books, .books-col,
+.steward-grid, .connect-grid, .build-grid, .vault-grid, .resource-grid,
+.token-grid, .listing-row, .plot-traits, .chat-log, .chat-row, .chat-compose,
+.guide, .guide section, .build-stores, .build-materials { min-width: 0; }
+.market-focus > *, .market-row > *, .bank-grid > *, .books-col > *,
+.steward-grid > *, .connect-grid > *, .build-grid > *, .vault-grid > *,
+.token-grid > *, .listing-row > *, .chat-row > * { min-width: 0; }
 .overlay-body h4 { margin: 22px 0 10px; font-size: 10px; letter-spacing: 2.2px; color: var(--emerald); }
 .eyebrow { font-size: 9px; letter-spacing: 2.4px; color: var(--emerald-dim); }
 
@@ -871,6 +889,7 @@ button {
 .market-focus strong small { font-size: 9px; letter-spacing: 1.6px; color: var(--muted); }
 .market-focus > div > span { display: block; font-size: 9px; letter-spacing: 2px; color: var(--muted); }
 .market-focus > div > b { font-size: 17px; color: var(--cream); }
+.market-chart .no-history { margin: 8px 0 0; font-style: italic; }
 .market-focus .up { color: var(--emerald); }
 .market-focus .down { color: #e0785f; }
 
@@ -933,11 +952,15 @@ button {
 .bank-grid b { font-size: 18px; color: var(--cream); }
 
 /* The purse: Gold and earned $EMERGE, on screen at all times. */
+/*
+ * The purse sits in the top-centre column, under the clock.
+ *
+ * It was absolutely positioned twice before this: centred, where it swallowed
+ * every click on the speed buttons; then top-left, where on any narrow window
+ * it covered the population pill. Three absolute boxes at the top of a screen
+ * will always find a width at which they collide. In the flow they cannot.
+ */
 .purse {
-  /* Under the world chip on the left, clear of the speed controls in the
-     middle — laid over them, it swallowed every click on 1×, 2× and 6×. */
-  position: absolute;
-  top: 78px; left: 18px;
   display: flex; align-items: stretch; gap: 0;
   padding: 0;
   border-radius: 11px;
@@ -962,9 +985,10 @@ button {
 .purse-cell.emerge b { color: var(--emerald); }
 .purse-cell.wallet b { color: var(--cream); font-size: 13px; }
 @media (max-width: 760px) {
-  .purse { top: 66px; left: 12px; }
-  .purse-cell { padding: 6px 10px; }
+  .purse-cell { padding: 5px 11px; }
   .purse-cell b { font-size: 13px; }
+  /* The wallet balance is the one figure that is not about this settlement,
+     and the one worth losing when the screen is 390 pixels wide. */
   .purse-cell.wallet { display: none; }
 }
 
@@ -1096,6 +1120,8 @@ button.fold:hover { color: var(--emerald); }
 .books-col.earning .books-line.today b { color: var(--emerald); }
 .books-col.spending .books-line.today b { color: var(--gold); }
 @media (max-width: 620px) { .books { grid-template-columns: 1fr; } }
+
+
 
 /* What the yard holds, above the buildings it can pay for. */
 .build-stores {
@@ -1499,4 +1525,55 @@ button.fold:hover { color: var(--emerald); }
   .phone-sheet .feed-scroll { max-height: 42vh; }
   .bottom-left { bottom: 104px; }
   .touch-zoom { bottom: 148px; }
+}
+
+/*
+ * Panels on a phone.
+ *
+ * The overlay used to keep a forty-pixel border on every side and lay its
+ * contents out in three and six columns whatever the screen, so on a 390px
+ * phone the market ran off the right edge with its header cut in half. Here
+ * the chrome gets out of the way and every multi-column block collapses to
+ * one or two.
+ */
+@media (max-width: 720px) {
+  .overlay { padding: 10px; place-items: end center; }
+  .overlay-panel, .overlay-panel.wide {
+    width: 100%;
+    max-height: 88vh;
+    border-radius: 16px 16px 12px 12px;
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+  .overlay-panel header { padding: 15px 16px 12px; }
+  .overlay-panel h2 { font-size: 18px; }
+  .overlay-panel header p { font-size: 11.5px; }
+  .overlay-body { padding: 14px 16px 20px; }
+  .overlay-body h4 { margin: 18px 0 8px; }
+
+  /* One number to a row rather than three squeezed columns. */
+  .market-focus { grid-template-columns: 1fr; gap: 10px; padding: 13px; }
+  .market-figures { display: flex; gap: 18px; flex-wrap: wrap; }
+
+  .bank-grid, .books { grid-template-columns: 1fr 1fr; }
+  .steward-grid { grid-template-columns: 1fr 1fr; }
+  .vault-grid, .connect-grid { grid-template-columns: 1fr; }
+  .build-grid { grid-template-columns: 1fr 1fr; }
+  .token-grid { grid-template-columns: 1fr; }
+  .resource-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .bank-balance { font-size: 32px; }
+
+  /* The listing row's three columns do not fit; the price wraps under. */
+  .listing-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .listing-row button { grid-column: 2; }
+
+  .chat-log { max-height: 38vh; }
+  .chat-row { grid-template-columns: auto 1fr; }
+  .chat-row em { grid-column: 2; }
+
+  .guide section.opening, .guide section.earn { padding: 13px 14px; }
+  .guide p, .guide li { font-size: 13px; }
+}
+
+@media (max-width: 400px) {
+  .bank-grid, .books, .steward-grid, .build-grid { grid-template-columns: 1fr; }
 }

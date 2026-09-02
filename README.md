@@ -490,6 +490,39 @@ at once, and none ended with a building permanently out of use. Against the same
 with hazards switched off, deaths rose by nought to four in eight of the nine biomes,
 and the largest cost was one woodland ending fifteen people smaller. Nothing collapsed.
 
+## Your world is saved
+
+The settlement is written to `localStorage` every fifteen seconds and again the
+moment the tab goes away, and read back when you return: the people, what they
+have built, who they are friends with, the treasury, the calendar. Before this,
+only the *claim* survived — seed, name, price, owner — and the world itself was
+rebuilt from its seed on every load, so an evening's work was gone by morning.
+
+The terrain, the water mask and the biome are deliberately **not** saved: those
+are pure functions of the seed, so regenerating them is cheaper than reading
+them back and impossible to get out of step. The road plan is saved, because it
+grows at runtime — lanes get cut through to new buildings and decks laid across
+water. A settlement of twenty-three people and sixty-seven buildings comes to
+55 KB.
+
+A save that cannot be read is discarded and the world regenerated. A corrupt
+entry should cost a player their progress, never their ability to open the game.
+
+## Earning is paced by the wall clock
+
+The yield used to be paid per settlement day. At 6× a settlement lives a hundred
+and thirty-six days in a real hour, so the fast-forward button was worth roughly
+2.8 million $EMERGE an hour — an order of magnitude worse than the reload
+exploit it was hiding behind.
+
+Yield is now accrued against real elapsed seconds, and attention decays over
+real hours. Measured across a real hour of play: **875–897 $EMERGE at 1×, 2× and
+6× alike.** Speed shows you more of your world sooner and pays you nothing extra
+for it. A settlement untouched for a day and a half falls to 1,686 $EMERGE a day
+against 20,682 for one being actively run, and a per-player ceiling of 30,000 a
+real day means holding six plots is six worlds to enjoy rather than six times
+the income.
+
 ## Starting small
 
 A world opens as a camp, not a town: six to nine people, a market, a shed, a

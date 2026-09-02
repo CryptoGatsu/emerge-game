@@ -99,7 +99,8 @@ export interface Snapshot {
     attention: number;
     dailyYield: number;
     lifetime: number;
-    idleDays: number;
+    /** Real hours since the player last did anything here. */
+    idleHours: number;
     cap: number;
   };
   /** What is going wrong right now, and what it is doing. */
@@ -261,7 +262,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       attention: world.stewardship.attention,
       dailyYield: world.stewardship.dailyYield,
       lifetime: world.stewardship.lifetime,
-      idleDays: Math.max(0, world.day - world.stewardship.lastActionDay),
+      idleHours: Math.max(0, (Date.now() - world.stewardship.lastActionAt) / 3_600_000),
       cap: STEWARDSHIP_DAILY_CAP,
     },
     hazards: world.hazards.map((h) => ({ id: h.id, kind: h.kind, label: h.label, effect: h.effect, days: h.days })),
