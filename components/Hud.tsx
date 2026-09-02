@@ -453,6 +453,37 @@ function EconomyRow({ view, activePanel, onPanel }: {
   );
 }
 
+/**
+ * What the player has, always on screen.
+ *
+ * Treasury Gold and earned {TOKEN.ticker} were both a panel away, so the two
+ * numbers a player is actually playing for were invisible while they watched
+ * the world. Tapping either opens the Bank.
+ */
+function Purse({ view, player, onPanel }: {
+  view: Snapshot; player: PlayerRecord; onPanel: (panel: PanelKey) => void;
+}) {
+  const steward = view.stewardship;
+  const uncollected = Math.floor(player.ledger.earnedEmerge);
+  return (
+    <button className="purse" onClick={() => onPanel('bank')} title="Open the Bank">
+      <span className="purse-cell gold">
+        <em>GOLD</em>
+        <b>{Math.floor(view.treasury).toLocaleString()}</b>
+      </span>
+      <span className="purse-cell emerge">
+        <em>{TOKEN.ticker} EARNED</em>
+        <b>{uncollected.toLocaleString()}</b>
+        <i>{steward.dailyYield > 0 ? `+${steward.dailyYield.toLocaleString()}/day` : 'nothing yet'}</i>
+      </span>
+      <span className="purse-cell wallet">
+        <em>WALLET</em>
+        <b>{Math.floor(player.ledger.balance).toLocaleString()}</b>
+      </span>
+    </button>
+  );
+}
+
 const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; blurb: string }[] = [
   { key: 'guide', icon: '◎', label: 'GAME GUIDE', blurb: 'How all of this works' },
   { key: 'build', icon: '⚒', label: 'BUILD', blurb: 'Create places and resources' },
@@ -483,6 +514,9 @@ export function Hud(props: HudProps) {
           <b>{view.name}</b>
         </button>
       )}
+
+      {/* What the player has, without opening anything. */}
+      <Purse view={view} player={props.player} onPanel={props.onPanel} />
 
       <header className={`brand-block ${introShown ? '' : 'hidden'}`} aria-hidden={!introShown}>
         <div className="brand-line">

@@ -18,6 +18,7 @@ import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, Til
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World,
 } from '../simulation';
+import { spokenLine } from '../simulation';
 import { speechFor } from '../speech';
 import { AMBIENT, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
@@ -367,6 +368,24 @@ export class EmergeScene {
 
   /** Create sprites for any building that does not have one yet. */
   syncBuildings() {
+    // Anything the settlement no longer has: pull its sprites out of the scene.
+    //
+    // This used to only ever add. A building the player pulled down vanished
+    // from the simulation and stayed on screen forever — people walked through
+    // the ghost of it, and the only way to be rid of it was a page reload.
+    const standing = new Set(this.world.buildings.map((b) => b.id));
+    for (const [id, view] of this.buildings) {
+      if (standing.has(id)) continue;
+      view.base.destroy();
+      view.lit.destroy();
+      view.glow?.destroy();
+      view.wheel?.destroy();
+      view.badge.destroy({ children: true });
+      this.buildings.delete(id);
+    }
+    // Smoke comes from a shared pool aimed at whatever chimneys exist, so it
+    // stops on its own once the building is out of the list.
+
     this.world.buildings.forEach((building) => {
       if (this.buildings.has(building.id)) {
         this.buildings.get(building.id)!.building = building;
@@ -736,6 +755,18 @@ export class EmergeScene {
       } else if (points.size === 0) {
         this.dragging = false;
         canvas.style.cursor = 'grab';
+        // A tap on open ground puts the inspector away. Before this it stayed
+        // open until something else was tapped, with no way to dismiss it but
+        // the small × in its corner.
+        //
+        // Whether the tap hit anything is decided by *when* a real selection
+        // last happened, not by a flag: Pixi's own listeners are registered on
+        // this canvas before these ones, so a sprite's handlers have already
+        // run by the time this does, and a flag set here would be re-armed
+        // after the sprite had cleared it — which is exactly what stopped
+        // buildings being selectable at all.
+        const justSelected = performance.now() - this.lastRealTap < 120;
+        if (!justSelected && this.dragMoved <= 6) this.tap(null);
       }
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     };
@@ -768,6 +799,9 @@ export class EmergeScene {
    * Picking people up
    * ---------------------------------------------------------------- */
 
+  /** When a sprite was last actually selected, so a tap on nothing can clear. */
+  private lastRealTap = -1e9;
+
   /** Whoever the player currently has hold of, and whether they have moved. */
   private carrying: string | null = null;
   private carryMoved = 0;
@@ -788,6 +822,15 @@ export class EmergeScene {
     return screenToWorld(scene.x, scene.y);
   }
 
+  /** Redraw a bubble's box around whatever its label now says. */
+  private layoutBubble(bubble: Bubble) {
+    const bw = Math.ceil(bubble.label.width) + 18;
+    const bh = Math.ceil(bubble.label.height) + 14;
+    bubble.bg.clear();
+    bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf1f3e4, alpha: 0.95 });
+    bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf1f3e4, alpha: 0.95 });
+  }
+
   private setHover(target: PickTarget) {
     if (this.dragging || this.carrying) return;
     this.hovered = target;
@@ -797,6 +840,7 @@ export class EmergeScene {
   private tap(target: PickTarget) {
     // A tap that ended a pan is a camera move, not a selection.
     if (this.dragMoved > 6) return;
+    if (target) this.lastRealTap = performance.now();
     this.selected = target;
     this.callbacks.onSelect?.(target);
   }
@@ -1211,6 +1255,25 @@ export class EmergeScene {
       this.assignBubbles();
     }
     const w = this.app.renderer.width, h = this.app.renderer.height;
+
+    // A conversation moves faster than the bubble rotation does.
+    //
+    // Bubbles are handed out every five and a half seconds and then held, but a
+    // turn in an exchange lasts under three. So the second, third and fourth
+    // lines of every conversation in the settlement were being spoken and never
+    // drawn: the pair appeared to say one thing each and stop. Anyone
+    // mid-conversation has their bubble refreshed every frame instead.
+    for (const bubble of this.bubbles) {
+      if (!bubble.citizenId) continue;
+      const spoken = spokenLine(this.world, bubble.citizenId);
+      if (spoken && spoken.text !== bubble.text) {
+        bubble.text = spoken.text;
+        bubble.label.text = spoken.text;
+        bubble.life = BUBBLE_ROTATE;
+        this.layoutBubble(bubble);
+      }
+    }
+
     // Where the bubbles already placed this frame are sitting, so the next one
     // can be lifted clear of them. Two people talking to each other stand a
     // few paces apart by definition, which put their two bubbles in exactly
@@ -1281,11 +1344,7 @@ export class EmergeScene {
           bubble.citizenId = citizen.id;
           bubble.text = line;
           bubble.label.text = line;
-          const bw = Math.ceil(bubble.label.width) + 18;
-          const bh = Math.ceil(bubble.label.height) + 14;
-          bubble.bg.clear();
-          bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf1f3e4, alpha: 0.95 });
-          bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf1f3e4, alpha: 0.95 });
+          this.layoutBubble(bubble);
         }
         bubble.life = BUBBLE_ROTATE;
         bubble.root.visible = true;

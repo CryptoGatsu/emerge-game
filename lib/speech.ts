@@ -7,7 +7,10 @@
  * frame. Nothing here feeds back into the simulation.
  */
 
-import { JOB_LABELS, buildingOf, plannedDay, spokenLine, type Citizen, type World } from './simulation';
+import {
+  JOB_LABELS, buildingOf, plannedDay, spokenLine, talkingWith,
+  type Citizen, type World,
+} from './simulation';
 
 type Line = string;
 
@@ -97,6 +100,10 @@ export function speechFor(world: World, c: Citizen, beat: number): string | null
   // unrelated things at each other.
   const spoken = spokenLine(world, c.id);
   if (spoken) return spoken.text;
+  // In a conversation but not the one talking: listening. Turn-taking only
+  // reads as turn-taking if the listener is quiet — otherwise both bubbles are
+  // up at once and it looks like two people talking over each other.
+  if (talkingWith(world, c.id)) return null;
 
   const roll = (c.hash * 31 + beat * 17) % 100;
   if (roll > 34) return null;

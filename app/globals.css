@@ -894,6 +894,31 @@ button {
 .market-row span:first-child { color: var(--text); }
 .market-row .buy { color: #7fc9e8; font-size: 10px; letter-spacing: 1.2px; }
 .market-row .sell { color: #d8a86a; font-size: 10px; letter-spacing: 1.2px; }
+/* Per-cell labels: hidden on a wide screen where the header row does the job,
+   shown on a phone where the row has reflowed and the header is gone. */
+.market-row .cell i { display: none; }
+
+@media (max-width: 720px) {
+  .market-row.head { display: none; }
+  .market-row {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px 10px;
+    padding: 11px 12px;
+  }
+  .market-row .cell { display: flex; flex-direction: column; gap: 1px; }
+  .market-row .cell i {
+    display: block;
+    font-style: normal;
+    font-size: 8px; letter-spacing: 1.4px; text-transform: uppercase;
+    color: var(--muted); opacity: 0.75;
+  }
+  .market-row .cell.name {
+    grid-column: 1 / -1;
+    font-size: 13.5px; font-weight: 600; color: var(--cream);
+  }
+  .market-row .cell.spark { display: none; }
+  .market-row .buy, .market-row .sell { font-size: 11px; letter-spacing: 0.4px; }
+}
 
 .bank-balance { font-size: 40px; font-weight: 700; color: var(--gold); }
 .bank-balance small { font-size: 11px; letter-spacing: 2.4px; color: var(--muted); }
@@ -906,6 +931,42 @@ button {
 }
 .bank-grid span { display: block; font-size: 9px; letter-spacing: 1.8px; color: var(--muted); }
 .bank-grid b { font-size: 18px; color: var(--cream); }
+
+/* The purse: Gold and earned $EMERGE, on screen at all times. */
+.purse {
+  /* Under the world chip on the left, clear of the speed controls in the
+     middle — laid over them, it swallowed every click on 1×, 2× and 6×. */
+  position: absolute;
+  top: 78px; left: 18px;
+  display: flex; align-items: stretch; gap: 0;
+  padding: 0;
+  border-radius: 11px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(10, 22, 14, 0.86);
+  backdrop-filter: blur(7px);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 6;
+}
+.purse:hover { border-color: var(--panel-edge); }
+.purse-cell {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 7px 14px;
+  border-right: 1px solid var(--panel-edge-soft);
+}
+.purse-cell:last-child { border-right: none; }
+.purse-cell em { font-style: normal; font-size: 8px; letter-spacing: 1.6px; color: var(--muted); }
+.purse-cell b { font-size: 15px; line-height: 1.1; }
+.purse-cell i { font-style: normal; font-size: 8.5px; color: var(--muted); }
+.purse-cell.gold b { color: var(--gold); }
+.purse-cell.emerge b { color: var(--emerald); }
+.purse-cell.wallet b { color: var(--cream); font-size: 13px; }
+@media (max-width: 760px) {
+  .purse { top: 66px; left: 12px; }
+  .purse-cell { padding: 6px 10px; }
+  .purse-cell b { font-size: 13px; }
+  .purse-cell.wallet { display: none; }
+}
 
 /* Rail panels that fold away, so the world can be watched unobstructed. */
 .panel.folding h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
@@ -931,6 +992,16 @@ button.fold:hover { color: var(--emerald); }
 .guide li { font-size: 12.5px; line-height: 1.55; color: var(--text); }
 .guide b { color: var(--cream); }
 .guide em { color: var(--muted); font-style: italic; }
+.guide ol { margin: 0 0 6px; padding-left: 19px; display: flex; flex-direction: column; gap: 7px; }
+.guide ol li { font-size: 12.5px; line-height: 1.55; color: var(--text); }
+.guide ol li::marker { color: var(--emerald); font-weight: 700; }
+.guide section.opening p:first-of-type { font-size: 13.5px; }
+.guide section.opening {
+  padding: 15px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(255, 255, 255, 0.03);
+}
 .guide section.earn {
   padding: 15px 16px;
   border-radius: 12px;

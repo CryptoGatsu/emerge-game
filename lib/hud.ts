@@ -10,7 +10,8 @@
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
-  activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals, readiness, talkingWith,
+  UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
+  readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource, type World,
 } from './simulation';
 import { statusLine } from './speech';
@@ -195,7 +196,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     }),
     // The market is the settlement's heart and a lived-in house is somebody's
     // home; neither offers the button.
-    demolishable: b.type !== 'Market' && !(family && family.members.length > 0),
+    demolishable: !UNDEMOLISHABLE.includes(b.type) && !(family && family.members.length > 0),
     salvage: (() => {
       const need = buildMaterials(b.type);
       return { wood: Math.floor(need.wood / 2), stone: Math.floor(need.stone / 2) };

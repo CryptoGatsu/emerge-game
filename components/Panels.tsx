@@ -57,6 +57,7 @@ const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] =
   { type: 'Tailor', cost: 325, icon: '✦', blurb: 'Turns wool into clothing.' },
   { type: 'Storage', cost: 120, icon: '▤', blurb: 'Somewhere to keep the surplus.' },
   { type: 'Tavern', cost: 350, icon: '♨', blurb: 'Where the settlement gathers.' },
+  { type: 'Bank', cost: 450, icon: '◈', blurb: 'A counting house for the treasury.' },
 ];
 
 function Shell({ title, subtitle, onClose, children, wide }: {
@@ -123,15 +124,18 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
           const pressure = m.quote.demand - m.quote.supply;
           const flow = Math.round((view.production[m.key] ?? 0) - (view.consumption[m.key] ?? 0));
           return (
+            // Six columns do not fit a phone, so each cell carries its own
+            // label and the row reflows into two lines rather than being
+            // squeezed into six unreadable slivers.
             <button key={m.key} className={`market-row ${focus === m.key ? 'focused' : ''}`} onClick={() => setFocus(m.key)}>
-              <span>{m.label}</span>
-              <b>{m.quote.price.toFixed(2)}</b>
-              <Sparkline values={m.quote.history} width={78} height={18} subtle />
-              <span className={pressure > 0 ? 'buy' : 'sell'}>
-                {pressure > 0 ? 'WANTED' : 'SURPLUS'} {Math.abs(Math.round(pressure))}
+              <span className="cell name">{m.label}</span>
+              <b className="cell price"><i>price</i>{m.quote.price.toFixed(2)}</b>
+              <span className="cell spark"><Sparkline values={m.quote.history} width={78} height={18} subtle /></span>
+              <span className={`cell ${pressure > 0 ? 'buy' : 'sell'}`}>
+                <i>pressure</i>{pressure > 0 ? 'WANTED' : 'SURPLUS'} {Math.abs(Math.round(pressure))}
               </span>
-              <span>{store(m.key)}</span>
-              <span className={flow >= 0 ? 'buy' : 'sell'}>{flow >= 0 ? '+' : ''}{flow}/day</span>
+              <span className="cell store"><i>in store</i>{store(m.key)}</span>
+              <span className={`cell ${flow >= 0 ? 'buy' : 'sell'}`}><i>flow</i>{flow >= 0 ? '+' : ''}{flow}/day</span>
             </button>
           );
         })}
@@ -159,44 +163,78 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
       wide
     >
       <div className="guide">
-        <section>
-          <h4>What Emerge is</h4>
+        <section className="opening">
+          <h4>You are not the mayor</h4>
           <p>
-            You own a plot of land. The people who live on it are not scripted: they have needs,
-            trades, families, friends and enemies, and they decide for themselves where to go and
-            what to do. The settlement grows, feeds itself, builds, argues and buries its dead
-            whether or not you are watching. Your part is to steward it — and what you earn in
-            {' '}{TOKEN.ticker} depends on how well you do that.
+            Nobody here takes orders. The people on your plot have their own hunger, their own
+            trades, their own friends and their own grudges, and they get up in the morning and
+            decide for themselves where to go. You cannot tell Maren to go and cut timber. You can
+            build her a woodcutter&rsquo;s hut and watch her work out that somebody ought to.
+          </p>
+          <p>
+            That is the whole game: <b>you shape the place, they decide what to do about it.</b> The
+            settlement will feed itself, argue with itself, throw a feast, catch fire and bury its
+            dead whether or not you are watching — and how well it does that is what pays you.
           </p>
         </section>
 
         <section>
-          <h4>The clock</h4>
+          <h4>The first ten minutes</h4>
+          <p>Your plot opens as a camp: a handful of families, a market, a shed, and not much Gold.</p>
+          <ol>
+            <li>Watch. Tap somebody and follow them around for a day — it will tell you more than this panel does.</li>
+            <li>Open the <b>Bank</b>. That opening treasury will not last a week; wages come out of it every single day.</li>
+            <li>Deposit some {TOKEN.ticker} to buy Gold. This is the one thing only you can do.</li>
+            <li>Open <b>Build</b> and raise a house. Somewhere to live is what makes a camp somewhere people move to.</li>
+            <li>Now do nothing for a bit and see who turns up on the road.</li>
+          </ol>
+        </section>
+
+        <section>
+          <h4>Time moves fast here</h4>
           <p>
-            A day is twenty-four hours of settlement time and passes in a few minutes of yours; the
-            speed control at the top runs it at 1×, 2× or 6×. Half a game year passes each day, so
-            people visibly age, come of age at sixteen, pair off, have children and die. A year is
-            twenty-four days and turns through four seasons, each with its own temperature and
-            weather.
+            A day passes in a few minutes; the speed control at the top runs it at 1×, 2× or 6×. But
+            half a <em>year</em> passes each of those days, which is the part that catches people
+            out: children born while you are reading this will be old enough to work by tomorrow
+            evening, and the farmer you got attached to on Monday has a name on the feed by Friday.
+          </p>
+          <p>
+            A year is twenty-four days and four seasons. Winter is not decorative — it gets cold
+            enough to kill people who have nowhere warm to be.
           </p>
         </section>
 
         <section>
-          <h4>The people</h4>
+          <h4>The people, and their opinions of each other</h4>
           <p>
-            Everyone wakes, works, eats, socialises and goes home on their own schedule. Tap anybody
-            to follow their story: their trade, their family, their friends, what they are doing and
-            what they are thinking. Their speech is real — it names where they are walking and what
-            they mean to do with the day — and two people standing together hold an actual
-            conversation, taking turns on one subject.
+            Everyone keeps their own hours. Tap somebody and you get their trade, their family, who
+            they are friends with, and what they are actually thinking — the speech bubbles are not
+            decoration, they name the building somebody is walking to and what they mean to do when
+            they arrive. Two people standing together hold a real conversation, taking turns on one
+            subject, about something they both have reason to raise.
           </p>
           <ul>
-            <li><b>Friendship</b> forms from standing together and talking, and once made it is remembered: friends do not become strangers because they have not met for a fortnight.</li>
-            <li><b>Dislike</b> is real too. About one pair in six simply does not get on, and enough time together makes it worse rather than better.</li>
-            <li><b>Fights</b> happen when two people who have fallen out are in the same place and at least one of them is tired, hungry or miserable. Everybody who sees one has a worse day for it.</li>
-            <li><b>Pick anybody up</b> by dragging them. Drop them where you like — in the water, they will swim for the bank and come out cold.</li>
-            <li><b>Rename anybody</b> from their card, for {RENAME_CITIZEN_EMERGE.toLocaleString()} {TOKEN.ticker}.</li>
+            <li><b>Friendship is remembered.</b> Once two people are friends they stay friends, even if they do not cross paths for a fortnight.</li>
+            <li><b>Not everyone likes everyone.</b> About one pair in six simply does not get on, and — this is the interesting part — spending time together makes it <em>worse</em>. Watch two of them get stuck at the same market stall.</li>
+            <li><b>Sometimes they swing for each other.</b> Two people who have fallen out, in the same place, one of them tired or hungry: it happens, it is in the feed, and everyone who saw it goes home in a mood.</li>
+            <li><b>You can pick them up.</b> Drag anybody. Put them anywhere. Drop one in the river and they will swim for the bank, get out, and be cold and unimpressed about it.</li>
+            <li><b>You can rename them</b> from their card, for {RENAME_CITIZEN_EMERGE.toLocaleString()} {TOKEN.ticker}. Name one after somebody and then watch what happens to them.</li>
           </ul>
+        </section>
+
+        <section>
+          <h4>Where people come from</h4>
+          <p>
+            Two ways, and both of them are downstream of you. Families have children when they have
+            a home, food and reason to be cheerful. And <b>settlers arrive on the road</b> — but only
+            somewhere with a spare roof, food in the store, wages it can actually meet, and people
+            who look content.
+          </p>
+          <p>
+            That list is the entire growth loop. Build a house, keep the granary full, keep the
+            treasury solvent, and strangers walk in from the edge of the map. Let any of it slip and
+            they stop coming.
+          </p>
         </section>
 
         <section>
@@ -264,12 +302,13 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         </section>
 
         <section className="earn">
-          <h4>Earning {TOKEN.ticker}</h4>
+          <h4>How you actually get paid</h4>
           <p>
-            This is the part worth reading twice. <b>The settlement&rsquo;s Gold is not convertible into
-            tokens.</b> Gold is what the town pays its people and buys its grain with; letting it out
-            of the world meant an untouched settlement minted eighty million {TOKEN.ticker} in sixty
-            days, which is a faucet and not a game.
+            Read this bit twice. <b>The settlement&rsquo;s Gold is not your money.</b> Gold is what the
+            town pays its people and buys its grain with. It does not convert into tokens, and it
+            never will — an earlier version let it, and a settlement nobody was watching minted
+            eighty million {TOKEN.ticker} in two months. That is a faucet, not a game, and it would
+            have buried the token.
           </p>
           <p>There are two doors, and they are different sizes:</p>
           <ul>
@@ -297,9 +336,12 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             </li>
           </ul>
           <p>
-            So a world you leave running earns a trickle and a world you actually manage earns about
-            ten times as much. Collect what you have earned in the Bank panel. You are being paid for
-            your time and judgement, not for leaving the tab open.
+            So: a world you leave running earns a trickle. A world you actually run earns about ten
+            times as much. Collect it in the Bank panel whenever you like.
+          </p>
+          <p>
+            <b>You are being paid for judgement, not for uptime.</b> Nobody gets rich here by opening
+            a tab and going to lunch.
           </p>
         </section>
 

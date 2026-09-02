@@ -490,6 +490,24 @@ at once, and none ended with a building permanently out of use. Against the same
 with hazards switched off, deaths rose by nought to four in eight of the nine biomes,
 and the largest cost was one woodland ending fifteen people smaller. Nothing collapsed.
 
+## Starting small
+
+A world opens as a camp, not a town: six to nine people, a market, a shed, a
+trade or two, and four hundred Gold. It used to open with twenty-odd people, a
+dozen buildings and three thousand Gold — a finished settlement, which left the
+player nothing to do and no reason to put anything in. The first week is now
+close-run, and funding it is a real decision.
+
+Growth comes from the player. Families have children when they have a home,
+food and reason to be cheerful; and **settlers arrive on the road** when the
+settlement has a spare roof, food in the store, wages it can meet, and people
+who look content. Every one of those is something the player controls.
+
+Measured over forty game days: a settlement left alone drifts between five and
+fourteen people and draws nought or one settler. One where the player funds the
+treasury and raises houses reaches sixteen to twenty-seven and draws ten to
+eighteen. Neither goes broke.
+
 ## Relationships
 
 Friendship is a memory now, not a running total. It used to fade at better than

@@ -1837,14 +1837,25 @@ export function renameWorld(world: World, name: string) {
  * with fields and a mill. Plots differ in what you can do on them, not just in
  * how they look.
  */
+/**
+ * What a settlement opens with, in Gold.
+ *
+ * Enough to run a handful of families for a few days and no more. It used to be
+ * three thousand, which covered a fortnight of wages with change to spare, so a
+ * player had no reason to deposit anything and no sense that the treasury
+ * mattered. Now the first week is close-run, and funding it is a real decision.
+ */
+export const OPENING_TREASURY = 400;
+
 function starterBuildings(seed: number, layout: WorldLayout, population: number): Building[] {
   const make = (id: string, type: string, x: number, y: number): Building => ({ id, type, x, y, workers: [], active: true });
   const civic = layout.civic;
+  // A market to trade at, somewhere to keep the surplus, and nothing else given.
+  // The bank and the tavern were here too, which meant the settlement opened
+  // with the buildings a player would most want the satisfaction of raising.
   const buildings = [
     make('market', 'Market', civic[0][0], civic[0][1]),
-    make('bank', 'Bank', civic[1][0], civic[1][1]),
     make('storage', 'Storage', civic[2][0], civic[2][1]),
-    make('tavern', 'Tavern', civic[3][0], civic[3][1]),
   ];
 
   // Trades go on the sites the plan set aside for them — the outer ends of the
@@ -1856,7 +1867,7 @@ function starterBuildings(seed: number, layout: WorldLayout, population: number)
   // desert of twelve people meant a wage bill and an upkeep bill that its
   // exports could never cover, and the treasury drained to nothing by the third
   // week. The rest is ground for the player to build on.
-  const affordable = Math.max(4, Math.round(population / 2.2));
+  const affordable = Math.max(2, Math.round(population / 4));
   const trades = biomeFor(seed).trades.slice(0, affordable);
   trades.forEach((type, i) => {
     const [x, y] = sites[i % sites.length];
@@ -2082,7 +2093,14 @@ export function createWorld(seed = 481516, name?: string): World {
   const terrain = Array.from({ length: 3 }, () => (['fertile', 'forest', 'mountain', 'rocky', 'coastal', 'river'] as Terrain[])[Math.floor(rand() * 6)]);
   // How many people the land carries. A desert supports fewer than a grassland,
   // and the settlement should read as the size the ground can feed.
-  const count = Math.max(12, Math.round((17 + rand() * 8) * profile.populationScale));
+  // A camp, not a town.
+  //
+  // A world used to open with twenty-odd people, a dozen buildings and three
+  // thousand Gold — which is a finished settlement, and left the player nothing
+  // to do and no reason to put anything in. It starts as a handful of families
+  // now and grows: people migrate in as the place becomes somewhere worth
+  // moving to, which is the thing the player is actually building.
+  const count = Math.max(6, Math.round((7 + rand() * 4) * profile.populationScale));
   const families: Family[] = [];
   const citizens: Citizen[] = [];
   for (let i = 0; i < Math.ceil(count / 4); i++) families.push({ id: `f${i}`, name: familyNames[i % familyNames.length], homeId: `h${i}`, members: [], wealth: 80 + Math.floor(rand() * 80) });
@@ -2121,7 +2139,7 @@ export function createWorld(seed = 481516, name?: string): World {
   const weather = weatherFor('Spring', seed, 1);
   const world: World = {
     id: `world-${seed.toString(36)}`, name: name?.trim() || defaultWorldName(seed), seed, biome: profile.kind, layout, day: 1, hour: 8, terrain, season: 'Spring',
-    weather, weatherSeed: seed, treasury: 3000, population: count,
+    weather, weatherSeed: seed, treasury: OPENING_TREASURY, population: count,
     temperature: temperatureAt({ biome: profile.kind, day: 1, hour: 8, weather }),
     deaths: 0, births: 0,
     amenities: buildAmenities(buildings, layout, water),
@@ -3218,6 +3236,7 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Blacksmith: { wood: 12, stone: 20 },
   Tailor: { wood: 14, stone: 6 },
   Tavern: { wood: 24, stone: 10 },
+  Bank: { wood: 18, stone: 26 },
 };
 
 /** What this kind of building takes to raise. Anything unlisted is a modest shed. */
@@ -3533,6 +3552,86 @@ function births(world: World, rand: () => number) {
   }
 }
 
+const SETTLER_NAMES = [
+  'Maren', 'Osric', 'Talia', 'Bram', 'Ines', 'Caleb', 'Rowan', 'Sena',
+  'Halvard', 'Perrin', 'Mira', 'Dain', 'Orla', 'Sigrid', 'Tobias', 'Wren',
+];
+
+/**
+ * People moving in.
+ *
+ * A settlement that only ever grows by having children takes a season to add
+ * anybody, and the player's building work has no visible consequence: they
+ * raise a house and it stands empty for a fortnight. Word gets around instead.
+ * Somewhere with a spare roof, food in the store, wages it can meet and people
+ * who seem content attracts settlers, and they arrive on the road.
+ *
+ * Every one of those conditions is a thing the player controls, which is the
+ * point: a plot begins as a handful of families and becomes a town because the
+ * player made it somewhere worth moving to.
+ */
+function migration(world: World, rand: () => number) {
+  const houses = world.buildings.filter((b) => b.type === 'House' && b.active).length;
+  // A spare roof. Nobody moves to a place they would have to sleep outside in.
+  if (world.citizens.length >= houses * 3.2) return;
+  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+  if (food < world.citizens.length * 4) return;
+  // And a settlement that can pay them.
+  const payroll = world.citizens.filter((c) => c.age >= 16 && c.job !== 'unemployed')
+    .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
+  if (world.treasury < payroll * 4 + 120) return;
+  // Word travels on how the place is doing, so a miserable town attracts nobody.
+  const content = world.citizens.reduce((s, c) => s + c.happiness, 0) / Math.max(1, world.citizens.length);
+  if (content < 55) return;
+  // Bigger places draw more people, but never more than one a day.
+  const draw = 0.18 + Math.min(0.32, world.buildings.length * 0.02);
+  if (rand() > draw) return;
+
+  const hash = world.counter * 37 + 11;
+  const name = SETTLER_NAMES[Math.floor(rand() * SETTLER_NAMES.length)];
+  // In on the road: the wander spot furthest from the square, so they are
+  // visibly arriving from somewhere rather than appearing in the middle of it.
+  const plaza = world.layout.plaza;
+  const spots = world.layout.wanderSpots;
+  const arrival = spots.reduce((far, spot) =>
+    Math.hypot(spot[0] - plaza.x, spot[1] - plaza.y) > Math.hypot(far[0] - plaza.x, far[1] - plaza.y) ? spot : far,
+  spots[0] ?? [plaza.x, plaza.y]);
+
+  const family: Family = {
+    id: `f${world.counter++}`,
+    name: familyNames[world.families.length % familyNames.length],
+    homeId: '',
+    members: [],
+    wealth: 40 + Math.floor(rand() * 40),
+  };
+  // A vacant house if there is one; otherwise they lodge until one is raised.
+  const vacant = world.buildings.find((b) =>
+    b.type === 'House' && !world.families.some((f) => f.homeId === b.id));
+  family.homeId = vacant?.id ?? '';
+
+  const settler: Citizen = {
+    id: `c${world.counter++}`,
+    name,
+    handle: `@${name.toLowerCase()}${(hash % 90) + 10}`,
+    familyId: family.id,
+    age: 18 + Math.floor(rand() * 26),
+    job: 'unemployed',
+    hash,
+    hunger: 70, rest: 62, social: 55, clothing: 70, purpose: 62,
+    happiness: 74, wage: 0, wallet: 30 + Math.floor(rand() * 40),
+    x: arrival[0], y: arrival[1], destX: arrival[0], destY: arrival[1],
+    path: [], dwell: 0, wanderIdx: hash % 17, errand: false,
+    phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
+    stalled: 0, bestAway: Infinity, roughSleeper: false,
+    look: Math.floor(rand() * 0xffffff),
+    livedDays: 0, lifespan: lifespanFor(rand()), warmth: 80, seated: false, chilled: true, sheltering: false,
+  };
+  world.families.push(family);
+  family.members.push(settler.id);
+  world.citizens.push(settler);
+  pushFeed(world, 'social', `${name} arrived on the road, looking for work and a roof.`);
+}
+
 export function maintenanceCost(type: string) {
   return ({ Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6, Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10 } as Record<string, number>)[type] ?? 2;
 }
@@ -3716,6 +3815,7 @@ function daily(world: World) {
   produce(world);
   consume(world);
   lifeAndDeath(world);
+  migration(world, mulberry32(world.seed + world.day * 4111));
   hazards(world);
   discoveries(world);
   projects(world);
@@ -3991,13 +4091,17 @@ function staffNow(world: World) {
  * Anyone working there changes trade at once rather than walking to a building
  * that is no longer standing.
  */
+/** Buildings the settlement cannot function without, so the button is never offered. */
+export const UNDEMOLISHABLE = ['Market', 'Bank', 'Town Hall'];
+
 export function demolishBuilding(world: World, id: string): { ok: boolean; message: string } {
   const building = world.buildings.find((b) => b.id === id);
   if (!building) return { ok: false, message: 'That building is not there.' };
-  // The market is where the settlement eats and trades; pulling it down strands
-  // everybody at once, and no amount of salvage is worth that.
-  if (building.type === 'Market') {
-    return { ok: false, message: 'The market is the heart of the settlement. It cannot be pulled down.' };
+  // The market is where the settlement eats and trades and the bank is where its
+  // Gold lives; pulling either down strands everybody at once, and no amount of
+  // salvage is worth that.
+  if (UNDEMOLISHABLE.includes(building.type)) {
+    return { ok: false, message: `The ${building.type.toLowerCase()} holds the settlement together. It cannot be pulled down.` };
   }
   const home = world.families.find((f) => f.homeId === building.id);
   if (home && home.members.length) {
