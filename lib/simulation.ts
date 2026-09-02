@@ -11,6 +11,8 @@
  * wants immutable snapshots.
  */
 
+import { biomeFor, type BiomeKind } from './world/biomes';
+
 export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 'river';
 export type Job = 'farmer' | 'woodcutter' | 'miner' | 'quarry' | 'miller' | 'baker' | 'carpenter' | 'blacksmith' | 'tailor' | 'unemployed';
 export type WorkingJob = Exclude<Job, 'unemployed'>;
@@ -46,15 +48,21 @@ export interface Citizen {
   targetBuildingId?: string; inside: boolean;
   /** Game hours spent making no progress toward the destination. */
   stalled: number;
+  /** True when they have no bed and are sleeping out in the open. */
+  roughSleeper: boolean;
   /** Cosmetic seed the renderer turns into a stable appearance. Never read by logic. */
   look: number;
 }
 export interface Family { id: string; name: string; members: string[]; homeId: string; wealth: number }
 export interface Building { id: string; type: string; x: number; y: number; workers: string[]; active: boolean; production?: string }
-export interface MarketQuote { price: number; supply: number; demand: number; volume: number; trend: number }
+export interface MarketQuote {
+  price: number; supply: number; demand: number; volume: number; trend: number;
+  /** Recent prices, oldest first, sampled once per game day. */
+  history: number[];
+}
 
 export interface World {
-  id: string; name: string; seed: number; day: number; hour: number; terrain: Terrain[];
+  id: string; name: string; seed: number; biome: BiomeKind; day: number; hour: number; terrain: Terrain[];
   season: Season; weather: Weather; weatherSeed: number; treasury: number; population: number;
   families: Family[]; citizens: Citizen[]; buildings: Building[];
   resources: Record<Resource, number>; market: Record<Resource, MarketQuote>;
@@ -62,9 +70,12 @@ export interface World {
   unlockedAreas: string[];
   /** Accumulates game hours so the market trades on the clock, not per frame. */
   marketClock: number;
-  /** What each resource actually gained yesterday. The renderer reads this to
-   *  fell exactly as many trees as the woodcutters really cut. */
-  lastProduction: Partial<Record<Resource, number>>;
+  /**
+   * What actually moved yesterday, per resource. The renderer fells exactly as
+   * many trees as the woodcutters really cut, and the market panel shows real
+   * throughput rather than a guess from stock levels.
+   */
+  flow: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>> };
   counter: number;
 }
 
@@ -258,8 +269,19 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   let spread = 2.4;
 
   if (phase === 'sleeping' || phase === 'athome') {
-    target = homeOf(world, c);
-    spread = 2.0;
+    // A bed if they have one, a bench at the tavern if not, and the square if
+    // there is neither. Nobody simply stops existing at night.
+    const home = homeOf(world, c);
+    if (home) {
+      target = home;
+      spread = 2.0;
+      c.roughSleeper = false;
+    } else {
+      const shelter = findBuilding(world, 'Tavern') ?? findBuilding(world, 'Market');
+      target = shelter;
+      spread = 4.0;
+      c.roughSleeper = !shelter || phase === 'sleeping';
+    }
   } else if (phase === 'working') {
     // Alternate between the workplace and a delivery run, so work is a visible loop.
     const workplace = jobBuilding(world, c);
@@ -293,90 +315,119 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   c.destX = clamp(target.x + ox, 3, 97);
   c.destY = clamp(target.y + oy, 5, 95);
   c.destId = target.id;
+  // Never send anyone to a spot inside someone else's wall. Left uncorrected,
+  // they walk to it, get pushed off it, walk back, and spend the afternoon
+  // vibrating against a neighbour's house.
+  for (const b of world.buildings) {
+    if (b.id === c.destId) continue;
+    const r = footprintRadius(b) + 0.6;
+    const dx = c.destX - b.x, dy = c.destY - b.y;
+    const d = Math.hypot(dx, dy);
+    if (d >= r) continue;
+    if (d < 0.0001) { c.destX = clamp(b.x + r, 3, 97); continue; }
+    c.destX = clamp(b.x + (dx / d) * r, 3, 97);
+    c.destY = clamp(b.y + (dy / d) * r, 5, 95);
+  }
   c.path = roadPath(nearestRoad(c.x, c.y), nearestRoad(c.destX, c.destY)).slice(1);
   c.dwell = phase === 'working' ? 1.2 + (c.hash % 4) * 0.4 : phase === 'socialising' ? 0.9 + (c.hash % 3) * 0.5 : 0.7 + (c.hash % 5) * 0.3;
   if (phase === 'socialising' || phase === 'wandering') c.wanderIdx = (c.wanderIdx + 1) % wanderSpots.length;
 }
 
-function hasArrived(c: Citizen) { return c.path.length === 0 && Math.hypot(c.destX - c.x, c.destY - c.y) < 0.06; }
+function hasArrived(c: Citizen) { return c.path.length === 0 && Math.hypot(c.destX - c.x, c.destY - c.y) < 0.35; }
 
 export interface Obstacle { x: number; y: number; r: number; id: string }
 
-/** Footprints citizens steer around. Kept a little tighter than the drawn
- *  building so people hug the walls rather than taking absurd detours. */
+/** Kept a little tighter than the drawn building so people hug the walls. */
+function footprintRadius(b: Building) {
+  return b.type === 'Market' || b.type === 'Town Hall' ? 4.2 : b.type === 'House' ? 2.6 : 3.2;
+}
+
 function buildObstacles(world: World): Obstacle[] {
-  return world.buildings.map((b) => ({
-    x: b.x,
-    y: b.y,
-    r: b.type === 'Market' || b.type === 'Town Hall' ? 4.2 : b.type === 'House' ? 2.6 : 3.2,
-    id: b.id,
-  }));
+  return world.buildings.map((b) => ({ x: b.x, y: b.y, r: footprintRadius(b), id: b.id }));
 }
 
 /**
- * Steer a desired direction around building footprints.
+ * Keep citizens out of buildings.
  *
- * Any obstacle that contains the immediate target is ignored — road junctions
- * and doorways sit inside footprints by design, and a citizen pushed away from
- * the very spot they are walking to would never arrive.
+ * This resolves overlap after a step rather than steering to predict one.
+ * Predictive steering proved unstable: the push away from a wall and the pull
+ * toward the destination formed a limit cycle, so citizens vibrated in place
+ * instead of arriving — measured at a direction reversal on four frames in
+ * five, and only 7% of their time spent standing still. Pushing out of a
+ * footprint preserves movement along the wall, so people slide around a
+ * building and still reach the far side.
+ *
+ * Obstacles at or near the target are ignored: doorsteps and road junctions sit
+ * inside footprints by design, and someone pushed off the very spot they are
+ * walking to would never get there.
  */
-function avoid(c: Citizen, dx: number, dy: number, obstacles: Obstacle[], tx: number, ty: number, destId?: string): [number, number] {
-  let ax = dx, ay = dy;
+function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: number) {
+  // A fixed side per citizen, so nobody dithers left and right along a wall.
+  const side = c.hash % 2 === 0 ? 1 : -1;
+  let pushX = 0, pushY = 0, hits = 0;
+
   for (const o of obstacles) {
-    if (o.id === destId) continue;
+    if (o.id === c.destId) continue;
     const toTargetX = o.x - tx, toTargetY = o.y - ty;
+    // Only skip a footprint that genuinely contains the target. Road junctions
+    // are kept clear of buildings by `enforceSpacing`, and destinations are
+    // nudged out of other people's walls when they are assigned, so a wide
+    // exemption here just lets citizens cut through.
     if (toTargetX * toTargetX + toTargetY * toTargetY < o.r * o.r) continue;
 
-    const ox = o.x - c.x, oy = o.y - c.y;
-    const dist = Math.hypot(ox, oy) || 0.0001;
-    const reach = o.r + 2.2;
-    if (dist > reach) continue;
-
-    const nx = ox / dist, ny = oy / dist;
-    if (dist < o.r) {
-      // Already overlapping: leave, and strongly.
-      ax -= nx * 2.4; ay -= ny * 2.4;
-      continue;
-    }
-    if (ax * nx + ay * ny <= 0) continue; // not heading into it
-    // Slide along whichever tangent keeps us moving forward.
-    const side = ax * ny - ay * nx > 0 ? 1 : -1;
-    const weight = ((reach - dist) / (reach - o.r)) * 1.8;
-    ax += -ny * side * weight;
-    ay += nx * side * weight;
+    const dx = c.x - o.x, dy = c.y - o.y;
+    const d = Math.hypot(dx, dy);
+    if (d >= o.r) continue;
+    hits++;
+    if (d < 0.0001) { pushX += o.r; continue; }
+    const nx = dx / d, ny = dy / d;
+    const depth = o.r - d;
+    pushX += nx * depth - ny * side * 0.2;
+    pushY += ny * depth + nx * side * 0.2;
   }
-  const len = Math.hypot(ax, ay) || 1;
-  return [ax / len, ay / len];
-}
 
+  if (!hits) return;
+  // One combined correction. Resolving each footprint in turn let a citizen
+  // caught between two of them be pushed out of one straight into the other,
+  // every frame, forever.
+  const len = Math.hypot(pushX, pushY);
+  const limit = 0.4;
+  const k = len > limit ? limit / len : 1;
+  c.x = clamp(c.x + pushX * k, 2, 98);
+  c.y = clamp(c.y + pushY * k, 4, 96);
+}
 
 function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[]) {
   let budget = (c.age < 16 ? 9 : 12.5) * hours;
+  const startX = c.x, startY = c.y;
   c.moving = false;
   let guard = 0;
+  let lastTargetX = c.destX, lastTargetY = c.destY;
+
   while (budget > 0 && guard++ < 24) {
     const final = c.path.length === 0;
     const tx = final ? c.destX : roadNodes[c.path[0]][0];
     const ty = final ? c.destY : roadNodes[c.path[0]][1];
+    lastTargetX = tx; lastTargetY = ty;
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
     if (d < 0.0001) { if (final) break; c.path.shift(); continue; }
 
-    const [sx, sy] = avoid(c, dx / d, dy / d, obstacles, tx, ty, c.destId);
     const step = Math.min(d, budget);
-    // Only a real step turns someone. Updating facing on every sub-pixel nudge
-    // leaves citizens pivoting while they stand still.
-    if (step > 0.05) {
-      if (Math.abs(sx) > Math.abs(sy)) c.facing = sx > 0 ? 'e' : 'w'; else c.facing = sy > 0 ? 's' : 'n';
-    }
-    c.x = clamp(c.x + sx * step, 2, 98);
-    c.y = clamp(c.y + sy * step, 4, 96);
+    c.x = clamp(c.x + (dx / d) * step, 2, 98);
+    c.y = clamp(c.y + (dy / d) * step, 4, 96);
     c.moving = true;
     budget -= step;
-    // Steering can carry us past a waypoint sideways, so advance on proximity
-    // rather than on having consumed the whole distance.
-    if (!final && Math.hypot(tx - c.x, ty - c.y) < 1.2) { c.path.shift(); continue; }
-    if (step >= d && final) break;
-    if (step >= d && !final) c.path.shift();
+    if (step >= d && !final) c.path.shift(); else if (step >= d) break;
+  }
+
+  resolveOverlap(c, obstacles, lastTargetX, lastTargetY);
+
+  // Facing comes from the whole frame's movement, not from each sub-step, and
+  // only when the frame actually took someone somewhere.
+  const netX = c.x - startX, netY = c.y - startY;
+  if (Math.hypot(netX, netY) > 0.02) {
+    if (Math.abs(netX) > Math.abs(netY)) c.facing = netX > 0 ? 'e' : 'w';
+    else c.facing = netY > 0 ? 's' : 'n';
   }
 }
 
@@ -415,7 +466,8 @@ function moveCitizens(world: World, hours: number) {
 
     const arrived = hasArrived(c);
     c.activity = arrived ? activityFor(phase) : 'walking';
-    c.inside = arrived && !!c.destId && phase !== 'wandering';
+    // Someone with nowhere to go stays out in the open where you can see them.
+    c.inside = arrived && !!c.destId && phase !== 'wandering' && !(c.roughSleeper && phase === 'sleeping');
     c.targetBuildingId = c.destId;
   }
 }
@@ -488,7 +540,7 @@ export function friendsOf(world: World, id: string): { citizen: Citizen; strengt
 }
 
 function createMarket(): Record<Resource, MarketQuote> {
-  return Object.fromEntries((Object.keys(marketPrices) as Resource[]).map((r) => [r, { price: marketPrices[r], supply: 0, demand: 0, volume: 0, trend: 0 }])) as Record<Resource, MarketQuote>;
+  return Object.fromEntries((Object.keys(marketPrices) as Resource[]).map((r) => [r, { price: marketPrices[r], supply: 0, demand: 0, volume: 0, trend: 0, history: [marketPrices[r]] }])) as Record<Resource, MarketQuote>;
 }
 function seasonForDay(day: number): Season { const n = (day - 1) % 120; return n < 30 ? 'Spring' : n < 60 ? 'Summer' : n < 90 ? 'Autumn' : 'Winter'; }
 function weatherFor(season: Season, seed: number, day: number): Weather {
@@ -510,6 +562,18 @@ export function defaultWorldName(seed: number) {
   return WORLD_NAMES[Math.abs(seed) % WORLD_NAMES.length];
 }
 
+/** Rename one citizen. Their handle follows the new name. */
+export function renameCitizen(world: World, id: string, name: string) {
+  const trimmed = name.trim().slice(0, 18);
+  const citizen = world.citizens.find((c) => c.id === id);
+  if (!citizen || !trimmed || trimmed === citizen.name) return false;
+  const was = citizen.name;
+  citizen.name = trimmed;
+  citizen.handle = `@${trimmed.toLowerCase().replace(/[^a-z0-9]/g, '')}${(citizen.hash % 90) + 10}`;
+  pushFeed(world, 'social', `${was} goes by ${trimmed} now.`);
+  return true;
+}
+
 /** Rename a world in place. Citizens refer to it by name when they speak. */
 export function renameWorld(world: World, name: string) {
   const trimmed = name.trim().slice(0, 24);
@@ -518,33 +582,88 @@ export function renameWorld(world: World, name: string) {
   pushFeed(world, 'world', `This place is called ${trimmed} now.`);
 }
 
-/** Starter settlement, laid out as a village around the square. */
-function starterBuildings(): Building[] {
+/**
+ * The starter settlement.
+ *
+ * The civic core is the same everywhere; the trades are whatever the land
+ * supports, so a highland plot opens with mines and a forge while a fen opens
+ * with fields and a mill. Plots differ in what you can do on them, not just in
+ * how they look.
+ */
+function starterBuildings(seed: number): Building[] {
   const make = (id: string, type: string, x: number, y: number): Building => ({ id, type, x, y, workers: [], active: true });
-  return [
-    make('market', 'Market', 50, 42),
-    make('bank', 'Bank', 41, 38),
-    make('storage', 'Storage', 59, 38),
-    make('tavern', 'Tavern', 44, 57),
-    make('bakery0', 'Bakery', 58, 57),
-    make('mill0', 'Mill', 67, 51),
-    make('carpenter0', 'Carpenter', 36, 45),
-    make('blacksmith0', 'Blacksmith', 66, 66),
-    make('tailor0', 'Tailor', 43, 68),
-    make('wood0', 'Woodcutter', 24, 48),
-    make('wood1', 'Woodcutter', 30, 33),
-    make('farm0', 'Farm', 29, 77),
-    make('farm1', 'Farm', 40, 80),
-    make('quarry0', 'Quarry', 80, 34),
-    make('mine0', 'Mine', 87, 27),
+  const buildings = [
+    make('market', 'Market', 50, 35),
+    make('bank', 'Bank', 40, 33),
+    make('storage', 'Storage', 60, 33),
+    make('tavern', 'Tavern', 42, 60),
   ];
+
+  // Work sites ring the settlement, spaced around it; `enforceSpacing` then
+  // settles them into legal positions.
+  const sites: [number, number][] = [
+    [28, 80], [23, 51], [68, 55], [59, 61], [35, 41], [68, 69], [41, 71],
+    [80, 30], [89, 23], [40, 80], [30, 33], [72, 40], [20, 40], [58, 78],
+  ];
+  const trades = biomeFor(seed).trades;
+  trades.forEach((type, i) => {
+    const [x, y] = sites[i % sites.length];
+    buildings.push(make(`w${i}`, type, x, y));
+  });
+  return buildings;
 }
 
 /** Homes line the residential lane running south-west out of the square. */
 const HOUSE_PLOTS: [number, number][] = [
-  [40, 55], [35, 62], [31, 60], [26, 68], [33, 69], [39, 62],
-  [46, 62], [24, 62], [37, 55], [28, 74],
+  [41, 54], [34, 63], [30, 59], [25, 69], [34, 70], [40, 62],
+  [47, 62], [23, 62], [37, 55], [27, 76],
 ];
+
+/**
+ * Push buildings apart until no two footprints overlap and none sits on a road
+ * junction.
+ *
+ * Hand-placed layouts drift out of spec the moment anything moves, and an
+ * overlapping pair leaves a corridor with no standing room in it — a citizen
+ * walking through gets shoved out of one wall into the other and spends the
+ * day vibrating between them. This makes the guarantee structural.
+ */
+function enforceSpacing(buildings: Building[]) {
+  for (let pass = 0; pass < 60; pass++) {
+    let moved = false;
+
+    for (let i = 0; i < buildings.length; i++) {
+      for (let j = i + 1; j < buildings.length; j++) {
+        const a = buildings[i], b = buildings[j];
+        const need = footprintRadius(a) + footprintRadius(b) + 0.8;
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d = Math.hypot(dx, dy);
+        if (d >= need) continue;
+        if (d < 0.0001) { dx = 1; dy = 0; d = 1; }
+        const shift = (need - d) / 2;
+        const nx = dx / d, ny = dy / d;
+        a.x = clamp(a.x - nx * shift, 6, 94); a.y = clamp(a.y - ny * shift, 8, 92);
+        b.x = clamp(b.x + nx * shift, 6, 94); b.y = clamp(b.y + ny * shift, 8, 92);
+        moved = true;
+      }
+    }
+
+    for (const b of buildings) {
+      const need = footprintRadius(b) + 0.6;
+      for (const [nx0, ny0] of roadNodes) {
+        let dx = b.x - nx0, dy = b.y - ny0;
+        let d = Math.hypot(dx, dy);
+        if (d >= need) continue;
+        if (d < 0.0001) { dx = 0; dy = 1; d = 1; }
+        b.x = clamp(nx0 + (dx / d) * need, 6, 94);
+        b.y = clamp(ny0 + (dy / d) * need, 8, 92);
+        moved = true;
+      }
+    }
+
+    if (!moved) break;
+  }
+}
 
 export function createWorld(seed = 481516, name?: string): World {
   const rand = mulberry32(seed);
@@ -565,26 +684,27 @@ export function createWorld(seed = 481516, name?: string): World {
       hunger: 82 + rand() * 18, rest: 72 + rand() * 28, social: 60 + rand() * 40, clothing: 72 + rand() * 28,
       purpose: 55 + rand() * 45, happiness: 78, wage: 0, wallet: 45 + Math.floor(rand() * 55),
       x, y, destX: x, destY: y, path: [], dwell: 0, wanderIdx: i * 5, errand: false,
-      phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false, stalled: 0,
+      phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false, stalled: 0, roughSleeper: false,
       look: Math.floor(rand() * 0xffffff),
     };
     citizens.push(citizen);
     family.members.push(citizen.id);
   }
-  const buildings = starterBuildings();
+  const buildings = starterBuildings(seed);
   families.forEach((f, i) => {
     const [hx, hy] = HOUSE_PLOTS[i % HOUSE_PLOTS.length];
     buildings.push({ id: f.homeId, type: 'House', x: hx, y: hy, workers: [], active: true });
   });
+  enforceSpacing(buildings);
 
   const world: World = {
-    id: `world-${seed.toString(36)}`, name: name?.trim() || defaultWorldName(seed), seed, day: 1, hour: 8, terrain, season: 'Spring',
+    id: `world-${seed.toString(36)}`, name: name?.trim() || defaultWorldName(seed), seed, biome: biomeFor(seed).kind, day: 1, hour: 8, terrain, season: 'Spring',
     weather: weatherFor('Spring', seed, 1), weatherSeed: seed, treasury: 3000, population: count,
     families, citizens, buildings,
     resources: { wheat: 60, vegetables: 30, wood: 50, stone: 20, ironOre: 10, wool: 8, flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10 },
     market: createMarket(),
     feed: [], gatherings: [], bonds: {}, projects: [], unlockedAreas: ['Settlement'],
-    marketClock: 0, lastProduction: {}, counter: 0,
+    marketClock: 0, flow: { produced: {}, consumed: {} }, counter: 0,
   };
   pushFeed(world, 'world', `${world.name} has emerged.`);
   pushFeed(world, 'world', 'Families are settling into their homes.');
@@ -625,6 +745,7 @@ function householdTrade(world: World) {
         const price = world.market[r].price;
         if (c.wallet >= price) {
           c.wallet -= price; world.treasury += price; world.resources[r] -= 1;
+          note(world, 'consumed', r, 1);
           c.hunger = Math.min(100, c.hunger + 18);
         }
       }
@@ -634,6 +755,7 @@ function householdTrade(world: World) {
       const price = world.market.clothing.price;
       if (c.wallet >= price) {
         c.wallet -= price; world.treasury += price; world.resources.clothing -= 1;
+        note(world, 'consumed', 'clothing', 1);
         c.clothing = Math.min(100, c.clothing + 34);
       }
     }
@@ -643,6 +765,7 @@ function householdTrade(world: World) {
       const price = world.market.furniture.price;
       if (c.wallet >= price) {
         c.wallet -= price; world.treasury += price; world.resources.furniture -= 1;
+        note(world, 'consumed', 'furniture', 1);
         c.purpose = Math.min(100, c.purpose + 2.5);
       }
     }
@@ -651,6 +774,7 @@ function householdTrade(world: World) {
       const price = world.market.tools.price;
       if (c.wallet >= price) {
         c.wallet -= price; world.treasury += price; world.resources.tools -= 1;
+        note(world, 'consumed', 'tools', 1);
         c.purpose = Math.min(100, c.purpose + 4);
       }
     }
@@ -779,8 +903,13 @@ function chooseJob(world: World, counts?: Partial<Record<Job, number>>): Working
     .sort((x, y) => y.s - x.s)[0].j;
 }
 
+/** Record a resource movement for the day's flow figures. */
+function note(world: World, side: 'produced' | 'consumed', key: Resource, amount: number) {
+  if (!(amount > 0)) return;
+  world.flow[side][key] = (world.flow[side][key] ?? 0) + amount;
+}
+
 function produce(world: World) {
-  const before: Partial<Record<Resource, number>> = { ...world.resources };
   const counts: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) counts[c.job] = (counts[c.job] || 0) + 1;
   for (const [job, count] of Object.entries(counts)) {
@@ -789,13 +918,16 @@ function produce(world: World) {
     const seasonal = world.season === 'Winter' && wj === 'farmer' ? .65 : world.season === 'Summer' && wj === 'farmer' ? 1.15 : 1;
     const weather = world.weather === 'Storm' ? .65 : world.weather === 'Rain' && wj === 'farmer' ? 1.08 : world.weather === 'Snow' ? .7 : 1;
     if (recipe.input && !Object.entries(recipe.input).every(([r, n]) => world.resources[r as Resource] >= (n as number) * workers)) continue;
-    for (const [r, n] of Object.entries(recipe.input || {})) world.resources[r as Resource] -= (n as number) * workers;
-    for (const [r, n] of Object.entries(recipe.output)) world.resources[r as Resource] += (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather;
-  }
-  world.lastProduction = {};
-  for (const key of Object.keys(world.resources) as Resource[]) {
-    const gained = world.resources[key] - (before[key] ?? 0);
-    if (gained > 0) world.lastProduction[key] = gained;
+    for (const [r, n] of Object.entries(recipe.input || {})) {
+      const used = (n as number) * workers;
+      world.resources[r as Resource] -= used;
+      note(world, 'consumed', r as Resource, used);
+    }
+    for (const [r, n] of Object.entries(recipe.output)) {
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather;
+      world.resources[r as Resource] += made;
+      note(world, 'produced', r as Resource, made);
+    }
   }
   if (counts.farmer) pushFeed(world, 'work', `${counts.farmer} farmers tended the fields.`);
   if (counts.woodcutter) pushFeed(world, 'work', `${counts.woodcutter} woodcutters worked the forest.`);
@@ -860,7 +992,12 @@ function checkUnlocks(world: World) {
 function consume(world: World) {
   const need = world.citizens.reduce((s, c) => s + (c.age < 16 ? .5 : .9), 0);
   let remaining = need;
-  for (const r of ['bread', 'wheat', 'vegetables'] as Resource[]) { const take = Math.min(world.resources[r], remaining); world.resources[r] -= take; remaining -= take; }
+  for (const r of ['bread', 'wheat', 'vegetables'] as Resource[]) {
+    const take = Math.min(world.resources[r], remaining);
+    world.resources[r] -= take;
+    note(world, 'consumed', r, take);
+    remaining -= take;
+  }
   if (remaining > 0) pushFeed(world, 'market', 'Food is running low. Families are searching the market.');
 }
 
@@ -869,6 +1006,7 @@ export function maintenanceCost(type: string) {
 }
 
 function daily(world: World) {
+  world.flow = { produced: {}, consumed: {} };
   const workers = world.citizens.filter((c) => c.age >= 16);
   const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + maintenanceCost(b.type), 0);
 
@@ -905,6 +1043,20 @@ function daily(world: World) {
   }
   world.treasury = Math.max(0, world.treasury - payroll * ratio - upkeep);
 
+  for (const r of Object.keys(marketPrices) as Resource[]) {
+    const q = world.market[r];
+    q.history.push(Number(q.price.toFixed(3)));
+    if (q.history.length > 30) q.history.shift();
+  }
+
+  const homeless = world.citizens.filter((c) => c.age >= 16 && !homeOf(world, c));
+  if (homeless.length) {
+    const shelter = findBuilding(world, 'Tavern');
+    pushFeed(world, 'social', shelter
+      ? `${homeless.length} ${homeless.length === 1 ? 'person has' : 'people have'} no home and slept at the tavern.`
+      : `${homeless.length} ${homeless.length === 1 ? 'person' : 'people'} slept outside. The settlement needs houses.`);
+  }
+
   produce(world);
   consume(world);
   discoveries(world);
@@ -939,7 +1091,7 @@ export function advance(world: World, hours: number): World {
     c.social = Math.max(0, c.social - hours * .35);
     c.hunger = Math.max(0, c.hunger - hours * .75);
     if (c.activity === 'eating') c.hunger = Math.min(100, c.hunger + hours * 1.4);
-    if (c.activity === 'resting') c.rest = Math.min(100, c.rest + hours * 1.1);
+    if (c.activity === 'resting') c.rest = Math.min(100, c.rest + hours * (c.roughSleeper ? 0.45 : 1.1));
     c.happiness = clamp((c.hunger + c.rest + c.social + c.clothing + c.purpose) / 5, 0, 100);
   }
   return world;

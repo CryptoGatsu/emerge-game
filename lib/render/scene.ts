@@ -1090,7 +1090,7 @@ export class EmergeScene {
       const newDay = this.lastDay !== 0;
       this.lastDay = this.world.day;
       if (newDay) {
-        this.fellTrees(this.world.lastProduction.wood ?? 0);
+        this.fellTrees(this.world.flow.produced.wood ?? 0);
         this.growTrees();
       }
     }

@@ -7,8 +7,9 @@
  * the preview is the world, not a picture of one.
  */
 
-import { createWorld, type Terrain } from '../simulation';
-import { NEW_LEDGER, normaliseLedger, type VaultLedger } from '../chain/vault';
+import { createWorld } from '../simulation';
+import { biomeFor, type BiomeKind } from './biomes';
+import { normaliseLedger, type VaultLedger } from '../chain/vault';
 import { GRID, TILE_H, TILE_W, tileToScreen } from './iso';
 import { TILE_COLOR, Tile, generateWorldMap } from './terrain';
 
@@ -18,58 +19,67 @@ export interface Plot {
   region: string;
   /** Price in $EMERGE. */
   price: number;
-  terrain: Terrain[];
+  biome: BiomeKind;
+  biomeLabel: string;
   population: number;
   families: number;
   blurb: string;
+  /** Trades the land supports, which is the real reason to prefer one plot. */
+  trades: string[];
 }
 
 const REGIONS = [
   'Fernrest Vale', 'Alder Hollow', 'Mosswater Bend', 'Thornebrook',
   'Sunmere Shallows', 'Elderford Rise', 'Briar Fen', 'Kestrel Ridge',
+  'Hollowmere', 'Ashenford', 'Windrow Downs', 'Greyfell', 'Saltmarch',
+  'Rookspire', 'Cairnwood', 'Lowbarrow',
 ];
 
-const TERRAIN_NOTE: Record<Terrain, string> = {
-  fertile: 'deep soil that rewards a plough',
-  forest: 'old woodland thick enough to lose a road in',
-  mountain: 'iron in the bones of the hills',
-  rocky: 'good clean building stone at the surface',
-  coastal: 'open water and a long horizon',
-  river: 'fast water running the length of it',
+/** What each biome is worth, since land that supports more trades is worth more. */
+const BIOME_PREMIUM: Record<BiomeKind, number> = {
+  valley: 190, highland: 165, woodland: 120, wetland: 110, coast: 130, steppe: 95,
 };
-
-const TERRAIN_PREMIUM: Record<Terrain, number> = {
-  fertile: 70, forest: 45, mountain: 80, rocky: 40, coastal: 30, river: 55,
-};
-
-function describe(terrain: Terrain[]) {
-  const unique = [...new Set(terrain)];
-  const notes = unique.map((t) => TERRAIN_NOTE[t]);
-  if (notes.length === 1) return `Land with ${notes[0]}.`;
-  return `Land with ${notes.slice(0, -1).join(', ')} and ${notes[notes.length - 1]}.`;
-}
 
 /** Read a plot's character out of the world its seed would create. */
 export function inspectPlot(seed: number, index: number): Plot {
   const world = createWorld(seed);
-  const price = 180 + world.terrain.reduce((sum, t) => sum + TERRAIN_PREMIUM[t], 0) + world.population * 4;
+  const profile = biomeFor(seed);
+  const trades = [...new Set(world.buildings
+    .filter((b) => !['Market', 'Bank', 'Storage', 'Tavern', 'House'].includes(b.type))
+    .map((b) => b.type))];
+  const price = 180 + BIOME_PREMIUM[profile.kind] + world.population * 4 + trades.length * 12;
   return {
     id: `plot-${seed.toString(36)}`,
     seed,
     region: REGIONS[index % REGIONS.length],
     price: Math.round(price / 10) * 10,
-    terrain: world.terrain,
+    biome: profile.kind,
+    biomeLabel: profile.label,
     population: world.population,
     families: world.families.length,
-    blurb: describe(world.terrain),
+    blurb: profile.blurb,
+    trades,
   };
 }
 
-/** Seeds on offer. Fixed, so the same plots are for sale for everyone. */
-export const PLOT_SEEDS = [481516, 2308, 90210, 71077, 33871, 604800];
+/**
+ * Seeds on offer. Fixed, so the same land is for sale for everyone, and chosen
+ * to cover every biome — a shop that happened to show three woodlands would
+ * hide the fact that plots differ in kind at all.
+ */
+export const PLOT_SEEDS = [1490, 1910, 1070, 1210, 1420, 1000];
 
 export function catalogue(): Plot[] {
   return PLOT_SEEDS.map((seed, i) => inspectPlot(seed, i));
+}
+
+/**
+ * Prospect a brand-new plot. The seed comes from the moment it was found, so no
+ * two prospected plots are the same piece of land.
+ */
+export function prospectPlot(index: number): Plot {
+  const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 8;
+  return inspectPlot(seed, index);
 }
 
 /**
@@ -118,7 +128,7 @@ export function drawPlotPreview(canvas: HTMLCanvasElement, seed: number) {
 }
 
 /* ------------------------------------------------------------------ *
- * Saved worlds
+ * What the player owns, locally
  * ------------------------------------------------------------------ */
 
 export interface ClaimedWorld {
@@ -131,41 +141,76 @@ export interface ClaimedWorld {
   owner: string | null;
   /** Transaction hash, once claims actually settle on chain. */
   txHash: string | null;
-  /** $EMERGE held against this world, and what has moved through the vault. */
-  ledger: VaultLedger;
 }
 
-export const newLedger = () => ({ ...NEW_LEDGER });
+export interface Listing { seed: number; region: string; price: number; listedAt: number }
 
-const STORAGE_KEY = 'emerge.world.v1';
+/**
+ * The player's record, kept separately from whichever world they are in.
+ *
+ * The $EMERGE balance belongs to the player, not the plot: leaving a world to
+ * look at the land office must not take their tokens with it.
+ */
+export interface PlayerRecord {
+  ledger: VaultLedger;
+  /** Seeds of plots this player prospected into existence. */
+  prospected: number[];
+  /** Plots they have put up for resale. */
+  listings: Listing[];
+}
 
-export function loadClaimedWorld(): ClaimedWorld | null {
+const WORLD_KEY = 'emerge.world.v1';
+const PLAYER_KEY = 'emerge.player.v1';
+
+function readJson<T>(key: string): T | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as ClaimedWorld;
-    if (typeof parsed?.seed !== 'number' || typeof parsed?.name !== 'string') return null;
-    // Worlds saved before the vault existed still load; they just get a ledger.
-    return { ...parsed, ledger: normaliseLedger(parsed.ledger) };
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
-    // A corrupt or unreadable entry should send the player to the plot view,
-    // never crash the app on boot.
+    // A corrupt entry should send the player to the land office, never crash
+    // the app on boot.
     return null;
   }
 }
 
-export function saveClaimedWorld(world: ClaimedWorld) {
+function writeJson(key: string, value: unknown) {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(world));
+    window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // Private browsing and full quotas both land here. The world still plays;
-    // it just will not be remembered next visit.
+    // Private browsing and full quotas both land here. Play continues; it just
+    // will not be remembered next visit.
   }
 }
 
+export function loadClaimedWorld(): ClaimedWorld | null {
+  const parsed = readJson<ClaimedWorld & { ledger?: unknown }>(WORLD_KEY);
+  if (!parsed || typeof parsed.seed !== 'number' || typeof parsed.name !== 'string') return null;
+  return parsed;
+}
+
+export const saveClaimedWorld = (world: ClaimedWorld) => writeJson(WORLD_KEY, world);
+
 export function clearClaimedWorld() {
   if (typeof window === 'undefined') return;
-  try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* nothing to do */ }
+  try { window.localStorage.removeItem(WORLD_KEY); } catch { /* nothing to do */ }
+}
+
+export function loadPlayer(): PlayerRecord {
+  const parsed = readJson<Partial<PlayerRecord>>(PLAYER_KEY);
+  return {
+    ledger: normaliseLedger(parsed?.ledger),
+    prospected: Array.isArray(parsed?.prospected) ? parsed!.prospected!.filter((n) => Number.isFinite(n)) : [],
+    listings: Array.isArray(parsed?.listings) ? parsed!.listings! : [],
+  };
+}
+
+export const savePlayer = (record: PlayerRecord) => writeJson(PLAYER_KEY, record);
+
+/** Everything currently for sale: the fixed catalogue plus anything prospected. */
+export function marketPlots(record: PlayerRecord): Plot[] {
+  const base = catalogue();
+  const found = record.prospected.map((seed, i) => inspectPlot(seed, base.length + i));
+  return [...base, ...found];
 }

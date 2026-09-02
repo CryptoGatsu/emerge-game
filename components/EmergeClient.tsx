@@ -20,11 +20,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { advance, constructBuilding, createWorld, drawFromTreasury, fundTreasury, inspireWorld, renameWorld, type World } from '@/lib/simulation';
+import { advance, constructBuilding, createWorld, drawFromTreasury, fundTreasury, renameCitizen, renameWorld, type World } from '@/lib/simulation';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
-import { clearClaimedWorld, loadClaimedWorld, saveClaimedWorld, type ClaimedWorld } from '@/lib/world/plots';
-import { payForRename, type VaultLedger } from '@/lib/chain/vault';
+import {
+  clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld,
+  type ClaimedWorld, type PlayerRecord,
+} from '@/lib/world/plots';
+import { RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, charge, credit, type VaultLedger } from '@/lib/chain/vault';
 import PlotSelect from './PlotSelect';
 import { Hud } from './Hud';
 import { Panels, type PanelKey } from './Panels';
@@ -45,11 +48,20 @@ export default function EmergeClient() {
   // its WebGL context and the generated texture atlas survive a trip back to
   // the land office instead of being torn down and rebuilt.
   const [mounted, setMounted] = useState<ClaimedWorld | null>(null);
+  // The $EMERGE balance and everything bought with it belongs to the player,
+  // not to whichever plot they happen to be standing on.
+  const [player, setPlayer] = useState<PlayerRecord | null>(null);
 
   useEffect(() => {
     const stored = loadClaimedWorld();
     setClaimed(stored);
     if (stored) setMounted(stored);
+    setPlayer(loadPlayer());
+  }, []);
+
+  const updatePlayer = useCallback((next: PlayerRecord) => {
+    savePlayer(next);
+    setPlayer(next);
   }, []);
 
   const enter = useCallback((world: ClaimedWorld) => {
@@ -63,16 +75,18 @@ export default function EmergeClient() {
     setClaimed(null);
   }, []);
 
-  if (claimed === undefined) return <main className="stage" />;
+  if (claimed === undefined || !player) return <main className="stage" />;
 
   return (
     <>
       {mounted && (
         <WorldView
           claimed={mounted}
+          player={player}
           hidden={claimed === null}
           onLeave={leave}
           onRename={enter}
+          onPlayer={updatePlayer}
         />
       )}
       {claimed === null && <PlotSelect onEnter={enter} />}
@@ -80,12 +94,14 @@ export default function EmergeClient() {
   );
 }
 
-function WorldView({ claimed, hidden, onLeave, onRename }: {
+function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
   claimed: ClaimedWorld;
+  player: PlayerRecord;
   /** True while the land office is open over the top of a running world. */
   hidden: boolean;
   onLeave: () => void;
   onRename: (world: ClaimedWorld) => void;
+  onPlayer: (record: PlayerRecord) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<World | null>(null);
@@ -213,13 +229,6 @@ function WorldView({ claimed, hidden, onLeave, onRename }: {
     return () => window.clearInterval(id);
   }, [ready]);
 
-  const inspire = useCallback(() => {
-    const world = worldRef.current;
-    if (!world) return;
-    inspireWorld(world);
-    setView(snapshot(world, selectedRef.current));
-  }, []);
-
   const beginBuild = useCallback((type: string, cost: number) => {
     const world = worldRef.current;
     const scene = sceneRef.current;
@@ -242,17 +251,32 @@ function WorldView({ claimed, hidden, onLeave, onRename }: {
     setPlacing(null);
   }, []);
 
-  const rename = useCallback((next: string) => {
+  const refresh = useCallback(() => {
+    const world = worldRef.current;
+    if (world) setView(snapshot(world, selectedRef.current));
+  }, []);
+
+  /** Naming costs tokens, so refuse rather than rename for free. */
+  const renameWorldFor = useCallback((next: string) => {
     const world = worldRef.current;
     if (!world) return;
-    // A name costs tokens, so refuse rather than rename for free if it cannot
-    // be paid for.
-    const paid = payForRename(claimed.ledger);
+    const paid = charge(player.ledger, RENAME_COST_EMERGE);
     if (!paid) return;
     renameWorld(world, next);
-    onRename({ ...claimed, name: world.name, ledger: paid });
-    setView(snapshot(world, selectedRef.current));
-  }, [claimed, onRename]);
+    onPlayer({ ...player, ledger: paid });
+    onRename({ ...claimed, name: world.name });
+    refresh();
+  }, [claimed, onRename, onPlayer, player, refresh]);
+
+  const renameCitizenFor = useCallback((id: string, next: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const paid = charge(player.ledger, RENAME_CITIZEN_EMERGE);
+    if (!paid) return;
+    if (!renameCitizen(world, id, next)) return;
+    onPlayer({ ...player, ledger: paid });
+    refresh();
+  }, [onPlayer, player, refresh]);
 
   /** Move Gold in or out of the treasury and persist the vault ledger. */
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
@@ -260,9 +284,18 @@ function WorldView({ claimed, hidden, onLeave, onRename }: {
     if (!world) return;
     if (goldDelta > 0) fundTreasury(world, goldDelta, note);
     else if (goldDelta < 0 && !drawFromTreasury(world, -goldDelta, note)) return;
-    onRename({ ...claimed, ledger });
-    setView(snapshot(world, selectedRef.current));
-  }, [claimed, onRename]);
+    onPlayer({ ...player, ledger });
+    refresh();
+  }, [onPlayer, player, refresh]);
+
+  /** Put this plot up for resale, or take it back off the market. */
+  const listPlot = useCallback((price: number | null) => {
+    const listings = player.listings.filter((l) => l.seed !== claimed.seed);
+    if (price !== null && price > 0) {
+      listings.push({ seed: claimed.seed, region: claimed.region, price: Math.round(price), listedAt: Date.now() });
+    }
+    onPlayer({ ...player, listings });
+  }, [claimed.region, claimed.seed, onPlayer, player]);
 
   const zoom = useCallback((factor: number) => sceneRef.current?.zoomBy(factor), []);
   const resetView = useCallback(() => sceneRef.current?.centreOn(50, 49, 1.05), []);
@@ -310,12 +343,13 @@ function WorldView({ claimed, hidden, onLeave, onRename }: {
             placing={placing}
             following={following}
             woodland={woodland}
+            player={player}
+            onRenameCitizen={renameCitizenFor}
             hover={hoverInfo}
             activePanel={panel}
             onTogglePause={() => setPaused((p) => !p)}
             onSpeed={setSpeed}
             onPanel={setPanel}
-            onInspire={inspire}
             onFocus={focusOn}
             onToggleFollow={toggleFollow}
             onClearSelection={() => setSelected(null)}
@@ -329,11 +363,14 @@ function WorldView({ claimed, hidden, onLeave, onRename }: {
             panel={panel}
             view={view}
             claimed={claimed}
+            player={player}
             onClose={() => setPanel(null)}
             onBuild={beginBuild}
-            onRename={rename}
+            onRenameWorld={renameWorldFor}
+            onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}
             onVault={vault}
+            onList={listPlot}
           />
         </>
       )}

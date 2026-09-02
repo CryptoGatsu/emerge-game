@@ -60,6 +60,9 @@ export interface Snapshot {
   events: EventCard[];
   resources: { key: Resource; label: string; amount: number }[];
   market: { key: Resource; label: string; quote: MarketQuote }[];
+  /** Yesterday's real throughput, per resource. */
+  production: Partial<Record<Resource, number>>;
+  consumption: Partial<Record<Resource, number>>;
   unlockedAreas: string[];
   projects: { id: string; name: string; owner: string; progress: number; length: number }[];
   focus: Focus | null;
@@ -164,6 +167,8 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     events: eventCards(world),
     resources: (Object.keys(RESOURCE_LABELS) as Resource[]).map((key) => ({ key, label: RESOURCE_LABELS[key], amount: world.resources[key] })),
     market: MARKET_ORDER.map((key) => ({ key, label: RESOURCE_LABELS[key], quote: world.market[key] })),
+    production: { ...world.flow.produced },
+    consumption: { ...world.flow.consumed },
     unlockedAreas: [...world.unlockedAreas],
     projects: world.projects.map((p) => ({
       id: p.id, name: p.name, progress: p.progress, length: p.length,

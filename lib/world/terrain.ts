@@ -13,6 +13,7 @@
 
 import { ROAD_EDGES, ROAD_NODES, type Building, type World } from '../simulation';
 import { GRID, worldToTile } from './iso';
+import { PONDS, WATER_ROUTES, biomeProfile, type BiomeProfile } from './biomes';
 
 export enum Tile {
   Grass, Flowers, Meadow, Forest, Soil, Tilled, CropWheat, CropVeg,
@@ -126,49 +127,56 @@ function fbm(seed: number, x: number, y: number, octaves = 4) {
  * ------------------------------------------------------------------ */
 
 /**
- * The river drops off the north-east highland and sweeps south-west across the
- * scene into a pond, then away off the southern edge. The route is chosen in
- * isometric screen space rather than world space: a river laid along a world
- * axis projects to the straight edge of a diamond and reads as a moat.
+ * Water for a biome.
+ *
+ * Routes come from the biome table and are chosen in isometric screen space:
+ * a channel laid along a world axis projects to the straight edge of a diamond
+ * and reads as a moat rather than a river.
  */
-const RIVER: [number, number][] = [
-  [86, 1], [78, 4], [68, 8], [58, 12], [48, 15], [38, 19], [30, 24],
-  [23, 31], [18, 40], [14, 50], [15, 63], [19, 76], [26, 89], [34, 99],
-];
-const POND = { x: 12, y: 56, r: 8 };
-/** Where the north road crosses the river, a bridge is drawn instead of a ford. */
+function waterFor(profile: BiomeProfile) {
+  const pond = PONDS[profile.water];
+  return {
+    routes: WATER_ROUTES[profile.water],
+    pond: { x: pond.x, y: pond.y, r: pond.r * profile.pondScale },
+  };
+}
+
+/** Where the north road crosses the water, a bridge is drawn instead of a ford. */
 const BRIDGE = { x: 46, y: 16 };
 
-function riverWidth(seed: number, t: number) {
-  return 2.5 + valueNoise(seed + 313, t * 2.4, 0) * 1.7;
+function riverWidth(seed: number, t: number, scale: number) {
+  return (2.5 + valueNoise(seed + 313, t * 2.4, 0) * 1.7) * scale;
 }
 
 interface Polyline { pts: [number, number][]; widths: number[] }
 
-function buildRiver(seed: number): Polyline {
+function buildRiver(seed: number, profile: BiomeProfile): Polyline {
   const pts: [number, number][] = [];
   const widths: number[] = [];
-  for (let i = 0; i < RIVER.length - 1; i++) {
-    const [ax, ay] = RIVER[i];
-    const [bx, by] = RIVER[i + 1];
-    const steps = 14;
-    for (let s = 0; s < steps; s++) {
-      const t = s / steps;
-      // Meander perpendicular to the run so the bank is never a straight edge.
-      const dx = bx - ax, dy = by - ay;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len, ny = dx / len;
-      const wobble = (valueNoise(seed + 71, (i + t) * 1.7, 0) - 0.5) * 3.2;
-      pts.push([ax + dx * t + nx * wobble, ay + dy * t + ny * wobble]);
-      widths.push(riverWidth(seed, i + t));
+  for (const route of waterFor(profile).routes) {
+    for (let i = 0; i < route.length - 1; i++) {
+      const [ax, ay] = route[i];
+      const [bx, by] = route[i + 1];
+      const steps = 14;
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps;
+        // Meander perpendicular to the run so the bank is never a straight edge.
+        const dx = bx - ax, dy = by - ay;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        const wobble = (valueNoise(seed + 71, (i + t) * 1.7, 0) - 0.5) * 3.2;
+        pts.push([ax + dx * t + nx * wobble, ay + dy * t + ny * wobble]);
+        widths.push(riverWidth(seed, i + t, profile.waterScale));
+      }
     }
   }
   return { pts, widths };
 }
 
 /** Elevation field: a raised shelf in the north-east that the mine road climbs. */
-function heightField(seed: number, wx: number, wy: number) {
-  const ridge = (wx - 70) * 0.06 + (34 - wy) * 0.045;
+function heightField(seed: number, wx: number, wy: number, plateau: number) {
+  if (plateau <= 0) return 0;
+  const ridge = ((wx - 70) * 0.06 + (34 - wy) * 0.045) * plateau;
   const noise = (fbm(seed + 4001, wx * 0.05, wy * 0.05, 3) - 0.5) * 0.7;
   return Math.max(0, Math.min(1, ridge + noise));
 }
@@ -243,7 +251,9 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   const field = new Float32Array(n);
   const cliffs = new Uint8Array(n);
   const tone = new Float32Array(n);
-  const river = buildRiver(seed);
+  const profile = biomeProfile(world.biome);
+  const water = waterFor(profile);
+  const river = buildRiver(seed, profile);
   const roads = buildRoads(seed);
   const props: PropInstance[] = [];
   const waterfalls: { tx: number; ty: number }[] = [];
@@ -263,13 +273,13 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
       const i = ty * grid + tx;
       const [wx, wy] = worldOf(tx, ty);
       tone[i] = fbm(seed + 5200, wx * 0.022, wy * 0.022, 3);
-      const h = heightField(seed, wx, wy);
+      const h = heightField(seed, wx, wy, profile.plateau);
       field[i] = h;
       steps[i] = h > 0.5 ? 1 : 0;
 
       const riverHit = nearest(river, wx, wy);
-      const pondD = Math.hypot(wx - POND.x, wy - POND.y);
-      const pondEdge = POND.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
+      const pondD = Math.hypot(wx - water.pond.x, wy - water.pond.y);
+      const pondEdge = water.pond.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
       const inWater = (riverHit.d < riverHit.w && steps[i] === 0) || pondD < pondEdge;
       const nearWater = riverHit.d < riverHit.w + 0.9 || pondD < pondEdge + 1.1;
 
@@ -295,15 +305,15 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
         // The shelf is rock where it is exposed and upland meadow everywhere else,
         // so the highland still reads as part of a lush world.
         tile = fbm(seed + 700, wx * 0.09, wy * 0.09, 3) > 0.52 ? Tile.Rock : Tile.Meadow;
-      } else if (fbm(seed + 700, wx * 0.06, wy * 0.06, 3) > 0.76) {
+      } else if (fbm(seed + 700, wx * 0.06, wy * 0.06, 3) > profile.rockThreshold) {
         tile = Tile.Rock;
       } else {
         const forest = fbm(seed + 1300, wx * 0.045, wy * 0.045, 4);
         const bloom = fbm(seed + 2600, wx * 0.09, wy * 0.09, 3);
         // Keep the settlement core open; push woodland out to the edges.
         const fromCore = Math.hypot(wx - 50, wy - 50) / 60;
-        tile = forest + fromCore * 0.28 > 0.62 ? Tile.Forest
-          : bloom > 0.68 ? Tile.Flowers
+        tile = forest + fromCore * 0.28 + profile.forest > 0.62 ? Tile.Forest
+          : bloom > profile.bloom ? Tile.Flowers
             : bloom < 0.34 ? Tile.Meadow
               : Tile.Grass;
       }
@@ -360,7 +370,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
     }
   }
 
-  const heightAt = (wx: number, wy: number) => heightField(seed, wx, wy);
+  const heightAt = (wx: number, wy: number) => heightField(seed, wx, wy, profile.plateau);
   const tileAt = (wx: number, wy: number) => {
     const tx = Math.max(0, Math.min(grid - 1, Math.floor(wx / cell)));
     const ty = Math.max(0, Math.min(grid - 1, Math.floor(wy / cell)));
@@ -368,8 +378,8 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   };
 
   if (options.props !== false) {
-    scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, roads, river, heightAt });
-    placeSettlementProps(props, world, roads, seed);
+    scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, roads, river, heightAt, profile });
+    placeSettlementProps(props, world, roads, seed, water.pond);
   }
 
   return { grid, tiles, variants, steps, field, cliffs, tone, waterfalls, props, heightAt, tileAt };
@@ -386,13 +396,16 @@ interface ScatterCtx {
   blocked: (wx: number, wy: number, pad?: number) => boolean;
   roads: Polyline; river: Polyline;
   heightAt: (wx: number, wy: number) => number;
+  profile: BiomeProfile;
 }
 
-const TREES = ['prop.tree.pine.big', 'prop.tree.oak.big', 'prop.tree.birch.big'];
-const SMALL_TREES = ['prop.tree.pine.small', 'prop.tree.oak.small', 'prop.tree.birch.small'];
+const bigTree = (species: string) => `prop.tree.${species}.big`;
+const smallTree = (species: string) => `prop.tree.${species}.small`;
 
 function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
-  const { seed, grid, tiles, steps, worldOf, blocked, roads } = ctx;
+  const { seed, grid, tiles, steps, worldOf, blocked, roads, profile } = ctx;
+  const TREES = profile.trees.map(bigTree);
+  const SMALL_TREES = profile.trees.map(smallTree);
   for (let ty = 0; ty < grid; ty++) {
     for (let tx = 0; tx < grid; tx++) {
       const i = ty * grid + tx;
@@ -455,7 +468,7 @@ function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
 }
 
 /** Hand-placed settlement dressing that reads as somewhere people have built this place. */
-function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline, seed: number) {
+function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline, seed: number, pond: { x: number; y: number; r: number }) {
   const at = (type: string) => world.buildings.find((b) => b.type === type);
   const push = (wx: number, wy: number, name: string, sway = 0, glowing = false) =>
     out.push({ wx, wy, name, sway, glow: glowing });
@@ -535,11 +548,12 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
   }
 
   // Reeds and lilies around the pond edge.
-  for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * Math.PI * 2;
-    const r = POND.r + 0.6 + hash2(seed + 404, i, 1) * 1.6;
-    push(POND.x + Math.cos(a) * r, POND.y + Math.sin(a) * r * 0.9, i % 3 === 0 ? 'prop.reeds' : 'prop.bush.0', 0.8);
+  const rim = Math.max(18, Math.round(pond.r * 3));
+  for (let i = 0; i < rim; i++) {
+    const a = (i / rim) * Math.PI * 2;
+    const r = pond.r + 0.6 + hash2(seed + 404, i, 1) * 1.6;
+    push(pond.x + Math.cos(a) * r, pond.y + Math.sin(a) * r * 0.9, i % 3 === 0 ? 'prop.reeds' : 'prop.bush.0', 0.8);
   }
 }
 
-export { BRIDGE, POND, PLAZA };
+export { BRIDGE, PLAZA };

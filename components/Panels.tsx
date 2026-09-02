@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import type { ClaimedWorld } from '@/lib/world/plots';
+import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import { maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import { ACTIVE_CHAIN, TOKEN, chainConfigured, tokenActions } from '@/lib/chain/emerge';
@@ -16,6 +16,7 @@ import {
   EMERGE_PER_GOLD, RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
   deposit, quoteWithdraw, withdraw, type VaultLedger,
 } from '@/lib/chain/vault';
+import { Sparkline } from './Sparkline';
 import { WalletPicker } from './WalletPicker';
 
 export type PanelKey = 'market' | 'bank' | 'build' | 'connect' | null;
@@ -24,12 +25,16 @@ interface PanelsProps {
   panel: PanelKey;
   view: Snapshot;
   claimed: ClaimedWorld;
+  player: PlayerRecord;
   onClose: () => void;
   onBuild: (type: string, cost: number) => void;
-  onRename: (name: string) => void;
+  onRenameWorld: (name: string) => void;
+  onRenameCitizen: (id: string, name: string) => void;
   onLeave: () => void;
-  /** Move Gold in or out of the treasury and record it against the world. */
+  /** Move Gold in or out of the treasury and record it against the player. */
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  /** List this plot for resale at a price, or pass null to withdraw it. */
+  onList: (price: number | null) => void;
 }
 
 /** Buildable structures. Upkeep is read from the simulation so it never drifts. */
@@ -70,8 +75,15 @@ function Shell({ title, subtitle, onClose, children, wide }: {
 function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
   const [focus, setFocus] = useState(view.market[0]?.key ?? 'wheat');
   const row = view.market.find((m) => m.key === focus) ?? view.market[0];
+  const store = (key: string) => Math.floor(view.resources.find((r) => r.key === key)?.amount ?? 0);
+
   return (
-    <Shell title="World Market" subtitle="Households buy food, producers consume inputs, and the market moves to close the gaps." onClose={onClose} wide>
+    <Shell
+      title="World Market"
+      subtitle="Households buy food, producers consume inputs, and the market moves to close the gaps."
+      onClose={onClose}
+      wide
+    >
       {row && (
         <div className="market-focus">
           <div>
@@ -79,35 +91,57 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
             <h3>{row.label}</h3>
             <strong>{row.quote.price.toFixed(2)} <small>GOLD / UNIT</small></strong>
           </div>
-          <div><span>SUPPLY</span><b>{Math.floor(row.quote.supply)}</b></div>
-          <div><span>DEMAND</span><b>{Math.floor(row.quote.demand)}</b></div>
-          <div><span>TREND</span><b className={row.quote.trend >= 0 ? 'up' : 'down'}>{row.quote.trend >= 0 ? '+' : ''}{row.quote.trend.toFixed(3)}</b></div>
+          <div className="market-chart">
+            <span className="eyebrow">LAST {row.quote.history.length} DAYS</span>
+            <Sparkline values={row.quote.history} width={260} height={54} />
+          </div>
+          <div className="market-figures">
+            <div><span>IN STORE</span><b>{store(row.key)}</b></div>
+            <div><span>MADE / DAY</span><b>{Math.round(view.production[row.key] ?? 0)}</b></div>
+            <div><span>USED / DAY</span><b>{Math.round(view.consumption[row.key] ?? 0)}</b></div>
+            <div>
+              <span>TREND</span>
+              <b className={row.quote.trend >= 0 ? 'up' : 'down'}>
+                {row.quote.trend >= 0 ? '+' : ''}{row.quote.trend.toFixed(3)}
+              </b>
+            </div>
+          </div>
         </div>
       )}
+
       <div className="market-rows">
-        {view.market.map((m) => (
-          <button key={m.key} className={`market-row ${focus === m.key ? 'focused' : ''}`} onClick={() => setFocus(m.key)}>
-            <span>{m.label}</span>
-            <b>{m.quote.price.toFixed(2)}</b>
-            <span className={m.quote.demand > m.quote.supply ? 'buy' : 'sell'}>
-              {m.quote.demand > m.quote.supply ? 'BUY PRESSURE' : 'SELL PRESSURE'}
-            </span>
-            <span>{Math.floor(view.resources.find((r) => r.key === m.key)?.amount ?? 0)} in store</span>
-          </button>
-        ))}
+        <div className="market-row head">
+          <span>RESOURCE</span><span>PRICE</span><span>30 DAYS</span><span>PRESSURE</span><span>IN STORE</span><span>FLOW</span>
+        </div>
+        {view.market.map((m) => {
+          const pressure = m.quote.demand - m.quote.supply;
+          const flow = Math.round((view.production[m.key] ?? 0) - (view.consumption[m.key] ?? 0));
+          return (
+            <button key={m.key} className={`market-row ${focus === m.key ? 'focused' : ''}`} onClick={() => setFocus(m.key)}>
+              <span>{m.label}</span>
+              <b>{m.quote.price.toFixed(2)}</b>
+              <Sparkline values={m.quote.history} width={78} height={18} subtle />
+              <span className={pressure > 0 ? 'buy' : 'sell'}>
+                {pressure > 0 ? 'WANTED' : 'SURPLUS'} {Math.abs(Math.round(pressure))}
+              </span>
+              <span>{store(m.key)}</span>
+              <span className={flow >= 0 ? 'buy' : 'sell'}>{flow >= 0 ? '+' : ''}{flow}/day</span>
+            </button>
+          );
+        })}
       </div>
     </Shell>
   );
 }
 
-function BankPanel({ view, claimed, onClose, onVault }: {
-  view: Snapshot; claimed: ClaimedWorld; onClose: () => void;
+function BankPanel({ view, player, onClose, onVault }: {
+  view: Snapshot; player: PlayerRecord; onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
 }) {
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [message, setMessage] = useState<string | null>(null);
-  const ledger = claimed.ledger;
+  const ledger = player.ledger;
 
   const depositGold = Math.floor((Number(depositAmount) || 0) / EMERGE_PER_GOLD * 100) / 100;
   const quote = quoteWithdraw(Math.floor(Number(withdrawAmount) || 0));
@@ -214,14 +248,16 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
   );
 }
 
-function ConnectPanel({ view, claimed, onClose, onRename, onLeave }: {
-  view: Snapshot; claimed: ClaimedWorld; onClose: () => void;
-  onRename: (name: string) => void; onLeave: () => void;
+function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, onList }: {
+  view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
+  onRenameWorld: (name: string) => void; onLeave: () => void; onList: (price: number | null) => void;
 }) {
   const [draftName, setDraftName] = useState(view.name);
+  const [askPrice, setAskPrice] = useState(String(Math.round(claimed.price * 1.25)));
   const configured = chainConfigured();
-  const affordable = claimed.ledger.balance >= RENAME_COST_EMERGE;
+  const affordable = player.ledger.balance >= RENAME_COST_EMERGE;
   const changed = draftName.trim().length > 0 && draftName.trim() !== view.name;
+  const listing = player.listings.find((l) => l.seed === claimed.seed);
 
   return (
     <Shell
@@ -234,6 +270,9 @@ function ConnectPanel({ view, claimed, onClose, onRename, onLeave }: {
         <div className="connect-card">
           <span className="eyebrow">WALLET</span>
           <WalletPicker />
+          <div className="vault-line" style={{ marginTop: 12 }}>
+            <span>Balance</span><b>{Math.floor(player.ledger.balance).toLocaleString()} {TOKEN.ticker}</b>
+          </div>
         </div>
 
         <div className="connect-card">
@@ -251,14 +290,34 @@ function ConnectPanel({ view, claimed, onClose, onRename, onLeave }: {
             <span>WORLD NAME</span>
             <input value={draftName} maxLength={24} onChange={(e) => setDraftName(e.target.value)} />
           </label>
-          <p className="muted small">
-            Renaming costs {RENAME_COST_EMERGE.toLocaleString()} {TOKEN.ticker}. Balance:{' '}
-            {Math.floor(claimed.ledger.balance).toLocaleString()}.
-          </p>
-          <button onClick={() => onRename(draftName)} disabled={!changed || !affordable}>
+          <button onClick={() => onRenameWorld(draftName)} disabled={!changed || !affordable}>
             {affordable ? `Rename for ${RENAME_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}` : `Not enough ${TOKEN.ticker}`}
           </button>
-          <button className="danger" onClick={onLeave}>Choose another plot</button>
+        </div>
+
+        <div className="connect-card">
+          <span className="eyebrow">SELL THIS PLOT</span>
+          {listing ? (
+            <>
+              <h3>Listed at {listing.price.toLocaleString()} {TOKEN.ticker}</h3>
+              <p className="muted small">
+                Waiting for a buyer. Resale between players needs the plot registry on
+                {' '}{ACTIVE_CHAIN.label}; until it is deployed the listing is local to this browser.
+              </p>
+              <button onClick={() => onList(null)}>Withdraw listing</button>
+            </>
+          ) : (
+            <>
+              <label className="name-field">
+                <span>ASKING PRICE ({TOKEN.ticker})</span>
+                <input value={askPrice} inputMode="numeric" onChange={(e) => setAskPrice(e.target.value.replace(/[^0-9]/g, ''))} />
+              </label>
+              <button onClick={() => onList(Number(askPrice) || 0)} disabled={!(Number(askPrice) > 0)}>
+                List for sale
+              </button>
+            </>
+          )}
+          <button className="danger" onClick={onLeave}>Leave for the land office</button>
         </div>
       </div>
 
@@ -267,7 +326,7 @@ function ConnectPanel({ view, claimed, onClose, onRename, onLeave }: {
         <p className="muted small">
           Chain details are not wired into this deployment yet. Set the Robinhood Chain RPC, chain id and token
           address in the environment to enable settlement; until then these are the actions the economy layer is
-          designed around, and vault balances are local to this browser.
+          designed around, and balances and listings are local to this browser.
         </p>
       )}
       <div className="token-grid">
@@ -283,12 +342,17 @@ function ConnectPanel({ view, claimed, onClose, onRename, onLeave }: {
   );
 }
 
-export function Panels({ panel, view, claimed, onClose, onBuild, onRename, onLeave, onVault }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onVault, onList }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
-  if (panel === 'bank') return <BankPanel view={view} claimed={claimed} onClose={onClose} onVault={onVault} />;
+  if (panel === 'bank') return <BankPanel view={view} player={player} onClose={onClose} onVault={onVault} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;
   if (panel === 'connect') {
-    return <ConnectPanel view={view} claimed={claimed} onClose={onClose} onRename={onRename} onLeave={onLeave} />;
+    return (
+      <ConnectPanel
+        view={view} claimed={claimed} player={player} onClose={onClose}
+        onRenameWorld={onRenameWorld} onLeave={onLeave} onList={onList}
+      />
+    );
   }
   return null;
 }

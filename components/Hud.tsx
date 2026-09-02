@@ -12,6 +12,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { FEED_ICON, WEATHER_ICON, type Focus, type Snapshot } from '@/lib/hud';
 import type { PickTarget } from '@/lib/render/scene';
+import type { PlayerRecord } from '@/lib/world/plots';
+import { RENAME_CITIZEN_EMERGE } from '@/lib/chain/vault';
+import { TOKEN } from '@/lib/chain/emerge';
 import type { PanelKey } from './Panels';
 import { SPEEDS, type Speed } from './EmergeClient';
 
@@ -22,14 +25,15 @@ interface HudProps {
   placing: string | null;
   following: string | null;
   woodland: { standing: number; stumps: number; saplings: number; total: number } | null;
+  player: PlayerRecord;
   hover: { title: string; lines: string[] } | null;
   activePanel: PanelKey;
   onTogglePause: () => void;
   onSpeed: (speed: Speed) => void;
   onPanel: (panel: PanelKey) => void;
-  onInspire: () => void;
   onFocus: (target: PickTarget) => void;
   onToggleFollow: () => void;
+  onRenameCitizen: (id: string, name: string) => void;
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
   onResetView: () => void;
@@ -111,10 +115,14 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, onClear, onFocus, onToggleFollow }: {
-  focus: Focus; following: string | null;
+function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow, onRenameCitizen }: {
+  focus: Focus; following: string | null; player: PlayerRecord;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
+  onRenameCitizen: (id: string, name: string) => void;
 }) {
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState('');
+  const affordable = player.ledger.balance >= RENAME_CITIZEN_EMERGE;
   if (focus.kind === 'building') {
     return (
       <section className="panel being-card">
@@ -145,11 +153,40 @@ function BeingCard({ focus, following, onClear, onFocus, onToggleFollow }: {
       <div className="being-head">
         <div className="being-portrait">{focus.name.slice(0, 1)}</div>
         <div>
-          <h2>{focus.name}</h2>
+          <h2>
+            {focus.name}
+            <button
+              className="rename-pen"
+              title={`Rename for ${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
+              onClick={() => { setDraft(focus.name); setRenaming((r) => !r); }}
+            >
+              ✎
+            </button>
+          </h2>
           <div className="being-handle">{focus.handle}</div>
           <p className="muted">{focus.job} · age {focus.age} · {focus.family} family</p>
         </div>
       </div>
+      {renaming && (
+        <div className="rename-row">
+          <input
+            value={draft}
+            maxLength={18}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && affordable) { onRenameCitizen(focus.id, draft); setRenaming(false); }
+              if (e.key === 'Escape') setRenaming(false);
+            }}
+          />
+          <button
+            disabled={!affordable || !draft.trim() || draft.trim() === focus.name}
+            onClick={() => { onRenameCitizen(focus.id, draft); setRenaming(false); }}
+          >
+            {affordable ? `${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}` : 'Not enough'}
+          </button>
+        </div>
+      )}
       <div className="being-meters">
         <Meter label="Mood" value={focus.mood} tone="linear-gradient(90deg,#4f9a3f,#8bf16b)" />
         <Meter label="Energy" value={focus.energy} tone="linear-gradient(90deg,#b08a2c,#f0d05e)" />
@@ -179,11 +216,11 @@ function BeingCard({ focus, following, onClear, onFocus, onToggleFollow }: {
   );
 }
 
-const ACTIONS: { key: Exclude<PanelKey, null> | 'observe' | 'inspire'; icon: string; label: string; blurb: string }[] = [
+const ACTIONS: { key: Exclude<PanelKey, null> | 'observe'; icon: string; label: string; blurb: string }[] = [
   { key: 'observe', icon: '◎', label: 'OBSERVE', blurb: 'Watch the world and its stories' },
-  { key: 'inspire', icon: '✧', label: 'INSPIRE', blurb: 'Spark new ideas and events' },
   { key: 'build', icon: '⚒', label: 'BUILD', blurb: 'Create places and resources' },
-  { key: 'connect', icon: '◈', label: 'CONNECT', blurb: 'Support and be part of the world' },
+  { key: 'market', icon: '◍', label: 'MARKET', blurb: 'Prices, flow and what is scarce' },
+  { key: 'connect', icon: '◈', label: 'CONNECT', blurb: 'Your plot, wallet and vault' },
 ];
 
 export function Hud(props: HudProps) {
@@ -287,9 +324,11 @@ export function Hud(props: HudProps) {
             <BeingCard
               focus={view.focus}
               following={props.following}
+              player={props.player}
               onClear={props.onClearSelection}
               onFocus={props.onFocus}
               onToggleFollow={props.onToggleFollow}
+              onRenameCitizen={props.onRenameCitizen}
             />
           )
           : (
@@ -311,7 +350,6 @@ export function Hud(props: HudProps) {
                 className={`action ${active ? 'active' : ''} ${action.key}`}
                 onClick={() => {
                   if (action.key === 'observe') { props.onPanel(null); props.onResetView(); }
-                  else if (action.key === 'inspire') { props.onPanel(null); props.onInspire(); }
                   else props.onPanel(active ? null : (action.key as PanelKey));
                 }}
               >

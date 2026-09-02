@@ -22,6 +22,10 @@ export const EMERGE_PER_GOLD = 10_000;
 export const WITHDRAW_BURN_RATE = 0.05;
 /** Renaming a world costs tokens, so a name means something. */
 export const RENAME_COST_EMERGE = 50_000;
+/** Renaming one of the beings who live there. */
+export const RENAME_CITIZEN_EMERGE = 20_000;
+/** Surveying a brand-new plot into existence. */
+export const PROSPECT_COST_EMERGE = 120_000;
 
 /**
  * What a new world starts with while claims are local.
@@ -139,8 +143,13 @@ export function withdraw(ledger: VaultLedger, gold: number, treasury: number, co
   };
 }
 
-/** Charge the rename fee. Returns null when the balance will not cover it. */
-export function payForRename(ledger: VaultLedger): VaultLedger | null {
-  if (ledger.balance < RENAME_COST_EMERGE) return null;
-  return { ...ledger, balance: ledger.balance - RENAME_COST_EMERGE };
+/** Charge a fee. Returns null when the balance will not cover it. */
+export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
+  if (ledger.balance < cost) return null;
+  return { ...ledger, balance: ledger.balance - cost };
+}
+
+/** Credit a sale or refund back to the local balance. */
+export function credit(ledger: VaultLedger, amount: number): VaultLedger {
+  return { ...ledger, balance: ledger.balance + amount };
 }
