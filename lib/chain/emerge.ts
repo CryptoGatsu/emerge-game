@@ -75,9 +75,19 @@ export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
   },
 };
 
-/** Which network this build targets. Development defaults to the test network. */
+/**
+ * Which network this build targets.
+ *
+ * Mainnet, because that is where the token will live. Set
+ * `NEXT_PUBLIC_CHAIN_TARGET=testnet` to point a build at the test network
+ * instead — useful for trying a contract before it is deployed for real.
+ *
+ * Targeting a chain is not the same as having anything deployed on it: what
+ * makes a claim or a balance real is the token and registry addresses, and
+ * every panel says plainly which of those exist yet.
+ */
 export const ACTIVE_CHAIN: ChainConfig =
-  process.env.NEXT_PUBLIC_CHAIN_TARGET === 'mainnet' ? CHAINS.robinhood : CHAINS['robinhood-testnet'];
+  process.env.NEXT_PUBLIC_CHAIN_TARGET === 'testnet' ? CHAINS['robinhood-testnet'] : CHAINS.robinhood;
 
 /** True once the build knows how to reach the network. Built in, so: always. */
 export const chainConfigured = (config: ChainConfig = ACTIVE_CHAIN) =>
@@ -221,6 +231,37 @@ export async function connectWallet(wallet?: DiscoveredWallet): Promise<WalletSt
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Wallet connection was rejected.';
     return { status: 'error', address: null, chainId: null, wallet: label, error: message };
+  }
+}
+
+/**
+ * Reconnect a wallet the player has already authorised, without a prompt.
+ *
+ * `eth_accounts` reports what the wallet has already granted this site and
+ * never opens a dialogue, so it is safe to call on every load. Without it a
+ * connection lasted exactly as long as the tab: reloading, or coming back to
+ * the game later, left the player looking at "connect a wallet" while the
+ * wallet itself considered them connected — and everything they own is keyed
+ * by that address.
+ */
+export async function resumeWallet(preferred?: DiscoveredWallet): Promise<WalletState | null> {
+  const provider = preferred?.provider ?? (typeof window !== 'undefined' ? window.ethereum : undefined);
+  if (!provider) return null;
+  const label = preferred?.name ?? nameFromLegacy(typeof window !== 'undefined' ? window.ethereum : undefined);
+  try {
+    const accounts = (await provider.request({ method: 'eth_accounts' })) as string[];
+    if (!accounts?.length) return null;
+    const rawChain = (await provider.request({ method: 'eth_chainId' })) as string;
+    return {
+      status: 'connected',
+      address: accounts[0],
+      chainId: Number.parseInt(rawChain, 16) || null,
+      wallet: label,
+      error: null,
+    };
+  } catch {
+    // A wallet that will not answer a silent query is simply not connected.
+    return null;
   }
 }
 

@@ -398,8 +398,23 @@ same land until the registry contract exists, and it is deliberately the
 server's word: a claim is accepted or refused there, and a browser that says it
 already owns something is not evidence. A refusal is final on the client too —
 falling back to "claim it locally anyway" is exactly the bug this exists to fix.
-The claimed-by-somebody-else case is marked on the map and its price is never
-charged.
+The claimed-by-somebody-else case is marked on the map, its price is never
+charged, and the registry outranks a stale local record everywhere it disagrees.
+
+The same route hands out **new land**. Prospecting used to pick its own berth
+from the player's own record, so two people surveying the same chart took the
+same slot: two settlements on one point of the map, each invisible to the other.
+The server now chooses the slot and the seed, and every discovery is served to
+everybody — a plot one player paid to find is a place that exists, and it
+belongs on every map.
+
+**`/api/gifts` — Gold across worlds.** A visitor may put Gold into the
+settlement they are standing in, at the same rate their own deposits cost, with
+the $EMERGE burned like every other charge. It is a queue rather than a direct
+write because a visitor's browser runs its own copy of the world it is looking
+at: Gold added there would live as long as the visit. The owner's client
+collects, read-and-clear, so a gift lands once. Sending to your own world is
+refused — that is the Bank's job, at the same price.
 
 **`/api/worlds` — visiting.** The owner publishes a snapshot of their settlement
 every forty-five seconds; a visitor reads it back and the world is restored from
@@ -416,13 +431,31 @@ world they are looking at or the one they own.
 
 **`/api/presence` — who is watching.** A heartbeat with a timeout rather than a
 sign-in, because nobody closes a tab politely: the only definition of "here"
-that survives a killed browser is "said something in the last minute". An eye
-appears beside the purse with a count once somebody other than you is looking.
+that survives a killed browser is "said something in the last minute". The owner
+is recorded but never counted, so the eye beside the purse reads as the number
+of people who have come to look rather than that number plus you.
 
-**Notices.** Chat messages that arrive while the chat panel is closed, and plots
-claimed by anybody, surface as a short-lived card in the corner. Neither
-interrupts the world; both are things a player would otherwise miss. Your own
-messages and your own claims are never announced back to you.
+**Notices.** Chat messages that arrive while the chat panel is closed, plots
+claimed by anybody, and gifts landing in your treasury surface as a short-lived
+card in the corner. None interrupts the world; all are things a player would
+otherwise miss. Your own messages and your own claims are never announced back
+to you, and the chat ones can be switched off from the Chat panel — a busy
+global channel is a card every few seconds over a world somebody is trying to
+watch, and the answer to that is a switch rather than an argument about the
+right rate.
+
+**What a visitor cannot do.** Read-only is enforced in five places, not one: the
+scene refuses to pick anybody up, the action bar drops build, prospect and
+on-chain, the Panels switch returns nothing for those keys even if a key is
+forced, the Bank is replaced by the gift panel, and the purse shows a dash where
+the treasury would be. A settlement's Gold is its owner's business, and the
+figure was previously readable by anyone who walked in.
+
+**Identity.** A wallet connection survives a reload: the wallet the player last
+used is remembered by name and reconnected with a silent `eth_accounts`, which
+reports an authorisation already given and never prompts. Everything a player
+owns is keyed by that address, so a connection that lasted only as long as the
+tab meant their holdings appeared to vanish on every refresh.
 
 ## Sound
 
@@ -680,9 +713,10 @@ becomes a button that travels to the world they built.
   twenty-four, against none at nine.
 - The highland shelf exists in the elevation field and drives the terrace plan, but its
   cliffs read weakly on screen; the relief deserves more than one elevation step.
-- No contracts are deployed. The chain layer is connection and configuration only:
-  ownership is enforced by the relay rather than by a registry contract, and balances are
-  local to the wallet's record in this browser. Every panel says so.
+- No contracts are deployed. The build targets Robinhood Chain **mainnet** (chain 4663);
+  set `NEXT_PUBLIC_CHAIN_TARGET=testnet` to point at the test network instead. Ownership is
+  enforced by the relay rather than by a registry contract, and balances are local to the
+  wallet's record in this browser. Every panel says so.
 - A settlement lives in `localStorage`, so clearing site data loses it. The snapshot
   other players visit is a copy sent out while you play, not a backup — it is never read
   back into the owner's own game.

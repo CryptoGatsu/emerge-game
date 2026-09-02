@@ -23,8 +23,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
-  CHART_COUNT, HOME_CHART_INDEX, chartName, chartRoom, claimOf, drawPlotPreview, drawRegionMap,
-  islandsFor, marketPlots, prospectPlot, usedSlots,
+  CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, chartRoom, claimOf, drawPlotPreview,
+  drawRegionMap, inspectPlot, islandsFor, marketPlots,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
 import {
@@ -32,7 +32,7 @@ import {
   type PlotOwnership,
 } from '@/lib/chain/emerge';
 import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, charge } from '@/lib/chain/vault';
-import { fetchClaims, takePlot, type Claim } from '@/lib/net/registry';
+import { fetchClaims, surveyPlot, takePlot, type Claim, type Find } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 /**
@@ -65,6 +65,7 @@ const CLAIMS_POLL = 12_000;
  */
 function useAllClaims() {
   const [claims, setClaims] = useState<Claim[]>([]);
+  const [finds, setFinds] = useState<Find[]>([]);
   const [shared, setShared] = useState(true);
   useEffect(() => {
     let live = true;
@@ -72,13 +73,14 @@ function useAllClaims() {
       const result = await fetchClaims();
       if (!live) return;
       setClaims(result.claims);
+      setFinds(result.finds);
       setShared(result.shared && !result.offline);
     };
     tick();
     const timer = window.setInterval(tick, CLAIMS_POLL);
     return () => { live = false; window.clearInterval(timer); };
   }, []);
-  return { claims, shared, setClaims };
+  return { claims, finds, shared, setClaims, setFinds };
 }
 
 function PlotPreview({ seed }: { seed: number }) {
@@ -182,19 +184,25 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
   const [name, setName] = useState('');
   const { wallet } = useWallet();
   const [claiming, setClaiming] = useState(false);
+  const [surveying, setSurveying] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // On a phone the map and the claim panel cannot both be on screen, so the
   // panel becomes a sheet that the map opens.
   const [sheetOpen, setSheetOpen] = useState(false);
   const configured = tokenLive();
 
-  const plots = useMemo(() => marketPlots(player, chart), [player, chart]);
-  const room = useMemo(() => chartRoom(player, chart), [player, chart]);
+  const { claims: allClaims, finds, shared: registryShared, setClaims, setFinds } = useAllClaims();
+  // Everybody's discoveries, in the shape the world model wants them.
+  const discovered = useMemo(
+    () => finds.map((f) => ({ seed: f.seed, chart: f.chart, slot: f.slot })),
+    [finds],
+  );
+  const plots = useMemo(() => marketPlots(player, chart, discovered), [player, chart, discovered]);
+  const room = useMemo(() => chartRoom(player, chart, discovered), [player, chart, discovered]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
   const held = selected ? claimOf(player, selected.seed) : null;
   const registry = useChainOwner(selected?.seed ?? null);
   const ownedSeeds = useMemo(() => new Set(player.claims.map((c) => c.seed)), [player.claims]);
-  const { claims: allClaims, shared: registryShared, setClaims } = useAllClaims();
   const [visiting, setVisiting] = useState(false);
 
   /*
@@ -220,31 +228,56 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
     setSheetOpen(true);
   }, []);
 
-  const prospect = useCallback(() => {
+  /**
+   * Pay to find new land.
+   *
+   * The registry picks the berth, because it is the only party that can see
+   * every plot already surveyed on this chart. A client choosing for itself
+   * could only avoid the ones it knew about, so two players prospecting the
+   * same chart took the same slot and put two settlements on one point of the
+   * map — each invisible to the other. The fee is charged only after the
+   * registry has actually handed over land.
+   */
+  const prospect = useCallback(async () => {
+    if (!wallet.address) {
+      setNotice('Connect a wallet first. Land you survey is recorded against your address.');
+      return;
+    }
     if (player.ledger.balance < PROSPECT_COST_EMERGE) {
       setNotice(`Prospecting costs ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
       return;
     }
-    // Land is finite. When a chart is surveyed out the answer is to sail to
-    // another one, not to stack another marker on the same skerry.
-    const found = prospectPlot(chart, usedSlots(player, chart));
-    if (!found) {
-      setNotice(`Every island on ${chartName(chart)} has been surveyed. Sail to another chart to find new land.`);
+    setSurveying(true);
+    setNotice(null);
+    const result = await surveyPlot({
+      chart,
+      capacity: chartCapacity(chart),
+      owner: wallet.address,
+      ownerName: player.name,
+    });
+    setSurveying(false);
+    if (!result.ok) {
+      // Land is finite. When a chart is surveyed out the answer is to sail to
+      // another one, not to stack another marker on the same skerry.
+      setNotice(`${result.reason} Sail to another chart to find new land.`);
       return;
     }
+
     // Surveying burns its fee. Nothing the game charges is collected.
     const paid = charge(player.ledger, PROSPECT_COST_EMERGE);
     if (!paid) return;
-    const next: PlayerRecord = {
+    const { find } = result;
+    const found = inspectPlot(find.seed, find.slot, find.chart);
+    setFinds((held) => [...held.filter((f) => f.seed !== find.seed), find]);
+    onPlayer({
       ...player,
       ledger: paid,
-      prospected: [...player.prospected, { seed: found.seed, chart: found.chart, slot: found.slot }],
-    };
-    onPlayer(next);
-    setSelectedSeed(found.seed);
+      prospected: [...player.prospected, { seed: find.seed, chart: find.chart, slot: find.slot }],
+    });
+    setSelectedSeed(find.seed);
     setSheetOpen(true);
-    setNotice(`Surveyed ${found.region} on ${found.island} — ${found.biomeLabel.toLowerCase()}.`);
-  }, [player, chart, onPlayer]);
+    setNotice(`Surveyed ${found.region} on ${found.island} — ${found.biomeLabel.toLowerCase()}. Everyone can see it now.`);
+  }, [player, chart, onPlayer, wallet.address, setFinds]);
 
   const sail = useCallback((delta: number) => {
     setChart((c) => (c + delta + CHART_COUNT) % CHART_COUNT);
@@ -266,16 +299,17 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
    */
   const claim = useCallback(async () => {
     if (!selected) return;
+    const other = takenByOthers.get(selected.seed);
+    // The registry outranks this browser's memory of what it owns.
+    if (other) {
+      setNotice(`${selected.region} already belongs to ${other.ownerName || shortAddress(other.owner)}.`);
+      return;
+    }
     // Already yours: this is the door back in, not a second purchase.
     const held = claimOf(player, selected.seed);
     if (held) { onEnter(held); return; }
     if (!wallet.address) {
       setNotice('Connect a wallet first. A plot belongs to an address, and so does everything you earn on it.');
-      return;
-    }
-    const other = takenByOthers.get(selected.seed);
-    if (other) {
-      setNotice(`${selected.region} already belongs to ${other.ownerName || shortAddress(other.owner)}.`);
       return;
     }
     if (player.ledger.balance < selected.price) {
@@ -367,11 +401,15 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             <button
               className="ghost prospect"
               onClick={prospect}
-              disabled={player.ledger.balance < PROSPECT_COST_EMERGE || room.free === 0}
+              disabled={surveying || !wallet.address || player.ledger.balance < PROSPECT_COST_EMERGE || room.free === 0}
             >
-              {room.free === 0
-                ? 'This chart is fully surveyed'
-                : `Prospect new land · ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
+              {surveying
+                ? 'Surveying…'
+                : room.free === 0
+                  ? 'This chart is fully surveyed'
+                  : !wallet.address
+                    ? 'Connect a wallet to survey'
+                    : `Prospect new land · ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
             </button>
           </div>
         </header>
@@ -404,25 +442,31 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
               <button
                 className="claim-button"
                 onClick={prospect}
-                disabled={player.ledger.balance < PROSPECT_COST_EMERGE}
+                disabled={surveying || !wallet.address || player.ledger.balance < PROSPECT_COST_EMERGE}
               >
-                Survey a plot · {PROSPECT_COST_EMERGE.toLocaleString()} {TOKEN.ticker}
+                {surveying
+                  ? 'Surveying…'
+                  : !wallet.address
+                    ? 'Connect a wallet to survey'
+                    : `Survey a plot · ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
               </button>
               {notice && <p className="warn">{notice}</p>}
             </aside>
           ) : (
           <aside className={`land-claim ${sheetOpen ? 'open' : ''}`}>
             <button className="sheet-close" onClick={() => setSheetOpen(false)} aria-label="Back to the map">×</button>
-            <span className="eyebrow">{held ? 'YOUR WORLD' : heldByOther ? 'SETTLED' : 'CLAIM'}</span>
-            <h2>{held ? held.name : heldByOther ? heldByOther.worldName : selected.region}</h2>
+            {/* The registry decides, not this browser's memory. A stale local
+                claim on land somebody else now holds must read as theirs. */}
+            <span className="eyebrow">{heldByOther ? 'SETTLED' : held ? 'YOUR WORLD' : 'CLAIM'}</span>
+            <h2>{heldByOther ? heldByOther.worldName : held ? held.name : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{selected.biomeLabel}</span>
               <span>{selected.island}</span>
               <span>{selected.population} beings</span>
-              {held && <span className="owned-tag">Yours</span>}
+              {held && !heldByOther && <span className="owned-tag">Yours</span>}
               {heldByOther && <span className="settled-tag-big">Taken</span>}
             </div>
-            {held && (
+            {held && !heldByOther && (
               <p className="muted small">
                 Claimed {new Date(held.claimedAt).toLocaleDateString()} for {held.price.toLocaleString()} {TOKEN.ticker}
                 {held.owner ? ` by ${shortAddress(held.owner)}` : ' with no wallet connected'}.
@@ -493,10 +537,10 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             >
               {claiming
                 ? 'Claiming…'
-                : held
-                  ? `Enter ${held.name}`
-                  : heldByOther
-                    ? (visiting ? 'Travelling…' : `Visit ${heldByOther.worldName}`)
+                : heldByOther
+                  ? (visiting ? 'Travelling…' : `Visit ${heldByOther.worldName}`)
+                  : held
+                    ? `Enter ${held.name}`
                     : !wallet.address
                       ? 'Connect a wallet to claim land'
                       : player.ledger.balance < selected.price

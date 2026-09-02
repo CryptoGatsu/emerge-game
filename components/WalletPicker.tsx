@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ACTIVE_CHAIN, INITIAL_WALLET, PREFERRED_WALLETS, connectWallet, discoverWallets,
-  shortAddress, switchToEmergeChain,
+  resumeWallet, shortAddress, switchToEmergeChain,
   type DiscoveredWallet, type WalletState,
 } from '@/lib/chain/emerge';
 
@@ -36,6 +36,46 @@ function publish(next: WalletState) {
 /** What is connected right now, for code that is not a component. */
 export const currentWallet = () => current;
 
+/**
+ * Which wallet the player last used, remembered across reloads.
+ *
+ * Only the name: the address comes back from the wallet itself, which is the
+ * only party entitled to say who is connected.
+ */
+const LAST_WALLET = 'emerge.wallet.v1';
+
+const rememberWallet = (name: string | null) => {
+  try {
+    if (name) window.localStorage.setItem(LAST_WALLET, name);
+    else window.localStorage.removeItem(LAST_WALLET);
+  } catch { /* private browsing; the session still works, it just will not resume */ }
+};
+
+const lastWallet = () => {
+  try {
+    return window.localStorage.getItem(LAST_WALLET);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Pick the connection back up on load.
+ *
+ * Runs once for the page, not once per component, and never prompts: a silent
+ * `eth_accounts` either reports an authorisation the player already gave or
+ * reports nothing.
+ */
+let resuming: Promise<void> | null = null;
+
+function resumeOnce(available: DiscoveredWallet[]) {
+  if (resuming || current.status === 'connected') return;
+  const preferred = available.find((w) => w.name === lastWallet()) ?? available[0];
+  resuming = resumeWallet(preferred).then((state) => {
+    if (state && current.status !== 'connected') publish(state);
+  }).catch(() => { /* nothing to resume */ });
+}
+
 export function useWallet() {
   const [wallet, setLocal] = useState<WalletState>(current);
   const [available, setAvailable] = useState<DiscoveredWallet[]>([]);
@@ -50,9 +90,15 @@ export function useWallet() {
 
   useEffect(() => discoverWallets(setAvailable), []);
 
+  // Wallets announce themselves asynchronously, so the resume waits for the
+  // list rather than firing at mount and finding nothing.
+  useEffect(() => { resumeOnce(available); }, [available]);
+
   const connect = useCallback(async (choice?: DiscoveredWallet) => {
     publish({ ...current, status: 'connecting' });
-    publish(await connectWallet(choice));
+    const state = await connectWallet(choice);
+    if (state.status === 'connected') rememberWallet(state.wallet);
+    publish(state);
   }, []);
 
   return { wallet, available, connect, setWallet: publish };

@@ -468,16 +468,35 @@ function EconomyRow({ view, activePanel, onPanel }: {
  * numbers a player is actually playing for were invisible while they watched
  * the world. Tapping either opens the Bank.
  */
-function Purse({ view, player, onPanel }: {
-  view: Snapshot; player: PlayerRecord; onPanel: (panel: PanelKey) => void;
+function Purse({ view, player, visiting, onPanel }: {
+  view: Snapshot; player: PlayerRecord; visiting: boolean; onPanel: (panel: PanelKey) => void;
 }) {
   const uncollected = Math.floor(player.ledger.earnedEmerge);
   return (
-    <button className="purse" onClick={() => onPanel('bank')} title="Open the Bank">
-      <span className="purse-cell gold">
-        <em>GOLD</em>
-        <b>{Math.floor(view.treasury).toLocaleString()}</b>
-      </span>
+    <button
+      className="purse"
+      onClick={() => onPanel(visiting ? 'gift' : 'bank')}
+      title={visiting ? 'Send Gold to this settlement' : 'Open the Bank'}
+    >
+      {/*
+        * A settlement's treasury is its owner's business.
+        *
+        * The purse reads from whichever world is on screen, so on a visit it
+        * was printing somebody else's Gold to anyone who walked in — how much
+        * they are holding, and by inference how well they are doing. What a
+        * visitor gets instead is the door to give them some.
+        */}
+      {visiting ? (
+        <span className="purse-cell gift">
+          <em>THEIR TREASURY</em>
+          <b>—</b>
+        </span>
+      ) : (
+        <span className="purse-cell gold">
+          <em>GOLD</em>
+          <b>{Math.floor(view.treasury).toLocaleString()}</b>
+        </span>
+      )}
       <span className="purse-cell emerge">
         <em>{TOKEN.ticker} EARNED</em>
         <b>{uncollected.toLocaleString()}</b>
@@ -497,6 +516,17 @@ function Purse({ view, player, onPanel }: {
  * any legible size — they used to run off both edges, with ON-CHAIN half
  * cut off — so the narrow layout uses one word each and drops the blurb.
  */
+/**
+ * The one thing a visitor can do to somebody else's settlement.
+ *
+ * Not in the main list, because on your own world it would be a button for
+ * sending Gold to yourself.
+ */
+const VISITOR_GIFT = {
+  key: 'gift' as const, icon: '❖', label: 'SEND GOLD', short: 'GIFT',
+  blurb: 'Help this settlement along',
+};
+
 /** How long ago a visited world was published, in words. */
 function sinceWhen(at: number) {
   const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
@@ -537,7 +567,10 @@ export function Hud(props: HudProps) {
    * buttons of which three do nothing; leaving them working would be worse.
    */
   const actions = props.visiting
-    ? ACTIONS.filter((a) => a.key === 'guide' || a.key === 'market' || a.key === 'chat')
+    ? [
+      ...ACTIONS.filter((a) => a.key === 'guide' || a.key === 'market' || a.key === 'chat'),
+      VISITOR_GIFT,
+    ]
     : ACTIONS;
 
   return (
@@ -588,12 +621,16 @@ export function Hud(props: HudProps) {
             {props.sound ? '♪' : '♪̸'}
           </button>
         </div>
-        <Purse view={view} player={props.player} onPanel={props.onPanel} />
-        {/* Who is looking. One person is only ever you, and a badge that
-            always reads "1" is furniture, so it appears when somebody else
-            arrives. */}
-        {props.watching > 1 && (
-          <div className="watching" title={`${props.watching} people have this world open`}>
+        <Purse view={view} player={props.player} visiting={!!props.visiting} onPanel={props.onPanel} />
+        {/* Who is looking, not counting you: the count arrives with the owner
+            already taken out, so one is one visitor and nothing is nobody. */}
+        {props.watching > 0 && (
+          <div
+            className="watching"
+            title={props.watching === 1
+              ? 'Somebody else has this world open'
+              : `${props.watching} other people have this world open`}
+          >
             <span aria-hidden>◉</span>
             <b>{props.watching}</b>
             <em>watching</em>

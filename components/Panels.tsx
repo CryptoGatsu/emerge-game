@@ -24,9 +24,10 @@ import {
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
+import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { WalletPicker, useWallet } from './WalletPicker';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'connect' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | null;
 
 interface PanelsProps {
   panel: PanelKey;
@@ -55,6 +56,13 @@ interface PanelsProps {
   onVisit: (seed: number) => Promise<string | null>;
   /** True when this is somebody else's world, being looked at. */
   spectating: boolean;
+  /** Whose world it is, when spectating. */
+  visit?: { worldName: string; ownerName: string; owner: string } | null;
+  /** Burn $EMERGE to put Gold in this settlement's treasury. */
+  onGift: (gold: number) => Promise<string | null>;
+  /** Whether a chat message raises a card when the panel is closed. */
+  chatNotices: boolean;
+  onToggleNotices: () => void;
 }
 
 /** Buildable structures. Upkeep is read from the simulation so it never drifts. */
@@ -450,6 +458,12 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             two prospected plots are the same land.
           </p>
           <p>
+            <b>Land you find belongs on everybody&rsquo;s map.</b> A plot you survey appears for every
+            other player as well — the registry hands out the berths, so two people prospecting the
+            same chart can never be given the same one. You paid to find it; anyone may claim it,
+            and the first to do so gets it.
+          </p>
+          <p>
             A claim is a purchase and it is yours. The price is charged in {TOKEN.ticker} and burned;
             nobody receives it. Leaving a world does not release it — your plots are marked on the
             chart and you can walk back into any of them. Giving one up is a separate, deliberate
@@ -474,13 +488,24 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
           </p>
           <p>
             A visit is a visit. You can watch, follow anybody around and read the feed; you cannot
-            build, pull anything down, pick anyone up or earn a single {TOKEN.ticker} there. When
-            somebody is looking at <em>your</em> world an eye appears by your purse with a count.
+            build, pull anything down, pick anyone up or earn a single {TOKEN.ticker} there. You
+            cannot see their treasury either — how much Gold a settlement is holding is its
+            owner&rsquo;s business. When somebody is looking at <em>your</em> world an eye appears by
+            your purse with a count of them; you are never in your own count.
+          </p>
+          <p>
+            <b>You can give.</b> The one thing a visitor may do is put Gold into the settlement
+            they are standing in, at the same {EMERGE_PER_GOLD.toLocaleString()} {TOKEN.ticker} a
+            Gold your own deposits cost. The tokens are burned like every other cost in the game
+            and the Gold is waiting in their treasury when they next open the world. You cannot
+            gift to yourself — that is what the Bank is for, and it is priced the same.
           </p>
           <p>
             You will also hear about it when somebody says something and you are not looking at
-            chat, and when anybody anywhere claims a plot. Both arrive as a small card in the
-            corner that goes away on its own.
+            chat, when anybody anywhere claims a plot, and when a gift lands in your treasury.
+            They arrive as a small card in the corner that goes away on its own. The chat ones can
+            be switched off from the Chat panel if a busy channel gets in the way; claims and gifts
+            are rare enough to stay.
           </p>
         </section>
 
@@ -496,6 +521,12 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             You arrive with a name picked for you and <b>your first change is free</b> — nobody
             should be charged to correct a name they did not choose. Changing it again costs
             {' '}{RENAME_PLAYER_EMERGE.toLocaleString()} {TOKEN.ticker}, burned like the rest.
+          </p>
+          <p>
+            Whoever owns the world a channel belongs to has their name marked in gold with a star,
+            so you can tell a suggestion from the person who built the place from a suggestion from
+            somebody passing through. Any name with an arrow beside it is a door: tap it and you
+            travel to the world they built.
           </p>
         </section>
 
@@ -522,10 +553,13 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
  * seconds; what is on screen is whatever the relay has, plus a local cache so
  * a reload does not wipe the conversation.
  */
-function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit }: {
+function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNotices, onToggleNotices }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord;
   onClose: () => void; onPlayer: (record: PlayerRecord) => void;
   onVisit: (seed: number) => Promise<string | null>;
+  /** Whether a message raises a card when the panel is closed. */
+  chatNotices: boolean;
+  onToggleNotices: () => void;
 }) {
   const [state, setState] = useState<ChatState | null>(null);
   const [kind, setKind] = useState<ChannelKind>('world');
@@ -572,6 +606,18 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit }: {
 
   const worldOf = (author: string) =>
     worldsBy.get(author.toLowerCase()) ?? worldsBy.get(author) ?? null;
+
+  /*
+   * Whoever holds the world this chat belongs to.
+   *
+   * Their name is marked, because in a room where anybody can talk about a
+   * settlement it matters which one of them actually built it — a suggestion
+   * from the owner reads differently from a suggestion from a passer-by.
+   */
+  const isHost = (author: string) => {
+    const held = worldOf(author);
+    return !!held && held.seed === claimed.seed;
+  };
 
   const travelTo = async (claim: Claim) => {
     setTravelling(claim.seed);
@@ -648,6 +694,15 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit }: {
           Global
           <em>{channelOf(state, 'global').length}</em>
         </button>
+        <button
+          className={`ghost bell ${chatNotices ? 'on' : ''}`}
+          onClick={onToggleNotices}
+          title={chatNotices
+            ? 'Messages raise a card when this panel is closed'
+            : 'Messages arrive quietly'}
+        >
+          {chatNotices ? '🔔 Alerts on' : '🔕 Alerts off'}
+        </button>
         <button className="ghost handle" onClick={() => setNaming((n) => !n)}>
           {player.nameChanges === 0 ? 'Change name · free' : 'Change name'}
         </button>
@@ -682,20 +737,21 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit }: {
           const label = m.wallet ? shortAddress(m.author) : m.author;
           const self = m.author === player.name
             || (!!wallet.address && m.author.toLowerCase() === wallet.address.toLowerCase());
+          const host = isHost(m.author);
           return (
-            <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''}`}>
+            <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''} ${host ? 'host' : ''}`}>
               {theirs && !self ? (
                 <button
-                  className="chat-who"
-                  title={`Visit ${theirs.worldName}`}
+                  className={`chat-who ${host ? 'host' : ''}`}
+                  title={host ? `${label} owns ${view.name}` : `Visit ${theirs.worldName}`}
                   disabled={travelling !== null}
                   onClick={() => travelTo(theirs)}
                 >
                   {label}
-                  <i>{travelling === theirs.seed ? '…' : '↗'}</i>
+                  <i>{travelling === theirs.seed ? '…' : host ? '★' : '↗'}</i>
                 </button>
               ) : (
-                <b>{label}</b>
+                <b className={host ? 'host' : ''}>{label}{host && <i className="host-star">★</i>}</b>
               )}
               <span>{m.text}</span>
               <em>{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</em>
@@ -804,6 +860,97 @@ function GachaPanel({ player, onClose, onDig }: {
         These are the real weights: the panel computes them from the same table the draw rolls
         against, so they cannot drift apart. Naming rights let you rename one citizen without paying
         the usual fee, and you hold {player.nameTokens} of them.
+      </p>
+    </Shell>
+  );
+}
+
+/**
+ * Sending Gold to somebody else's settlement.
+ *
+ * A visitor cannot build here, cannot pull anything down and cannot take a
+ * penny out — but they can put something in. The $EMERGE is burned out of the
+ * sender's balance exactly like every other cost in the game, and Gold appears
+ * in the owner's treasury when their world next opens. It is the one way one
+ * player's tokens turn into another player's settlement.
+ */
+function GiftPanel({ player, visit, onClose, onGift }: {
+  player: PlayerRecord;
+  visit: { worldName: string; ownerName: string; owner: string };
+  onClose: () => void;
+  onGift: (gold: number) => Promise<string | null>;
+}) {
+  const [amount, setAmount] = useState('100');
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [sent, setSent] = useState<number | null>(null);
+
+  const gold = Math.floor(Number(amount) || 0);
+  const cost = gold * EMERGE_PER_GOLD;
+  const affordable = player.ledger.balance >= cost;
+  const who = visit.ownerName?.trim() ? visit.ownerName : shortAddress(visit.owner);
+
+  const send = async () => {
+    if (!(gold > 0)) { setNotice('Enter an amount to send.'); return; }
+    if (gold > MAX_GIFT_GOLD) {
+      setNotice(`A single gift carries at most ${MAX_GIFT_GOLD.toLocaleString()} Gold.`);
+      return;
+    }
+    if (!affordable) {
+      setNotice(`That is ${cost.toLocaleString()} ${TOKEN.ticker}, and you hold ${Math.floor(player.ledger.balance).toLocaleString()}.`);
+      return;
+    }
+    setSending(true);
+    const refused = await onGift(gold);
+    setSending(false);
+    if (refused) { setNotice(refused); return; }
+    setNotice(null);
+    setSent(gold);
+  };
+
+  return (
+    <Shell
+      title={`Send Gold to ${visit.worldName}`}
+      subtitle={`${who} built this place. You cannot change it — but you can help pay for it.`}
+      onClose={onClose}
+    >
+      <div className="vault-card">
+        <span className="eyebrow">HOW MUCH</span>
+        <div className="vault-row">
+          <input
+            value={amount}
+            inputMode="numeric"
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
+          />
+          <span className="muted">Gold</span>
+        </div>
+        <p className="muted small">
+          {gold > 0
+            ? `${cost.toLocaleString()} ${TOKEN.ticker}, burned out of your balance. ${who} finds ${gold.toLocaleString()} Gold in their treasury when they next open ${visit.worldName}.`
+            : `${EMERGE_PER_GOLD.toLocaleString()} ${TOKEN.ticker} per Gold, the same rate as your own deposits.`}
+        </p>
+        <button className="claim-button" onClick={send} disabled={sending || !affordable || !(gold > 0)}>
+          {sending
+            ? 'Sending…'
+            : !(gold > 0)
+              ? 'Enter an amount'
+              : !affordable
+                ? `Not enough ${TOKEN.ticker}`
+                : `Send ${gold.toLocaleString()} Gold`}
+        </button>
+        {sent !== null && (
+          <p className="muted small">
+            Sent. {sent.toLocaleString()} Gold is waiting for {who}, and{' '}
+            {(sent * EMERGE_PER_GOLD).toLocaleString()} {TOKEN.ticker} has left the supply for good.
+          </p>
+        )}
+        {notice && <p className="warn">{notice}</p>}
+      </div>
+
+      <p className="muted small">
+        At most {MAX_GIFT_GOLD.toLocaleString()} Gold at a time. Gifts cannot be sent to a world you
+        own — putting your own tokens into your own treasury is what the Bank is for, and it is
+        priced the same either way.
       </p>
     </Shell>
   );
@@ -1173,9 +1320,23 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList, onPlayer, onDig, onVisit, spectating }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
+  if (panel === 'gift' && visit) {
+    return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
+  }
   if (panel === 'bank') {
+    /*
+     * The Bank acts on the settlement in front of you, so on a visit it would
+     * have let a stranger deposit into, withdraw from and collect earnings on
+     * a treasury that is not theirs. There is a door for putting something in
+     * — the gift — and no door at all for taking anything out.
+     */
+    if (spectating) {
+      return visit
+        ? <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />
+        : null;
+    }
     // Which of the player's worlds pay is decided by claim order, so the panel
     // works it out the same way the credit does rather than being told.
     const earning = [...player.claims]
@@ -1184,12 +1345,16 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenam
       .some((c) => c.seed === claimed.seed);
     return <BankPanel view={view} player={player} earning={earning} onClose={onClose} onVault={onVault} />;
   }
+
+  // Everything that changes the settlement is the owner's alone.
+  if (spectating && (panel === 'build' || panel === 'gacha' || panel === 'connect')) return null;
   if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
   if (panel === 'chat') {
     return (
       <ChatPanel
         view={view} claimed={claimed} player={player}
         onClose={onClose} onPlayer={onPlayer} onVisit={onVisit}
+        chatNotices={chatNotices} onToggleNotices={onToggleNotices}
       />
     );
   }

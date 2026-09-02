@@ -1,9 +1,10 @@
 /**
  * The land registry.
  *
- * `GET  /api/plots` — every claim on record.
+ * `GET  /api/plots` — every claim on record, and every plot anybody surveyed.
  * `POST /api/plots` — take a plot, or be told who already has it.
- * `POST /api/plots?release=1` — give one up.
+ * `POST /api/plots` with `survey` — pay to find new land.
+ * `POST /api/plots` with `release` — give a plot up.
  *
  * This is what stops two players owning the same land. Everything a client
  * sends is treated as hostile: the address is pattern-matched against what an
@@ -13,7 +14,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { allClaims, registryShared, releaseClaim, takeClaim, type Claim } from '@/lib/server/registry';
+import {
+  allClaims, allFinds, registryShared, releaseClaim, survey, takeClaim, type Claim,
+} from '@/lib/server/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,11 +35,12 @@ const clean = (value: string, limit: number) =>
 
 export async function GET() {
   try {
-    return NextResponse.json({ claims: await allClaims(), shared: registryShared() });
+    const [claims, finds] = await Promise.all([allClaims(), allFinds()]);
+    return NextResponse.json({ claims, finds, shared: registryShared() });
   } catch {
-    // A store that is unreachable should leave the land office usable and
+    // A store that is unreachable should leave the world map usable and
     // honest, not throw a red panel at the player.
-    return NextResponse.json({ claims: [], shared: false, degraded: true });
+    return NextResponse.json({ claims: [], finds: [], shared: false, degraded: true });
   }
 }
 
@@ -44,6 +48,7 @@ export async function POST(request: Request) {
   let body: {
     seed?: number; region?: string; worldName?: string; owner?: string;
     ownerName?: string; price?: number; release?: boolean;
+    survey?: boolean; chart?: number; capacity?: number;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -51,15 +56,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 });
   }
 
-  const seed = Number(body.seed);
-  if (!Number.isInteger(seed) || seed <= 0 || seed > 1e12) {
-    return NextResponse.json({ error: 'Unknown plot.' }, { status: 400 });
-  }
   const owner = String(body.owner ?? '');
   if (!ADDRESS.test(owner)) {
     // Not a formality: the whole point of the registry is that a plot belongs
     // to a wallet, so a claim without one has nothing to belong to.
     return NextResponse.json({ error: 'Connect a wallet before claiming land.' }, { status: 400 });
+  }
+
+  /*
+   * Surveying new land.
+   *
+   * The slot and the seed are both chosen here. A client picking its own could
+   * only avoid the plots it already knew about, so two players surveying the
+   * same chart took the same berth and put two settlements on one point of the
+   * map, each invisible to the other.
+   */
+  if (body.survey) {
+    const chart = Number(body.chart);
+    if (!Number.isInteger(chart) || chart < 0 || chart > 32) {
+      return NextResponse.json({ error: 'Unknown chart.' }, { status: 400 });
+    }
+    try {
+      const result = await survey(
+        chart,
+        Number(body.capacity) || 0,
+        owner,
+        clean(String(body.ownerName ?? ''), MAX_NAME),
+      );
+      if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
+      return NextResponse.json({ find: result.find, shared: registryShared() });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
+  const seed = Number(body.seed);
+  if (!Number.isInteger(seed) || seed <= 0 || seed > 1e12) {
+    return NextResponse.json({ error: 'Unknown plot.' }, { status: 400 });
   }
 
   if (body.release) {

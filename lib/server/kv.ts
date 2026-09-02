@@ -85,8 +85,17 @@ export async function range(key: string): Promise<string[]> {
   return Array.isArray(raw) ? raw : [];
 }
 
+/** Empty a list. */
+export async function clear(key: string): Promise<void> {
+  if (!shared()) {
+    memory().lists.delete(key);
+    return;
+  }
+  await redis(['DEL', key]);
+}
+
 /* ------------------------------------------------------------------ *
- * Hashes — the plot registry, presence
+ * Hashes — the plot registry, discoveries, presence
  * ------------------------------------------------------------------ */
 
 /** Write one field of a hash. */

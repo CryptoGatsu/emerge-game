@@ -35,12 +35,13 @@ import {
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
 import {
-  HEARTBEAT_INTERVAL, departWorld, fetchWorld, heartbeat, publishWorld, releasePlot, visitorId,
+  GIFT_POLL, HEARTBEAT_INTERVAL, collectGifts, departWorld, fetchWorld, heartbeat, publishWorld,
+  releasePlot, sendGift, visitorId,
 } from '@/lib/net/registry';
 import { useWallet } from './WalletPicker';
-import { Notices, useNotices } from './Notices';
+import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import {
-  EARNING_PLOT_LIMIT, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
+  EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   type VaultLedger,
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
@@ -586,9 +587,45 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     };
   }, [claimed.seed, wallet.address, player.name, spectating]);
 
-  const { notices, dismiss } = useNotices({
+  /**
+   * Burn $EMERGE to put Gold in the treasury of the world being visited.
+   *
+   * Charged here and queued there: the settlement on screen is a copy running
+   * in this browser, so adding Gold to it would last exactly as long as the
+   * visit. The owner's own client is the only thing that can put it into the
+   * world that persists.
+   */
+  const gift = useCallback(async (gold: number): Promise<string | null> => {
+    if (!visit || !wallet.address) return 'Connect a wallet to send Gold.';
+    const cost = gold * EMERGE_PER_GOLD;
+    const paid = charge(player.ledger, cost);
+    if (!paid) {
+      return `That is ${cost.toLocaleString()} $EMERGE and you hold `
+        + `${Math.floor(player.ledger.balance).toLocaleString()}.`;
+    }
+    const result = await sendGift({
+      seed: visit.seed,
+      gold,
+      from: wallet.address,
+      fromName: player.name,
+    });
+    // Only charged once the registry has the gift: a refusal must not cost the
+    // sender anything.
+    if (!result.ok) return result.reason;
+    onPlayer({ ...player, ledger: paid });
+    return null;
+  }, [visit, wallet.address, player, onPlayer]);
+
+  const [chatNotices, setChatNoticesOn] = useState(true);
+  useEffect(() => { setChatNoticesOn(chatNoticesOn()); }, []);
+  const toggleChatNotices = useCallback(() => {
+    setChatNoticesOn((on) => { setChatNotices(!on); return !on; });
+  }, []);
+
+  const { notices, dismiss, announce } = useNotices({
     seed: claimed.seed,
     chatOpen: panel === 'chat',
+    chatNotices,
     mine: { address: wallet.address, name: player.name },
     onOpenChat: () => setPanel('chat'),
   });
@@ -665,6 +702,42 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const world = worldRef.current;
     if (world) setView(snapshot(world, selectedRef.current));
   }, []);
+
+  /*
+   * Gold other players have sent, put into the settlement that persists.
+   *
+   * Read-and-clear on the server, so a gift is applied once. Never on a visit:
+   * the owner's client is the only one that may collect, and the relay checks
+   * the address as well.
+   */
+  useEffect(() => {
+    if (spectating || hidden || !wallet.address) return;
+    const seed = claimed.seed;
+    const owner = wallet.address;
+    let live = true;
+    const tick = async () => {
+      const gifts = await collectGifts(seed, owner);
+      const world = worldRef.current;
+      if (!live || !world || !gifts.length) return;
+      const arrived: { fromName: string; gold: number }[] = [];
+      for (const g of gifts) {
+        fundTreasury(world, g.gold, `Gift from ${g.fromName || 'a visitor'}`);
+        arrived.push(g);
+      }
+      for (const g of arrived) {
+        announce({
+          id: `gift-${g.gold}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          kind: 'claim',
+          title: 'A gift arrived',
+          body: `${g.fromName || 'Somebody'} sent ${g.gold.toLocaleString()} Gold to your treasury.`,
+        });
+      }
+      refresh();
+    };
+    const timer = window.setInterval(tick, GIFT_POLL);
+    tick();
+    return () => { live = false; window.clearInterval(timer); };
+  }, [claimed.seed, wallet.address, spectating, hidden, refresh, announce]);
 
   /** Naming costs tokens, so refuse rather than rename for free. */
   const renameWorldFor = useCallback((next: string) => {
@@ -830,6 +903,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onDig={dig}
             onVisit={onVisit}
             spectating={spectating}
+            visit={visit ?? null}
+            onGift={gift}
+            chatNotices={chatNotices}
+            onToggleNotices={toggleChatNotices}
           />
         </>
       )}

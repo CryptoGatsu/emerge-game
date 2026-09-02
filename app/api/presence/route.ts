@@ -57,8 +57,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ count: (await watchers(seed)).length });
     }
     const here = await heartbeat(seed, who);
-    // The count includes the caller, which is what a player expects to read:
-    // "2 watching" with one other person there, not "1 other".
+    // The owner is never in this count. On your own world it reads as the
+    // number of people who have come to look; on somebody else's, as how many
+    // others are looking with you.
     return NextResponse.json({ count: here.length });
   } catch {
     return NextResponse.json({ count: 0, degraded: true });

@@ -9,6 +9,7 @@
 
 import { createWorld } from '../simulation';
 import { biomeFor, type BiomeKind } from './biomes';
+import { HOME_CHART_INDEX, chartCapacity, islandOf, islandsFor, type Island } from './charts';
 import { normaliseLedger, type VaultLedger } from '../chain/vault';
 import { GRID, TILE_H, TILE_W, tileToScreen } from './iso';
 import { fbm } from './relief';
@@ -85,130 +86,10 @@ const BIOME_PREMIUM: Record<BiomeKind, number> = {
  * they are arranged, and crowding them produced exactly the wall of labels this
  * was meant to fix. Fewer per island, more islands.
  */
-export interface Island {
-  name: string;
-  /** Centre and radii on the map, normalised to 0-1. */
-  x: number;
-  y: number;
-  rx: number;
-  ry: number;
-  /** How many plots this island has room for. */
-  capacity: number;
-  /** Noise offset, so no two islands share a coastline. */
-  shape: number;
-}
-
-/**
- * The chain, laid out with real water between the islands.
- *
- * The gaps are wider than they look they need to be. Each coastline is an
- * ellipse pushed about a third of its radius by noise, so two islands whose
- * ellipses merely fail to touch will still grow into one another and land as a
- * single blob with three names printed on it.
- */
-/**
- * The home chart, hand-placed so no two coastlines merge.
- *
- * Every other chart is this geometry mirrored and thinned, which is deliberate:
- * the gaps here were tuned by eye against the noise that roughens each coast,
- * and a freshly generated set of ellipses reliably produced two islands grown
- * into one blob with three names printed across it. Mirroring cannot introduce
- * an overlap that is not already here.
- */
-const HOME_CHART: Island[] = [
-  // Capacity is set by how much coast there actually is. A skerry a twentieth
-  // of the map wide was carrying three settlements, whose markers landed within
-  // thirty pixels of each other with a name on each — the crowding the player
-  // saw. One island, one town, unless there is room for more.
-  { name: 'Fernrest', x: 0.24, y: 0.43, rx: 0.20, ry: 0.31, capacity: 4, shape: 0 },
-  { name: 'Kestrel Reach', x: 0.70, y: 0.20, rx: 0.16, ry: 0.16, capacity: 3, shape: 311 },
-  { name: 'Saltmarch', x: 0.68, y: 0.76, rx: 0.16, ry: 0.17, capacity: 3, shape: 907 },
-  { name: 'Ashen Skerry', x: 0.90, y: 0.47, rx: 0.05, ry: 0.10, capacity: 1, shape: 2203 },
-  { name: 'Tidewick', x: 0.46, y: 0.86, rx: 0.09, ry: 0.08, capacity: 2, shape: 3391 },
-  { name: 'Windrow Holm', x: 0.16, y: 0.90, rx: 0.10, ry: 0.07, capacity: 2, shape: 1451 },
-  { name: 'Gale Rock', x: 0.47, y: 0.10, rx: 0.07, ry: 0.07, capacity: 1, shape: 4177 },
-  { name: 'Farholt', x: 0.90, y: 0.87, rx: 0.06, ry: 0.09, capacity: 1, shape: 5051 },
-];
-
-/**
- * Names for the islands of charts past the first: eight per chart, in blocks,
- * so no name appears on two charts. Sharing a pool with a stride shorter than a
- * chart's island count put Grey Mull and Sable Isle on both Chart 2 and Chart
- * 3, which makes two different places look like the same one.
- */
-const ISLAND_NAMES = [
-  'Corrach', 'Brindle Holm', 'Stormward', 'Hallow Skerry', 'Lambert Rock', 'Netherhaigh',
-  'Cold Sound', 'Marrowbank',
-  'Quillhaven', 'Torrin', 'Grey Mull', 'Sable Isle', 'Wrackreach', 'Ossory',
-  'Thrushmere', 'Barrenhead',
-  'Fallowsound', 'Lorn', 'Kittiwake', 'Sunder Rock', 'Halloway', 'Verne',
-  'Cape Alder', 'Drumcarrow',
-  'Ferrishaw', 'Coldbarrow', 'Rimewatch', 'Anvil Rock', 'Mewstone', 'Salter Holm',
-  'Larkspit', 'Undermere',
-  'Hollowsound', 'Craigmar', 'Petrel Isle', 'Bleak Ness', 'Fastnet', 'Longhaven',
-  'Turnstone', 'Cairnmuir',
-];
-
-/** The first chart, kept as a name because the world map opens on it. */
-export const HOME_CHART_INDEX = 0;
-
-/**
- * How many charts a player can sail between.
- *
- * Not unlimited, because "somewhere else to look" stops meaning anything when
- * there is always somewhere else: with enough charts the world map becomes a
- * slot machine rather than a map. Six is enough that running one dry is a
- * decision about where to go next.
- */
-export const CHART_COUNT = 6;
-
-/** A chart's name, as the world map prints it. */
-export function chartName(chart: number) {
-  return chart === HOME_CHART_INDEX ? 'The Home Chart' : `Chart ${chart + 1}`;
-}
-
-/**
- * The islands of one chart.
- *
- * Mirrored from the home chart along one or both axes and thinned to between
- * five and eight islands, with fresh names and fresh coastline noise, so no two
- * charts read as the same water.
- */
-export function islandsFor(chart: number): Island[] {
-  if (chart === HOME_CHART_INDEX) return HOME_CHART;
-  const flipX = (chart & 1) === 1;
-  const flipY = (chart & 2) === 2;
-  const keep = 8 - (chart % 3);
-  return HOME_CHART.slice(0, keep).map((island, i) => ({
-    ...island,
-    name: ISLAND_NAMES[((chart - 1) * 8 + i) % ISLAND_NAMES.length],
-    x: flipX ? 1 - island.x : island.x,
-    y: flipY ? 1 - island.y : island.y,
-    shape: island.shape + chart * 613 + 97,
-  }));
-}
-
-/** How many plots a chart has room for in total. */
-export function chartCapacity(chart: number) {
-  return islandsFor(chart).reduce((sum, island) => sum + island.capacity, 0);
-}
-
-/**
- * Which island a slot on a chart belongs to, and its place on it.
- *
- * A slot past the chart's capacity has no island: the caller is expected to
- * have refused the prospecting rather than crowding another marker onto the
- * last skerry, which is what the eight islands of the home chart were doing
- * with fifty-six plots on them.
- */
-export function islandOf(slot: number, chart = HOME_CHART_INDEX): { island: Island; slot: number } | null {
-  let remaining = slot;
-  for (const island of islandsFor(chart)) {
-    if (remaining < island.capacity) return { island, slot: remaining };
-    remaining -= island.capacity;
-  }
-  return null;
-}
+export {
+  CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, islandOf, islandsFor,
+  type Island,
+} from './charts';
 
 /**
  * Where a plot sits on its island: a golden-angle spiral out from the middle,
@@ -278,24 +159,6 @@ export function catalogue(): Plot[] {
   return PLOT_SEEDS.map((seed, i) => inspectPlot(seed, i, HOME_CHART_INDEX));
 }
 
-/**
- * Prospect a brand-new plot on a chart, in the first slot that chart has free.
- *
- * Returns null when the chart is full, which is the whole point: land is
- * finite, and the answer to a full chart is to sail to another one rather than
- * to stack another marker on the same skerry.
- */
-export function prospectPlot(chart: number, takenSlots: number[]): Plot | null {
-  const capacity = chartCapacity(chart);
-  const used = new Set(takenSlots);
-  let slot = -1;
-  for (let i = 0; i < capacity; i++) {
-    if (!used.has(i)) { slot = i; break; }
-  }
-  if (slot < 0) return null;
-  const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 8;
-  return inspectPlot(seed, slot, chart);
-}
 
 /**
  * Paint a plot's terrain onto a canvas.
@@ -677,9 +540,14 @@ function readProspected(raw: unknown): FoundPlot[] {
 }
 
 /** Which slots on a chart are already spoken for. */
-export function usedSlots(record: PlayerRecord, chart: number): number[] {
-  const taken = record.prospected.filter((p) => p.chart === chart).map((p) => p.slot);
-  return chart === HOME_CHART_INDEX ? [...PLOT_SEEDS.map((_, i) => i), ...taken] : taken;
+export function usedSlots(record: PlayerRecord, chart: number, shared: FoundPlot[] = []): number[] {
+  const taken = new Set<number>();
+  for (const p of [...record.prospected, ...shared]) {
+    if (p.chart === chart) taken.add(p.slot);
+  }
+  return chart === HOME_CHART_INDEX
+    ? [...new Set([...PLOT_SEEDS.map((_, i) => i), ...taken])]
+    : [...taken];
 }
 
 /**
@@ -693,11 +561,27 @@ export function usedSlots(record: PlayerRecord, chart: number): number[] {
  * first name nobody on this chart is using, and fall back to a numbered name
  * only if the whole list is taken.
  */
-export function marketPlots(record: PlayerRecord, chart = HOME_CHART_INDEX): Plot[] {
+export function marketPlots(
+  record: PlayerRecord,
+  chart = HOME_CHART_INDEX,
+  /**
+   * Land anybody has surveyed, from the shared registry.
+   *
+   * Discoveries are not private. A plot one player paid to find is a place that
+   * now exists, and every map should show it — before this, a surveyed island
+   * appeared on exactly one person's chart and everybody else saw open water
+   * where a settlement was about to be built.
+   */
+  shared: FoundPlot[] = [],
+): Plot[] {
   const base = chart === HOME_CHART_INDEX ? catalogue() : [];
-  const found = record.prospected
-    .filter((p) => p.chart === chart)
-    .map((p) => inspectPlot(p.seed, p.slot, p.chart));
+  const seen = new Set<number>();
+  const found: Plot[] = [];
+  for (const p of [...record.prospected, ...shared]) {
+    if (p.chart !== chart || seen.has(p.seed)) continue;
+    seen.add(p.seed);
+    found.push(inspectPlot(p.seed, p.slot, p.chart));
+  }
   const all = [...base, ...found];
 
   const used = new Set<string>();
@@ -722,8 +606,8 @@ export function marketPlots(record: PlayerRecord, chart = HOME_CHART_INDEX): Plo
 }
 
 /** How much room is left on a chart. */
-export function chartRoom(record: PlayerRecord, chart: number) {
+export function chartRoom(record: PlayerRecord, chart: number, shared: FoundPlot[] = []) {
   const capacity = chartCapacity(chart);
-  const used = usedSlots(record, chart).length;
+  const used = usedSlots(record, chart, shared).length;
   return { capacity, used, free: Math.max(0, capacity - used) };
 }

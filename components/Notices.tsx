@@ -37,14 +37,43 @@ const LIFETIME = 9_000;
 const MAX_ON_SCREEN = 3;
 
 /**
+ * Whether chat raises a card, remembered between sessions.
+ *
+ * A busy global channel is a card every few seconds over the top of a world
+ * somebody is trying to watch, and the answer to that is a switch rather than
+ * an argument about the right rate. Claims and gifts are rare enough to stay
+ * on either way — the setting is about chat, and says so.
+ */
+const CHAT_NOTICES = 'emerge.notices.chat.v1';
+
+export function chatNoticesOn(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return window.localStorage.getItem(CHAT_NOTICES) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+export function setChatNotices(on: boolean) {
+  try {
+    window.localStorage.setItem(CHAT_NOTICES, on ? 'on' : 'off');
+  } catch { /* private browsing; the setting simply will not persist */ }
+}
+
+/**
  * Watch chat and the land registry, and hand back notices worth showing.
  *
  * `mine` is the player's own address and chat name, so their own messages and
- * their own claims are not announced back to them.
+ * their own claims are not announced back to them. `announce` comes back out
+ * so the caller can raise a card for something only it knows about — a gift
+ * landing in the treasury, say.
  */
-export function useNotices({ seed, chatOpen, mine, onOpenChat }: {
+export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
   seed: number;
   chatOpen: boolean;
+  /** Whether a message should raise a card at all. */
+  chatNotices: boolean;
   mine: { address: string | null; name: string };
   onOpenChat: () => void;
 }) {
@@ -57,6 +86,8 @@ export function useNotices({ seed, chatOpen, mine, onOpenChat }: {
   mineRef.current = mine;
   const onOpenChatRef = useRef(onOpenChat);
   onOpenChatRef.current = onOpenChat;
+  const chatNoticesRef = useRef(chatNotices);
+  chatNoticesRef.current = chatNotices;
 
   const push = useCallback((notice: Notice) => {
     setNotices((held) => {
@@ -92,8 +123,8 @@ export function useNotices({ seed, chatOpen, mine, onOpenChat }: {
         const who = mineRef.current;
         // Your own message, coming back off the relay.
         if (m.author === who.name || (who.address && m.author.toLowerCase() === who.address.toLowerCase())) continue;
-        // Already on screen in the panel.
-        if (chatOpenRef.current) continue;
+        // Already on screen in the panel, or switched off entirely.
+        if (chatOpenRef.current || !chatNoticesRef.current) continue;
         push({
           id: `chat-${m.id}`,
           kind: 'chat',
@@ -155,7 +186,7 @@ export function useNotices({ seed, chatOpen, mine, onOpenChat }: {
     return () => { live = false; window.clearInterval(timer); };
   }, [push]);
 
-  return { notices, dismiss };
+  return { notices, dismiss, announce: push };
 }
 
 const nameOf = (claim: Claim) =>

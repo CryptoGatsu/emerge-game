@@ -1845,6 +1845,19 @@ button.fold:hover { color: var(--emerald); }
 .chat-who:hover { color: var(--cream); text-decoration: underline; }
 .chat-who:disabled { opacity: 0.6; }
 
+
+/* The owner of the world this chat belongs to. */
+.chat-row.host b, .chat-who.host { color: var(--gold); }
+.chat-who.host:hover { color: #f6dda0; }
+.host-star { font-style: normal; margin-left: 3px; font-size: 9px; color: var(--gold); }
+
+/* The alerts switch, beside the name button. */
+.chat-tabs button.bell { font-size: 10.5px; padding: 6px 11px; }
+.chat-tabs button.bell.on { color: var(--emerald); border-color: rgba(139, 241, 107, 0.4); }
+
+/* A visitor's purse: their treasury is not yours to read. */
+.purse-cell.gift b { color: var(--muted); }
+
 @media (max-width: 720px) {
   .overlay { padding: 10px; place-items: end center; }
   .overlay-panel, .overlay-panel.wide {
