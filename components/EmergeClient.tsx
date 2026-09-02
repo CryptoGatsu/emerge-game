@@ -140,15 +140,14 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
 
   useEffect(() => {
     const host = hostRef.current;
-    const world = worldRef.current;
-    if (!host || !world) return;
+    if (!host || !worldRef.current) return;
 
     const scene = new EmergeScene();
     sceneRef.current = scene;
     let frame = 0;
 
     scene
-      .init(host, world, {
+      .init(host, worldRef.current, {
         onHover: setHovered,
         onSelect: (target) => {
           selectedRef.current = target;
@@ -157,7 +156,8 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
       })
       .then(() => {
         setReady(true);
-        setView(snapshot(world, selectedRef.current));
+        const live = worldRef.current;
+        if (live) setView(snapshot(live, selectedRef.current));
       })
       .catch((error) => {
         console.error('Emerge: renderer failed to start', error);
@@ -168,12 +168,21 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
       frame = requestAnimationFrame(step);
       const dt = Math.min(0.12, (now - last) / 1000);
       last = now;
-      if (!pausedRef.current) advance(world, dt * HOURS_PER_SECOND * speedRef.current);
+      // Read the ref every frame rather than closing over the world at mount.
+      //
+      // This effect runs once, so a captured world would be the one claimed
+      // first, for the life of the session. Claiming a second plot swaps
+      // `worldRef.current` and points the scene at the new world, but the loop
+      // went on advancing the old one — so the new settlement stood perfectly
+      // still until the page was reloaded.
+      const live = worldRef.current;
+      if (live && !pausedRef.current) advance(live, dt * HOURS_PER_SECOND * speedRef.current);
     };
     frame = requestAnimationFrame(step);
 
     const hudTimer = window.setInterval(() => {
-      setView(snapshot(world, selectedRef.current));
+      const live = worldRef.current;
+      if (live) setView(snapshot(live, selectedRef.current));
       setWoodland(sceneRef.current?.woodland() ?? null);
     }, HUD_INTERVAL);
 

@@ -76,6 +76,13 @@ export interface BiomeProfile {
   /** Roughly how many people the land supports. */
   populationScale: number;
 
+  /** Mean temperature over the year, in degrees Celsius. */
+  baseTemp: number;
+  /** How far midsummer and midwinter swing either side of the mean. */
+  seasonSwing: number;
+  /** How far a day swings between its coldest hour and its warmest. */
+  diurnalSwing: number;
+
   trees: TreeSpecies[];
   /** Trades the land supports, on top of the civic core. */
   trades: string[];
@@ -89,6 +96,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: 0, rockThreshold: 0.76, bloom: 0.68, ground: 'grass', groundCover: 0,
     water: 'river', waterScale: 1, pondScale: 1, plateau: 1,
     layout: 'hub', populationScale: 1,
+    baseTemp: 12, seasonSwing: 12, diurnalSwing: 8,
     trees: ['oak', 'birch', 'pine'],
     trades: ['Farm', 'Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Blacksmith', 'Tailor', 'Quarry', 'Mine'],
   },
@@ -99,6 +107,8 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: 0.16, rockThreshold: 0.84, bloom: 0.74, ground: 'grass', groundCover: 0,
     water: 'creek', waterScale: 0.7, pondScale: 0.8, plateau: 0.5,
     layout: 'clearing', populationScale: 0.85,
+    // Under a canopy the air moves less and the day swings less.
+    baseTemp: 10, seasonSwing: 11, diurnalSwing: 6,
     trees: ['pine', 'oak', 'pine'],
     trades: ['Woodcutter', 'Woodcutter', 'Carpenter', 'Carpenter', 'Farm', 'Mill', 'Bakery', 'Tailor'],
   },
@@ -109,6 +119,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: -0.1, rockThreshold: 0.58, bloom: 0.8, ground: 'grass', groundCover: 0,
     water: 'creek', waterScale: 0.8, pondScale: 0.7, plateau: 1.9,
     layout: 'terrace', populationScale: 0.8,
+    baseTemp: 5, seasonSwing: 12, diurnalSwing: 9,
     trees: ['pine', 'pine', 'birch'],
     trades: ['Mine', 'Mine', 'Quarry', 'Quarry', 'Blacksmith', 'Woodcutter', 'Farm', 'Mill', 'Bakery'],
   },
@@ -119,6 +130,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: 0.05, rockThreshold: 0.88, bloom: 0.58, ground: 'marsh', groundCover: 0.35,
     water: 'delta', waterScale: 1.35, pondScale: 1.7, plateau: 0,
     layout: 'causeway', populationScale: 1.05,
+    baseTemp: 12, seasonSwing: 10, diurnalSwing: 6,
     trees: ['birch', 'oak', 'birch'],
     trades: ['Farm', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Woodcutter', 'Carpenter'],
   },
@@ -129,6 +141,8 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: -0.2, rockThreshold: 0.7, bloom: 0.5, ground: 'scrub', groundCover: 0.4,
     water: 'creek', waterScale: 0.6, pondScale: 1.2, plateau: 0.6,
     layout: 'lane', populationScale: 0.8,
+    // Nothing to hold the heat in: a continental swing, hot and cold.
+    baseTemp: 13, seasonSwing: 16, diurnalSwing: 12,
     trees: ['oak', 'birch', 'acacia'],
     trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Quarry', 'Woodcutter'],
   },
@@ -139,6 +153,8 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: 0.02, rockThreshold: 0.8, bloom: 0.64, ground: 'grass', groundCover: 0,
     water: 'lake', waterScale: 1.1, pondScale: 2.2, plateau: 0.4,
     layout: 'harbour', populationScale: 1.05,
+    // A body of water is a flywheel for temperature.
+    baseTemp: 13, seasonSwing: 8, diurnalSwing: 5,
     trees: ['pine', 'birch', 'oak'],
     trades: ['Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Tailor', 'Quarry'],
   },
@@ -149,6 +165,8 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: -0.55, rockThreshold: 0.62, bloom: 0.94, ground: 'dune', groundCover: 0.82,
     water: 'oasis', waterScale: 0.35, pondScale: 1.15, plateau: 1.2,
     layout: 'oasis', populationScale: 0.62,
+    // Fierce by day, bitter after dark. The widest daily swing of any biome.
+    baseTemp: 27, seasonSwing: 11, diurnalSwing: 17,
     trees: ['palm', 'acacia', 'palm'],
     trades: ['Quarry', 'Quarry', 'Mine', 'Mine', 'Blacksmith', 'Tailor', 'Farm', 'Bakery'],
   },
@@ -159,6 +177,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: 0.22, rockThreshold: 0.93, bloom: 0.86, ground: 'marsh', groundCover: 0.66,
     water: 'marsh', waterScale: 1.7, pondScale: 0.85, plateau: 0,
     layout: 'scatter', populationScale: 0.75,
+    baseTemp: 21, seasonSwing: 7, diurnalSwing: 5,
     trees: ['mangrove', 'mangrove', 'birch'],
     trades: ['Woodcutter', 'Woodcutter', 'Carpenter', 'Tailor', 'Farm', 'Mill', 'Bakery'],
   },
@@ -169,6 +188,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     forest: -0.05, rockThreshold: 0.86, bloom: 0.58, ground: 'grass', groundCover: 0,
     water: 'brook', waterScale: 0.75, pondScale: 1.35, plateau: 0.3,
     layout: 'ring', populationScale: 1.15,
+    baseTemp: 14, seasonSwing: 12, diurnalSwing: 8,
     trees: ['oak', 'oak', 'birch'],
     trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Mill', 'Bakery', 'Tailor', 'Carpenter', 'Woodcutter', 'Quarry'],
   },

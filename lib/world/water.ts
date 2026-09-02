@@ -42,6 +42,24 @@ export interface WaterField {
   distanceToWater(wx: number, wy: number): number;
   /** Fraction of the map under water, which is what makes a fen a fen. */
   coverage: number;
+
+  /**
+   * Which landmass a point belongs to, or -1 in the water.
+   *
+   * Water divides the map into islands, and until this existed nothing knew
+   * that. Citizens were pushed off a bank onto an islet with no dry route back
+   * and simply stopped: one was measured standing four units from his own front
+   * door for four days, unable to move at all, until he froze to death. The
+   * settlement planner, the spawner and the escape push all now insist on the
+   * mainland.
+   */
+  landAt(wx: number, wy: number): number;
+  /** The largest landmass, which is where the settlement goes. */
+  mainland: number;
+  /** Every landmass, biggest first: id, how many cells, and a point on it. */
+  islands: { id: number; cells: number; x: number; y: number }[];
+  /** Unit vector to the nearest cell of the mainland, and how far. */
+  toMainland(wx: number, wy: number): { x: number; y: number; d: number };
 }
 
 /** Squared distance from a point to the nearest sample, plus that sample's width. */
@@ -176,6 +194,66 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
     }
   }
 
+  // Which landmass each dry cell belongs to. A flood fill over the four
+  // neighbours, so two shores separated by a channel are two islands.
+  const land = new Int32Array(n * n).fill(-1);
+  const islands: { id: number; cells: number; x: number; y: number }[] = [];
+  let nextIsland = 0;
+  for (let start = 0; start < mask.length; start++) {
+    if (mask[start] || land[start] !== -1) continue;
+    const id = nextIsland++;
+    const stack = [start];
+    land[start] = id;
+    let cells = 0;
+    let sx = 0, sy = 0;
+    while (stack.length) {
+      const i = stack.pop()!;
+      cells++;
+      const gx = i % n, gy = (i / n) | 0;
+      sx += gx; sy += gy;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = gx + dx, ny = gy + dy;
+        if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+        const j = ny * n + nx;
+        if (mask[j] || land[j] !== -1) continue;
+        land[j] = id;
+        stack.push(j);
+      }
+    }
+    islands.push({ id, cells, x: (sx / cells + 0.5) * cell, y: (sy / cells + 0.5) * cell });
+  }
+  islands.sort((a, b) => b.cells - a.cells);
+  const mainland = islands.length ? islands[0].id : -1;
+
+  // And, for anything that finds itself on an islet, the way back to the
+  // mainland — swept from the mainland's own cells so the answer is a real
+  // destination rather than the nearest shore of wherever they are stranded.
+  const mainX = new Float32Array(n * n);
+  const mainY = new Float32Array(n * n);
+  const mainD = new Float32Array(n * n).fill(Infinity);
+  const mainQueue: number[] = [];
+  for (let i = 0; i < land.length; i++) {
+    if (land[i] !== mainland) continue;
+    mainD[i] = 0;
+    mainX[i] = (i % n + 0.5) * cell;
+    mainY[i] = (Math.floor(i / n) + 0.5) * cell;
+    mainQueue.push(i);
+  }
+  for (let head = 0; head < mainQueue.length; head++) {
+    const i = mainQueue[head];
+    const gx = i % n, gy = (i / n) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const nx = gx + dx, ny = gy + dy;
+      if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+      const j = ny * n + nx;
+      if (mainD[j] !== Infinity) continue;
+      mainD[j] = mainD[i] + 1;
+      mainX[j] = mainX[i];
+      mainY[j] = mainY[i];
+      mainQueue.push(j);
+    }
+  }
+
   const indexOf = (wx: number, wy: number) => {
     const gx = Math.max(0, Math.min(n - 1, Math.floor(wx / cell)));
     const gy = Math.max(0, Math.min(n - 1, Math.floor(wy / cell)));
@@ -199,6 +277,17 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
       const dx = fromX[i] - wx, dy = fromY[i] - wy;
       const d = Math.hypot(dx, dy);
       if (d < 0.0001) return { x: 0, y: 1, d: cell };
+      return { x: dx / d, y: dy / d, d };
+    },
+    landAt: (wx, wy) => land[indexOf(wx, wy)],
+    mainland,
+    islands,
+    toMainland(wx, wy) {
+      const i = indexOf(wx, wy);
+      if (land[i] === mainland) return { x: 0, y: 0, d: 0 };
+      const dx = mainX[i] - wx, dy = mainY[i] - wy;
+      const d = Math.hypot(dx, dy);
+      if (!Number.isFinite(d) || d < 0.0001) return { x: 0, y: 0, d: 0 };
       return { x: dx / d, y: dy / d, d };
     },
   };

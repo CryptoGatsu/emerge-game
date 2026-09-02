@@ -252,6 +252,11 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
       <Stat icon="♥" label="Happiness" value={`${view.happiness}%`} />
       <Stat icon="⚡" label="Energy" value={`${view.energy}%`} />
       <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label="Day" value={`${view.day} · ${view.clock}`} />
+      <Stat
+        icon={view.temperature <= 2 ? '❄' : view.temperature >= 30 ? '☼' : '🌡'}
+        label="Temperature"
+        value={`${Math.round(view.temperature)}°C · ${view.temperatureLabel}`}
+      />
       {woodland && (
         <Stat
           icon="♣"
@@ -263,7 +268,8 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
       )}
       <div className="status-foot">
         <span>{view.season} · {view.weather}</span>
-        <span>{view.employed} working · {view.outdoors} outdoors</span>
+        <span>{view.employed} working · {view.outdoors} outdoors{view.seated > 0 ? ` · ${view.seated} sitting` : ''}</span>
+        <span>{view.births} born · {view.deaths} died here</span>
       </div>
     </section>
   );

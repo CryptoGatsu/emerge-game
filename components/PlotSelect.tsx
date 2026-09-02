@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
-  drawPlotPreview, drawRegionMap, loadPlayer, marketPlots, prospectPlot, savePlayer,
+  ISLANDS, drawPlotPreview, drawRegionMap, loadPlayer, marketPlots, prospectPlot, savePlayer,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
 import { ACTIVE_CHAIN, TOKEN, chainConfigured, claimPlot } from '@/lib/chain/emerge';
@@ -62,10 +62,22 @@ function RegionMap({ plots, selected, onSelect }: {
     <div className="region">
       <canvas ref={ref} width={900} height={570} className="region-canvas" aria-hidden />
       <div className="region-pins">
+        {ISLANDS.filter((island) => plots.some((p) => p.island === island.name)).map((island) => (
+          <span
+            key={island.name}
+            className="island-name"
+            // Below the island, where the markers are not.
+            style={{ left: `${island.x * 100}%`, top: `${(island.y + island.ry * 0.92) * 100}%` }}
+          >
+            {island.name}
+          </span>
+        ))}
         {plots.map((plot) => (
           <button
             key={plot.id}
-            className={`region-pin ${plot.biome} ${plot.seed === selected.seed ? 'selected' : ''}`}
+            // A marker on the right-hand side of the map hangs its label to the
+            // left, or it runs off the edge.
+            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected.seed ? 'selected' : ''}`}
             style={{ left: `${plot.mapX * 100}%`, top: `${plot.mapY * 100}%` }}
             onClick={() => onSelect(plot)}
             aria-pressed={plot.seed === selected.seed}
@@ -73,13 +85,18 @@ function RegionMap({ plots, selected, onSelect }: {
             <span className="pin-dot" aria-hidden />
             <span className="pin-label">
               <b>{plot.region}</b>
-              <em>{plot.biomeLabel}</em>
+              {/* The biome only on the one being looked at. Nine markers each
+                  carrying two lines of text is more label than map. */}
+              {plot.seed === selected.seed && <em>{plot.biomeLabel}</em>}
             </span>
           </button>
         ))}
       </div>
       <div className="region-legend">
-        <span>{plots.length} plots surveyed</span>
+        <span>
+          {plots.length} plots across {new Set(plots.map((p) => p.island)).size}
+          {new Set(plots.map((p) => p.island)).size === 1 ? ' island' : ' islands'}
+        </span>
         <span>Tap a marker to inspect the land</span>
       </div>
     </div>
@@ -201,6 +218,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
             <h2>{selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{selected.biomeLabel}</span>
+              <span>{selected.island}</span>
               <span>{selected.population} beings</span>
             </div>
 

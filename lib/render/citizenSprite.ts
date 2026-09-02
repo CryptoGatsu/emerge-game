@@ -128,6 +128,8 @@ export class CitizenSprite {
   /** Pick the animation state from what the citizen is actually doing. */
   private stateFor(citizen: Citizen, moving: boolean): CharState {
     if (moving) return 'walk';
+    // Actually sat down: on a bench in the square, or crouched at a fire.
+    if (citizen.seated) return 'sit';
     switch (citizen.activity) {
       case 'working': return 'work';
       case 'resting': return citizen.phase === 'sleeping' ? 'sleep' : 'sit';
@@ -166,7 +168,10 @@ export class CitizenSprite {
     const prevX = this.wx, prevY = this.wy;
     // Ease toward the simulation position. The simulation is authoritative; this
     // only removes the stepping that would otherwise show at low tick rates.
-    const k = Math.min(1, dt * 14);
+    // Gentler than it was: a correction out of a wall arrives in the simulation
+    // as one decisive step, and easing it over about a tenth of a second is
+    // what turns it from a snap sideways into a stride.
+    const k = Math.min(1, dt * 9);
     this.wx += (targetX - this.wx) * k;
     this.wy += (targetY - this.wy) * k;
 

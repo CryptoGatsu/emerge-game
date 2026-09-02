@@ -822,10 +822,54 @@ export class EmergeScene {
     this.centreOn(50, 49, 1.05);
   }
 
+  /** How many bridges the drawn map was built with. */
+  private bridgeCount = 0;
+
+  /**
+   * Repaint the ground, the water and the props without disturbing anything
+   * else. Unlike `reset`, the camera, the citizens and the selection all
+   * survive: this runs while the player is watching.
+   */
+  private rebuildGround() {
+    if (!this.world) return;
+    this.map = generateWorldMap(this.world);
+    for (const layer of [this.groundLayer, this.waterLayer]) {
+      for (const child of layer.removeChildren()) child.destroy({ children: true });
+    }
+    // Props live in the shared object layer alongside buildings and citizens,
+    // and their glows live in the lights layer, so each is destroyed by hand
+    // rather than by emptying a container.
+    for (const entry of this.propSprites) entry.sprite.destroy();
+    for (const glow of this.lampGlows) glow.destroy();
+    for (const puff of this.smoke) puff.sprite.destroy();
+    this.propSprites = [];
+    this.trees = [];
+    this.foliage = [];
+    this.waterSprites = [];
+    this.waterfallSprites = [];
+    this.campfires = [];
+    this.lampGlows = [];
+    this.smoke = [];
+    this.minimapBase = null;
+    this.waterFrame = -1;
+    this.buildTerrain();
+    this.buildProps();
+    this.lastSeason = '';
+  }
+
   private update(dt: number) {
     if (!this.world) return;
     const clamped = Math.min(dt, 0.1);
     this.time += clamped;
+
+    // A settlement that finishes a bridge changes the shape of its own map: a
+    // new deck, a new road, new ground opened on the far shore. Repaint the
+    // ground when that happens, and only then — it is a few tens of
+    // milliseconds and it happens once every several game weeks.
+    if (this.world.layout.bridges.length !== this.bridgeCount) {
+      this.bridgeCount = this.world.layout.bridges.length;
+      this.rebuildGround();
+    }
 
     this.updateWater();
     this.updateProps(clamped);
@@ -1515,7 +1559,7 @@ export class EmergeScene {
       const family = this.world.families.find((f) => f.id === c.familyId);
       return {
         title: c.name,
-        lines: [`${JOB_LABELS[c.job]} · ${ACTIVITY_LABELS[c.activity]}`, `${family?.name ?? 'Unknown'} family · age ${c.age}`],
+        lines: [`${JOB_LABELS[c.job]} · ${ACTIVITY_LABELS[c.activity]}`, `${family?.name ?? 'Unknown'} family · age ${Math.floor(c.age)}`],
       };
     }
     const b = this.world.buildings.find((x) => x.id === target.id);

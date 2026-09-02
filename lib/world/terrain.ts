@@ -14,7 +14,7 @@
 import { waterOf, type Building, type World } from '../simulation';
 import { GRID, worldToTile } from './iso';
 import { biomeProfile, type BiomeProfile } from './biomes';
-import { BRIDGE_SPAN, type WorldLayout } from './layout';
+import { onDeck, type WorldLayout } from './layout';
 import { fbm, heightField } from './relief';
 import { hash2, nearestOn, valueNoise, type Polyline, type WaterField } from './water';
 
@@ -191,8 +191,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   // them used to plough only one.
   const farms = world.buildings.filter((b) => b.type === 'Farm');
   const core = layout.plaza;
-  const bridgeNear = (wx: number, wy: number) =>
-    layout.bridges.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < BRIDGE_SPAN * BRIDGE_SPAN);
+  const bridgeNear = (wx: number, wy: number) => onDeck(layout.bridges, wx, wy);
 
   for (let ty = 0; ty < grid; ty++) {
     for (let tx = 0; tx < grid; tx++) {
@@ -443,15 +442,28 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
   const push = (wx: number, wy: number, name: string, sway = 0, glowing = false) =>
     out.push({ wx, wy, name, sway, glow: glowing });
 
-  // A deck at every place the plan found a road crossing water, rather than one
-  // bridge at a fixed spot that most biomes had no river under.
-  for (const bridge of layout.bridges) push(bridge.x, bridge.y, 'prop.bridge');
+  // A deck at every place the plan found a road crossing water, laid along the
+  // whole span rather than as a single sprite at the midpoint — a crossing is
+  // as long as the water under it.
+  for (const bridge of layout.bridges) {
+    const sections = Math.max(1, Math.round(bridge.span / 2.6));
+    for (let i = -sections; i <= sections; i++) {
+      const t = (i / Math.max(1, sections)) * bridge.span;
+      push(bridge.x + Math.cos(bridge.angle) * t, bridge.y + Math.sin(bridge.angle) * t, 'prop.bridge');
+    }
+  }
 
-  // Well and benches in the square.
+  // Benches, fires, the well and the market stalls stand exactly where the
+  // simulation says they do, because citizens walk up to them and use them.
+  // Drawing them anywhere else would put people sitting on empty ground.
+  for (const amenity of world.amenities) {
+    if (amenity.kind === 'bench') push(amenity.x, amenity.y, 'prop.bench');
+    else if (amenity.kind === 'well') push(amenity.x, amenity.y, 'prop.well');
+    else if (amenity.kind === 'campfire') push(amenity.x, amenity.y, 'prop.campfire.0', 0, true);
+    else push(amenity.x, amenity.y, `prop.stall.${(Math.round(amenity.x + amenity.y)) % 3}`);
+  }
+
   const PLAZA = layout.plaza;
-  push(PLAZA.x + 3.5, PLAZA.y + 1.5, 'prop.well');
-  push(PLAZA.x - 5, PLAZA.y + 2.5, 'prop.bench');
-  push(PLAZA.x + 5.5, PLAZA.y - 3, 'prop.bench');
   push(PLAZA.x - 4.5, PLAZA.y - 3.5, 'prop.planter', 0.4);
   push(PLAZA.x + 1.5, PLAZA.y + 5.5, 'prop.planter', 0.4);
   push(PLAZA.x - 7.5, PLAZA.y - 1, 'prop.signpost');
@@ -466,14 +478,8 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
 
   const market = at('Market');
   if (market) {
-    // Stalls fanned out in front of the market hall.
-    const spots: [number, number, number][] = [
-      [-7, 4.5, 0], [-2.5, 6, 1], [2.5, 6, 2], [7, 4.5, 0], [-8.5, 0.5, 1], [8.5, 0.5, 2],
-    ];
-    for (const [dx, dy, kind] of spots) push(market.x + dx, market.y + dy, `prop.stall.${kind}`);
     push(market.x - 10, market.y + 2.5, 'prop.crates');
     push(market.x + 10.5, market.y + 2, 'prop.barrel');
-    push(market.x + 4, market.y + 8.5, 'prop.campfire.0', 0, true);
   }
 
   for (const farm of world.buildings.filter((b) => b.type === 'Farm')) {
@@ -504,12 +510,7 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
   }
 
   const tavern = at('Tavern');
-  if (tavern) {
-    push(tavern.x - 5.5, tavern.y + 3.5, 'prop.bench');
-    push(tavern.x + 5.5, tavern.y + 3.5, 'prop.bench');
-    push(tavern.x + 8, tavern.y + 1, 'prop.lantern', 0, true);
-    push(tavern.x - 2, tavern.y + 6.5, 'prop.campfire.0', 0, true);
-  }
+  if (tavern) push(tavern.x + 8, tavern.y + 1, 'prop.lantern', 0, true);
 
   const quarry = at('Quarry');
   if (quarry) {

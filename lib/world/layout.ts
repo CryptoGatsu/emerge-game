@@ -27,20 +27,62 @@ import type { WaterField } from './water';
 /** What a road node is for, which is how sites are derived from the plan. */
 export type NodeRole = 'core' | 'street' | 'residential' | 'work';
 
+/** How far a deck reaches either side of the road's centre line. */
+export const BRIDGE_HALF_WIDTH = 2.2;
+
 /**
- * How far a bridge deck reaches along the road, in world units.
+ * Whether a point is on one of these bridges.
  *
- * Shared so the terrain paints exactly the span the simulation lets people
- * walk on. When these two numbers disagree, citizens either stroll on open
- * water at the edge of a deck or get shoved off the end of one.
+ * A deck is a narrow strip along the road, not a circle around a point. Testing
+ * a radius let a settlement's five river crossings blanket the ground either
+ * side of them: half of every citizen sample was standing "on a bridge", which
+ * meant half the town was exempt from the water rule and, being outdoors and
+ * never sheltered, froze through the first winter.
  */
-export const BRIDGE_SPAN = 4.5;
+export function onDeck(bridges: Bridge[], x: number, y: number) {
+  return deckAt(bridges, x, y) !== null;
+}
+
+/**
+ * Which deck a point is on, and where on it.
+ *
+ * Callers need more than a yes: a citizen crossing a bridge drifts off the
+ * centre line — the scatter that spreads people around a destination, the push
+ * away from a wall — and one step past the handrail is open water, where the
+ * water rule refuses every direction and strands them mid-river. Knowing the
+ * offset lets them be walked back to the middle of the deck instead.
+ */
+export function deckAt(bridges: Bridge[], x: number, y: number):
+{ bridge: Bridge; along: number; across: number } | null {
+  for (const bridge of bridges) {
+    const dx = x - bridge.x, dy = y - bridge.y;
+    const cos = Math.cos(bridge.angle), sin = Math.sin(bridge.angle);
+    const along = dx * cos + dy * sin;
+    const across = -dx * sin + dy * cos;
+    if (Math.abs(along) <= bridge.span && Math.abs(across) <= BRIDGE_HALF_WIDTH) {
+      return { bridge, along, across };
+    }
+  }
+  return null;
+}
 
 export interface Bridge {
   x: number;
   y: number;
   /** Along the road, in radians, so the deck can be laid the right way. */
   angle: number;
+  /**
+   * Half the deck's length, in world units — enough to span the water it
+   * crosses, with a little bank at each end.
+   *
+   * It used to be a fixed four and a half for every crossing. Anything wider
+   * than that had a deck stopping short of the far bank, so the road was
+   * impassable while still being in the routing graph: citizens walked to the
+   * gap, found every direction refused, and stopped. Six of eighteen were piled
+   * on one such spot, and most of that settlement's deaths were those people
+   * freezing where they stood.
+   */
+  span: number;
 }
 
 export interface WorldLayout {
@@ -103,7 +145,7 @@ function chooseCentre(seed: number, profile: BiomeProfile, water: WaterField, ki
 
   for (let y = 26; y <= 74; y += 3) {
     for (let x = 26; x <= 74; x += 3) {
-      if (water.isWater(x, y)) continue;
+      if (water.isWater(x, y) || water.landAt(x, y) !== water.mainland) continue;
       const toWater = Math.min(water.distanceToWater(x, y), 40);
       let score = -Math.abs(toWater - want) * 1.4;
       // Keep clear of the map edge: a town half off the field looks like a bug.
@@ -418,10 +460,20 @@ function buildRing(c: Point, angle: number, rand: () => number): Plan {
  * Assembly
  * ------------------------------------------------------------------ */
 
-/** Shift a node off water, if there is dry ground within reach. */
+/**
+ * Shift a node onto the mainland, if it is not there already.
+ *
+ * Nearest dry ground is not good enough: a road node beached onto an islet is a
+ * junction nobody can walk to, and everything routed through it walks at the
+ * water instead.
+ */
 function beach(p: Point, water: WaterField): Point {
-  if (!water.isWater(p[0], p[1])) return p;
-  const out = water.toLand(p[0], p[1]);
+  if (water.landAt(p[0], p[1]) === water.mainland) return p;
+  const out = water.isWater(p[0], p[1]) ? water.toMainland(p[0], p[1]) : water.toMainland(p[0], p[1]);
+  if (out.d <= 0) {
+    const dry = water.toLand(p[0], p[1]);
+    return [clamp(p[0] + dry.x * (dry.d + 1.6), 8, 92), clamp(p[1] + dry.y * (dry.d + 1.6), 10, 90)];
+  }
   return [clamp(p[0] + out.x * (out.d + 1.6), 8, 92), clamp(p[1] + out.y * (out.d + 1.6), 10, 90)];
 }
 
@@ -440,7 +492,8 @@ function findBridges(nodes: Point[], edges: number[][], water: WaterField): Brid
     const [bx, by] = nodes[bIdx];
     const len = Math.hypot(bx - ax, by - ay);
     const steps = Math.max(4, Math.round(len));
-    // Every run of wet samples along the edge gets one deck at its midpoint.
+    // Every run of wet samples along the edge gets a deck long enough to span
+    // it, with a little bank at either end.
     let runStart = -1;
     for (let s = 0; s <= steps; s++) {
       const t = s / steps;
@@ -448,11 +501,14 @@ function findBridges(nodes: Point[], edges: number[][], water: WaterField): Brid
       const wet = water.isWater(x, y);
       if (wet && runStart < 0) runStart = s;
       if ((!wet || s === steps) && runStart >= 0) {
-        const mid = ((runStart + (wet ? s : s - 1)) / 2) / steps;
+        const runEnd = wet ? s : s - 1;
+        const mid = ((runStart + runEnd) / 2) / steps;
+        const runLength = ((runEnd - runStart + 1) / steps) * len;
         bridges.push({
           x: ax + (bx - ax) * mid,
           y: ay + (by - ay) * mid,
           angle: Math.atan2(by - ay, bx - ax),
+          span: runLength / 2 + 1.8,
         });
         runStart = -1;
       }
@@ -521,6 +577,8 @@ function siteNear(
       const x = anchor[0] + Math.cos(a) * reach;
       const y = anchor[1] + Math.sin(a) * reach * 0.9;
       if (x < 8 || x > 92 || y < 10 || y > 90) continue;
+      // On the mainland, not on an islet across a channel from the town.
+      if (water.landAt(x, y) !== water.mainland) continue;
       if (water.distanceToWater(x, y) < radius + bankGap) continue;
       if (roadClearance(nodes, edges, x, y) < radius + 1.2) continue;
       let clash = false;
@@ -645,7 +703,7 @@ export function createLayout(seed: number, profile: BiomeProfile, water: WaterFi
         nodes[a][0] + (nodes[b][0] - nodes[a][0]) * t,
         nodes[a][1] + (nodes[b][1] - nodes[a][1]) * t,
       ];
-      if (!water.isWater(p[0], p[1])) wanderSpots.push(p);
+      if (water.landAt(p[0], p[1]) === water.mainland) wanderSpots.push(p);
     }
   }));
 

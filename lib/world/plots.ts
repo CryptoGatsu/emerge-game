@@ -30,6 +30,8 @@ export interface Plot {
   /** Where this plot sits on the region map, normalised to 0-1. */
   mapX: number;
   mapY: number;
+  /** Which island of the chain it belongs to. */
+  island: string;
 }
 
 /**
@@ -40,15 +42,15 @@ export interface Plot {
  * telling plots apart at a glance.
  */
 const REGION_NAMES: Record<BiomeKind, string[]> = {
-  valley: ['Fernrest Vale', 'Elderford Bend', 'Willowdale', 'Rivermarch'],
-  woodland: ['Alder Hollow', 'Cairnwood', 'Thornebrook', 'Deepbough'],
-  highland: ['Kestrel Ridge', 'Greyfell', 'Rookspire', 'Stonewatch'],
-  wetland: ['Briar Fen', 'Mosswater', 'Reedmere', 'Lowbarrow'],
-  steppe: ['Windrow Downs', 'Tallgrass', 'Farholt', 'Openreach'],
-  coast: ['Sunmere Shallows', 'Saltmarch', 'Kelphaven', 'Tidewick'],
-  desert: ['Emberwaste', 'Duneward', 'Ashenford', 'Sablereach'],
-  swamp: ['Blackmire', 'Gloamwater', 'Rootfen', 'Sunkenhollow'],
-  grassland: ['Hollowmere', 'Greenhale', 'Meadowlark', 'Broadfield'],
+  valley: ['Fernrest Vale', 'Elderford Bend', 'Willowdale', 'Rivermarch', 'Havenford', 'Wyndmere'],
+  woodland: ['Alder Hollow', 'Cairnwood', 'Thornebrook', 'Deepbough', 'Elmshade', 'Briarwood'],
+  highland: ['Kestrel Ridge', 'Greyfell', 'Rookspire', 'Stonewatch', 'Cragmoor', 'Ironscar'],
+  wetland: ['Briar Fen', 'Mosswater', 'Reedmere', 'Lowbarrow', 'Willowfen', 'Marshlight'],
+  steppe: ['Windrow Downs', 'Tallgrass', 'Farholt', 'Openreach', 'Longsight', 'Dryhearth'],
+  coast: ['Sunmere Shallows', 'Saltmarch', 'Kelphaven', 'Tidewick', 'Spraycliff', 'Bayreach'],
+  desert: ['Emberwaste', 'Duneward', 'Ashenford', 'Sablereach', 'Sunscorch', 'Dryreach'],
+  swamp: ['Blackmire', 'Gloamwater', 'Rootfen', 'Sunkenhollow', 'Fenlight', 'Stillwater'],
+  grassland: ['Hollowmere', 'Greenhale', 'Meadowlark', 'Broadfield', 'Larkmoor', 'Summerlea'],
 };
 
 /** What each biome is worth, since land that supports more trades is worth more. */
@@ -58,34 +60,78 @@ const BIOME_PREMIUM: Record<BiomeKind, number> = {
 };
 
 /**
- * Where each plot sits in the region.
+ * The archipelago.
  *
- * The first nine are placed by hand so the map reads as a composed piece of
- * country rather than a scatter plot — the desert out west, the fen and the
- * swamp along the southern water, the highland up in the north-east. Anything
- * prospected afterwards is placed on a spiral out from the middle, which keeps
- * new land inside the coast and away from what is already claimed.
+ * Every plot used to sit on one landmass, and with twenty-five of them claimed
+ * the map was a wall of overlapping labels with no sense of place left in it.
+ * Now the region is a chain of islands, and even the nine plots the land office
+ * opens with are spread across it.
+ *
+ * The capacities are small on purpose. A marker carries a name, so it is about
+ * a sixth of the map wide; nine of them will not fit inside one island however
+ * they are arranged, and crowding them produced exactly the wall of labels this
+ * was meant to fix. Fewer per island, more islands.
  */
-const REGION_SITES: [number, number][] = [
-  [0.44, 0.46], // valley, the heart of it
-  [0.26, 0.30], // woodland
-  [0.74, 0.24], // highland
-  [0.55, 0.74], // wetland
-  [0.70, 0.55], // steppe
-  [0.86, 0.66], // coast
-  [0.14, 0.60], // desert
-  [0.36, 0.80], // swamp
-  [0.56, 0.20], // grassland
+export interface Island {
+  name: string;
+  /** Centre and radii on the map, normalised to 0-1. */
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  /** How many plots this island has room for. */
+  capacity: number;
+  /** Noise offset, so no two islands share a coastline. */
+  shape: number;
+}
+
+/**
+ * The chain, laid out with real water between the islands.
+ *
+ * The gaps are wider than they look they need to be. Each coastline is an
+ * ellipse pushed about a third of its radius by noise, so two islands whose
+ * ellipses merely fail to touch will still grow into one another and land as a
+ * single blob with three names printed on it.
+ */
+export const ISLANDS: Island[] = [
+  { name: 'Fernrest', x: 0.24, y: 0.43, rx: 0.20, ry: 0.31, capacity: 4, shape: 0 },
+  { name: 'Kestrel Reach', x: 0.70, y: 0.20, rx: 0.16, ry: 0.16, capacity: 3, shape: 311 },
+  { name: 'Saltmarch', x: 0.68, y: 0.76, rx: 0.16, ry: 0.17, capacity: 3, shape: 907 },
+  { name: 'Ashen Skerry', x: 0.90, y: 0.47, rx: 0.05, ry: 0.10, capacity: 3, shape: 2203 },
+  { name: 'Tidewick', x: 0.46, y: 0.86, rx: 0.09, ry: 0.08, capacity: 3, shape: 3391 },
+  { name: 'Windrow Holm', x: 0.16, y: 0.90, rx: 0.10, ry: 0.07, capacity: 3, shape: 1451 },
+  { name: 'Gale Rock', x: 0.47, y: 0.10, rx: 0.07, ry: 0.07, capacity: 2, shape: 4177 },
+  { name: 'Farholt', x: 0.90, y: 0.87, rx: 0.06, ry: 0.09, capacity: 3, shape: 5051 },
 ];
 
+/** Which island a plot index belongs to, and its place on it. */
+export function islandOf(index: number): { island: Island; slot: number } {
+  let remaining = index;
+  for (const island of ISLANDS) {
+    if (remaining < island.capacity) return { island, slot: remaining };
+    remaining -= island.capacity;
+  }
+  // Past the chain's capacity everything crowds onto the last skerry.
+  const last = ISLANDS[ISLANDS.length - 1];
+  return { island: last, slot: remaining % last.capacity };
+}
+
+/**
+ * Where a plot sits on its island: a golden-angle spiral out from the middle,
+ * which spreads any number of them without two ever landing on top of each
+ * other, and keeps them inside the coast.
+ */
 function regionSite(index: number): [number, number] {
-  if (index < REGION_SITES.length) return REGION_SITES[index];
-  const n = index - REGION_SITES.length;
-  const angle = n * 2.399963229728653;
-  const radius = 0.16 + Math.sqrt(n + 1) * 0.075;
+  const { island, slot } = islandOf(index);
+  if (slot === 0) return [island.x, island.y];
+  const angle = slot * 2.399963229728653;
+  // Out to most of the island's radius, not a third of it: the markers carry
+  // labels a hundred and forty pixels wide, and a tighter spiral piles four of
+  // them on top of each other in the middle of the map.
+  const spread = 0.42 + Math.sqrt(slot / Math.max(1, island.capacity)) * 0.55;
   return [
-    Math.max(0.07, Math.min(0.93, 0.5 + Math.cos(angle) * radius)),
-    Math.max(0.1, Math.min(0.9, 0.5 + Math.sin(angle) * radius * 0.8)),
+    Math.max(0.03, Math.min(0.97, island.x + Math.cos(angle) * island.rx * spread)),
+    Math.max(0.05, Math.min(0.95, island.y + Math.sin(angle) * island.ry * spread)),
   ];
 }
 
@@ -100,7 +146,10 @@ export function inspectPlot(seed: number, index: number): Plot {
   return {
     id: `plot-${seed.toString(36)}`,
     seed,
-    region: REGION_NAMES[profile.kind][index % REGION_NAMES[profile.kind].length],
+    // Named from the seed rather than from its place in the list, so a plot
+    // keeps its name wherever it ends up and two plots of the same biome only
+    // collide by chance rather than every sixth time.
+    region: REGION_NAMES[profile.kind][Math.abs(seed) % REGION_NAMES[profile.kind].length],
     price: Math.round(price / 10) * 10,
     biome: profile.kind,
     biomeLabel: profile.label,
@@ -110,6 +159,7 @@ export function inspectPlot(seed: number, index: number): Plot {
     trades,
     mapX: regionSite(index)[0],
     mapY: regionSite(index)[1],
+    island: islandOf(index).island.name,
   };
 }
 
@@ -229,11 +279,16 @@ export function drawRegionMap(canvas: HTMLCanvasElement, plots: Plot[]) {
 
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      // A landmass: an ellipse softened by noise, so the coast is ragged.
-      const nx = (x / W - 0.5) * 2, ny = (y / H - 0.5) * 2;
-      const radial = 1 - Math.hypot(nx * 1.02, ny * 1.16);
-      const n = fbm(REGION_SEED, x * 0.026, y * 0.026, 4);
-      const land = radial + (n - 0.5) * 0.78;
+      // The chain: each island is an ellipse softened by its own noise, and the
+      // map takes whichever is nearest to being land at this point.
+      let land = -1;
+      for (const island of ISLANDS) {
+        const nx = (x / W - island.x) / island.rx;
+        const ny = (y / H - island.y) / island.ry;
+        const radial = 1 - Math.hypot(nx, ny);
+        const n = fbm(REGION_SEED + island.shape, x * 0.03, y * 0.03, 4);
+        land = Math.max(land, radial + (n - 0.5) * 0.5);
+      }
 
       let nearest = 0, best = Infinity, second = Infinity;
       for (let i = 0; i < sites.length; i++) {

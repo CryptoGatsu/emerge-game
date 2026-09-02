@@ -9,7 +9,7 @@
 
 import {
   ACTIVITY_LABELS, JOB_LABELS, PHASE_LABELS, RESOURCE_LABELS,
-  activeGathering, friendsOf,
+  activeGathering, describeTemperature, friendsOf,
   type FeedEntry, type Gathering, type MarketQuote, type Resource, type World,
 } from './simulation';
 import { statusLine } from './speech';
@@ -44,7 +44,15 @@ export interface Snapshot {
   clock: string;
   season: string;
   weather: string;
+  /** Degrees Celsius, and the word for how that feels. */
+  temperature: number;
+  temperatureLabel: string;
   population: number;
+  /** Everyone who has been born here and everyone who has died. */
+  births: number;
+  deaths: number;
+  /** How many are sat on a bench or at a fire right now. */
+  seated: number;
   treasury: number;
   happiness: number;
   energy: number;
@@ -107,7 +115,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     const project = world.projects.find((p) => p.ownerId === c.id);
     return {
       kind: 'citizen',
-      id: c.id, name: c.name, handle: c.handle, age: c.age,
+      id: c.id, name: c.name, handle: c.handle, age: Math.floor(c.age),
       job: JOB_LABELS[c.job], activity: ACTIVITY_LABELS[c.activity], phase: PHASE_LABELS[c.phase],
       status: statusLine(c),
       family: family?.name ?? 'Unknown',
@@ -151,7 +159,12 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     clock: formatClock(world.hour),
     season: world.season,
     weather: world.weather,
+    temperature: world.temperature,
+    temperatureLabel: describeTemperature(world.temperature),
     population: world.population,
+    births: world.births,
+    deaths: world.deaths,
+    seated: people.filter((c) => c.seated).length,
     treasury: world.treasury,
     happiness: Math.round(avg((c) => c.happiness)),
     energy: Math.round(avg((c) => c.rest)),
