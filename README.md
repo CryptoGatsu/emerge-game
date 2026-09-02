@@ -490,6 +490,56 @@ at once, and none ended with a building permanently out of use. Against the same
 with hazards switched off, deaths rose by nought to four in eight of the nine biomes,
 and the largest cost was one woodland ending fifteen people smaller. Nothing collapsed.
 
+## Relationships
+
+Friendship is a memory now, not a running total. It used to fade at better than
+a point a day and be forgotten outright at zero, so a settlement's oldest
+friends quietly became strangers over a fortnight of not happening to meet. A
+friendship settles at the level that made it and drifts by a third of a point a
+day; a grudge is just as durable in the other direction.
+
+The negative half is new. About one pair in six simply does not get on — drawn
+from their hashes, so it is a fact about the pair and identical in every replay
+— and time together makes it worse rather than better. A bond deep enough in
+the negative is a rivalry, and two rivals in the same place with at least one of
+them tired, hungry or miserable can come to blows. Everybody who sees it has a
+worse day.
+
+Co-presence is measured on *phase* rather than *activity*, which is what makes
+any of this happen at all: `activity` only reads 'trading' inside the third of a
+unit that counts as having arrived, and arriving at a building puts the person
+inside it, so a settlement of twenty-five was building four acquaintanceships in
+forty days and nobody ever fell out with anybody. Over forty days a town now
+holds a couple of rivalries, a handful of real friendships, and none of the
+friendships made are lost again.
+
+## What people say
+
+Speech is drawn from what the citizen is actually doing before anything
+generic: where they are walking and which building that is, what their trade
+means to do today given the settlement's real shortages — a baker with no flour
+says so — and what they mean to do with the evening. The old mood-and-weather
+lines are still there as a fallback for anyone with nothing concrete to say,
+about one line in three.
+
+## The interface
+
+Every rail panel folds to its heading, and what is open is remembered between
+sessions, so the world can be watched unobstructed. The action bar is Game
+Guide, Build, Market, Chat and On-Chain.
+
+**Game Guide** is a full explanation of the world, written to be read from cold:
+the clock, the people and their relationships, work and the market, building and
+demolition, gatherings, the four hazards and their defences, how $EMERGE is
+actually earned, the land charts, and what the chain does and does not do yet.
+
+**Chat** has a global channel and one per world. The channels, the identity a
+message is signed with (a wallet address, or a local handle), the history, the
+ordering and the limits are all real. The transport is not: there is no relay in
+this build, so a message stays in the browser that typed it, and the panel says
+so rather than showing a room that looks populated and is not. `deliver()` in
+`lib/chat.ts` is the one function that changes when a relay exists.
+
 ## Where this still needs work
 
 - Final sprites are generated procedurally; the pipeline is ready for authored art but the

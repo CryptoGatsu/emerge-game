@@ -7,7 +7,7 @@
  * frame. Nothing here feeds back into the simulation.
  */
 
-import { JOB_LABELS, spokenLine, type Citizen, type World } from './simulation';
+import { JOB_LABELS, buildingOf, plannedDay, spokenLine, type Citizen, type World } from './simulation';
 
 type Line = string;
 
@@ -99,10 +99,56 @@ export function speechFor(world: World, c: Citizen, beat: number): string | null
   if (spoken) return spoken.text;
 
   const roll = (c.hash * 31 + beat * 17) % 100;
-  // Most citizens are quiet most of the time; a crowded settlement of constant
-  // talkers reads as noise rather than life.
   if (roll > 34) return null;
 
+  // What they are actually doing, before anything generic. A line that names
+  // where this person is walking and why is worth a dozen that could belong to
+  // anybody: "Off to the bakery — flour to drop in" tells the player something
+  // true about the settlement, and "Beautiful day in Fernrest" does not.
+  const real = plannedLine(world, c);
+  if (real && (c.hash + beat) % 3 !== 0) return real.replace('{world}', world.name);
+
+  return moodLine(world, c, beat);
+}
+
+/**
+ * A line about this citizen's real errand.
+ *
+ * Everything here is read out of the simulation: where they are heading, what
+ * building that is, what their trade does with it, and what they mean to do
+ * with the rest of the day.
+ */
+function plannedLine(world: World, c: Citizen): string | null {
+  if (c.age < 16) return null;
+  const plan = plannedDay(world, c);
+  const heading = buildingOf(world, c.destId);
+
+  if (c.swimming) return 'Cold — making for the bank.';
+  if (c.carried) return 'Put me down!';
+
+  if (c.activity === 'walking' && heading) {
+    const place = heading.type === 'House'
+      ? (world.families.find((f) => f.homeId === heading.id)?.name ?? '') + ' house'
+      : `the ${heading.type.toLowerCase()}`;
+    switch (c.phase) {
+      case 'working': return `Off to ${place}. ${plan.work}`;
+      case 'eating': return `Going to ${place} for something to eat.`;
+      case 'socialising': return `Heading to ${place} for the evening.`;
+      case 'sleeping':
+      case 'athome': return `Turning in. Back to ${place}.`;
+      default: return `On my way to ${place}.`;
+    }
+  }
+
+  if (c.activity === 'working') return plan.work;
+  if (c.phase === 'socialising' && plan.evening) return plan.evening;
+  if (c.phase === 'eating') return 'Getting something to eat before I go back.';
+  if (c.phase === 'sleeping') return null;
+  return plan.today;
+}
+
+/** The old, mood-driven line, still used when there is nothing concrete to say. */
+function moodLine(world: World, c: Citizen, beat: number): string | null {
   const pools: Line[][] = [];
   for (const need of BY_NEED) if (need.test(c)) pools.push(need.lines);
   const hour = BY_HOUR.find((h) => world.hour >= h.from && world.hour < h.to);

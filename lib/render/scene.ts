@@ -880,8 +880,14 @@ export class EmergeScene {
     this.centreOn(50, 49, 1.05);
   }
 
-  /** How many bridges the drawn map was built with. */
-  private bridgeCount = 0;
+  /**
+   * The shape of the plan the drawn map was built from.
+   *
+   * Both the bridges and the road network change while the player watches — a
+   * crossing gets finished, a lane is cut through to a new building — and the
+   * ground has to be repainted when either does.
+   */
+  private layoutShape = '';
 
   /**
    * Repaint the ground, the water and the props without disturbing anything
@@ -924,8 +930,9 @@ export class EmergeScene {
     // new deck, a new road, new ground opened on the far shore. Repaint the
     // ground when that happens, and only then — it is a few tens of
     // milliseconds and it happens once every several game weeks.
-    if (this.world.layout.bridges.length !== this.bridgeCount) {
-      this.bridgeCount = this.world.layout.bridges.length;
+    const shape = `${this.world.layout.bridges.length}:${this.world.layout.nodes.length}`;
+    if (shape !== this.layoutShape) {
+      this.layoutShape = shape;
       this.rebuildGround();
     }
 

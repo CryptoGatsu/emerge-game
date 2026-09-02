@@ -264,10 +264,55 @@ function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow,
   );
 }
 
+/**
+ * A rail panel that folds away.
+ *
+ * The right-hand rail is four stacked panels and it covers a quarter of the
+ * world. Each one collapses to its heading, and what is open is remembered
+ * between sessions, so a player who wants to just watch the place can have the
+ * screen back without losing the panel when they come looking for it.
+ */
+function Folding({ id, title, badge, children, defaultOpen = true }: {
+  id: string;
+  title: string;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const key = `emerge.panel.${id}`;
+  const [open, setOpen] = useState(defaultOpen);
+  // Read the stored state after mount: the server render has no localStorage,
+  // and reading it during the first render makes the markup disagree.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (saved !== null) setOpen(saved === '1');
+    } catch { /* private browsing: the default stands */ }
+  }, [key]);
+  const toggle = () => {
+    setOpen((was) => {
+      const next = !was;
+      try { window.localStorage.setItem(key, next ? '1' : '0'); } catch { /* nothing to do */ }
+      return next;
+    });
+  };
+  return (
+    <section className={`panel folding ${open ? '' : 'shut'}`}>
+      <h3>
+        <button className="fold" onClick={toggle} aria-expanded={open}>
+          <i aria-hidden>{open ? '▾' : '▸'}</i>
+          {title}
+        </button>
+        {badge}
+      </h3>
+      {open && <div className="fold-body">{children}</div>}
+    </section>
+  );
+}
+
 function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['woodland'] }) {
   return (
-    <section className="panel">
-      <h3>WORLD STATUS <span>✦</span></h3>
+    <Folding id="status" title="WORLD STATUS" badge={<span>✦</span>}>
       <Stat icon="◍" label="Population" value={`${view.population}`} />
       <Stat icon="♥" label="Happiness" value={`${view.happiness}%`} />
       <Stat icon="⚡" label="Energy" value={`${view.energy}%`} />
@@ -291,7 +336,7 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
         <span>{view.employed} working · {view.outdoors} outdoors{view.seated > 0 ? ` · ${view.seated} sitting` : ''}</span>
         <span>{view.births} born · {view.deaths} died here</span>
       </div>
-    </section>
+    </Folding>
   );
 }
 
@@ -305,8 +350,7 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
 function DangerPanel({ view }: { view: Snapshot }) {
   const worst = view.readiness[0];
   return (
-    <section className="panel">
-      <h3>WHAT COULD GO WRONG</h3>
+    <Folding id="danger" title="WHAT COULD GO WRONG" defaultOpen={false}>
       {view.hazards.map((h) => (
         <div key={h.id} className={`hazard ${h.kind}`}>
           <div className="hazard-head">
@@ -331,14 +375,13 @@ function DangerPanel({ view }: { view: Snapshot }) {
         ))}
       </div>
       {worst && worst.percent < 75 && <p className="muted small">{worst.defence}</p>}
-    </section>
+    </Folding>
   );
 }
 
 function EventsPanel({ view }: { view: Snapshot }) {
   return (
-    <section className="panel">
-      <h3>ACTIVE EVENTS</h3>
+    <Folding id="events" title="ACTIVE EVENTS">
       {view.events.length === 0 && <p className="muted small">Nothing scheduled today.</p>}
       {view.events.map((e) => (
         <div key={e.id} className={`event-row ${e.status}`}>
@@ -372,14 +415,13 @@ function EventsPanel({ view }: { view: Snapshot }) {
           ))}
         </div>
       )}
-    </section>
+    </Folding>
   );
 }
 
 function FeedPanel({ view }: { view: Snapshot }) {
   return (
-    <section className="panel feed-panel">
-      <h3>WORLD FEED <span>✦</span></h3>
+    <Folding id="feed" title="WORLD FEED" badge={<span>✦</span>}>
       <div className="feed-scroll">
         {view.feed.map((entry) => (
           <div key={entry.id} className={`feed-row kind-${entry.kind}`}>
@@ -388,7 +430,7 @@ function FeedPanel({ view }: { view: Snapshot }) {
           </div>
         ))}
       </div>
-    </section>
+    </Folding>
   );
 }
 
@@ -411,11 +453,12 @@ function EconomyRow({ view, activePanel, onPanel }: {
   );
 }
 
-const ACTIONS: { key: Exclude<PanelKey, null> | 'observe'; icon: string; label: string; blurb: string }[] = [
-  { key: 'observe', icon: '◎', label: 'OBSERVE', blurb: 'Watch the world and its stories' },
+const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; blurb: string }[] = [
+  { key: 'guide', icon: '◎', label: 'GAME GUIDE', blurb: 'How all of this works' },
   { key: 'build', icon: '⚒', label: 'BUILD', blurb: 'Create places and resources' },
   { key: 'market', icon: '◍', label: 'MARKET', blurb: 'Prices, flow and what is scarce' },
-  { key: 'connect', icon: '◈', label: 'CONNECT', blurb: 'Your plot, wallet and vault' },
+  { key: 'chat', icon: '✎', label: 'CHAT', blurb: 'Talk to other players' },
+  { key: 'connect', icon: '◈', label: 'ON-CHAIN', blurb: 'Your plot, wallet and vault' },
 ];
 
 export function Hud(props: HudProps) {
@@ -541,8 +584,7 @@ export function Hud(props: HudProps) {
                 key={action.key}
                 className={`action ${active ? 'active' : ''} ${action.key}`}
                 onClick={() => {
-                  if (action.key === 'observe') { props.onPanel(null); props.onResetView(); }
-                  else props.onPanel(active ? null : (action.key as PanelKey));
+                  props.onPanel(active ? null : (action.key as PanelKey));
                 }}
               >
                 <b>{action.icon}</b>

@@ -7,19 +7,23 @@
  * running behind them, which is the whole point of the thing.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import { buildMaterials, maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
-import { ACTIVE_CHAIN, TOKEN, tokenActions, tokenLive } from '@/lib/chain/emerge';
+import { ACTIVE_CHAIN, TOKEN, shortAddress, tokenActions, tokenLive } from '@/lib/chain/emerge';
 import {
-  EMERGE_PER_GOLD, RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
+  EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, deposit, quoteWithdraw, withdraw, type VaultLedger,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
-import { WalletPicker } from './WalletPicker';
+import {
+  MESSAGE_LIMIT, channelOf, chatConnected, loadChat, send, setHandle, worldChannel,
+  type ChannelKind, type ChatState,
+} from '@/lib/chat';
+import { WalletPicker, useWallet } from './WalletPicker';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'connect' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'connect' | null;
 
 interface PanelsProps {
   panel: PanelKey;
@@ -132,6 +136,312 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
           );
         })}
       </div>
+    </Shell>
+  );
+}
+
+
+/**
+ * The game guide.
+ *
+ * Everything a player needs to understand what they are looking at and how to
+ * make anything happen, written as sections they can read in any order. It is
+ * long on purpose: the settlement runs itself in a dozen interlocking ways and
+ * none of them are self-evident from watching.
+ */
+function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
+  const steward = view.stewardship;
+  return (
+    <Shell
+      title="Game Guide"
+      subtitle="What everything here does, and how to earn from it."
+      onClose={onClose}
+      wide
+    >
+      <div className="guide">
+        <section>
+          <h4>What Emerge is</h4>
+          <p>
+            You own a plot of land. The people who live on it are not scripted: they have needs,
+            trades, families, friends and enemies, and they decide for themselves where to go and
+            what to do. The settlement grows, feeds itself, builds, argues and buries its dead
+            whether or not you are watching. Your part is to steward it — and what you earn in
+            {' '}{TOKEN.ticker} depends on how well you do that.
+          </p>
+        </section>
+
+        <section>
+          <h4>The clock</h4>
+          <p>
+            A day is twenty-four hours of settlement time and passes in a few minutes of yours; the
+            speed control at the top runs it at 1×, 2× or 6×. Half a game year passes each day, so
+            people visibly age, come of age at sixteen, pair off, have children and die. A year is
+            twenty-four days and turns through four seasons, each with its own temperature and
+            weather.
+          </p>
+        </section>
+
+        <section>
+          <h4>The people</h4>
+          <p>
+            Everyone wakes, works, eats, socialises and goes home on their own schedule. Tap anybody
+            to follow their story: their trade, their family, their friends, what they are doing and
+            what they are thinking. Their speech is real — it names where they are walking and what
+            they mean to do with the day — and two people standing together hold an actual
+            conversation, taking turns on one subject.
+          </p>
+          <ul>
+            <li><b>Friendship</b> forms from standing together and talking, and once made it is remembered: friends do not become strangers because they have not met for a fortnight.</li>
+            <li><b>Dislike</b> is real too. About one pair in six simply does not get on, and enough time together makes it worse rather than better.</li>
+            <li><b>Fights</b> happen when two people who have fallen out are in the same place and at least one of them is tired, hungry or miserable. Everybody who sees one has a worse day for it.</li>
+            <li><b>Pick anybody up</b> by dragging them. Drop them where you like — in the water, they will swim for the bank and come out cold.</li>
+            <li><b>Rename anybody</b> from their card, for {RENAME_CITIZEN_EMERGE.toLocaleString()} {TOKEN.ticker}.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h4>Work and the market</h4>
+          <p>
+            Nine trades turn the land into goods: farmers and woodcutters and miners take raw
+            material, millers and bakers and carpenters and smiths and tailors turn it into
+            something better. Each trade needs its building, and a building supports two workers
+            (three down a mine). People change trade on their own when they are unhappy or their
+            trade is overfull — and immediately when you raise a building nobody is working in.
+          </p>
+          <p>
+            The market buys what the settlement cannot make and sells what it has too much of, at
+            prices that move with real scarcity. The Market panel shows every price, its trend, and
+            what actually moved yesterday.
+          </p>
+        </section>
+
+        <section>
+          <h4>Building</h4>
+          <p>
+            The Build panel places new buildings. Each costs Gold <em>and</em> materials — timber and
+            stone out of the yard — so what you can raise depends on what the settlement has cut and
+            quarried. Buildings placed off the road network get a lane cut through to them, and one
+            placed across water will have a bridge started toward it.
+          </p>
+          <p>
+            Anything except the market and a lived-in house can be <b>pulled down</b> from its card.
+            You get half the timber and stone back. The Gold does not come back: it went on wages
+            and haulage and those were spent.
+          </p>
+        </section>
+
+        <section>
+          <h4>Gatherings</h4>
+          <p>
+            Every evening at seven the settlement holds one gathering, and each does something real:
+          </p>
+          <ul>
+            <li><b>Town meeting</b> — the town resolves on what it most needs, and that resolution outranks what the settlement would otherwise build for three days.</li>
+            <li><b>Art showcase</b> — somebody makes a piece, named and titled, kept in the settlement&rsquo;s body of work.</li>
+            <li><b>Market day</b> — over the middle of the day, every fifth day: stock moves nearly twice as fast and the stalls take real Gold.</li>
+            <li><b>Harvest feast</b> — when the larder can carry one. It eats real food and everybody goes home fed and warm.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h4>Danger</h4>
+          <p>
+            Four things can go wrong, each out of the world&rsquo;s own state, and each with a defence
+            you can build. One at a time, never in the first five days.
+          </p>
+          <ul>
+            <li><b>Fire</b> — dry heat and hearths. Answered by wells and by having enough people about.</li>
+            <li><b>Blight</b> — a growing season and fields. Answered by a granary and food put by.</li>
+            <li><b>Wolves</b> — a cold night near woodland. Answered by fires burning and by numbers.</li>
+            <li><b>Flood</b> — a storm on a river. Answered by building back from the bank.</li>
+          </ul>
+          <p>
+            Readiness decides what a hazard <em>costs</em>, not whether it happens. At full readiness a
+            fire is out the same day and the wolves turn back at the treeline. Readiness is measured
+            against the size of the settlement, so a town that builds fast outgrows its wells until
+            the next one goes in. The bars are in the rail whether or not anything is wrong.
+          </p>
+        </section>
+
+        <section className="earn">
+          <h4>Earning {TOKEN.ticker}</h4>
+          <p>
+            This is the part worth reading twice. <b>The settlement&rsquo;s Gold is not convertible into
+            tokens.</b> Gold is what the town pays its people and buys its grain with; letting it out
+            of the world meant an untouched settlement minted eighty million {TOKEN.ticker} in sixty
+            days, which is a faucet and not a game.
+          </p>
+          <p>There are two doors, and they are different sizes:</p>
+          <ul>
+            <li>
+              <b>Principal.</b> {EMERGE_PER_GOLD.toLocaleString()} {TOKEN.ticker} buys 1 Gold for the
+              treasury, and the same Gold can be taken back out, minus a {Math.round(WITHDRAW_BURN_RATE * 100)}%
+              burn. That is your own money; moving it mints nothing.
+            </li>
+            <li>
+              <b>Stewardship yield.</b> The only new {TOKEN.ticker}. Up to {steward.cap.toLocaleString()} a
+              day, multiplied by two things.
+            </li>
+          </ul>
+          <p>The two multipliers are the whole game:</p>
+          <ul>
+            <li>
+              <b>How the place is run</b> — everyone housed, everyone fed, everyone employed, people
+              content, and no hazard the settlement was unready for. Weighted and then squared, so
+              running a place <em>well</em> is worth much more than running it.
+            </li>
+            <li>
+              <b>Your attention</b> — this decays from full to eight per cent over three days in which
+              you do nothing. Building, pulling down, moving somebody, funding the treasury and
+              renaming all count.
+            </li>
+          </ul>
+          <p>
+            So a world you leave running earns a trickle and a world you actually manage earns about
+            ten times as much. Collect what you have earned in the Bank panel. You are being paid for
+            your time and judgement, not for leaving the tab open.
+          </p>
+        </section>
+
+        <section>
+          <h4>Land</h4>
+          <p>
+            The land office is a chart of islands, and there are six charts to sail between. Each
+            holds fifteen to seventeen plots and no more: when a chart is fully surveyed, prospecting
+            there is refused and you have to go elsewhere. Surveying costs
+            {' '}{PROSPECT_COST_EMERGE.toLocaleString()} {TOKEN.ticker} and turns up a brand-new seed, so no
+            two prospected plots are the same land.
+          </p>
+          <p>
+            A claim is a purchase and it is yours. Leaving a world does not release it — your plots
+            are marked on the chart and you can walk back into any of them. Giving one up is a
+            separate, deliberate action.
+          </p>
+        </section>
+
+        <section>
+          <h4>The chain</h4>
+          <p>
+            Emerge is hybrid by design. The living world runs off-chain so it is always responsive;
+            {' '}{ACTIVE_CHAIN.label} carries ownership and value. This build reaches the network and your
+            wallet can switch to it. What does not exist yet is the {TOKEN.ticker} contract and the
+            land registry — so balances, claims and listings are recorded in this browser, every
+            panel says so, and you are never shown a transaction that did not happen.
+          </p>
+        </section>
+      </div>
+    </Shell>
+  );
+}
+
+/**
+ * Player chat.
+ *
+ * A channel that follows the player between worlds and one attached to the
+ * world they are in. The panel is honest about its reach: there is no relay in
+ * this build, so what is typed here stays in this browser, and saying so is
+ * better than a room that looks populated and is not.
+ */
+function ChatPanel({ view, claimed, onClose }: { view: Snapshot; claimed: ClaimedWorld; onClose: () => void }) {
+  const [state, setState] = useState<ChatState | null>(null);
+  const [kind, setKind] = useState<ChannelKind>('world');
+  const [draft, setDraft] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [naming, setNaming] = useState(false);
+  const { wallet } = useWallet();
+  const endRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => { setState(loadChat()); }, []);
+
+  const channel = kind === 'global' ? 'global' : worldChannel(claimed.seed);
+  const messages = state ? channelOf(state, channel) : [];
+
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length, kind]);
+
+  if (!state) return null;
+
+  const post = () => {
+    const result = send(state, channel, draft, wallet.address);
+    setNotice(result.refused);
+    if (!result.refused) { setState(result.state); setDraft(''); }
+  };
+
+  const who = wallet.address ? shortAddress(wallet.address) : state.handle;
+
+  return (
+    <Shell
+      title="Chat"
+      subtitle={`Posting as ${who}${wallet.address ? '' : ' — connect a wallet to post under your address'}.`}
+      onClose={onClose}
+      wide
+    >
+      <div className="chat-tabs">
+        <button className={kind === 'world' ? 'on' : ''} onClick={() => setKind('world')}>
+          {view.name}
+          <em>{state ? channelOf(state, worldChannel(claimed.seed)).length : 0}</em>
+        </button>
+        <button className={kind === 'global' ? 'on' : ''} onClick={() => setKind('global')}>
+          Global
+          <em>{state ? channelOf(state, 'global').length : 0}</em>
+        </button>
+        {!wallet.address && (
+          <button className="ghost handle" onClick={() => setNaming((n) => !n)}>Change name</button>
+        )}
+      </div>
+
+      {naming && !wallet.address && (
+        <div className="rename-row">
+          <input
+            defaultValue={state.handle}
+            maxLength={18}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              setState(setHandle(state, (e.target as HTMLInputElement).value));
+              setNaming(false);
+            }}
+          />
+          <span className="muted small">Press enter</span>
+        </div>
+      )}
+
+      <div className="chat-log">
+        {messages.length === 0 && (
+          <p className="muted small">
+            {kind === 'global'
+              ? 'Nothing on the global channel yet.'
+              : `Nothing said about ${view.name} yet.`}
+          </p>
+        )}
+        {messages.map((m) => (
+          <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''}`}>
+            <b>{m.wallet ? shortAddress(m.author) : m.author}</b>
+            <span>{m.text}</span>
+            <em>{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</em>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+
+      <div className="chat-compose">
+        <input
+          value={draft}
+          maxLength={MESSAGE_LIMIT}
+          placeholder={kind === 'global' ? 'Say something to everyone' : `Say something about ${view.name}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') post(); }}
+        />
+        <button onClick={post} disabled={!draft.trim()}>Send</button>
+      </div>
+      {notice && <p className="warn">{notice}</p>}
+
+      {!chatConnected() && (
+        <p className="muted small">
+          There is no chat relay in this build, so what you post is kept in this browser and nobody
+          else can see it yet. The channels, your identity, the history and the limits are all real —
+          only the wire between players is missing, and it is a single function
+          ({'`'}deliver{'`'} in {'`'}lib/chat.ts{'`'}) away from being connected.
+        </p>
+      )}
     </Shell>
   );
 }
@@ -388,7 +698,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
 
   return (
     <Shell
-      title="Connect"
+      title="On-Chain"
       subtitle={`Emerge is a hybrid world: the settlement runs off-chain, and ${TOKEN.ticker} on ${ACTIVE_CHAIN.label} carries ownership and value.`}
       onClose={onClose}
       wide
@@ -488,6 +798,8 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
 export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'bank') return <BankPanel view={view} player={player} onClose={onClose} onVault={onVault} />;
+  if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
+  if (panel === 'chat') return <ChatPanel view={view} claimed={claimed} onClose={onClose} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;
   if (panel === 'connect') {
     return (

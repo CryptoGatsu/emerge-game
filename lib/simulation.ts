@@ -93,7 +93,32 @@ export interface Hazard {
   buildingId?: string;
 }
 
-export interface Bond { a: string; b: string; strength: number; friends: boolean }
+/**
+ * What two people are to each other.
+ *
+ * Strength runs from -100 to 100, and it is a memory rather than a running
+ * total. Friendship used to fade at better than a point a day and be forgotten
+ * outright at zero, so a settlement's oldest friends quietly became strangers
+ * over a fortnight of not happening to stand near each other. Now a friendship,
+ * once made, decays slowly and never falls below the floor that made it: people
+ * remember who their friends are.
+ *
+ * The negative half is new. Not everyone gets on: two people whose tempers run
+ * opposite ways grate on each other every time they meet, and a bond deep in
+ * the negative is a grudge, which is remembered exactly as stubbornly.
+ */
+export interface Bond {
+  a: string;
+  b: string;
+  strength: number;
+  friends: boolean;
+  /** True once the bond has soured past the point of ordinary dislike. */
+  rivals: boolean;
+  /** The day they first stood together, so the panel can say how long. */
+  met: number;
+  /** How many times they have come to blows. */
+  fights: number;
+}
 
 /**
  * Two people talking to each other.
@@ -1175,12 +1200,29 @@ function updateBuildingWorkers(world: World) {
 
 const bondKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
+/** The bond between two people, created on first meeting. */
+function bondBetween(world: World, a: Citizen, b: Citizen): Bond {
+  const key = bondKey(a.id, b.id);
+  return world.bonds[key] ?? (world.bonds[key] = {
+    a: a.id, b: b.id, strength: 0, friends: false, rivals: false, met: world.day, fights: 0,
+  });
+}
+
+/** How these two feel about each other right now, whether or not they have met. */
+export function bondOf(world: World, a: string, b: string): Bond | undefined {
+  return world.bonds[bondKey(a, b)];
+}
+
 /**
  * Friendships form from actual co-presence: two adults socialising in the same
  * venue build a bond, and crossing the threshold is a real, reportable event.
  */
 function socialStep(world: World, hours: number) {
-  const mingling = world.citizens.filter((c) => c.activity === 'trading' || c.activity === 'eating');
+  // Phase, not activity: `activity` only reads 'trading' inside the third of a
+  // unit that counts as having arrived, and arriving at a building puts the
+  // person inside it. Testing it meant a settlement of twenty-five built four
+  // acquaintanceships in forty days and nobody ever fell out with anybody.
+  const mingling = world.citizens.filter((c) => outAndAbout(c));
   for (let i = 0; i < mingling.length; i++) {
     for (let j = i + 1; j < mingling.length; j++) {
       const a = mingling[i], b = mingling[j];
@@ -1188,14 +1230,23 @@ function socialStep(world: World, hours: number) {
       // in the settlement passes through the tavern; only neighbours in the
       // crowd actually get to know each other.
       if (Math.hypot(a.x - b.x, a.y - b.y) > 4.5) continue;
-      const key = bondKey(a.id, b.id);
-      const bond = world.bonds[key] ?? (world.bonds[key] = { a: a.id, b: b.id, strength: 0, friends: false });
-      bond.strength = Math.min(100, bond.strength + hours * 3.2);
-      a.social = Math.min(100, a.social + hours * 3);
-      b.social = Math.min(100, b.social + hours * 3);
+      const bond = bondBetween(world, a, b);
+      // Time together deepens whatever is already there. For a pair who do not
+      // get on, that is the point: more of each other makes it worse.
+      const drift = hours * 3.2 * chemistry(a, b);
+      bond.strength = clamp(bond.strength + drift, -100, 100);
+      // Only good company is company. Being stuck next to somebody you cannot
+      // stand does not meet anybody's need for society.
+      const social = drift > 0 ? hours * 3 : hours * -1.2;
+      a.social = clamp(a.social + social, 0, 100);
+      b.social = clamp(b.social + social, 0, 100);
       if (!bond.friends && bond.strength >= 78) {
         bond.friends = true;
         pushFeed(world, 'social', `${a.name} and ${b.name} are now good friends.`);
+      }
+      if (!bond.rivals && bond.strength <= -55) {
+        bond.rivals = true;
+        pushFeed(world, 'social', `${a.name} and ${b.name} have fallen out badly.`);
       }
     }
   }
@@ -1246,6 +1297,27 @@ function conversationFor(world: World, a: Citizen, b: Citizen): { topic: string;
   const shared = a.job !== 'unemployed' && a.job === b.job;
   const friends = world.bonds[bondKey(a.id, b.id)]?.friends ?? false;
   const art = world.artworks[0];
+
+  // People who cannot stand each other are not making small talk.
+  const bond = bondOf(world, a.id, b.id);
+  if (bond && bond.strength <= -40) {
+    return {
+      topic: bond.fights > 0 ? 'what happened last time' : 'an old grievance',
+      lines: bond.fights > 0
+        ? [
+          'You have a nerve, showing your face.',
+          'It is a small settlement. I go where I like.',
+          'Not where I am, you do not.',
+          'Then move.',
+        ]
+        : [
+          'I heard what you said about the yard.',
+          'I said what everybody is thinking.',
+          'Say it to me next time, then.',
+          'I just did.',
+        ],
+    };
+  }
 
   // Urgent business first, because these are things happening to the two of
   // them right now and nobody talks about the price of wool in a blizzard.
@@ -1425,8 +1497,10 @@ function converse(world: World, hours: number) {
       talk.index++;
     }
     if (talk.index >= talk.lines.length) {
-      const bond = world.bonds[bondKey(a.id, b.id)] ?? (world.bonds[bondKey(a.id, b.id)] = { a: a.id, b: b.id, strength: 0, friends: false });
-      bond.strength = Math.min(100, bond.strength + 9);
+      const bond = bondBetween(world, a, b);
+      // A conversation is worth more than standing near somebody, in whichever
+      // direction the two of them are already headed.
+      bond.strength = clamp(bond.strength + 9 * chemistry(a, b), -100, 100);
       a.social = Math.min(100, a.social + 10);
       b.social = Math.min(100, b.social + 10);
       if (!bond.friends && bond.strength >= 78) {
@@ -1457,6 +1531,104 @@ function converse(world: World, hours: number) {
   }
 }
 
+/**
+ * Two people who cannot stand each other, in the same place, at the end of
+ * their tether.
+ *
+ * A settlement where nothing ever goes wrong between anybody reads as a
+ * diorama. A fight needs all of it to line up: a real grudge, both of them
+ * within arm's reach, and at least one of them already tired, hungry or
+ * miserable — which is when people actually snap. It costs both of them, it
+ * deepens the grudge, and everybody who saw it thinks less of the day.
+ */
+function quarrels(world: World, hours: number) {
+  for (const bond of Object.values(world.bonds)) {
+    if (!bond.rivals) continue;
+    const a = world.citizens.find((c) => c.id === bond.a);
+    const b = world.citizens.find((c) => c.id === bond.b);
+    if (!a || !b || a.inside || b.inside || a.carried || b.carried || a.swimming || b.swimming) continue;
+    if (Math.hypot(a.x - b.x, a.y - b.y) > 3.2) continue;
+    // Somebody has to be at the end of their tether. Two well-fed, well-rested
+    // people who dislike each other simply avoid each other.
+    const frayed = Math.min(a.happiness, b.happiness) < 45
+      || Math.min(a.rest, b.rest) < 30
+      || Math.min(a.hunger, b.hunger) < 30;
+    if (!frayed) continue;
+    // Rare even then: a few times a season between one bad pair, not daily.
+    if (Math.random() > hours * 0.05) continue;
+
+    bond.fights += 1;
+    bond.strength = Math.max(-100, bond.strength - 12);
+    for (const person of [a, b]) {
+      person.happiness = Math.max(0, person.happiness - 18);
+      person.rest = Math.max(0, person.rest - 12);
+      person.purpose = Math.max(0, person.purpose - 6);
+    }
+    // Anyone who saw it. A fight in the square is everybody's afternoon.
+    let witnesses = 0;
+    for (const c of world.citizens) {
+      if (c === a || c === b || c.inside || c.age < 10) continue;
+      if (Math.hypot(c.x - a.x, c.y - a.y) > 9) continue;
+      c.happiness = Math.max(0, c.happiness - 5);
+      witnesses++;
+    }
+    // The conversation, if they were having one, is over.
+    world.conversations = world.conversations.filter((t) =>
+      t.a !== a.id && t.b !== a.id && t.a !== b.id && t.b !== b.id);
+    pushFeed(world, 'social', witnesses > 0
+      ? `${a.name} and ${b.name} came to blows in front of ${witnesses} ${witnesses === 1 ? 'person' : 'people'}.`
+      : `${a.name} and ${b.name} came to blows.`);
+  }
+}
+
+/** A building by id, for anything that wants to name where somebody is going. */
+export function buildingOf(world: World, id: string | undefined): Building | undefined {
+  return id ? world.buildings.find((b) => b.id === id) : undefined;
+}
+
+/**
+ * What this person means to do today, in their own words.
+ *
+ * Read from their trade, the settlement's shortages and their own state, so a
+ * line names something true: a baker short of flour says so, and a woodcutter
+ * in a town with a bare yard says something different from one in a town with
+ * a full one. This is what the speech bubbles draw on before they fall back to
+ * anything generic.
+ */
+export function plannedDay(world: World, c: Citizen): { work: string; today: string; evening: string | null } {
+  const res = world.resources;
+  const short = (r: Resource, per: number) => res[r] < world.citizens.length * per;
+  const gathering = world.gatherings.find((g) => g.day === world.day && world.hour < g.hour + g.duration);
+
+  const work: Record<WorkingJob, string> = {
+    farmer: short('wheat', 2) ? 'The stores are low — everything I cut today goes straight to the mill.' : 'The far field wants turning today.',
+    woodcutter: short('wood', 1.5) ? 'The yard is nearly bare. Timber all day.' : 'A dozen loads and I can call it done.',
+    miner: 'Down the shaft again. There is a seam worth following.',
+    quarry: short('stone', 1) ? 'They want stone faster than I can cut it.' : 'Blocks for the square today.',
+    miller: res.wheat < 8 ? 'No wheat in yet. I am waiting on the fields.' : 'Wheat in, flour out, all morning.',
+    baker: res.flour < 8 ? 'No flour to work with. I will go and ask the mill.' : 'Bread by noon, if the oven holds.',
+    carpenter: res.wood < 10 ? 'I cannot build without timber. Waiting on the woodcutters.' : 'Two chairs and a table before dark.',
+    blacksmith: res.ironOre < 6 ? 'The forge is cold until the ore comes up.' : 'Tools for half the street on the bench today.',
+    tailor: res.wool < 5 ? 'No wool. Nothing I can do until there is.' : 'Coats before the cold sets in.',
+  };
+
+  const today = c.hunger < 35
+    ? 'I need to get to the market before I do anything else.'
+    : c.rest < 30
+      ? 'I am running on nothing. An early night.'
+      : c.job === 'unemployed'
+        ? 'Looking for something useful to put my hands to.'
+        : `${JOB_LABELS[c.job]}'s day ahead of me.`;
+
+  const evening = gathering
+    ? `I will be at the ${gathering.name.toLowerCase()} later.`
+    : c.social < 35
+      ? 'I should find some company tonight.'
+      : null;
+
+  return { work: c.job === 'unemployed' ? 'Nothing of my own to do today.' : work[c.job as WorkingJob], today, evening };
+}
+
 /** The line this citizen is speaking right now, if they are in a conversation. */
 export function spokenLine(world: World, id: string): { text: string; topic: string } | null {
   for (const talk of world.conversations) {
@@ -1481,12 +1653,64 @@ export function talkingWith(world: World, id: string): Citizen | null {
  * eventually befriend everyone, and "X and Y are now good friends" stops meaning
  * anything.
  */
+/**
+ * How a day changes what people are to each other.
+ *
+ * Acquaintance is shallow and fades fast — that is what stops a settlement of
+ * thirty from befriending everybody. A friendship does not: it settles at the
+ * level that made it and drifts by a third of a point a day, so somebody you
+ * have not seen for a fortnight is still your friend when you next meet. A
+ * grudge is just as durable in the other direction, and only softens if the two
+ * of them have not been near each other for a long time.
+ */
+const FRIEND_FLOOR = 46;
+const RIVAL_FLOOR = -48;
+
 function decayBonds(world: World) {
   for (const [key, bond] of Object.entries(world.bonds)) {
-    bond.strength -= bond.friends ? 1.2 : 3.5;
-    if (bond.friends && bond.strength < 45) bond.friends = false;
-    if (bond.strength <= 0) delete world.bonds[key];
+    if (bond.friends) {
+      bond.strength = Math.max(FRIEND_FLOOR, bond.strength - 0.35);
+    } else if (bond.rivals) {
+      // A grudge fades even more slowly than a friendship. People forgive an
+      // acquaintance in a week and remember a slight for a season.
+      bond.strength = Math.min(RIVAL_FLOOR, bond.strength + 0.2);
+    } else if (bond.strength > 0) {
+      bond.strength -= 3.5;
+      if (bond.strength <= 0) delete world.bonds[key];
+    } else {
+      bond.strength += 1.2;
+      if (bond.strength >= 0) delete world.bonds[key];
+    }
   }
+}
+
+/**
+ * Whether two people rub each other up the wrong way, before they have met.
+ *
+ * Drawn from their hashes, so it is a fact about the pair and never changes:
+ * the same two people dislike each other in every replay of the same world.
+ * About one pair in six is off to a bad start, which in a settlement of twenty
+ * is a handful of frictions rather than a town at war with itself.
+ */
+function chemistry(a: Citizen, b: Citizen) {
+  const mix = ((a.hash * 31 + b.hash * 17) ^ (a.hash + b.hash)) >>> 0;
+  const roll = (mix % 1000) / 1000;
+  if (roll < 0.17) return -1.6;
+  if (roll > 0.72) return 1.35;
+  return 1;
+}
+
+/** People this citizen cannot stand, worst first. */
+export function rivalsOf(world: World, id: string): { citizen: Citizen; strength: number }[] {
+  const out: { citizen: Citizen; strength: number }[] = [];
+  for (const bond of Object.values(world.bonds)) {
+    if (!bond.rivals) continue;
+    const otherId = bond.a === id ? bond.b : bond.b === id ? bond.a : undefined;
+    if (!otherId) continue;
+    const citizen = world.citizens.find((c) => c.id === otherId);
+    if (citizen) out.push({ citizen, strength: bond.strength });
+  }
+  return out.sort((x, y) => x.strength - y.strength);
 }
 
 /** Friends of a citizen, most-bonded first. Used by the inspector panel. */
@@ -3089,7 +3313,9 @@ function settlementBuilds(world: World) {
 
   spend(world, 'building', cost);
   drawMaterials(world, want);
-  world.buildings.push({ id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true });
+  const raised: Building = { id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true };
+  world.buildings.push(raised);
+  linkToRoads(world, raised);
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   pushFeed(world, 'build', bySay
     ? `The settlement built a ${want.toLowerCase()}, as the meeting resolved.`
@@ -3521,6 +3747,7 @@ export function advance(world: World, hours: number): World {
   updateBuildingWorkers(world);
   socialStep(world, hours);
   converse(world, hours);
+  quarrels(world, hours);
   concludeGatherings(world);
 
   // What the air is doing to a person standing in it. Indoors and beside a fire
@@ -3684,13 +3911,69 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   spend(world, 'building', cost);
   drawMaterials(world, type);
   world.buildings.push(building);
-  // The settlement notices it straight away rather than at the next day roll:
-  // amenities are laid out around it, and somebody changes trade to work in it.
+  // The settlement notices it straight away rather than at the next day roll: a
+  // lane is run out to it if it stands off the plan, amenities are laid out
+  // around it, and somebody changes trade to work in it.
+  if (linkToRoads(world, building)) {
+    pushFeed(world, 'build', `A lane was cut through to the new ${type.toLowerCase()}.`);
+  }
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   staffNow(world);
   pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
   checkUnlocks(world);
   return building;
+}
+
+/**
+ * How far a building may stand from the nearest road before a lane is run out
+ * to it. Roughly the width of the plaza: further than that and people are
+ * picking their way across open ground to reach it.
+ */
+const ROAD_REACH = 9;
+
+/**
+ * Run a lane out to a building that has none.
+ *
+ * A player can place a building anywhere, including well off the plan, and the
+ * settlement would simply route people at it across whatever was in the way.
+ * Adding a junction beside it and joining it to the nearest one gives them a
+ * road to walk, and gives the terrain generator something to draw — the same
+ * machinery the original plan uses, so the new lane bends and wears like the
+ * rest of them.
+ */
+function linkToRoads(world: World, building: Building) {
+  const layout = world.layout;
+  const water = waterOf(world);
+  let nearest = -1;
+  let best = Infinity;
+  for (let i = 0; i < layout.nodes.length; i++) {
+    const [x, y] = layout.nodes[i];
+    const d = Math.hypot(x - building.x, y - building.y);
+    if (d < best) { best = d; nearest = i; }
+  }
+  if (nearest < 0 || best <= ROAD_REACH) return false;
+
+  // The junction goes beside the building, not in it: a node inside a footprint
+  // is a place nobody can stand, which is what stranded citizens on the plan's
+  // own junctions in the first place.
+  const away = Math.atan2(layout.nodes[nearest][1] - building.y, layout.nodes[nearest][0] - building.x);
+  const gap = (building.type === 'Market' || building.type === 'Town Hall' ? 4.2 : 3.2) + 1.6;
+  let nx = clamp(building.x + Math.cos(away) * gap, 3, 97);
+  let ny = clamp(building.y + Math.sin(away) * gap, 4, 96);
+  if (water.blocks(nx, ny)) {
+    const clear = water.toClear(nx, ny);
+    if (!(clear.d > 0)) return false;
+    nx = clamp(nx + clear.x * (clear.d + 0.6), 3, 97);
+    ny = clamp(ny + clear.y * (clear.d + 0.6), 4, 96);
+  }
+
+  layout.nodes.push([nx, ny]);
+  layout.roles.push('work');
+  layout.edges.push([nearest]);
+  layout.edges[nearest].push(layout.nodes.length - 1);
+  // Somewhere to loiter at the new end of the street, so wanderers use it.
+  layout.wanderSpots.push([nx, ny]);
+  return true;
 }
 
 /** Fill any trade a building has just opened, without waiting for the day to turn. */
