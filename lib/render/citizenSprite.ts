@@ -29,6 +29,12 @@ const HAT_TINTS: Record<Exclude<HatKind, 'none'>, number> = {
 /** How far a citizen has to travel for one full four-frame walk cycle. */
 const STRIDE = 2.6;
 
+/** What each trade hauls between its workplace and the store. */
+const CARRIED: Record<string, string> = {
+  farmer: 'sack', woodcutter: 'log', miner: 'crate', quarry: 'crate',
+  miller: 'sack', baker: 'loaf', carpenter: 'crate', blacksmith: 'crate', tailor: 'cloth',
+};
+
 export interface CitizenView {
   /** Interpolated world position used for depth sorting and label anchoring. */
   wx: number;
@@ -44,6 +50,8 @@ export class CitizenSprite {
   private readonly body: Partial<Record<LayerName, Sprite>> = {};
   private readonly hair: Sprite;
   private readonly hat: Sprite;
+  private readonly carry: Sprite;
+  private carryKind: string | null = null;
   private readonly stack = new Container();
   private readonly appearance: Appearance;
   private readonly hatKind: HatKind;
@@ -86,11 +94,19 @@ export class CitizenSprite {
     this.hair.tint = this.appearance.hair;
     stack.addChild(this.hair);
 
+    this.carry = new Sprite();
+    this.carry.anchor.set(0.5, 0.5);
+    this.carry.visible = false;
+    const load = CARRIED[citizen.job];
+    if (load) this.carry.texture = assets.get(`fx.carry.${load}`);
+    this.carryKind = load ?? null;
+
     this.hat = new Sprite();
     this.hat.anchor.set(0.5, CHAR_GROUND / CHAR_H);
     this.hat.visible = this.hatKind !== 'none';
     if (this.hatKind !== 'none') this.hat.tint = HAT_TINTS[this.hatKind];
     stack.addChild(this.hat);
+    stack.addChild(this.carry);
 
     this.container.addChild(stack);
     this.applyFrame();
@@ -180,6 +196,18 @@ export class CitizenSprite {
     this.container.position.set(screen.x, screen.y);
     this.shadow.position.set(0, -1);
     this.shadow.scale.set(this.appearance.scale * (this.state === 'sleep' ? 1.2 : 1));
+
+    // Anyone commuting during the working day is hauling something, held in
+    // front of them so it reads at a glance which trade is on the move.
+    // Held at waist height in front of them, and out of sight when their back
+    // is turned. Centred on the chest it just covers the character up.
+    const hauling = this.carryKind !== null && moving && citizen.phase === 'working' && this.dir !== 'n';
+    this.carry.visible = hauling;
+    if (hauling) {
+      const scale = 0.8;
+      this.carry.scale.set(this.flipped ? -scale : scale, scale);
+      this.carry.position.set(this.dir === 'e' ? 7 : 0, -8 + (this.frame % 2 === 1 ? -1 : 0));
+    }
 
     // Walking into a building means going inside it: the citizen fades out at
     // the doorway and fades back in there when they come out again. The

@@ -260,6 +260,37 @@ function waterTile(seed: number, frame: number, shore: boolean): Pixels {
   return p;
 }
 
+/**
+ * Foam along one edge of a water tile.
+ *
+ * Drawn per edge and applied only where water actually meets land, rather than
+ * ringing every water tile — a foam ring on all four sides outlines the
+ * isometric grid across the whole surface, which is what the earlier shore
+ * variant did wrong.
+ */
+export type ShoreEdge = 'nw' | 'ne' | 'se' | 'sw';
+
+function foamEdge(edge: ShoreEdge, seed: number): Pixels {
+  const p = tile();
+  const r = rng(seed);
+  const half = TILE_H / 2;
+  for (let y = 0; y < TILE_H; y++) {
+    const [x0, width] = diamondRow(y);
+    const upper = y < half;
+    // Each edge occupies one half of the diamond's outline.
+    const onEdge =
+      (edge === 'nw' && upper) || (edge === 'sw' && !upper) ? 'left'
+        : (edge === 'ne' && upper) || (edge === 'se' && !upper) ? 'right'
+          : null;
+    if (!onEdge) continue;
+    const depth = 2 + Math.round(r() * 3);
+    const x = onEdge === 'left' ? x0 : x0 + width - depth;
+    rect(p, x, y, depth, 1, WATER.foam);
+    if (r() < 0.45) rect(p, onEdge === 'left' ? x + depth : x - 1, y, 1, 1, shade(WATER.foam, -0.15));
+  }
+  return p;
+}
+
 /** The vertical rock face shown below a raised tile. */
 function cliffFace(seed: number): Pixels {
   const p = surface(TILE_W, TILE_H + ELEVATION);
@@ -361,6 +392,7 @@ export function buildTiles(): TileArt[] {
   for (let f = 0; f < 4; f++) add(`tile.water.${f}`, waterTile(3200, f, false));
   for (let f = 0; f < 4; f++) add(`tile.watershore.${f}`, waterTile(3300, f, true));
   add('tile.cliff.0', cliffFace(3400));
+  for (const edge of ['nw', 'ne', 'se', 'sw'] as ShoreEdge[]) add(`tile.foam.${edge}`, foamEdge(edge, 3500 + edge.length));
   for (let f = 0; f < 4; f++) add(`tile.waterfall.${f}`, waterfallFrame(f));
   return out;
 }

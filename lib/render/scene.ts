@@ -25,6 +25,7 @@ import { buildingArtKey } from './buildings';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, worldToScreen } from '../world/iso';
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
+import type { ShoreEdge } from './tiles';
 
 export type PickTarget = { kind: 'citizen' | 'building'; id: string } | null;
 
@@ -337,14 +338,12 @@ export class EmergeScene {
 
   /** Create sprites for any building that does not have one yet. */
   syncBuildings() {
-    let houseIndex = 0;
     this.world.buildings.forEach((building) => {
-      const index = building.type === 'House' ? houseIndex++ : 0;
       if (this.buildings.has(building.id)) {
         this.buildings.get(building.id)!.building = building;
         return;
       }
-      const artKey = buildingArtKey(building.type, index);
+      const artKey = buildingArtKey(building.type, building.id);
       const meta = this.assets.buildingMeta.get(artKey);
       if (!meta) return;
       const height = this.map.heightAt(building.x, building.y);
@@ -1337,7 +1336,7 @@ export class EmergeScene {
    */
   startPlacement(type: string, onPlace: (x: number, y: number) => void) {
     this.cancelPlacement();
-    const artKey = buildingArtKey(type, 0);
+    const artKey = buildingArtKey(type, 'ghost');
     const meta = this.assets.buildingMeta.get(artKey);
     if (!meta) return;
     const ghost = new Sprite(this.assets.get(`building.${artKey}`));

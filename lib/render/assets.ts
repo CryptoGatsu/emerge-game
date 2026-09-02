@@ -26,8 +26,8 @@ import {
 import { buildBuildings, type BuildingArt } from './buildings';
 import { buildProps } from './props';
 import { buildTiles, canopyPattern } from './tiles';
-import { BLOOM, BUILD, UI, WATER } from './palette';
-import { glow, rect, rng, surface, type Pixels } from './pixelCanvas';
+import { BLOOM, BUILD, FOLIAGE, UI, WATER } from './palette';
+import { glow, outline, rect, rng, surface, type Pixels } from './pixelCanvas';
 
 const PAGE = 2048;
 const PAD = 2;
@@ -170,6 +170,43 @@ function activityIcon(kind: 'work' | 'eat' | 'social' | 'sleep' | 'trade'): Pixe
   return p;
 }
 
+/** Something a citizen is carrying, held in front of them as they walk. */
+function carried(kind: 'crate' | 'sack' | 'log' | 'loaf' | 'cloth'): Pixels {
+  const p = surface(12, 10);
+  // Drawn small and outlined: a carried thing has to read against a body of
+  // roughly the same size without swallowing it.
+  switch (kind) {
+    case 'crate':
+      rect(p, 1, 2, 10, 7, BUILD.timber);
+      rect(p, 1, 2, 10, 1, BUILD.timberLight);
+      rect(p, 5, 2, 2, 7, BUILD.timberDark);
+      rect(p, 1, 8, 10, 1, BUILD.timberDark);
+      break;
+    case 'sack':
+      rect(p, 2, 3, 8, 6, '#c9b47a');
+      rect(p, 3, 1, 6, 3, '#b8a469');
+      rect(p, 2, 8, 8, 1, '#8f7f4a');
+      break;
+    case 'log':
+      rect(p, 0, 4, 12, 4, FOLIAGE.trunk);
+      rect(p, 0, 4, 12, 1, FOLIAGE.trunkLight);
+      rect(p, 0, 7, 12, 1, FOLIAGE.trunkDark);
+      break;
+    case 'loaf':
+      rect(p, 2, 3, 8, 5, BLOOM.wheat);
+      rect(p, 3, 2, 6, 2, BLOOM.wheatDark);
+      rect(p, 2, 7, 8, 1, '#8f7233');
+      break;
+    case 'cloth':
+      rect(p, 2, 2, 8, 7, '#a86a8f');
+      rect(p, 2, 4, 8, 1, '#d8a8c4');
+      rect(p, 2, 7, 8, 1, '#7a4a68');
+      break;
+  }
+  outline(p, '#1c2a1a', 0.9);
+  return p;
+}
+
 /** Screen-space vignette, stretched over the viewport to settle the edges. */
 function vignette(): Pixels {
   const p = surface(256, 256);
@@ -306,6 +343,7 @@ export function loadAssets(): AssetLibrary {
   put('fx.select', selectionRing(UI.emerald, 2));
   put('fx.hover', selectionRing(UI.cream, 1));
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
+  for (const kind of ['crate', 'sack', 'log', 'loaf', 'cloth'] as const) put(`fx.carry.${kind}`, carried(kind));
   put('fx.vignette', vignette());
   put('fx.bird.0', bird(0));
   put('fx.bird.1', bird(1));

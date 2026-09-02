@@ -300,6 +300,26 @@ function awning(p: Pixels, g: Geometry, side: Side, color: string) {
   }
 }
 
+/** A small roof on posts over the front door. */
+function porch(p: Pixels, g: Geometry, side: Side, t: number, color: string) {
+  wallPatch(p, g, side, t - 0.02, 0.34, 2, Math.round(g.wallH * 0.66), BUILD.timberDark);
+  wallPatch(p, g, side, t + 0.16, 0.34, 2, Math.round(g.wallH * 0.66), BUILD.timberDark);
+  for (let i = 0; i < 16; i++) {
+    wallPatch(p, g, side, t - 0.03 + i / g.bw, 0.26, 1, 5, i % 5 < 3 ? color : shade(color, -0.25));
+  }
+}
+
+/** A small extension built against one wall, breaking up the silhouette. */
+function leanTo(p: Pixels, g: Geometry, side: Side, roof: string, wall: string) {
+  const t = side === 'left' ? 0.06 : 0.72;
+  wallPatch(p, g, side, t, 0.32, 18, Math.round(g.wallH * 0.7), wall);
+  wallPatch(p, g, side, t, 0.32, 18, 2, shade(wall, 0.2));
+  for (let i = 0; i < 20; i++) {
+    wallPatch(p, g, side, t - 0.01 + i / g.bw, 0.24 + (i / 20) * 0.06, 1, 5, roof);
+  }
+  wallPatch(p, g, side, t + 0.07, 0.5, 6, Math.round(g.wallH * 0.5), BUILD.timberDark);
+}
+
 function goldGlyph(q: Pixels, x: number, y: number) {
   rect(q, x, y, 9, 2, BUILD.gold);
   rect(q, x + 3, y + 2, 3, 6, BUILD.gold);
@@ -326,20 +346,56 @@ function clothGlyph(q: Pixels, x: number, y: number) {
 }
 
 const RECIPES: Record<string, Recipe> = {
+  // Eight homes with genuinely different outlines: a settlement of twenty
+  // houses built from three designs reads as a housing estate.
   'House.0': {
     bw: 76, wallH: 26, roofH: 26, roof: 'gable', wall: 'plaster', roofColor: 'red',
     windows: [['left', 0.2, 0.24], ['left', 0.62, 0.24], ['right', 0.68, 0.24]],
     door: ['right', 0.26], chimneyAt: -20, chimneyH: 20,
   },
   'House.1': {
-    bw: 72, wallH: 24, roofH: 24, roof: 'gable', wall: 'plaster', roofColor: 'thatch',
-    windows: [['left', 0.28, 0.26], ['right', 0.6, 0.26]],
-    door: ['right', 0.22], chimneyAt: 16, chimneyH: 18,
+    bw: 70, wallH: 22, roofH: 26, roof: 'gable', wall: 'plaster', roofColor: 'thatch', overhang: 8,
+    windows: [['left', 0.28, 0.3], ['right', 0.6, 0.3]],
+    door: ['right', 0.22], chimneyAt: 16, chimneyH: 16,
+    extras: (p, _lit, g) => porch(p, g, 'right', 0.2, BUILD.roofThatchDark),
   },
   'House.2': {
-    bw: 80, wallH: 28, roofH: 28, roof: 'hip', wall: 'plaster', roofColor: 'green',
+    bw: 80, wallH: 28, roofH: 30, roof: 'hip', wall: 'plaster', roofColor: 'green',
     windows: [['left', 0.22, 0.22], ['left', 0.66, 0.22], ['right', 0.7, 0.22]],
     door: ['right', 0.3], chimneyAt: -18, chimneyH: 22,
+  },
+  // Two storeys: the tallest thing on a residential lane.
+  'House.3': {
+    bw: 66, wallH: 44, roofH: 22, roof: 'gable', wall: 'plaster', roofColor: 'slate',
+    windows: [['left', 0.22, 0.12], ['left', 0.64, 0.12], ['right', 0.66, 0.12], ['left', 0.22, 0.52], ['right', 0.66, 0.52]],
+    door: ['right', 0.24], chimneyAt: -16, chimneyH: 26,
+  },
+  // Long and low, with a lean-to on the end.
+  'House.4': {
+    bw: 92, wallH: 20, roofH: 22, roof: 'gable', wall: 'timber', roofColor: 'thatch', overhang: 9,
+    windows: [['left', 0.3, 0.24], ['left', 0.62, 0.24]],
+    door: ['right', 0.5], chimneyAt: 24, chimneyH: 16,
+    extras: (p, _lit, g) => leanTo(p, g, 'right', BUILD.roofThatchDark, BUILD.timberLight),
+  },
+  // Stone cottage with a deep porch.
+  'House.5': {
+    bw: 72, wallH: 26, roofH: 24, roof: 'hip', wall: 'stone', roofColor: 'slate',
+    windows: [['left', 0.24, 0.26], ['right', 0.68, 0.26]],
+    door: ['right', 0.3], chimneyAt: -18, chimneyH: 24,
+    extras: (p, _lit, g) => porch(p, g, 'right', 0.26, BUILD.roofSlateDark),
+  },
+  // Narrow townhouse with a steep roof.
+  'House.6': {
+    bw: 58, wallH: 34, roofH: 34, roof: 'gable', wall: 'plaster', roofColor: 'red', overhang: 4,
+    windows: [['left', 0.28, 0.16], ['right', 0.6, 0.16], ['left', 0.28, 0.58]],
+    door: ['right', 0.24], chimneyAt: 14, chimneyH: 22,
+  },
+  // Log cabin with a broad chimney breast.
+  'House.7': {
+    bw: 78, wallH: 24, roofH: 26, roof: 'gable', wall: 'log', roofColor: 'green', overhang: 8,
+    windows: [['left', 0.3, 0.26], ['right', 0.66, 0.26]],
+    door: ['right', 0.3], chimneyAt: -24, chimneyH: 28,
+    extras: (p, _lit, g) => leanTo(p, g, 'left', BUILD.roofGreenDark, FOLIAGE.trunkLight),
   },
   Market: {
     bw: 112, wallH: 20, roofH: 26, roof: 'hip', wall: 'timber', roofColor: 'red', overhang: 10,
@@ -577,8 +633,17 @@ export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string
   return { art, overlays };
 }
 
-/** Maps a simulation building type to its art key. Houses cycle three designs. */
-export function buildingArtKey(type: string, index: number): string {
-  if (type === 'House') return `House.${index % 3}`;
-  return RECIPES[type] ? type : 'House.0';
+export const HOUSE_DESIGNS = 8;
+
+/**
+ * Map a simulation building type to its art.
+ *
+ * Houses pick a design from a hash of their id rather than their position in
+ * the list, so a home keeps its face when the settlement grows around it.
+ */
+export function buildingArtKey(type: string, id: string): string {
+  if (type !== 'House') return RECIPES[type] ? type : 'House.0';
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `House.${Math.abs(h) % HOUSE_DESIGNS}`;
 }

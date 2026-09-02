@@ -27,7 +27,8 @@ import {
   clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld,
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
-import { RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, charge, credit, type VaultLedger } from '@/lib/chain/vault';
+import { RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, charge, type VaultLedger } from '@/lib/chain/vault';
+import { Soundscape } from '@/lib/audio/soundscape';
 import PlotSelect from './PlotSelect';
 import { Hud } from './Hud';
 import { Panels, type PanelKey } from './Panels';
@@ -120,6 +121,8 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
   const [following, setFollowing] = useState<string | null>(null);
   const [view, setView] = useState<Snapshot | null>(null);
   const [woodland, setWoodland] = useState<{ standing: number; stumps: number; saplings: number; total: number } | null>(null);
+  const soundRef = useRef<Soundscape | null>(null);
+  const [sound, setSound] = useState(false);
 
   if (!worldRef.current) worldRef.current = createWorld(claimed.seed, claimed.name);
 
@@ -174,6 +177,33 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
     };
   }, []);
 
+  // The soundscape follows the world's conditions, and only ever after the
+  // player has asked for it: browsers will not start audio unprompted, and a
+  // world that makes noise on its own is worse than a silent one.
+  useEffect(() => {
+    if (!sound) return;
+    const scape = soundRef.current ?? new Soundscape();
+    soundRef.current = scape;
+    let cancelled = false;
+    scape.start().catch(() => { /* refused, stay silent */ });
+    const id = window.setInterval(() => {
+      const world = worldRef.current;
+      if (cancelled || !world) return;
+      scape.update({
+        hour: world.hour,
+        weather: world.weather,
+        activity: Math.min(1, world.citizens.filter((c) => !c.inside).length / 20),
+      }, 0.25);
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      scape.stop().catch(() => { /* nothing to stop */ });
+    };
+  }, [sound]);
+
+  useEffect(() => () => { soundRef.current?.destroy(); soundRef.current = null; }, []);
+
   const seedRef = useRef(claimed.seed);
   useEffect(() => {
     if (seedRef.current === claimed.seed) return;
@@ -207,6 +237,7 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
   const focusOn = useCallback((target: PickTarget) => {
     setSelected(target);
     sceneRef.current?.focus(target);
+    soundRef.current?.tick('select');
   }, []);
 
   const toggleFollow = useCallback(() => {
@@ -343,6 +374,8 @@ function WorldView({ claimed, player, hidden, onLeave, onRename, onPlayer }: {
             placing={placing}
             following={following}
             woodland={woodland}
+            sound={sound}
+            onToggleSound={() => setSound((on) => !on)}
             player={player}
             onRenameCitizen={renameCitizenFor}
             hover={hoverInfo}

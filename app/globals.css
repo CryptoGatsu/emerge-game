@@ -356,9 +356,18 @@ button {
   bottom: 336px;
   width: 262px;
   display: flex; flex-direction: column; gap: 10px;
-  overflow: hidden;
+  overflow-y: auto;
 }
 .right-rail > .panel:not(.feed-panel) { flex: none; }
+.right-rail::-webkit-scrollbar { width: 5px; }
+.right-rail::-webkit-scrollbar-thumb { background: rgba(122, 194, 112, 0.28); border-radius: 3px; }
+
+/* On a short window the world map is the first thing to go: status, events and
+   the feed all need somewhere to live, and the minimap is the least of them. */
+@media (max-height: 800px) {
+  .minimap-panel { display: none; }
+  .right-rail { bottom: 128px; }
+}
 
 .stat-row {
   display: grid;

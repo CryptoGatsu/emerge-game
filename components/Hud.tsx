@@ -26,6 +26,8 @@ interface HudProps {
   following: string | null;
   woodland: { standing: number; stumps: number; saplings: number; total: number } | null;
   player: PlayerRecord;
+  sound: boolean;
+  onToggleSound: () => void;
   hover: { title: string; lines: string[] } | null;
   activePanel: PanelKey;
   onTogglePause: () => void;
@@ -269,6 +271,13 @@ export function Hud(props: HudProps) {
           {SPEEDS.map((s) => (
             <button key={s} className={speed === s ? 'sel' : ''} onClick={() => props.onSpeed(s)}>{s}×</button>
           ))}
+          <button
+            className={props.sound ? 'sel' : ''}
+            onClick={props.onToggleSound}
+            title={props.sound ? 'Mute the world' : 'Listen to the world'}
+          >
+            {props.sound ? '♪' : '♪̸'}
+          </button>
         </div>
       </div>
 
