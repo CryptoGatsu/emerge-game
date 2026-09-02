@@ -13,18 +13,19 @@ import { buildMaterials, maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import { ACTIVE_CHAIN, TOKEN, shortAddress, tokenActions, tokenLive } from '@/lib/chain/emerge';
 import {
-  DAILY_EARN_CEILING, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
-  RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
-  claimEarnings, deposit, quoteWithdraw, withdraw, type VaultLedger,
+  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
+  RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
+  charge, claimEarnings, deposit, quoteWithdraw, withdraw, type VaultLedger,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import {
-  MESSAGE_LIMIT, channelOf, chatConnected, loadChat, send, setHandle, worldChannel,
+  MESSAGE_LIMIT, POLL_INTERVAL, channelOf, loadChat, poll, send, worldChannel,
   type ChannelKind, type ChatState,
 } from '@/lib/chat';
+import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { WalletPicker, useWallet } from './WalletPicker';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'connect' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'connect' | null;
 
 interface PanelsProps {
   panel: PanelKey;
@@ -42,6 +43,13 @@ interface PanelsProps {
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
   /** List this plot for resale at a price, or pass null to withdraw it. */
   onList: (price: number | null) => void;
+  /** Record a change to the player themselves — their name, their name tokens. */
+  onPlayer: (record: PlayerRecord) => void;
+  /**
+   * Spend on one dig. Returns what the party found, or a sentence explaining
+   * why they did not go.
+   */
+  onDig: () => { prize: Prize; story: string } | string;
 }
 
 /** Buildable structures. Upkeep is read from the simulation so it never drifts. */
@@ -359,13 +367,51 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
           <p>
             So: a world you have not touched for two days earns about 1,700 {TOKEN.ticker} a day. One
             you are actually running earns around 21,000. Collect it in the Bank panel whenever you
-            like — and there is a ceiling of {DAILY_EARN_CEILING.toLocaleString()} a real day across
-            everything you own, so holding six plots is six worlds to enjoy rather than six times
-            the income.
+            like.
+          </p>
+          <p>
+            <b>Four plots pay.</b> You may own as many as you can afford, but only the four you
+            claimed first earn {TOKEN.ticker} — so the most anyone can make is four well-run
+            settlements, {DAILY_EARN_CEILING.toLocaleString()} a real day, and no more. The rest are
+            yours to build in for the pleasure of it. Give one of the four up and the next in line
+            starts earning.
           </p>
           <p>
             <b>You are being paid for judgement, not for uptime.</b> Nobody gets rich here by opening
             a tab and going to lunch.
+          </p>
+        </section>
+
+        <section className="earn">
+          <h4>Nothing is taken — everything is burned</h4>
+          <p>
+            The game takes no cut of anything. There is no fee address, no treasury the developers
+            draw from, and no tax on what you earn. Every {TOKEN.ticker} the game charges you — a
+            claim, a survey, a rename, a pull on the prospectors — is destroyed. It leaves your
+            balance and it leaves the supply, permanently.
+          </p>
+          <p>
+            The only money the project makes is the trading fee on the coin itself, which has
+            nothing to do with anything you do in here. That means every action you take in the game
+            shrinks the supply rather than feeding somebody, and the burn counter in the Bank is a
+            real running total of what has gone.
+          </p>
+        </section>
+
+        <section>
+          <h4>Sending out a party</h4>
+          <p>
+            Under <b>Prospect</b> you can hire a party for a day for
+            {' '}{DIG_COST_EMERGE.toLocaleString()} {TOKEN.ticker} — burned, like everything else. They
+            always come back with something: Gold for the treasury, timber, stone, ore or wheat for
+            the yard, naming rights, or, rarely, people looking for work.
+          </p>
+          <p>
+            The odds are printed on the panel as real percentages, computed from the same table the
+            draw rolls against, so what you are shown cannot drift away from what actually happens.
+            There is no blank on the table — the worst result still pays. It is a way to convert
+            tokens into a settlement, not a slot machine, and people are the one thing on it you
+            cannot buy any other way.
           </p>
         </section>
 
@@ -392,9 +438,25 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             two prospected plots are the same land.
           </p>
           <p>
-            A claim is a purchase and it is yours. Leaving a world does not release it — your plots
-            are marked on the chart and you can walk back into any of them. Giving one up is a
-            separate, deliberate action.
+            A claim is a purchase and it is yours. The price is charged in {TOKEN.ticker} and burned;
+            nobody receives it. Leaving a world does not release it — your plots are marked on the
+            chart and you can walk back into any of them. Giving one up is a separate, deliberate
+            action.
+          </p>
+        </section>
+
+        <section>
+          <h4>Talking to other players</h4>
+          <p>
+            <b>Chat</b> has two channels: the world you are standing in, so a conversation about
+            Fernrest is read by the people looking at Fernrest, and a global one that follows you
+            everywhere. Connect a wallet and you post under your address; otherwise you post under
+            your name.
+          </p>
+          <p>
+            You arrive with a name picked for you and <b>your first change is free</b> — nobody
+            should be charged to correct a name they did not choose. Changing it again costs
+            {' '}{RENAME_PLAYER_EMERGE.toLocaleString()} {TOKEN.ticker}, burned like the rest.
           </p>
         </section>
 
@@ -417,35 +479,74 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
  * Player chat.
  *
  * A channel that follows the player between worlds and one attached to the
- * world they are in. The panel is honest about its reach: there is no relay in
- * this build, so what is typed here stays in this browser, and saying so is
- * better than a room that looks populated and is not.
+ * world they are in. Messages go to the relay and come back from it every few
+ * seconds; what is on screen is whatever the relay has, plus a local cache so
+ * a reload does not wipe the conversation.
  */
-function ChatPanel({ view, claimed, onClose }: { view: Snapshot; claimed: ClaimedWorld; onClose: () => void }) {
+function ChatPanel({ view, claimed, player, onClose, onPlayer }: {
+  view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord;
+  onClose: () => void; onPlayer: (record: PlayerRecord) => void;
+}) {
   const [state, setState] = useState<ChatState | null>(null);
   const [kind, setKind] = useState<ChannelKind>('world');
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
+  const [reach, setReach] = useState<{ shared: boolean; offline: boolean }>({ shared: false, offline: false });
   const { wallet } = useWallet();
   const endRef = useRef<HTMLDivElement | null>(null);
 
+  const channel = kind === 'global' ? 'global' : worldChannel(claimed.seed);
+
   useEffect(() => { setState(loadChat()); }, []);
 
-  const channel = kind === 'global' ? 'global' : worldChannel(claimed.seed);
-  const messages = state ? channelOf(state, channel) : [];
+  // Ask the relay for anything new, now and every few seconds. Re-runs when
+  // the player switches channel so the other room fills straight away.
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      const current = loadChat();
+      const result = await poll(current, channel);
+      if (!live) return;
+      setState(result.state);
+      setReach({ shared: result.shared, offline: result.offline });
+    };
+    tick();
+    const timer = window.setInterval(tick, POLL_INTERVAL);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [channel]);
 
+  const messages = state ? channelOf(state, channel) : [];
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length, kind]);
 
   if (!state) return null;
 
-  const post = () => {
-    const result = send(state, channel, draft, wallet.address);
+  const post = async () => {
+    const result = await send(state, channel, draft, wallet.address, player.name);
     setNotice(result.refused);
     if (!result.refused) { setState(result.state); setDraft(''); }
   };
 
-  const who = wallet.address ? shortAddress(wallet.address) : state.handle;
+  const rename = (next: string) => {
+    const trimmed = next.trim().slice(0, 18);
+    if (!trimmed || trimmed === player.name) { setNaming(false); return; }
+    // The first change is free. Nobody should be charged to correct the random
+    // name they were handed on arrival.
+    if (player.nameChanges === 0) {
+      onPlayer({ ...player, name: trimmed, nameChanges: 1 });
+      setNaming(false);
+      return;
+    }
+    const paid = charge(player.ledger, RENAME_PLAYER_EMERGE);
+    if (!paid) {
+      setNotice(`Changing your name again costs ${RENAME_PLAYER_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
+      return;
+    }
+    onPlayer({ ...player, name: trimmed, nameChanges: player.nameChanges + 1, ledger: paid });
+    setNaming(false);
+  };
+
+  const who = wallet.address ? shortAddress(wallet.address) : player.name;
 
   return (
     <Shell
@@ -457,29 +558,30 @@ function ChatPanel({ view, claimed, onClose }: { view: Snapshot; claimed: Claime
       <div className="chat-tabs">
         <button className={kind === 'world' ? 'on' : ''} onClick={() => setKind('world')}>
           {view.name}
-          <em>{state ? channelOf(state, worldChannel(claimed.seed)).length : 0}</em>
+          <em>{channelOf(state, worldChannel(claimed.seed)).length}</em>
         </button>
         <button className={kind === 'global' ? 'on' : ''} onClick={() => setKind('global')}>
           Global
-          <em>{state ? channelOf(state, 'global').length : 0}</em>
+          <em>{channelOf(state, 'global').length}</em>
         </button>
-        {!wallet.address && (
-          <button className="ghost handle" onClick={() => setNaming((n) => !n)}>Change name</button>
-        )}
+        <button className="ghost handle" onClick={() => setNaming((n) => !n)}>
+          {player.nameChanges === 0 ? 'Change name · free' : 'Change name'}
+        </button>
       </div>
 
-      {naming && !wallet.address && (
+      {naming && (
         <div className="rename-row">
           <input
-            defaultValue={state.handle}
+            defaultValue={player.name}
             maxLength={18}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return;
-              setState(setHandle(state, (e.target as HTMLInputElement).value));
-              setNaming(false);
-            }}
+            autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter') rename((e.target as HTMLInputElement).value); }}
           />
-          <span className="muted small">Press enter</span>
+          <span className="muted small">
+            {player.nameChanges === 0
+              ? 'Your first change is free. Press enter.'
+              : `${RENAME_PLAYER_EMERGE.toLocaleString()} ${TOKEN.ticker}, burned. Press enter.`}
+          </span>
         </div>
       )}
 
@@ -487,7 +589,7 @@ function ChatPanel({ view, claimed, onClose }: { view: Snapshot; claimed: Claime
         {messages.length === 0 && (
           <p className="muted small">
             {kind === 'global'
-              ? 'Nothing on the global channel yet.'
+              ? 'Nothing on the global channel yet. Say hello.'
               : `Nothing said about ${view.name} yet.`}
           </p>
         )}
@@ -513,20 +615,100 @@ function ChatPanel({ view, claimed, onClose }: { view: Snapshot; claimed: Claime
       </div>
       {notice && <p className="warn">{notice}</p>}
 
-      {!chatConnected() && (
+      {/* What the relay can actually reach, said plainly either way. */}
+      {reach.offline ? (
         <p className="muted small">
-          There is no chat relay in this build, so what you post is kept in this browser and nobody
-          else can see it yet. The channels, your identity, the history and the limits are all real —
-          only the wire between players is missing, and it is a single function
-          ({'`'}deliver{'`'} in {'`'}lib/chat.ts{'`'}) away from being connected.
+          The relay is not answering. Your messages are being kept here and nobody else can see them
+          until it comes back.
         </p>
-      )}
+      ) : !reach.shared ? (
+        <p className="muted small">
+          This build has no shared relay behind it yet, so what you say reaches players on the same
+          server and no further. Said plainly rather than left for you to discover.
+        </p>
+      ) : null}
     </Shell>
   );
 }
 
-function BankPanel({ view, player, onClose, onVault }: {
-  view: Snapshot; player: PlayerRecord; onClose: () => void;
+/**
+ * The dig.
+ *
+ * $EMERGE in, burned; a prospecting party out; something the settlement can
+ * use back. The odds are computed from the same table the draw uses, so the
+ * percentages on screen cannot drift away from the ones being rolled.
+ */
+function GachaPanel({ player, onClose, onDig }: {
+  player: PlayerRecord; onClose: () => void;
+  onDig: () => { prize: Prize; story: string } | string;
+}) {
+  const [last, setLast] = useState<{ prize: Prize; story: string } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const table = odds();
+  const affordable = player.ledger.balance >= DIG_COST_EMERGE;
+
+  const pull = () => {
+    const result = onDig();
+    if (typeof result === 'string') { setNotice(result); return; }
+    setNotice(null);
+    setLast(result);
+  };
+
+  return (
+    <Shell
+      title="Send out a party"
+      subtitle="Hire prospectors for a day. They always come back with something."
+      onClose={onClose}
+      wide
+    >
+      <div className="dig">
+        <button className="dig-button" onClick={pull} disabled={!affordable}>
+          <span>{affordable ? 'SEND THEM OUT' : `NOT ENOUGH ${TOKEN.ticker}`}</span>
+          <b>{DIG_COST_EMERGE.toLocaleString()} {TOKEN.ticker}</b>
+          <i>burned, not collected</i>
+        </button>
+
+        {last && (
+          <div className={`dig-result ${last.prize.kind}`}>
+            <span className="eyebrow">THEY CAME BACK WITH</span>
+            <b>{last.prize.label}</b>
+            <p>{last.story}</p>
+          </div>
+        )}
+        {!last && (
+          <div className="dig-result waiting">
+            <span className="eyebrow">NOTHING SENT YET</span>
+            <p>
+              Every party comes back with something — the worst outcome on the table is still worth
+              more than a wasted afternoon.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {notice && <p className="warn">{notice}</p>}
+
+      <h4>What they might find</h4>
+      <div className="odds">
+        {table.map((prize) => (
+          <div key={prize.id} className={`odds-row ${prize.kind}`}>
+            <span>{prize.label}</span>
+            <div className="odds-bar"><i style={{ width: `${Math.max(3, prize.percent * 3)}%` }} /></div>
+            <b>{prize.percent.toFixed(1)}%</b>
+          </div>
+        ))}
+      </div>
+      <p className="muted small">
+        These are the real weights: the panel computes them from the same table the draw rolls
+        against, so they cannot drift apart. Naming rights let you rename one citizen without paying
+        the usual fee, and you hold {player.nameTokens} of them.
+      </p>
+    </Shell>
+  );
+}
+
+function BankPanel({ view, player, earning, onClose, onVault }: {
+  view: Snapshot; player: PlayerRecord; earning: boolean; onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
 }) {
   const [depositAmount, setDepositAmount] = useState('100000');
@@ -629,10 +811,14 @@ function BankPanel({ view, player, onClose, onVault }: {
                 : `Nothing done for ${Math.floor(steward.idleHours / 24)} ${Math.floor(steward.idleHours / 24) === 1 ? 'day' : 'days'}`}
           </em>
         </div>
-        <div>
+        <div className={earning ? '' : 'fading'}>
           <span>EARNING PER DAY</span>
-          <b>{steward.dailyYield.toLocaleString()}</b>
-          <em>{TOKEN.ticker} a real day, of {steward.cap.toLocaleString()} possible</em>
+          <b>{earning ? steward.dailyYield.toLocaleString() : 'nothing'}</b>
+          <em>
+            {earning
+              ? `${TOKEN.ticker} a real day, of ${steward.cap.toLocaleString()} possible`
+              : `beyond your first ${EARNING_PLOT_LIMIT} plots`}
+          </em>
         </div>
         <div>
           <span>EARNED HERE</span>
@@ -640,6 +826,15 @@ function BankPanel({ view, player, onClose, onVault }: {
           <em>{Math.floor(ledger.earnedEmerge).toLocaleString()} uncollected</em>
         </div>
       </div>
+
+      {!earning && (
+        <p className="warn">
+          This world does not pay. Only the first {EARNING_PLOT_LIMIT} plots you claimed earn
+          {' '}{TOKEN.ticker} — this one is yours to build in, and everything you do here still
+          counts towards the settlement, just not towards your balance. Give up one of the four and
+          the next in line starts earning.
+        </p>
+      )}
 
       <div className="vault-card claim-card">
         <span className="eyebrow">COLLECT EARNINGS</span>
@@ -876,11 +1071,22 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList, onPlayer, onDig }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
-  if (panel === 'bank') return <BankPanel view={view} player={player} onClose={onClose} onVault={onVault} />;
+  if (panel === 'bank') {
+    // Which of the player's worlds pay is decided by claim order, so the panel
+    // works it out the same way the credit does rather than being told.
+    const earning = [...player.claims]
+      .sort((a, b) => a.claimedAt - b.claimedAt)
+      .slice(0, EARNING_PLOT_LIMIT)
+      .some((c) => c.seed === claimed.seed);
+    return <BankPanel view={view} player={player} earning={earning} onClose={onClose} onVault={onVault} />;
+  }
   if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
-  if (panel === 'chat') return <ChatPanel view={view} claimed={claimed} onClose={onClose} />;
+  if (panel === 'chat') {
+    return <ChatPanel view={view} claimed={claimed} player={player} onClose={onClose} onPlayer={onPlayer} />;
+  }
+  if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;
   if (panel === 'connect') {
     return (

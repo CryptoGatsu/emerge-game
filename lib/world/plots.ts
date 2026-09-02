@@ -495,6 +495,19 @@ export interface FoundPlot {
 
 export interface PlayerRecord {
   ledger: VaultLedger;
+  /**
+   * What this player is called, and how many times they have changed it.
+   *
+   * The first change is free — nobody should be charged to correct the random
+   * name they were handed on arrival. Every one after that costs, and burns.
+   */
+  name: string;
+  nameChanges: number;
+  /**
+   * Unspent naming rights won from the gacha, each good for renaming one
+   * citizen without paying the usual fee.
+   */
+  nameTokens: number;
   /** Plots this player prospected into existence. */
   prospected: FoundPlot[];
   /**
@@ -507,6 +520,17 @@ export interface PlayerRecord {
   claims: ClaimedWorld[];
   /** Plots they have put up for resale. */
   listings: Listing[];
+}
+
+const PLAYER_NAMES = [
+  'Sparrow', 'Ember', 'Harbour', 'Thistle', 'Lantern', 'Quarry', 'Willow', 'Ridge',
+  'Beacon', 'Hollow', 'Kestrel', 'Marsh', 'Anvil', 'Cinder', 'Pike', 'Larch',
+];
+
+/** A name for a player who has not chosen one. */
+export function newPlayerName() {
+  const word = PLAYER_NAMES[Math.floor(Math.random() * PLAYER_NAMES.length)];
+  return `${word}${Math.floor(Math.random() * 900) + 100}`;
 }
 
 const WORLD_KEY = 'emerge.world.v1';
@@ -551,6 +575,9 @@ export function loadPlayer(): PlayerRecord {
   const parsed = readJson<Partial<PlayerRecord>>(PLAYER_KEY);
   return {
     ledger: normaliseLedger(parsed?.ledger),
+    name: typeof parsed?.name === 'string' && parsed.name.trim() ? parsed.name : newPlayerName(),
+    nameChanges: Number(parsed?.nameChanges) || 0,
+    nameTokens: Number(parsed?.nameTokens) || 0,
     prospected: readProspected(parsed?.prospected),
     claims: readClaims(parsed?.claims),
     listings: Array.isArray(parsed?.listings) ? parsed!.listings! : [],

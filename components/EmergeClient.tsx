@@ -21,8 +21,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  advance, carryCitizenTo, collectYield, constructBuilding, createWorld, demolishBuilding,
-  dropCitizen, drawFromTreasury, fundTreasury, pickUpCitizen, renameCitizen, renameWorld,
+  addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
+  demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, pickUpCitizen,
+  renameCitizen, renameWorld,
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld } from '@/lib/world/save';
@@ -32,7 +33,11 @@ import {
   clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld, withClaim, withoutClaim,
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
-import { RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge, type VaultLedger } from '@/lib/chain/vault';
+import {
+  EARNING_PLOT_LIMIT, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
+  type VaultLedger,
+} from '@/lib/chain/vault';
+import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
 import PlotSelect from './PlotSelect';
 import { Hud } from './Hud';
@@ -68,12 +73,21 @@ export default function EmergeClient() {
   // The $EMERGE balance and everything bought with it belongs to the player,
   // not to whichever plot they happen to be standing on.
   const [player, setPlayer] = useState<PlayerRecord | null>(null);
+  // Which world the yield being credited belongs to. Read inside the state
+  // updater, where the current `claimed` is not in scope.
+  const claimedSeedRef = useRef<number | null>(null);
 
   useEffect(() => {
     const stored = loadClaimedWorld();
     setClaimed(stored);
-    if (stored) setMounted(stored);
-    setPlayer(loadPlayer());
+    if (stored) { setMounted(stored); claimedSeedRef.current = stored.seed; }
+    // Write the opening record straight back. `loadPlayer` invents a name for
+    // a player who has none, and until something else saved, that name was
+    // re-invented on every reload — so the person you were in chat yesterday
+    // was a stranger today.
+    const record = loadPlayer();
+    savePlayer(record);
+    setPlayer(record);
   }, []);
 
   const updatePlayer = useCallback((next: PlayerRecord) => {
@@ -92,6 +106,14 @@ export default function EmergeClient() {
     if (!(emerge > 0)) return;
     setPlayer((prev) => {
       if (!prev) return prev;
+      // Only the first four plots a player claimed pay. Beyond that a world is
+      // theirs to play with and earns nothing, so a large wallet buys more to
+      // watch rather than more income.
+      const earning = [...prev.claims]
+        .sort((a, b) => a.claimedAt - b.claimedAt)
+        .slice(0, EARNING_PLOT_LIMIT)
+        .some((c) => c.seed === claimedSeedRef.current);
+      if (!earning) return prev;
       const next = { ...prev, ledger: accrue(prev.ledger, emerge) };
       savePlayer(next);
       return next;
@@ -100,6 +122,7 @@ export default function EmergeClient() {
 
   const enter = useCallback((world: ClaimedWorld) => {
     saveClaimedWorld(world);
+    claimedSeedRef.current = world.seed;
     // A claim is a purchase, so it goes into the player's holdings and stays
     // there. `emerge.world.v1` only records which of them is open right now.
     setPlayer((prev) => {
@@ -429,11 +452,49 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
   const renameCitizenFor = useCallback((id: string, next: string) => {
     const world = worldRef.current;
     if (!world) return;
+    // Naming rights won from a dig are spent before the player's balance is
+    // touched — holding one and being charged anyway would make the prize a lie.
+    if (player.nameTokens > 0) {
+      if (!renameCitizen(world, id, next)) return;
+      onPlayer({ ...player, nameTokens: player.nameTokens - 1 });
+      refresh();
+      return;
+    }
     const paid = charge(player.ledger, RENAME_CITIZEN_EMERGE);
     if (!paid) return;
     if (!renameCitizen(world, id, next)) return;
     onPlayer({ ...player, ledger: paid });
     refresh();
+  }, [onPlayer, player, refresh]);
+
+  /**
+   * Send out a prospecting party.
+   *
+   * The cost is charged and burned before the draw, so a refused charge cannot
+   * pay out, and the prize is applied to the world the player is standing in.
+   */
+  const dig = useCallback((): { prize: Prize; story: string } | string => {
+    const world = worldRef.current;
+    if (!world) return 'The settlement is still waking up. Try again in a moment.';
+    const paid = charge(player.ledger, DIG_COST_EMERGE);
+    if (!paid) {
+      return `A party costs ${DIG_COST_EMERGE.toLocaleString()} $EMERGE and you hold `
+        + `${Math.floor(player.ledger.balance).toLocaleString()}.`;
+    }
+    const prize = drawPrize();
+    const story = prizeStory(prize);
+
+    if (prize.gold) fundTreasury(world, prize.gold, 'Prospecting party');
+    if (prize.resource) grantResource(world, prize.resource.key, prize.resource.amount);
+    for (let i = 0; i < (prize.settlers ?? 0); i += 1) addSettler(world);
+
+    onPlayer({
+      ...player,
+      ledger: paid,
+      nameTokens: player.nameTokens + (prize.naming ?? 0),
+    });
+    refresh();
+    return { prize, story };
   }, [onPlayer, player, refresh]);
 
   /** Move Gold in or out of the treasury and persist the vault ledger. */
@@ -533,6 +594,8 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
             onRelease={onRelease}
             onVault={vault}
             onList={listPlot}
+            onPlayer={onPlayer}
+            onDig={dig}
           />
         </>
       )}

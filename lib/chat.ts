@@ -5,18 +5,14 @@
  * to the world they are standing in, so a message about Fernrest is read by the
  * people looking at Fernrest.
  *
- * **What this actually reaches.** Messages are held in this browser. There is
- * no chat server in this build, and there is no honest way to fake one: two
- * browsers share no storage, so a message typed here cannot appear anywhere
- * else. The transport is the one thing in this module that is stubbed, and it
- * is stubbed behind a seam — `deliver` is where a websocket or a relay goes —
- * rather than being papered over with invented replies from players who are not
- * there. The panel says so in as many words.
+ * Messages go to `/api/chat` and come back from it by polling. The local copy
+ * is a cache, not the record: it keeps the last thing you saw on screen through
+ * a reload and while the network is down, and the relay is what other players
+ * actually read.
  *
- * What is real: the channels, the history, the identity a message is signed
- * with (a connected wallet address, or a local handle when there is none), the
- * ordering, the persistence across sessions, and the moderation floor of a
- * length cap and a rate limit.
+ * Polling rather than a socket, at a few seconds a tick. At the volume a
+ * settlement game's chat runs at, that is indistinguishable from a push, and it
+ * survives a serverless deployment — which a long-lived connection does not.
  */
 
 const KEY = 'emerge.chat.v1';
@@ -47,26 +43,13 @@ export interface ChatMessage {
 export interface ChatState {
   /** Messages across every channel, oldest first. */
   messages: ChatMessage[];
-  /** A name for this player when no wallet is connected. */
-  handle: string;
 }
 
 /** The channel id for a world, so each settlement has its own room. */
 export const worldChannel = (seed: number) => `world:${seed}`;
 
-const HANDLE_WORDS = [
-  'Sparrow', 'Ember', 'Harbour', 'Thistle', 'Lantern', 'Quarry', 'Willow', 'Ridge',
-  'Beacon', 'Hollow', 'Kestrel', 'Marsh', 'Anvil', 'Cinder', 'Pike', 'Larch',
-];
-
-/** A stable, friendly name for a player with no wallet connected. */
-function newHandle() {
-  const word = HANDLE_WORDS[Math.floor(Math.random() * HANDLE_WORDS.length)];
-  return `${word}${Math.floor(Math.random() * 900) + 100}`;
-}
-
 function read(): ChatState {
-  if (typeof window === 'undefined') return { messages: [], handle: 'Guest' };
+  if (typeof window === 'undefined') return { messages: [] };
   try {
     const raw = window.localStorage.getItem(KEY);
     const parsed = raw ? (JSON.parse(raw) as Partial<ChatState>) : null;
@@ -74,10 +57,10 @@ function read(): ChatState {
       ? parsed!.messages!.filter((m): m is ChatMessage =>
         !!m && typeof m.text === 'string' && typeof m.channel === 'string')
       : [];
-    return { messages, handle: typeof parsed?.handle === 'string' ? parsed.handle : newHandle() };
+    return { messages };
   } catch {
     // A corrupt entry should cost the player their history, not the game.
-    return { messages: [], handle: newHandle() };
+    return { messages: [] };
   }
 }
 
@@ -106,11 +89,17 @@ export interface SendResult {
 /**
  * Post a message.
  *
- * Refuses an empty message, one over the length cap, and one sent faster than
- * the rate limit — the three things that make a shared room unreadable, and the
- * three worth enforcing at the client whether or not a server ever does.
+ * The client checks the same three things the server does — empty, too long,
+ * too fast — so an obvious mistake costs a round trip rather than a rejection,
+ * and the server checks them again because a client's word is not evidence.
  */
-export function send(state: ChatState, channel: string, text: string, address: string | null): SendResult {
+export async function send(
+  state: ChatState,
+  channel: string,
+  text: string,
+  address: string | null,
+  name: string,
+): Promise<SendResult> {
   const body = text.trim().replace(/\s+/g, ' ');
   if (!body) return { state, refused: null };
   if (body.length > MESSAGE_LIMIT) {
@@ -122,36 +111,55 @@ export function send(state: ChatState, channel: string, text: string, address: s
   }
   lastSent = now;
 
-  const message: ChatMessage = {
-    id: `m${now}-${Math.floor(Math.random() * 1e6)}`,
-    channel,
-    author: address ?? state.handle,
-    wallet: !!address,
-    text: body,
-    at: now,
-  };
-  const next: ChatState = {
-    ...state,
-    messages: [...state.messages, message].slice(-HISTORY * 4),
-  };
-  write(next);
-  deliver(message);
-  return { state: next, refused: null };
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ channel, author: address ?? name, wallet: !!address, text: body }),
+    });
+    const json = (await response.json()) as { message?: ChatMessage; error?: string };
+    if (!response.ok || !json.message) {
+      return { state, refused: json.error ?? 'The message did not go.' };
+    }
+    return { state: receive(state, json.message), refused: null };
+  } catch {
+    return { state, refused: 'Could not reach the relay. Check your connection.' };
+  }
+}
+
+export interface PollResult {
+  state: ChatState;
+  /** True when the relay has a shared store behind it and can reach other players. */
+  shared: boolean;
+  /** True when the relay could not be reached at all. */
+  offline: boolean;
 }
 
 /**
- * Hand a message to whatever carries it to other players.
+ * Ask the relay for anything newer than what we already hold on a channel.
  *
- * This is the seam. Today there is nothing on the other side of it, and the
- * interface says as much rather than implying an audience. When a relay exists,
- * this is the one function that changes — and the receiving half calls
- * `receive` below, which is already wired to the panel.
+ * Sending the newest timestamp we have rather than a page number means the
+ * usual answer is an empty list, and two clients that have drifted apart
+ * converge without either of them having to know it happened.
  */
-function deliver(message: ChatMessage) {
-  void message;
+export async function poll(state: ChatState, channel: string): Promise<PollResult> {
+  const held = channelOf(state, channel);
+  const newest = held.length ? held[held.length - 1].at : 0;
+  try {
+    const response = await fetch(`/api/chat?channel=${encodeURIComponent(channel)}&since=${newest}`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) return { state, shared: false, offline: true };
+    const json = (await response.json()) as { messages?: ChatMessage[]; shared?: boolean };
+    let next = state;
+    for (const message of json.messages ?? []) next = receive(next, message);
+    return { state: next, shared: json.shared === true, offline: false };
+  } catch {
+    return { state, shared: false, offline: true };
+  }
 }
 
-/** Accept a message from elsewhere. Used by the transport when there is one. */
+/** Fold a message in, keeping the channel in order and free of duplicates. */
 export function receive(state: ChatState, message: ChatMessage): ChatState {
   if (state.messages.some((m) => m.id === message.id)) return state;
   const next: ChatState = {
@@ -162,14 +170,5 @@ export function receive(state: ChatState, message: ChatMessage): ChatState {
   return next;
 }
 
-/** Change the name a player posts under when they have no wallet. */
-export function setHandle(state: ChatState, handle: string): ChatState {
-  const trimmed = handle.trim().slice(0, 18);
-  if (!trimmed) return state;
-  const next = { ...state, handle: trimmed };
-  write(next);
-  return next;
-}
-
-/** True once messages typed here can actually reach anybody else. */
-export const chatConnected = () => false;
+/** How often the panel asks the relay for new messages, in milliseconds. */
+export const POLL_INTERVAL = 4_000;

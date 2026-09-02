@@ -29,7 +29,7 @@ import {
   ACTIVE_CHAIN, TOKEN, claimPlot, plotOwner, registryLive, shortAddress, tokenLive,
   type PlotOwnership,
 } from '@/lib/chain/emerge';
-import { LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
+import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, charge } from '@/lib/chain/vault';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 /**
@@ -171,9 +171,12 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
       setNotice(`Every island on ${chartName(chart)} has been surveyed. Sail to another chart to find new land.`);
       return;
     }
+    // Surveying burns its fee. Nothing the game charges is collected.
+    const paid = charge(player.ledger, PROSPECT_COST_EMERGE);
+    if (!paid) return;
     const next: PlayerRecord = {
       ...player,
-      ledger: { ...player.ledger, balance: player.ledger.balance - PROSPECT_COST_EMERGE },
+      ledger: paid,
       prospected: [...player.prospected, { seed: found.seed, chart: found.chart, slot: found.slot }],
     };
     onPlayer(next);
@@ -210,9 +213,11 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
     });
     setClaiming(false);
     if (result.reason) setNotice(result.reason);
-    // Claiming costs what the plot is priced at. It used to cost nothing at
-    // all: the price was shown and never charged.
-    onPlayer({ ...player, ledger: { ...player.ledger, balance: player.ledger.balance - selected.price } });
+    // Claiming costs what the plot is priced at, and the price is burned — it
+    // used to cost nothing at all, the price being shown and never charged.
+    const paid = charge(player.ledger, selected.price);
+    if (!paid) { setNotice(`Not enough ${TOKEN.ticker} to claim ${selected.region}.`); return; }
+    onPlayer({ ...player, ledger: paid });
     onEnter({
       seed: selected.seed,
       name: worldName,
@@ -374,14 +379,20 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
               <>
                 <span className="eyebrow">WORLDS YOU OWN</span>
                 <div className="listing-list">
-                  {player.claims.map((c) => (
+                  {[...player.claims].sort((a, b) => a.claimedAt - b.claimedAt).map((c, i) => (
                     <div key={c.seed} className={`listing-row ${c.seed === selected.seed ? 'here' : ''}`}>
-                      <span>{c.name}</span>
+                      <span>{c.name}{i >= EARNING_PLOT_LIMIT && <i className="idle-plot">not earning</i>}</span>
                       <b>{c.region}</b>
                       <button className="ghost" onClick={() => onEnter(c)}>Enter</button>
                     </div>
                   ))}
                 </div>
+                {player.claims.length > EARNING_PLOT_LIMIT && (
+                  <p className="muted small">
+                    The first {EARNING_PLOT_LIMIT} worlds you claimed earn {TOKEN.ticker}; the rest are
+                    yours to play with. Give one up and the next in line starts earning.
+                  </p>
+                )}
               </>
             )}
 

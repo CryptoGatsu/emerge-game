@@ -463,7 +463,6 @@ function EconomyRow({ view, activePanel, onPanel }: {
 function Purse({ view, player, onPanel }: {
   view: Snapshot; player: PlayerRecord; onPanel: (panel: PanelKey) => void;
 }) {
-  const steward = view.stewardship;
   const uncollected = Math.floor(player.ledger.earnedEmerge);
   return (
     <button className="purse" onClick={() => onPanel('bank')} title="Open the Bank">
@@ -474,7 +473,6 @@ function Purse({ view, player, onPanel }: {
       <span className="purse-cell emerge">
         <em>{TOKEN.ticker} EARNED</em>
         <b>{uncollected.toLocaleString()}</b>
-        <i>{steward.dailyYield > 0 ? `+${steward.dailyYield.toLocaleString()}/day` : 'nothing yet'}</i>
       </span>
       <span className="purse-cell wallet">
         <em>WALLET</em>
@@ -489,6 +487,7 @@ const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; blur
   { key: 'build', icon: '⚒', label: 'BUILD', blurb: 'Create places and resources' },
   { key: 'market', icon: '◍', label: 'MARKET', blurb: 'Prices, flow and what is scarce' },
   { key: 'chat', icon: '✎', label: 'CHAT', blurb: 'Talk to other players' },
+  { key: 'gacha', icon: '⛏', label: 'PROSPECT', blurb: 'Send a party out for a day' },
   { key: 'connect', icon: '◈', label: 'ON-CHAIN', blurb: 'Your plot, wallet and vault' },
 ];
 

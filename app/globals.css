@@ -1293,7 +1293,7 @@ button.fold:hover { color: var(--emerald); }
 }
 .rename-pen:hover { color: var(--emerald); background: rgba(255, 255, 255, 0.06); }
 
-.rename-row { display: flex; gap: 7px; }
+.rename-row { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
 .rename-row input {
   flex: 1;
   padding: 7px 10px;
@@ -1536,6 +1536,96 @@ button.fold:hover { color: var(--emerald); }
  * the chrome gets out of the way and every multi-column block collapses to
  * one or two.
  */
+
+.idle-plot {
+  font-style: normal;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--panel-edge-soft);
+}
+
+/* ---------------------------------------------------------------- *
+ * The dig
+ *
+ * One large, unambiguous button that says what it costs and that the
+ * cost is burned, and a table of real odds under it. The odds are not
+ * decoration: they are the reason a player can trust the button.
+ * ---------------------------------------------------------------- */
+
+.dig {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 13px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+.dig > * { min-width: 0; }
+
+.dig-button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 20px 16px;
+  border-radius: 13px;
+  border: 1px solid rgba(232, 193, 105, 0.4);
+  background: linear-gradient(160deg, rgba(232, 193, 105, 0.16), rgba(232, 193, 105, 0.05));
+  color: var(--cream);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, transform 90ms ease;
+}
+.dig-button:hover:not(:disabled) { border-color: var(--gold); transform: translateY(-1px); }
+.dig-button:active:not(:disabled) { transform: translateY(1px); }
+.dig-button:disabled { cursor: not-allowed; opacity: 0.5; }
+.dig-button span { font-size: 13px; letter-spacing: 0.09em; font-weight: 700; color: var(--gold); }
+.dig-button b { font-size: 19px; color: var(--cream); font-weight: 600; }
+.dig-button i { font-style: normal; font-size: 11px; color: var(--muted); }
+
+.dig-result {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 16px;
+  border-radius: 13px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(255, 255, 255, 0.025);
+}
+.dig-result .eyebrow { font-size: 10px; letter-spacing: 0.11em; color: var(--muted); }
+.dig-result b { font-size: 17px; color: var(--cream); }
+.dig-result p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.dig-result.gold { border-color: rgba(232, 193, 105, 0.4); }
+.dig-result.gold b { color: var(--gold); }
+.dig-result.resource { border-color: rgba(139, 241, 107, 0.32); }
+.dig-result.resource b { color: var(--emerald); }
+.dig-result.naming, .dig-result.settlers { border-color: rgba(139, 241, 107, 0.5); }
+.dig-result.settlers b { color: var(--emerald); }
+.dig-result.waiting b { color: var(--muted); }
+
+.odds { display: grid; gap: 6px; }
+.odds-row {
+  display: grid;
+  grid-template-columns: minmax(0, 130px) minmax(0, 1fr) 48px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.odds-row > * { min-width: 0; }
+.odds-row span { color: var(--text); }
+.odds-row b { text-align: right; font-weight: 600; color: var(--cream); font-size: 11.5px; }
+.odds-bar { height: 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.05); overflow: hidden; }
+.odds-bar i { display: block; height: 100%; border-radius: 4px; background: var(--muted); }
+.odds-row.gold .odds-bar i { background: var(--gold); }
+.odds-row.resource .odds-bar i { background: rgba(139, 241, 107, 0.6); }
+.odds-row.naming .odds-bar i, .odds-row.settlers .odds-bar i { background: var(--emerald); }
+
 @media (max-width: 720px) {
   .overlay { padding: 10px; place-items: end center; }
   .overlay-panel, .overlay-panel.wide {
@@ -1569,6 +1659,11 @@ button.fold:hover { color: var(--emerald); }
   .chat-log { max-height: 38vh; }
   .chat-row { grid-template-columns: auto 1fr; }
   .chat-row em { grid-column: 2; }
+
+  .dig { grid-template-columns: 1fr; }
+  .dig-button { padding: 16px 14px; }
+  .odds-row { grid-template-columns: minmax(0, 1fr) 46px; }
+  .odds-row .odds-bar { display: none; }
 
   .guide section.opening, .guide section.earn { padding: 13px 14px; }
   .guide p, .guide li { font-size: 13px; }

@@ -39,6 +39,8 @@ export const RENAME_COST_EMERGE = 50_000;
 export const RENAME_CITIZEN_EMERGE = 20_000;
 /** Surveying a brand-new plot into existence. */
 export const PROSPECT_COST_EMERGE = 120_000;
+/** Changing your own name, after the first change, which is free. */
+export const RENAME_PLAYER_EMERGE = 30_000;
 
 /**
  * What a new world starts with while claims are local.
@@ -78,8 +80,21 @@ export interface VaultLedger {
   earnedOn: string;
 }
 
-/** The most one player can mint in a real day, across every world they hold. */
-export const DAILY_EARN_CEILING = 30_000;
+/**
+ * How many of a player's worlds pay.
+ *
+ * A player may hold as many plots as they can afford, but only the four they
+ * claimed first earn — so income tops out at four times one well-run
+ * settlement rather than scaling with the size of a wallet. Give one up and
+ * the next in line starts earning.
+ */
+export const EARNING_PLOT_LIMIT = 4;
+
+/**
+ * The most one player can mint in a real day, across every world they hold:
+ * four settlements' worth, which is the same limit stated as a number.
+ */
+export const DAILY_EARN_CEILING = 25_000 * EARNING_PLOT_LIMIT;
 
 /** Today, as a plain date key in the player's own timezone. */
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -280,10 +295,29 @@ export function claimEarnings(ledger: VaultLedger, emerge: number, config: Chain
   };
 }
 
-/** Charge a fee. Returns null when the balance will not cover it. */
+/**
+ * Charge a fee, and burn it.
+ *
+ * Nothing the game charges is collected by anybody. A claim, a survey, a
+ * rename, a pull on the gacha: every one of them takes $EMERGE out of the
+ * player's balance and out of circulation entirely. The project takes no cut,
+ * and there is no treasury address for one to accumulate in — the only revenue
+ * the token carries is the trading fee on the coin itself, which is nothing to
+ * do with this file.
+ *
+ * That makes every action in the game deflationary, and it makes
+ * `burnedEmerge` a real running total rather than a decoration.
+ *
+ * Returns null when the balance will not cover it.
+ */
 export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
+  if (!(cost > 0)) return ledger;
   if (ledger.balance < cost) return null;
-  return { ...ledger, balance: ledger.balance - cost };
+  return {
+    ...ledger,
+    balance: ledger.balance - cost,
+    burnedEmerge: ledger.burnedEmerge + cost,
+  };
 }
 
 /** Credit a sale or refund back to the local balance. */

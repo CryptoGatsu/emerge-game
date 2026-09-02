@@ -3656,6 +3656,65 @@ function migration(world: World, rand: () => number) {
   pushFeed(world, 'social', `${name} arrived on the road, looking for work and a roof.`);
 }
 
+/**
+ * Somebody arrives, from outside the ordinary migration rules.
+ *
+ * Used by the gacha, where a player has spent real tokens on the chance of
+ * people. That purchase is honoured whatever the settlement's housing and food
+ * look like — refusing it because the granary is low would be taking payment
+ * for nothing. They arrive on the road like any other settler and take their
+ * chances with the winter.
+ */
+export function addSettler(world: World, name?: string): Citizen {
+  const rand = mulberry32(world.seed + world.counter * 7919);
+  const hash = world.counter * 37 + 11;
+  const plaza = world.layout.plaza;
+  const spots = world.layout.wanderSpots;
+  const arrival = spots.reduce((far, spot) =>
+    Math.hypot(spot[0] - plaza.x, spot[1] - plaza.y) > Math.hypot(far[0] - plaza.x, far[1] - plaza.y) ? spot : far,
+  spots[0] ?? [plaza.x, plaza.y]);
+  const chosen = name ?? SETTLER_NAMES[Math.floor(rand() * SETTLER_NAMES.length)];
+
+  const family: Family = {
+    id: `f${world.counter++}`,
+    name: familyNames[world.families.length % familyNames.length],
+    homeId: world.buildings.find((b) =>
+      b.type === 'House' && !world.families.some((f) => f.homeId === b.id))?.id ?? '',
+    members: [],
+    wealth: 40 + Math.floor(rand() * 40),
+  };
+  const settler: Citizen = {
+    id: `c${world.counter++}`,
+    name: chosen,
+    handle: `@${chosen.toLowerCase()}${(hash % 90) + 10}`,
+    familyId: family.id,
+    age: 18 + Math.floor(rand() * 26),
+    job: 'unemployed',
+    hash,
+    hunger: 74, rest: 66, social: 58, clothing: 72, purpose: 64,
+    happiness: 78, wage: 0, wallet: 30 + Math.floor(rand() * 40),
+    x: arrival[0], y: arrival[1], destX: arrival[0], destY: arrival[1],
+    path: [], dwell: 0, wanderIdx: hash % 17, errand: false,
+    phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
+    stalled: 0, bestAway: Infinity, roughSleeper: false,
+    look: Math.floor(rand() * 0xffffff),
+    livedDays: 0, lifespan: lifespanFor(rand()), warmth: 80, seated: false, chilled: true, sheltering: false,
+  };
+  world.families.push(family);
+  family.members.push(settler.id);
+  world.citizens.push(settler);
+  world.population = world.citizens.length;
+  pushFeed(world, 'social', `${chosen} walked back with the prospecting party, looking for work.`);
+  return settler;
+}
+
+/** Put materials in the yard from outside the settlement's own production. */
+export function grantResource(world: World, key: Resource, amount: number) {
+  if (!(amount > 0)) return;
+  world.resources[key] += amount;
+  note(world, 'produced', key, amount);
+}
+
 export function maintenanceCost(type: string) {
   return ({ Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6, Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10 } as Record<string, number>)[type] ?? 2;
 }
