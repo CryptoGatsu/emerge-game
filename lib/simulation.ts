@@ -11,7 +11,9 @@
  * wants immutable snapshots.
  */
 
-import { biomeFor, type BiomeKind } from './world/biomes';
+import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
+import { BRIDGE_SPAN, createLayout, type WorldLayout } from './world/layout';
+import { buildWater, type WaterField } from './world/water';
 
 export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 'river';
 export type Job = 'farmer' | 'woodcutter' | 'miner' | 'quarry' | 'miller' | 'baker' | 'carpenter' | 'blacksmith' | 'tailor' | 'unemployed';
@@ -48,6 +50,15 @@ export interface Citizen {
   targetBuildingId?: string; inside: boolean;
   /** Game hours spent making no progress toward the destination. */
   stalled: number;
+  /**
+   * Closest they have got to the current destination.
+   *
+   * Progress is judged against this rather than against the previous frame. A
+   * citizen shuffling back and forth by a fifth of a unit gets closer on every
+   * other frame, which reset a frame-to-frame detector forever and let them
+   * oscillate at the water's edge for the rest of the day.
+   */
+  bestAway: number;
   /** True when they have no bed and are sleeping out in the open. */
   roughSleeper: boolean;
   /** Cosmetic seed the renderer turns into a stable appearance. Never read by logic. */
@@ -63,6 +74,12 @@ export interface MarketQuote {
 
 export interface World {
   id: string; name: string; seed: number; biome: BiomeKind; day: number; hour: number; terrain: Terrain[];
+  /**
+   * The settlement plan for this world: its roads, its square, and where its
+   * buildings stand. Generated from the seed and the biome, so a fen and a
+   * desert are laid out as different places rather than the same village.
+   */
+  layout: WorldLayout;
   season: Season; weather: Weather; weatherSeed: number; treasury: number; population: number;
   families: Family[]; citizens: Citizen[]; buildings: Building[];
   resources: Record<Resource, number>; market: Record<Resource, MarketQuote>;
@@ -104,80 +121,22 @@ const marketBuffers: Record<Resource, number> = { wheat: 60, vegetables: 40, woo
 const terrainBonuses: Record<Terrain, Partial<Record<WorkingJob, number>>> = { fertile: { farmer: 1.3 }, forest: { woodcutter: 1.3 }, mountain: { miner: 1.3 }, rocky: { quarry: 1.25 }, coastal: {}, river: { farmer: 1.15 } };
 
 /**
- * The settlement road graph, laid out as a real village plan rather than a
- * diagram: a main street through the square, a residential lane to the
- * south-west, a farm track, a mountain road east and a forest path west.
- * The renderer rasterises curves through these nodes into stone paths, so the
- * same data drives both routing and the visible roads.
+ * The water for a world.
+ *
+ * Held here rather than on the world object because it carries lookup closures
+ * and `tick()` structured-clones worlds for its callers. Keyed by seed, which
+ * is what the water is a function of, and capped so a session that visits many
+ * plots does not accumulate fields for all of them.
  */
-export const ROAD_NODES: [number, number][] = [
-  [50, 48], // 0  town square
-  [50, 40], // 1  market front
-  [48, 22], // 2  north road to the bridge
-  [39, 48], // 3  main street west
-  [62, 48], // 4  main street east
-  [41, 40], // 5  bank corner
-  [59, 40], // 6  storage corner
-  [45, 56], // 7  tavern lane
-  [50, 58], // 8  south fork
-  [37, 59], // 9  residential lane
-  [29, 65], // 10 residential end
-  [31, 74], // 11 farm track
-  [57, 57], // 12 bakery corner
-  [65, 51], // 13 mill approach
-  [64, 65], // 14 forge lane
-  [72, 44], // 15 east ridge
-  [78, 36], // 16 quarry road
-  [85, 29], // 17 mine head
-  [31, 44], // 18 west lane
-  [27, 47], // 19 woodcutter camp
-  [53, 68], // 20 pond walk
-  [44, 66], // 21 tailor row
-  [44, 8],  // 22 north grove, across the bridge
-];
-export const ROAD_EDGES: number[][] = [
-  [1, 3, 4, 8],       // 0
-  [0, 2, 5, 6],       // 1
-  [1, 22],            // 2
-  [0, 5, 7, 18],      // 3
-  [0, 6, 13, 15],     // 4
-  [1, 3],             // 5
-  [1, 4],             // 6
-  [3, 8, 9, 21],      // 7
-  [0, 7, 12, 20],     // 8
-  [7, 10, 21],        // 9
-  [9, 11],            // 10
-  [10],               // 11
-  [8, 13, 14],        // 12
-  [4, 12],            // 13
-  [12, 20],           // 14
-  [4, 16],            // 15
-  [15, 17],           // 16
-  [16],               // 17
-  [3, 19],            // 18
-  [18],               // 19
-  [8, 14, 21],        // 20
-  [7, 9, 20],         // 21
-  [2],                // 22
-];
-const roadNodes = ROAD_NODES;
-const roadEdges = ROAD_EDGES;
-
-// Sampling along every road segment gives ~90 distinct loitering spots, so
-// wandering citizens spread along the streets instead of stacking on junctions.
-const wanderSpots: [number, number][] = (() => {
-  const out: [number, number][] = [...roadNodes];
-  const seen = new Set<string>();
-  roadEdges.forEach((neighbours, a) => neighbours.forEach((b) => {
-    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    for (const t of [0.2, 0.4, 0.6, 0.8]) {
-      out.push([roadNodes[a][0] + (roadNodes[b][0] - roadNodes[a][0]) * t, roadNodes[a][1] + (roadNodes[b][1] - roadNodes[a][1]) * t]);
-    }
-  }));
-  return out;
-})();
+const waterCache = new Map<number, WaterField>();
+export function waterOf(world: { seed: number; biome: BiomeKind }): WaterField {
+  const cached = waterCache.get(world.seed);
+  if (cached) return cached;
+  const field = buildWater(world.seed, biomeProfile(world.biome));
+  if (waterCache.size >= 12) waterCache.delete(waterCache.keys().next().value as number);
+  waterCache.set(world.seed, field);
+  return field;
+}
 
 export function mulberry32(seed: number) {
   return function () { let t = (seed += 0x6D2B79F5); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -197,14 +156,31 @@ function standingOffset(hash: number, spread = 2.4): [number, number] {
   return [Math.cos(angle) * r, Math.sin(angle) * r * 0.6];
 }
 
+/**
+ * One citizen's day.
+ *
+ * The offsets are drawn from the whole hash rather than from `hash % 3`, and
+ * that is the entire point of this function. Three or four distinct wake times
+ * across a whole settlement meant everybody stepped out of their door in the
+ * same minute: measured at peak, all twenty-eight citizens were on the street
+ * at once, which is why a village of twenty-eight read as a crowd of far more.
+ * Spreading departures over a couple of hours costs nothing and makes the
+ * streets fill and empty the way a real one does.
+ */
 function scheduleFor(hash: number) {
+  // Three independent fractions from the hash, so wake time does not determine
+  // lunch time and the day does not move as a block.
+  const a = ((hash * 2654435761) >>> 0) / 4294967296;
+  const b = ((hash * 40503 + 12345) >>> 0) / 4294967296;
+  const c = ((hash * 1103515245 + 98765) >>> 0) / 4294967296;
+  const wake = 5.4 + a * 2.6;
   return {
-    wake: 6 + (hash % 3) * 0.5,
-    workStart: 8 + (hash % 4) * 0.25,
-    lunch: 12 + (hash % 3) * 0.3,
-    lunchEnd: 13 + (hash % 2) * 0.4,
-    workEnd: 17 + (hash % 3) * 0.5,
-    homeTime: 21 + (hash % 4) * 0.3,
+    wake,
+    workStart: wake + 1.3 + b * 1.4,
+    lunch: 11.6 + c * 1.6,
+    lunchEnd: 12.6 + c * 1.6 + b * 0.5,
+    workEnd: 16.2 + a * 2.4,
+    homeTime: 20.2 + b * 2.6,
   };
 }
 
@@ -228,22 +204,63 @@ function activityFor(phase: Phase): Activity {
   return phase === 'working' ? 'working' : phase === 'eating' ? 'eating' : phase === 'socialising' ? 'trading' : phase === 'wandering' ? 'idle' : 'resting';
 }
 
-function nearestRoad(x: number, y: number) {
+// Routing runs on the world's own plan, not on a shared one. Every helper here
+// takes the layout rather than reading a module constant, because two worlds
+// open at once — the one being played and the one being previewed in the land
+// office — have different roads.
+function nearestRoad(layout: WorldLayout, x: number, y: number) {
+  const nodes = layout.nodes;
   let best = 0, dist = Infinity;
-  for (let i = 0; i < roadNodes.length; i++) { const n = roadNodes[i], d = (n[0] - x) ** 2 + (n[1] - y) ** 2; if (d < dist) { dist = d; best = i; } }
+  for (let i = 0; i < nodes.length; i++) { const n = nodes[i], d = (n[0] - x) ** 2 + (n[1] - y) ** 2; if (d < dist) { dist = d; best = i; } }
   return best;
 }
-function roadDistance(a: number, b: number) { return Math.hypot(roadNodes[a][0] - roadNodes[b][0], roadNodes[a][1] - roadNodes[b][1]); }
-function roadPath(start: number, end: number): number[] {
+
+/** Whether a straight walk between two points stays out of the water. */
+function dryLine(water: WaterField, layout: WorldLayout, ax: number, ay: number, bx: number, by: number) {
+  const len = Math.hypot(bx - ax, by - ay);
+  const steps = Math.max(2, Math.ceil(len));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+    if (water.isWater(x, y) && !onBridge(layout, x, y)) return false;
+  }
+  return true;
+}
+
+/**
+ * The road node to join or leave the network at.
+ *
+ * Nearest is not good enough when there is water about: the nearest junction to
+ * a house on the far bank is often across the channel from it, and a citizen
+ * routed through it walks straight at the river. This prefers the closest node
+ * whose last leg is walkable, and only falls back to plain nearest when no node
+ * qualifies — at which point the stall detector will find them something else
+ * to do rather than leave them swimming.
+ */
+function joinRoad(layout: WorldLayout, water: WaterField, x: number, y: number) {
+  const nodes = layout.nodes;
+  const order = nodes
+    .map((n, i) => ({ i, d: (n[0] - x) ** 2 + (n[1] - y) ** 2 }))
+    .sort((a, b) => a.d - b.d);
+  for (const { i } of order) {
+    if (dryLine(water, layout, x, y, nodes[i][0], nodes[i][1])) return i;
+  }
+  return order[0].i;
+}
+function roadDistance(layout: WorldLayout, a: number, b: number) {
+  const n = layout.nodes;
+  return Math.hypot(n[a][0] - n[b][0], n[a][1] - n[b][1]);
+}
+function roadPath(layout: WorldLayout, start: number, end: number): number[] {
   if (start === end) return [start];
-  const open = [start], came = new Map<number, number>(), g = new Map([[start, 0]]), f = new Map([[start, roadDistance(start, end)]]);
+  const open = [start], came = new Map<number, number>(), g = new Map([[start, 0]]), f = new Map([[start, roadDistance(layout, start, end)]]);
   while (open.length) {
     open.sort((a, b) => (f.get(a) ?? Infinity) - (f.get(b) ?? Infinity));
     const current = open.shift()!;
     if (current === end) { const path = [current]; let cursor = current; while (came.has(cursor)) { cursor = came.get(cursor)!; path.unshift(cursor); } return path; }
-    for (const next of roadEdges[current]) {
-      const score = (g.get(current) ?? Infinity) + roadDistance(current, next);
-      if (score < (g.get(next) ?? Infinity)) { came.set(next, current); g.set(next, score); f.set(next, score + roadDistance(next, end)); if (!open.includes(next)) open.push(next); }
+    for (const next of layout.edges[current]) {
+      const score = (g.get(current) ?? Infinity) + roadDistance(layout, current, next);
+      if (score < (g.get(next) ?? Infinity)) { came.set(next, current); g.set(next, score); f.set(next, score + roadDistance(layout, next, end)); if (!open.includes(next)) open.push(next); }
     }
   }
   return [start, end];
@@ -283,11 +300,17 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
       c.roughSleeper = !shelter || phase === 'sleeping';
     }
   } else if (phase === 'working') {
-    // Alternate between the workplace and a delivery run, so work is a visible loop.
+    // Mostly at the workbench, with an occasional delivery run so work is a
+    // visible loop rather than a statue. It used to alternate every trip, which
+    // meant a worker was on the road for half the working day — with the whole
+    // settlement doing it at once, the streets never emptied and eighteen
+    // people read as a crowd of far more.
     const workplace = jobBuilding(world, c);
     const depot = findBuilding(world, 'Storage') ?? findBuilding(world, 'Market');
-    target = c.errand ? depot ?? workplace : workplace ?? depot;
-    c.errand = !c.errand;
+    const runErrand = (c.wanderIdx + c.hash) % 3 === 0;
+    target = runErrand ? depot ?? workplace : workplace ?? depot;
+    c.errand = runErrand;
+    c.wanderIdx = (c.wanderIdx + 1) % Math.max(1, world.layout.wanderSpots.length);
   } else if (phase === 'eating') {
     target = findBuilding(world, 'Market') ?? findBuilding(world, 'Bakery');
   } else if (phase === 'socialising') {
@@ -305,8 +328,9 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   }
 
   if (!target) {
-    c.wanderIdx = (c.wanderIdx * 7 + c.hash + 3) % wanderSpots.length;
-    const spot = wanderSpots[c.wanderIdx];
+    const spots = world.layout.wanderSpots;
+    c.wanderIdx = (c.wanderIdx * 7 + c.hash + 3) % spots.length;
+    const spot = spots[c.wanderIdx];
     target = { x: spot[0], y: spot[1] };
     spread = 1.2;
   }
@@ -328,9 +352,44 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     c.destX = clamp(b.x + (dx / d) * r, 3, 97);
     c.destY = clamp(b.y + (dy / d) * r, 5, 95);
   }
-  c.path = roadPath(nearestRoad(c.x, c.y), nearestRoad(c.destX, c.destY)).slice(1);
-  c.dwell = phase === 'working' ? 1.2 + (c.hash % 4) * 0.4 : phase === 'socialising' ? 0.9 + (c.hash % 3) * 0.5 : 0.7 + (c.hash % 5) * 0.3;
-  if (phase === 'socialising' || phase === 'wandering') c.wanderIdx = (c.wanderIdx + 1) % wanderSpots.length;
+  // And not in the river. `standingOffset` scatters people in a ring around
+  // their target, and on a fen or a coast that ring reaches the water; without
+  // this they walk to a spot they cannot stand on, get pushed out, and walk
+  // back to it — the same loop that footprints used to cause.
+  const water = waterOf(world);
+  if (water.isWater(c.destX, c.destY)) {
+    const out = water.toLand(c.destX, c.destY);
+    c.destX = clamp(c.destX + out.x * (out.d + 1.2), 3, 97);
+    c.destY = clamp(c.destY + out.y * (out.d + 1.2), 5, 95);
+  }
+  const full = roadPath(
+    world.layout,
+    joinRoad(world.layout, water, c.x, c.y),
+    joinRoad(world.layout, water, c.destX, c.destY),
+  );
+  // Pull the string tight at the near end: skip leading junctions the citizen
+  // can already walk past. This used to drop the first node unconditionally,
+  // which is where the swimming came from — the line to the *second* node was
+  // never checked for water, so somebody standing on a bank was routed straight
+  // across the channel and spent the day shuffling against it.
+  let from = 0;
+  while (from + 1 < full.length) {
+    const here = world.layout.nodes[full[from]];
+    const next = world.layout.nodes[full[from + 1]];
+    if (!dryLine(water, world.layout, c.x, c.y, next[0], next[1])) break;
+    const detour = Math.hypot(here[0] - c.x, here[1] - c.y) + Math.hypot(next[0] - here[0], next[1] - here[1]);
+    if (Math.hypot(next[0] - c.x, next[1] - c.y) > detour - 0.5) break;
+    from++;
+  }
+  c.path = full.slice(from);
+  c.bestAway = Infinity;
+  // How long they stay put once they get there. Long enough at work that the
+  // working day is spent working, and staggered across the population so the
+  // settlement does not turn over all at once.
+  c.dwell = phase === 'working' ? 2.6 + (c.hash % 5) * 0.62
+    : phase === 'socialising' ? 1.3 + (c.hash % 4) * 0.55
+      : 0.9 + (c.hash % 5) * 0.45;
+  if (phase === 'socialising' || phase === 'wandering') c.wanderIdx = (c.wanderIdx + 1) % world.layout.wanderSpots.length;
 }
 
 function hasArrived(c: Citizen) { return c.path.length === 0 && Math.hypot(c.destX - c.x, c.destY - c.y) < 0.35; }
@@ -361,7 +420,7 @@ function buildObstacles(world: World): Obstacle[] {
  * inside footprints by design, and someone pushed off the very spot they are
  * walking to would never get there.
  */
-function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: number) {
+function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: number, water: WaterField, onBridge: boolean) {
   // A fixed side per citizen, so nobody dithers left and right along a wall.
   const side = c.hash % 2 === 0 ? 1 : -1;
   let pushX = 0, pushY = 0, hits = 0;
@@ -386,18 +445,60 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
     pushY += ny * depth + nx * side * 0.2;
   }
 
-  if (!hits) return;
-  // One combined correction. Resolving each footprint in turn let a citizen
-  // caught between two of them be pushed out of one straight into the other,
-  // every frame, forever.
-  const len = Math.hypot(pushX, pushY);
-  const limit = 0.4;
-  const k = len > limit ? limit / len : 1;
-  c.x = clamp(c.x + pushX * k, 2, 98);
-  c.y = clamp(c.y + pushY * k, 4, 96);
+  if (hits) {
+    // One combined correction. Resolving each footprint in turn let a citizen
+    // caught between two of them be pushed out of one straight into the other,
+    // every frame, forever.
+    const len = Math.hypot(pushX, pushY);
+    const limit = 0.4;
+    const k = len > limit ? limit / len : 1;
+    c.x = clamp(c.x + pushX * k, 2, 98);
+    c.y = clamp(c.y + pushY * k, 4, 96);
+  }
+
+  // And out of the river.
+  //
+  // The step is uncapped on purpose — being briefly inside a wall looks like a
+  // near miss, a single frame standing on open water does not — but a straight
+  // shove toward the nearest bank drives people into whatever is built on it,
+  // which on a fen is most of the town: measured at fourteen per cent of frames
+  // spent inside somebody's wall. So the escape is a short search for a spot
+  // that is both dry and clear, and only settles for merely dry.
+  if (!onBridge && water.isWater(c.x, c.y)) {
+    const out = water.toLand(c.x, c.y);
+    const reach = out.d + 0.8;
+    let bestX = clamp(c.x + out.x * reach, 2, 98);
+    let bestY = clamp(c.y + out.y * reach, 4, 96);
+    for (const turn of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
+      const cos = Math.cos(turn), sin = Math.sin(turn);
+      const nx = out.x * cos - out.y * sin;
+      const ny = out.x * sin + out.y * cos;
+      const x = clamp(c.x + nx * reach, 2, 98);
+      const y = clamp(c.y + ny * reach, 4, 96);
+      if (water.isWater(x, y)) continue;
+      if (turn === 0) { bestX = x; bestY = y; }
+      const clear = obstacles.every((o) => o.id === c.destId || (o.x - x) ** 2 + (o.y - y) ** 2 >= o.r * o.r);
+      if (clear) { bestX = x; bestY = y; break; }
+    }
+    c.x = bestX;
+    c.y = bestY;
+  }
 }
 
-function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[]) {
+/**
+ * Whether a position is on one of the world's bridges.
+ *
+ * A causeway settlement is roads over water by design, so the water push has to
+ * know where the decks are or its own citizens would be shoved off them.
+ */
+function onBridge(layout: WorldLayout, x: number, y: number) {
+  for (const b of layout.bridges) {
+    if ((b.x - x) ** 2 + (b.y - y) ** 2 < BRIDGE_SPAN * BRIDGE_SPAN) return true;
+  }
+  return false;
+}
+
+function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: WorldLayout, water: WaterField) {
   let budget = (c.age < 16 ? 9 : 12.5) * hours;
   const startX = c.x, startY = c.y;
   c.moving = false;
@@ -406,21 +507,58 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[]) {
 
   while (budget > 0 && guard++ < 24) {
     const final = c.path.length === 0;
-    const tx = final ? c.destX : roadNodes[c.path[0]][0];
-    const ty = final ? c.destY : roadNodes[c.path[0]][1];
+    const tx = final ? c.destX : layout.nodes[c.path[0]][0];
+    const ty = final ? c.destY : layout.nodes[c.path[0]][1];
     lastTargetX = tx; lastTargetY = ty;
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
     if (d < 0.0001) { if (final) break; c.path.shift(); continue; }
 
     const step = Math.min(d, budget);
-    c.x = clamp(c.x + (dx / d) * step, 2, 98);
-    c.y = clamp(c.y + (dy / d) * step, 4, 96);
+    let nx = clamp(c.x + (dx / d) * step, 2, 98);
+    let ny = clamp(c.y + (dy / d) * step, 4, 96);
+
+    // Do not step into the water in the first place.
+    //
+    // Undoing the step afterwards looked equivalent and was not: walking in,
+    // being shoved out and walking in again is a limit cycle, and it showed up
+    // as a direction reversal on one frame in six across the fen and the swamp
+    // — the same signature as the vibration that predictive steering used to
+    // cause. Refusing the step and sliding along the bank instead is stable,
+    // and it makes people walk around an inlet the way they walk around a wall.
+    if (water.isWater(nx, ny) && !onBridge(layout, nx, ny)) {
+      const out = water.toLand(nx, ny);
+      // Slide along the bank: the tangent to the escape direction, taking
+      // whichever way points closer to where they are going.
+      // The side is fixed per citizen rather than chosen by which tangent
+      // points nearer the target. Choosing per frame flips as the geometry
+      // changes and the citizen shuffles left and right against the bank —
+      // measured at a reversal on one frame in five, worse than not sliding at
+      // all. This is the same fix the wall push needed.
+      const first = c.hash % 2 === 0 ? 0 : 1;
+      const tangents: [number, number][] = [[-out.y, out.x], [out.y, -out.x]];
+      let slid = false;
+      for (const t of [tangents[first], tangents[1 - first]]) {
+        const sx = clamp(c.x + t[0] * step, 2, 98);
+        const sy = clamp(c.y + t[1] * step, 4, 96);
+        if (water.isWater(sx, sy)) continue;
+        nx = sx; ny = sy; slid = true;
+        break;
+      }
+      if (!slid) break;
+      c.x = nx; c.y = ny;
+      c.moving = true;
+      budget -= step;
+      continue;
+    }
+
+    c.x = nx;
+    c.y = ny;
     c.moving = true;
     budget -= step;
     if (step >= d && !final) c.path.shift(); else if (step >= d) break;
   }
 
-  resolveOverlap(c, obstacles, lastTargetX, lastTargetY);
+  resolveOverlap(c, obstacles, lastTargetX, lastTargetY, water, onBridge(layout, c.x, c.y));
 
   // Facing comes from the whole frame's movement, not from each sub-step, and
   // only when the frame actually took someone somewhere.
@@ -433,6 +571,7 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[]) {
 
 function moveCitizens(world: World, hours: number) {
   const obstacles = buildObstacles(world);
+  const water = waterOf(world);
   for (const c of world.citizens) {
     if (c.age < 16) c.job = 'unemployed';
     let phase = phaseFor(c, world.hour);
@@ -448,20 +587,23 @@ function moveCitizens(world: World, hours: number) {
       }
     }
 
-    const beforeX = c.x, beforeY = c.y;
-    const wasAway = Math.hypot(c.destX - c.x, c.destY - c.y);
-    stepCitizen(c, hours, obstacles);
-    const nowAway = Math.hypot(c.destX - c.x, c.destY - c.y);
+    stepCitizen(c, hours, obstacles, world.layout, water);
 
-    // Safety net: steering around a crowded corner can occasionally leave
-    // someone shuffling on the spot. If they make no headway, pick somewhere
-    // else to be rather than let them stand there for the rest of the day.
-    const moved = Math.hypot(c.x - beforeX, c.y - beforeY);
-    if (!hasArrived(c) && (moved < hours * 0.5 || nowAway > wasAway - hours * 0.2)) {
+    // Safety net: squeezing past a crowded corner or an inlet can leave someone
+    // shuffling on the spot. Progress is judged against the closest they have
+    // ever got to this destination, so trading a fifth of a unit back and forth
+    // no longer counts as getting somewhere; if they genuinely cannot make
+    // headway, they pick somewhere else to be rather than stand there all day.
+    const nowAway = Math.hypot(c.destX - c.x, c.destY - c.y);
+    if (hasArrived(c)) {
+      c.stalled = 0;
+      c.bestAway = 0;
+    } else if (nowAway < c.bestAway - 0.25) {
+      c.bestAway = nowAway;
+      c.stalled = 0;
+    } else {
       c.stalled += hours;
       if (c.stalled > 0.75) { c.stalled = 0; assignDestination(world, c, phase); }
-    } else {
-      c.stalled = 0;
     }
 
     const arrived = hasArrived(c);
@@ -590,21 +732,20 @@ export function renameWorld(world: World, name: string) {
  * with fields and a mill. Plots differ in what you can do on them, not just in
  * how they look.
  */
-function starterBuildings(seed: number): Building[] {
+function starterBuildings(seed: number, layout: WorldLayout): Building[] {
   const make = (id: string, type: string, x: number, y: number): Building => ({ id, type, x, y, workers: [], active: true });
+  const civic = layout.civic;
   const buildings = [
-    make('market', 'Market', 50, 35),
-    make('bank', 'Bank', 40, 33),
-    make('storage', 'Storage', 60, 33),
-    make('tavern', 'Tavern', 42, 60),
+    make('market', 'Market', civic[0][0], civic[0][1]),
+    make('bank', 'Bank', civic[1][0], civic[1][1]),
+    make('storage', 'Storage', civic[2][0], civic[2][1]),
+    make('tavern', 'Tavern', civic[3][0], civic[3][1]),
   ];
 
-  // Work sites ring the settlement, spaced around it; `enforceSpacing` then
-  // settles them into legal positions.
-  const sites: [number, number][] = [
-    [28, 80], [23, 51], [68, 55], [59, 61], [35, 41], [68, 69], [41, 71],
-    [80, 30], [89, 23], [40, 80], [30, 33], [72, 40], [20, 40], [58, 78],
-  ];
+  // Trades go on the sites the plan set aside for them — the outer ends of the
+  // arms, the far side of the ring, the head of the causeway — so the shape of
+  // the settlement decides where its work happens.
+  const sites = layout.workSites;
   const trades = biomeFor(seed).trades;
   trades.forEach((type, i) => {
     const [x, y] = sites[i % sites.length];
@@ -613,62 +754,158 @@ function starterBuildings(seed: number): Building[] {
   return buildings;
 }
 
-/** Homes line the residential lane running south-west out of the square. */
-const HOUSE_PLOTS: [number, number][] = [
-  [41, 54], [34, 63], [30, 59], [25, 69], [34, 70], [40, 62],
-  [47, 62], [23, 62], [37, 55], [27, 76],
-];
-
 /**
- * Push buildings apart until no two footprints overlap and none sits on a road
- * junction.
+ * Settle the buildings into legal positions.
  *
- * Hand-placed layouts drift out of spec the moment anything moves, and an
- * overlapping pair leaves a corridor with no standing room in it — a citizen
- * walking through gets shoved out of one wall into the other and spends the
- * day vibrating between them. This makes the guarantee structural.
+ * Three constraints have to hold at once: no two footprints may overlap, none
+ * may sit on a road, and none may stand in water. An earlier version applied
+ * them in sequence within each pass, so whichever ran last simply overwrote the
+ * others and the loop never converged — measured at four interpenetrating pairs
+ * and thirteen buildings standing in the street on a single plot, which is
+ * exactly the condition that leaves a corridor with no room to walk in and sets
+ * citizens vibrating between two walls.
+ *
+ * This accumulates every correction for a pass and applies the sum, damped.
+ * That is an ordinary relaxation and it actually converges; the loop exits on
+ * the residual rather than on a pass count.
  */
-function enforceSpacing(buildings: Building[]) {
-  for (let pass = 0; pass < 60; pass++) {
-    let moved = false;
+function enforceSpacing(buildings: Building[], layout: WorldLayout, water: WaterField) {
+  const n = buildings.length;
+  const dx = new Float64Array(n);
+  const dy = new Float64Array(n);
 
-    for (let i = 0; i < buildings.length; i++) {
-      for (let j = i + 1; j < buildings.length; j++) {
+  for (let pass = 0; pass < 240; pass++) {
+    dx.fill(0);
+    dy.fill(0);
+    let residual = 0;
+
+    // Footprints must not overlap.
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
         const a = buildings[i], b = buildings[j];
         const need = footprintRadius(a) + footprintRadius(b) + 0.8;
-        let dx = b.x - a.x, dy = b.y - a.y;
-        let d = Math.hypot(dx, dy);
+        let ex = b.x - a.x, ey = b.y - a.y;
+        let d = Math.hypot(ex, ey);
         if (d >= need) continue;
-        if (d < 0.0001) { dx = 1; dy = 0; d = 1; }
-        const shift = (need - d) / 2;
-        const nx = dx / d, ny = dy / d;
-        a.x = clamp(a.x - nx * shift, 6, 94); a.y = clamp(a.y - ny * shift, 8, 92);
-        b.x = clamp(b.x + nx * shift, 6, 94); b.y = clamp(b.y + ny * shift, 8, 92);
-        moved = true;
+        if (d < 0.0001) { ex = 1; ey = 0; d = 1; }
+        const push = (need - d) / 2;
+        residual = Math.max(residual, need - d);
+        dx[i] -= (ex / d) * push; dy[i] -= (ey / d) * push;
+        dx[j] += (ex / d) * push; dy[j] += (ey / d) * push;
       }
     }
 
-    for (const b of buildings) {
-      const need = footprintRadius(b) + 0.6;
-      for (const [nx0, ny0] of roadNodes) {
-        let dx = b.x - nx0, dy = b.y - ny0;
-        let d = Math.hypot(dx, dy);
-        if (d >= need) continue;
-        if (d < 0.0001) { dx = 0; dy = 1; d = 1; }
-        b.x = clamp(nx0 + (dx / d) * need, 6, 94);
-        b.y = clamp(ny0 + (dy / d) * need, 8, 92);
-        moved = true;
+    // Clear of the whole road, not just its junctions. Plans generated per
+    // biome put buildings far closer to the carriageway than the old
+    // hand-placed sites did, and a house whose wall overlaps a street is a
+    // house every passer-by walks into.
+    for (let i = 0; i < n; i++) {
+      const b = buildings[i];
+      const need = footprintRadius(b) + 1;
+      for (let u = 0; u < layout.nodes.length; u++) {
+        for (const v of layout.edges[u]) {
+          if (v < u) continue;
+          const [ax, ay] = layout.nodes[u];
+          const [bx, by] = layout.nodes[v];
+          const ex = bx - ax, ey = by - ay;
+          const len2 = ex * ex + ey * ey;
+          // Closest point on the segment to the building's centre.
+          const t = len2 > 0 ? clamp(((b.x - ax) * ex + (b.y - ay) * ey) / len2, 0, 1) : 0;
+          const px = ax + ex * t, py = ay + ey * t;
+          let ox = b.x - px, oy = b.y - py;
+          let d = Math.hypot(ox, oy);
+          if (d >= need) continue;
+          if (d < 0.0001) { ox = -ey; oy = ex; d = Math.hypot(ox, oy) || 1; }
+          residual = Math.max(residual, need - d);
+          dx[i] += (ox / d) * (need - d);
+          dy[i] += (oy / d) * (need - d);
+        }
       }
     }
 
-    if (!moved) break;
+    // And nothing stands in the river.
+    for (let i = 0; i < n; i++) {
+      const b = buildings[i];
+      if (!water.isWater(b.x, b.y)) continue;
+      const out = water.toLand(b.x, b.y);
+      residual = Math.max(residual, out.d + 2.4);
+      dx[i] += out.x * (out.d + 2.4);
+      dy[i] += out.y * (out.d + 2.4);
+    }
+
+    if (residual < 0.02) return;
+
+    // Damped, because a full correction against several constraints at once
+    // overshoots and the whole set oscillates.
+    for (let i = 0; i < n; i++) {
+      buildings[i].x = clamp(buildings[i].x + dx[i] * 0.5, 6, 94);
+      buildings[i].y = clamp(buildings[i].y + dy[i] * 0.5, 8, 92);
+    }
+  }
+
+  // Anything still in violation is not going to be nudged free: it is wedged
+  // somewhere with no valid position nearby. Move it instead. A building that
+  // ends up a little further from its intended plot is invisible; two buildings
+  // sharing a wall is a corridor citizens cannot walk down.
+  relocateStuck(buildings, layout, water);
+}
+
+/** Somewhere this building can legally stand, searched outward in a spiral. */
+function relocateStuck(buildings: Building[], layout: WorldLayout, water: WaterField) {
+  const legal = (b: Building, x: number, y: number, bankGap: number) => {
+    if (x < 6 || x > 94 || y < 8 || y > 92) return false;
+    // Leave walkable bank, not merely dry ground: a wall closer to the water
+    // than a person is wide turns the gap between them into a trap.
+    if (water.distanceToWater(x, y) < footprintRadius(b) + bankGap) return false;
+    const need = footprintRadius(b) + 1;
+    for (let u = 0; u < layout.nodes.length; u++) {
+      for (const v of layout.edges[u]) {
+        if (v < u) continue;
+        const [ax, ay] = layout.nodes[u];
+        const [bx, by] = layout.nodes[v];
+        const ex = bx - ax, ey = by - ay;
+        const len2 = ex * ex + ey * ey;
+        const t = len2 > 0 ? clamp(((x - ax) * ex + (y - ay) * ey) / len2, 0, 1) : 0;
+        if (Math.hypot(x - (ax + ex * t), y - (ay + ey * t)) < need) return false;
+      }
+    }
+    for (const other of buildings) {
+      if (other === b) continue;
+      const gap = footprintRadius(b) + footprintRadius(other) + 0.8;
+      if ((other.x - x) ** 2 + (other.y - y) ** 2 < gap * gap) return false;
+    }
+    return true;
+  };
+
+  for (const b of buildings) {
+    if (legal(b, b.x, b.y, 1.5)) continue;
+    let moved = false;
+    // Roomy first, then cramped, so a fen still gets its buildings placed.
+    for (const bankGap of [1.5, 0.4]) {
+      for (let ring = 1; ring <= 14 && !moved; ring++) {
+        for (let k = 0; k < 16; k++) {
+          const a = (k / 16) * Math.PI * 2 + ring * 0.4;
+          const x = b.x + Math.cos(a) * ring * 2.4;
+          const y = b.y + Math.sin(a) * ring * 2.4 * 0.9;
+          if (!legal(b, x, y, bankGap)) continue;
+          b.x = x; b.y = y; moved = true;
+          break;
+        }
+      }
+      if (moved) break;
+    }
   }
 }
 
 export function createWorld(seed = 481516, name?: string): World {
   const rand = mulberry32(seed);
+  const profile = biomeFor(seed);
+  const water = waterOf({ seed, biome: profile.kind });
+  const layout = createLayout(seed, profile, water);
   const terrain = Array.from({ length: 3 }, () => (['fertile', 'forest', 'mountain', 'rocky', 'coastal', 'river'] as Terrain[])[Math.floor(rand() * 6)]);
-  const count = 20 + Math.floor(rand() * 11);
+  // How many people the land carries. A desert supports fewer than a grassland,
+  // and the settlement should read as the size the ground can feed.
+  const count = Math.max(12, Math.round((17 + rand() * 8) * profile.populationScale));
   const families: Family[] = [];
   const citizens: Citizen[] = [];
   for (let i = 0; i < Math.ceil(count / 4); i++) families.push({ id: `f${i}`, name: familyNames[i % familyNames.length], homeId: `h${i}`, members: [], wealth: 80 + Math.floor(rand() * 80) });
@@ -677,28 +914,33 @@ export function createWorld(seed = 481516, name?: string): World {
     const age = i % 5 === 0 ? 8 + Math.floor(rand() * 8) : 18 + Math.floor(rand() * 42);
     const hash = i * 37 + 11;
     const name = names[i % names.length];
-    const x = 34 + rand() * 32, y = 38 + rand() * 26;
+    // Everyone starts somewhere near the square rather than in a fixed box, so
+    // a settlement built on the far side of the map does not open with its
+    // population standing in a field.
+    const spawn = layout.wanderSpots[Math.floor(rand() * layout.wanderSpots.length)];
+    const x = clamp(spawn[0] + (rand() - 0.5) * 6, 4, 96), y = clamp(spawn[1] + (rand() - 0.5) * 6, 6, 94);
     const citizen: Citizen = {
       id: `c${i}`, name, handle: `@${name.toLowerCase()}${(hash % 90) + 10}`, familyId: family.id, age, hash,
       job: age >= 16 ? chooseJobFromSeed(terrain, i) : 'unemployed',
       hunger: 82 + rand() * 18, rest: 72 + rand() * 28, social: 60 + rand() * 40, clothing: 72 + rand() * 28,
       purpose: 55 + rand() * 45, happiness: 78, wage: 0, wallet: 45 + Math.floor(rand() * 55),
       x, y, destX: x, destY: y, path: [], dwell: 0, wanderIdx: i * 5, errand: false,
-      phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false, stalled: 0, roughSleeper: false,
+      phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
+      stalled: 0, bestAway: Infinity, roughSleeper: false,
       look: Math.floor(rand() * 0xffffff),
     };
     citizens.push(citizen);
     family.members.push(citizen.id);
   }
-  const buildings = starterBuildings(seed);
+  const buildings = starterBuildings(seed, layout);
   families.forEach((f, i) => {
-    const [hx, hy] = HOUSE_PLOTS[i % HOUSE_PLOTS.length];
+    const [hx, hy] = layout.housePlots[i % layout.housePlots.length];
     buildings.push({ id: f.homeId, type: 'House', x: hx, y: hy, workers: [], active: true });
   });
-  enforceSpacing(buildings);
+  enforceSpacing(buildings, layout, water);
 
   const world: World = {
-    id: `world-${seed.toString(36)}`, name: name?.trim() || defaultWorldName(seed), seed, biome: biomeFor(seed).kind, day: 1, hour: 8, terrain, season: 'Spring',
+    id: `world-${seed.toString(36)}`, name: name?.trim() || defaultWorldName(seed), seed, biome: profile.kind, layout, day: 1, hour: 8, terrain, season: 'Spring',
     weather: weatherFor('Spring', seed, 1), weatherSeed: seed, treasury: 3000, population: count,
     families, citizens, buildings,
     resources: { wheat: 60, vegetables: 30, wood: 50, stone: 20, ironOre: 10, wool: 8, flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10 },
@@ -1105,6 +1347,10 @@ export function tick(world: World, hours = 1): World {
 /** Player-driven construction. Returns the new building, or null if unaffordable. */
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {
   if (world.treasury < cost) return null;
+  // Refuse the river rather than quietly moving the building somewhere else:
+  // a player who clicked on water should be told no, not have their choice
+  // silently overridden.
+  if (waterOf(world).isWater(x, y)) return null;
   const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, 6, 94), y: clamp(y, 8, 92), workers: [], active: true };
   world.treasury -= cost;
   world.buildings.push(building);

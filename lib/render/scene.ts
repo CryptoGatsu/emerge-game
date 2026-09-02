@@ -26,6 +26,7 @@ import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, worldToScreen } from '../world/iso';
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
 import type { ShoreEdge } from './tiles';
+import type { BiomeKind } from '../world/biomes';
 
 export type PickTarget = { kind: 'citizen' | 'building'; id: string } | null;
 
@@ -92,6 +93,24 @@ const FOLIAGE_SEASON: Record<string, number> = {
  * tone gradually across tens of tiles gives the terrain depth; varying it per
  * tile would just draw the isometric grid.
  */
+/**
+ * What the country beyond the plot looks like, per biome.
+ *
+ * The backdrop is one tiling forest texture; tinting it is enough to place it,
+ * because at that distance only the overall colour reads.
+ */
+const BACKDROP_TINT: Record<BiomeKind, number> = {
+  valley: 0xffffff,
+  woodland: 0xd6e8cc,
+  highland: 0xb9c4c2,
+  wetland: 0xcfe0cf,
+  steppe: 0xd8cf96,
+  coast: 0xc8dcd2,
+  desert: 0xd9b478,
+  swamp: 0x9fb69c,
+  grassland: 0xd8ecbe,
+};
+
 function groundTint(tone: number) {
   const t = Math.max(0, Math.min(1, tone));
   const level = Math.round(214 + t * 41);
@@ -200,6 +219,9 @@ export class EmergeScene {
       width: SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX + pad * 2,
       height: SCENE_BOUNDS.maxY - SCENE_BOUNDS.minY + pad * 2,
     });
+    // The distant land belongs to the same biome as the map: an unbroken green
+    // forest ringing a desert made the plot look like a diorama on a lawn.
+    this.backdrop.tint = BACKDROP_TINT[this.world.biome];
     this.worldRoot.addChild(this.backdrop, this.groundLayer, this.waterLayer, this.objectLayer, this.fxLayer);
     this.objectLayer.sortableChildren = true;
     this.lightsRoot.blendMode = 'add';
@@ -601,16 +623,65 @@ export class EmergeScene {
    * Input
    * ---------------------------------------------------------------- */
 
+  /**
+   * Pan, zoom and pick, from a mouse or from fingers.
+   *
+   * Every live pointer is tracked rather than just the last one, because that is
+   * what pinch needs: with two down, the distance between them drives the zoom
+   * and their midpoint drives the pan, so the world scales about the point
+   * being pinched the way a map does.
+   */
   private attachInput() {
     const canvas = this.app.canvas;
+    const points = new Map<number, { x: number; y: number }>();
+    let pinchDistance = 0;
+    let pinchCentre = { x: 0, y: 0 };
+
+    const centreOfPoints = () => {
+      let x = 0, y = 0;
+      for (const p of points.values()) { x += p.x; y += p.y; }
+      return { x: x / points.size, y: y / points.size };
+    };
+    const spreadOfPoints = () => {
+      const [a, b] = [...points.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+
     canvas.addEventListener('pointerdown', (e) => {
+      points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      canvas.setPointerCapture(e.pointerId);
+      if (points.size === 2) {
+        pinchDistance = spreadOfPoints();
+        pinchCentre = centreOfPoints();
+        // A pinch is not a tap, and it is not a drag either.
+        this.dragging = false;
+        this.dragMoved = 99;
+        return;
+      }
       this.dragging = true;
       this.dragMoved = 0;
       this.lastPointer = { x: e.clientX, y: e.clientY };
-      canvas.setPointerCapture(e.pointerId);
       canvas.style.cursor = 'grabbing';
     });
+
     canvas.addEventListener('pointermove', (e) => {
+      if (!points.has(e.pointerId)) return;
+      points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (points.size >= 2) {
+        const spread = spreadOfPoints();
+        const centre = centreOfPoints();
+        const rect = canvas.getBoundingClientRect();
+        if (pinchDistance > 0 && spread > 0) {
+          this.zoomBy(spread / pinchDistance, centre.x - rect.left, centre.y - rect.top);
+        }
+        // Two fingers moving together pan as well as scale.
+        this.panBy(centre.x - pinchCentre.x, centre.y - pinchCentre.y);
+        pinchDistance = spread;
+        pinchCentre = centre;
+        return;
+      }
+
       if (!this.dragging) return;
       const dx = e.clientX - this.lastPointer.x;
       const dy = e.clientY - this.lastPointer.y;
@@ -618,18 +689,45 @@ export class EmergeScene {
       this.dragMoved += Math.abs(dx) + Math.abs(dy);
       this.panBy(dx, dy);
     });
+
     const end = (e: PointerEvent) => {
-      this.dragging = false;
-      canvas.style.cursor = 'grab';
+      points.delete(e.pointerId);
+      if (points.size < 2) pinchDistance = 0;
+      if (points.size === 1) {
+        // Lifting one finger of a pinch resumes a one-finger drag from where
+        // the remaining finger actually is, rather than jumping the camera.
+        const [only] = [...points.values()];
+        this.lastPointer = { x: only.x, y: only.y };
+        this.dragging = true;
+      } else if (points.size === 0) {
+        this.dragging = false;
+        canvas.style.cursor = 'grab';
+      }
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
+
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       this.zoomBy(e.deltaY > 0 ? 0.9 : 1.1, e.clientX - rect.left, e.clientY - rect.top);
     }, { passive: false });
+
+    // Safari answers a pinch with gesture events and no second pointer, so it
+    // needs its own path or the world simply will not zoom on an iPhone.
+    const gestureCapable = canvas as HTMLCanvasElement & { addEventListener: HTMLCanvasElement['addEventListener'] };
+    let gestureScale = 1;
+    gestureCapable.addEventListener('gesturestart', ((e: Event) => {
+      e.preventDefault();
+      gestureScale = 1;
+    }) as EventListener);
+    gestureCapable.addEventListener('gesturechange', ((e: Event & { scale?: number }) => {
+      e.preventDefault();
+      const scale = e.scale ?? 1;
+      if (gestureScale > 0 && scale > 0) this.zoomBy(scale / gestureScale);
+      gestureScale = scale;
+    }) as EventListener);
   }
 
   private setHover(target: PickTarget) {
@@ -681,6 +779,10 @@ export class EmergeScene {
   reset(world: World) {
     this.world = world;
     this.map = generateWorldMap(world);
+    // The backdrop survives the teardown below, so it is re-tinted here rather
+    // than rebuilt — otherwise a desert claimed after a woodland keeps the
+    // woodland's horizon.
+    if (this.backdrop) this.backdrop.tint = BACKDROP_TINT[world.biome];
 
     for (const layer of [this.groundLayer, this.waterLayer, this.objectLayer, this.fxLayer, this.lightsRoot, this.hudRoot, this.weatherLayer]) {
       for (const child of layer.removeChildren()) child.destroy({ children: true });

@@ -54,7 +54,29 @@ function trunk(p: Pixels, cx: number, baseY: number, height: number, width: numb
   rect(p, cx - width, baseY - 1, width * 2, 2, FOLIAGE.trunkDark);
 }
 
-function tree(seed: number, species: 'pine' | 'oak' | 'birch', big: boolean): Pixels {
+type Species = 'pine' | 'oak' | 'birch' | 'palm' | 'mangrove' | 'acacia';
+
+/**
+ * A frond, drawn as a tapering arc from the crown outward and down.
+ *
+ * Palms are the one silhouette the blob canopy cannot fake: their read comes
+ * entirely from separated leaves against the sky, so they get drawn stroke by
+ * stroke instead.
+ */
+function frond(p: Pixels, cx: number, cy: number, angle: number, length: number, seed: number) {
+  const r = rng(seed);
+  const droop = 0.9 + r() * 0.5;
+  for (let t = 0; t < length; t++) {
+    const k = t / length;
+    const x = Math.round(cx + Math.cos(angle) * t);
+    const y = Math.round(cy + Math.sin(angle) * t + k * k * length * droop * 0.45);
+    const width = Math.max(1, Math.round((1 - k) * 4));
+    rect(p, x - (width >> 1), y, width, 1, k < 0.55 ? FOLIAGE.palm : FOLIAGE.palmDark);
+    if (t % 3 === 0) rect(p, x - (width >> 1), y - 1, Math.max(1, width - 1), 1, FOLIAGE.palmLight);
+  }
+}
+
+function tree(seed: number, species: Species, big: boolean): Pixels {
   const w = big ? 52 : 38;
   const h = big ? 76 : 56;
   const p = surface(w, h);
@@ -84,6 +106,67 @@ function tree(seed: number, species: 'pine' | 'oak' | 'birch', big: boolean): Pi
       if (i % 7 === 3) rect(p, cx - 1, y, 2, 1, '#4a4636');
     }
     canopy(p, cx, Math.round(h * 0.26), big ? 21 : 15, big ? 17 : 12, seed, FOLIAGE.birchLight, FOLIAGE.birch, FOLIAGE.birchDark);
+  }
+  outline(p, DARK, 0.85);
+  return p;
+}
+
+/** Trees for the desert, the swamp and the open plain. */
+function exoticTree(seed: number, species: 'palm' | 'mangrove' | 'acacia', big: boolean): Pixels {
+  const w = big ? 52 : 38;
+  const h = big ? 76 : 56;
+  const p = surface(w, h);
+  const cx = Math.round(w / 2);
+  const baseY = h - 3;
+  const r = rng(seed);
+  groundShadow(p, cx, baseY, big ? 14 : 10, big ? 6 : 4, 0.3);
+
+  if (species === 'palm') {
+    // A bare curved trunk with a crown of fronds, and nothing in between.
+    const th = Math.round(h * 0.66);
+    const lean = (r() < 0.5 ? -1 : 1) * (big ? 7 : 5);
+    for (let i = 0; i < th; i++) {
+      const y = baseY - i;
+      const k = i / th;
+      const x = Math.round(cx - 2 + lean * k * k);
+      rect(p, x, y, 4, 1, FOLIAGE.trunkDark);
+      rect(p, x + 1, y, 2, 1, FOLIAGE.trunk);
+      if (i % 4 === 0) rect(p, x + 1, y, 3, 1, FOLIAGE.trunkLight);
+    }
+    const crownX = cx + lean;
+    const crownY = baseY - th;
+    const fronds = big ? 8 : 6;
+    for (let i = 0; i < fronds; i++) {
+      const a = Math.PI + (i / (fronds - 1)) * Math.PI;
+      frond(p, crownX, crownY, a, big ? 20 : 14, seed + i * 37);
+    }
+    // Dates clustered under the crown.
+    for (let i = 0; i < 5; i++) {
+      rect(p, crownX - 3 + Math.floor(r() * 7), crownY + 2 + Math.floor(r() * 3), 1, 1, '#a86b34');
+    }
+  } else if (species === 'mangrove') {
+    // Stilt roots first: they are most of what makes a mangrove recognisable.
+    const th = Math.round(h * 0.38);
+    for (let i = 0; i < (big ? 6 : 4); i++) {
+      const spread = (i - (big ? 2.5 : 1.5)) * (big ? 6 : 5);
+      for (let t = 0; t < (big ? 16 : 12); t++) {
+        const k = t / (big ? 16 : 12);
+        const x = Math.round(cx + spread * k);
+        const y = Math.round(baseY - t * 0.9);
+        rect(p, x, y, 2, 1, FOLIAGE.trunkDark);
+      }
+    }
+    trunk(p, cx, baseY - (big ? 13 : 10), th, big ? 6 : 4);
+    canopy(p, cx, Math.round(h * 0.3), big ? 25 : 18, big ? 15 : 11, seed,
+      FOLIAGE.mangroveLight, FOLIAGE.mangrove, FOLIAGE.mangroveDark);
+  } else {
+    // Acacia: a bare trunk under a wide flat crown, the shape of dry country.
+    trunk(p, cx, baseY, Math.round(h * 0.5), big ? 6 : 4, big ? 4 : 3);
+    const crownY = Math.round(h * 0.28);
+    canopy(p, cx + (big ? 2 : 1), crownY, big ? 26 : 19, big ? 9 : 7, seed,
+      FOLIAGE.acaciaLight, FOLIAGE.acacia, FOLIAGE.acaciaDark);
+    canopy(p, cx - (big ? 8 : 6), crownY + 4, big ? 14 : 10, big ? 6 : 5, seed + 91,
+      FOLIAGE.acaciaLight, FOLIAGE.acacia, FOLIAGE.acaciaDark);
   }
   outline(p, DARK, 0.85);
   return p;
@@ -477,6 +560,10 @@ export function buildProps(): PropArt[] {
   for (const species of ['pine', 'oak', 'birch'] as const) {
     add(`prop.tree.${species}.big`, tree(species.length * 911 + 7, species, true));
     add(`prop.tree.${species}.small`, tree(species.length * 733 + 19, species, false));
+  }
+  for (const species of ['palm', 'mangrove', 'acacia'] as const) {
+    add(`prop.tree.${species}.big`, exoticTree(species.length * 877 + 13, species, true));
+    add(`prop.tree.${species}.small`, exoticTree(species.length * 641 + 23, species, false));
   }
   add('prop.tree.dead', deadTree(555));
   add('prop.sapling', sapling(560));

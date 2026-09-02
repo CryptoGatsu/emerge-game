@@ -133,25 +133,84 @@ button {
 }
 .land-inner { max-width: 1240px; margin: 0 auto; padding: 46px 32px 60px; }
 
-.land-head { max-width: 640px; margin-bottom: 30px; }
-.land-head p { margin: 18px 0 0; font-size: 14px; line-height: 1.7; color: #b9cfae; }
-
-.land-body { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 22px; align-items: start; }
-
-.plot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; }
-
-.plot-card {
-  display: flex; flex-direction: column;
-  padding: 0;
-  overflow: hidden;
-  border-radius: 14px;
-  border: 1px solid var(--panel-edge-soft);
-  background: var(--panel);
-  text-align: left;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+.land-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'brand side' 'intro side';
+  align-items: start;
+  gap: 6px 28px;
+  margin-bottom: 26px;
 }
-.plot-card:hover { border-color: var(--panel-edge); transform: translateY(-2px); }
-.plot-card.selected { border-color: var(--emerald); box-shadow: 0 0 0 1px rgba(139, 241, 107, 0.35), var(--shadow); }
+.land-head .brand-line { grid-area: brand; }
+.land-intro { grid-area: intro; max-width: 620px; margin: 14px 0 0; font-size: 14px; line-height: 1.7; color: #b9cfae; }
+.land-head-side { grid-area: side; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.ghost.prospect { white-space: nowrap; }
+
+.land-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; align-items: start; }
+
+/* ---- The region map ---- */
+
+.region {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--panel-edge);
+  background: #0b1c26;
+  box-shadow: var(--shadow);
+}
+.region-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* The map is painted small and blown up on purpose: a map of a pixel-art
+     world should look drawn rather than photographed. */
+  image-rendering: pixelated;
+}
+.region-pins { position: absolute; inset: 0; }
+.region-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(8, 20, 14, 0.65);
+  background: rgba(8, 20, 14, 0.72);
+  backdrop-filter: blur(4px);
+  color: var(--cream);
+  text-align: left;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.region-pin:hover { border-color: var(--panel-edge); transform: translate(-50%, -50%) scale(1.04); }
+.region-pin.selected {
+  border-color: var(--emerald);
+  background: rgba(14, 40, 22, 0.9);
+  box-shadow: 0 0 0 1px rgba(139, 241, 107, 0.4), 0 6px 18px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+.pin-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.45);
+  flex: none;
+}
+.region-pin.selected .pin-dot { background: var(--emerald); }
+.pin-label { display: flex; flex-direction: column; line-height: 1.25; }
+.pin-label b { font-size: 11.5px; }
+.pin-label em { font-style: normal; font-size: 9.5px; letter-spacing: 0.5px; color: var(--muted); }
+
+.region-legend {
+  position: absolute;
+  left: 14px; bottom: 12px; right: 14px;
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 10.5px; letter-spacing: 0.8px;
+  color: rgba(216, 232, 208, 0.75);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
 
 .plot-canvas {
   display: block;
@@ -170,12 +229,17 @@ button {
 .land-claim {
   position: sticky;
   top: 46px;
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
   padding: 20px;
   border-radius: 14px;
   border: 1px solid var(--panel-edge);
   background: var(--panel);
   box-shadow: var(--shadow);
 }
+.land-claim .plot-canvas { border-radius: 10px; border: 1px solid var(--panel-edge-soft); margin-bottom: 12px; }
+/* Only a phone gets the sheet, so the close button is hidden everywhere else. */
+.sheet-close { display: none; }
 .land-claim h2 { margin: 6px 0 10px; font-size: 22px; color: var(--cream); }
 .land-claim > p { font-size: 12.5px; line-height: 1.6; }
 
@@ -239,9 +303,53 @@ button {
 .claim-button:disabled { opacity: 0.6; cursor: progress; }
 .land-claim .muted.small { display: block; margin-top: 12px; line-height: 1.55; }
 
-@media (max-width: 900px) {
+@media (max-width: 1080px) {
+  .land-head { grid-template-columns: 1fr; grid-template-areas: 'brand' 'intro' 'side'; }
+  .land-head-side { align-items: flex-start; flex-direction: row; flex-wrap: wrap; margin-top: 14px; }
   .land-body { grid-template-columns: 1fr; }
-  .land-claim { position: static; }
+  .land-claim { position: static; max-height: none; }
+}
+
+/*
+ * On a phone the map and the claim panel cannot share the screen, so the panel
+ * slides up over it as a sheet and the map stays the way you choose land.
+ */
+@media (max-width: 720px) {
+  .land-inner { padding: 20px 14px 28px; }
+  .land-intro { font-size: 13px; }
+  .region-legend { font-size: 9.5px; }
+  .pin-label em { display: none; }
+  .region-pin { padding: 4px 9px 4px 6px; }
+
+  .land-claim {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 40;
+    max-height: 86vh;
+    overflow-y: auto;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    /* Opaque, not the translucent panel tint the desktop uses: a sheet laid
+       over the map has the map showing through every line of its text. */
+    background: #0c1c12;
+    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.6);
+    transform: translateY(102%);
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+  .land-claim.open { transform: translateY(0); }
+  .sheet-close {
+    display: block;
+    position: absolute;
+    top: 10px; right: 12px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--panel-edge-soft);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--cream);
+    font-size: 20px;
+    line-height: 1;
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -364,7 +472,7 @@ button {
 
 /* On a short window the world map is the first thing to go: status, events and
    the feed all need somewhere to live, and the minimap is the least of them. */
-@media (max-height: 800px) {
+@media (min-width: 781px) and (max-height: 800px) {
   .minimap-panel { display: none; }
   .right-rail { bottom: 128px; }
 }
@@ -813,11 +921,14 @@ button {
 .biome-tag.wetland  { background: rgba(90, 176, 176, 0.16);  color: #8ed4d0; border-color: rgba(90, 176, 176, 0.34); }
 .biome-tag.steppe   { background: rgba(224, 190, 110, 0.16); color: #e6cd8c; border-color: rgba(224, 190, 110, 0.34); }
 .biome-tag.coast    { background: rgba(110, 170, 220, 0.16); color: #9ec9ea; border-color: rgba(110, 170, 220, 0.34); }
+.biome-tag.desert   { background: rgba(226, 192, 132, 0.18); color: #eccb92; border-color: rgba(226, 192, 132, 0.38); }
+.biome-tag.swamp    { background: rgba(82, 112, 85, 0.24);   color: #9dbb9e; border-color: rgba(82, 112, 85, 0.5); }
+.biome-tag.grassland{ background: rgba(121, 193, 98, 0.16);  color: #a4dd8c; border-color: rgba(121, 193, 98, 0.34); }
 
 .listing-list { display: flex; flex-direction: column; gap: 7px; }
 .listing-row {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr auto;
+  grid-template-columns: 1.4fr 1fr auto;
   align-items: center; gap: 12px;
   padding: 11px 14px;
   border-radius: 10px;
@@ -971,12 +1082,121 @@ button {
   .action { width: 96px; }
 }
 
-@media (max-width: 780px) {
-  .right-rail, .bottom-right, .brand-copy { display: none; }
-  .bottom-left { left: 14px; right: 14px; width: auto; bottom: 132px; }
-  .action-bar { bottom: 14px; padding: 9px 10px 11px; }
-  .action { width: 78px; padding: 9px 6px; }
+/*
+ * Phones.
+ *
+ * The previous rule here simply deleted the right-hand rail and the bottom
+ * right corner, which on a phone meant no world status, no events, no minimap,
+ * no treasury — and no world feed. Nothing was broken; the whole half of the
+ * interface was just switched off. So instead the same panels are composed
+ * into a sheet that slides up over the world, reachable from a button that is
+ * always on screen.
+ */
+/* This query is mirrored by COMPACT_QUERY in components/Hud.tsx. Keep them
+   identical: they decide the same thing from two different places. */
+@media (max-width: 780px), (max-height: 520px) {
+  .brand-copy { display: none; }
+  .bottom-left { left: 12px; right: 12px; width: auto; bottom: 128px; }
+  .being-card { max-height: 40vh; overflow-y: auto; }
+  .action-bar { bottom: calc(10px + env(safe-area-inset-bottom)); padding: 9px 8px 11px; }
+  .action-title { display: none; }
+  .action { width: 78px; padding: 10px 6px; min-height: 56px; }
   .action span { font-size: 9.5px; letter-spacing: 1px; }
-  .brand-block { top: 14px; left: 14px; }
+  .brand-block { top: 12px; left: 12px; max-width: 62vw; }
   .wordmark { font-size: 22px; letter-spacing: 5px; }
+
+  /* The top bar wraps rather than running off the side of a 390px screen. */
+  /*
+   * The top of a phone screen is one column, not three overlapping ones: the
+   * world's name on the left, the sheet button on the right, and the clock
+   * below both. Laid out as absolute boxes at the same height they simply sat
+   * on top of each other.
+   */
+  .brand-block, .world-chip { top: 12px; left: 12px; max-width: 54vw; }
+  .top-centre {
+    top: 60px;
+    left: 0; right: 0;
+    transform: none;
+    align-items: center;
+    padding: 0 10px;
+  }
+  .beings-pill { padding: 7px 14px; font-size: 11px; }
+  .time-controls { flex-wrap: wrap; justify-content: center; }
+  .time-controls button { min-width: 40px; min-height: 34px; }
+
+  .rail-toggle {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    z-index: 30;
+    display: flex; align-items: center; gap: 7px;
+    padding: 10px 14px;
+    min-height: 40px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-edge);
+    background: rgba(8, 20, 14, 0.86);
+    backdrop-filter: blur(8px);
+    color: var(--cream);
+    box-shadow: var(--shadow);
+  }
+  .rail-toggle span { color: var(--emerald); }
+  .rail-toggle b { font-size: 10.5px; letter-spacing: 1.6px; }
+  .rail-toggle.on { border-color: var(--emerald); }
+
+  .phone-sheet {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 35;
+    display: flex; flex-direction: column; gap: 10px;
+    max-height: 76vh;
+    overflow-y: auto;
+    padding: 8px 12px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0;
+    /* Opaque: a sheet of text with a moving world behind it is unreadable. */
+    background: #0b1a11;
+    border-top: 1px solid var(--panel-edge);
+    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.6);
+    transform: translateY(102%);
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .phone-sheet.open { transform: translateY(0); }
+  .sheet-grip {
+    width: 42px; height: 4px;
+    margin: 2px auto 4px;
+    border-radius: 999px;
+    background: rgba(216, 232, 208, 0.28);
+    flex: none;
+  }
+  .phone-sheet .feed-panel { max-height: 46vh; }
+  .phone-sheet .feed-scroll { max-height: 40vh; }
+  .phone-sheet .economy-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .touch-zoom {
+    position: absolute;
+    right: 12px;
+    bottom: 200px;
+    z-index: 25;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .touch-zoom button {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    border: 1px solid var(--panel-edge-soft);
+    background: rgba(8, 20, 14, 0.82);
+    backdrop-filter: blur(8px);
+    color: var(--cream);
+    font-size: 17px;
+  }
+}
+
+/* A phone in landscape has no vertical room for a tall sheet. */
+@media (max-height: 520px) {
+  .brand-block { display: none; }
+  .phone-sheet { max-height: 90vh; }
+  /* Nothing else fits above the fold, so the feed goes first and the rest of
+     the sheet scrolls underneath it. */
+  .phone-sheet .feed-panel { order: -1; }
+  .phone-sheet .feed-scroll { max-height: 42vh; }
+  .bottom-left { bottom: 104px; }
+  .touch-zoom { bottom: 148px; }
 }

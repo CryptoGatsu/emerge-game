@@ -2,18 +2,45 @@
  * Biomes.
  *
  * A plot's seed decides what kind of place it is, and that decision reaches
- * everything: how much of it is wood or bare rock, where the water runs and how
- * much of it there is, whether there is a highland shelf worth mining, which
- * trees grow, what colour the ground and the canopy read as, and which trades
- * the first settlers can practise there.
+ * everything: how much of it is wood, bare rock, dune or marsh, where the water
+ * runs and how much of it there is, whether there is a highland shelf worth
+ * mining, which trees grow, what colour the ground and the canopy read as,
+ * which trades the first settlers can practise there — and, since this round,
+ * what shape the settlement itself takes. A fen village strung along a causeway
+ * and a desert town wrapped around its only water are not the same place with a
+ * different palette.
  *
  * This module imports nothing, so both the simulation and the terrain generator
  * can depend on it without a cycle.
  */
 
-export type BiomeKind = 'valley' | 'woodland' | 'highland' | 'wetland' | 'steppe' | 'coast';
-export type WaterShape = 'river' | 'creek' | 'lake' | 'delta';
-export type TreeSpecies = 'pine' | 'oak' | 'birch';
+export type BiomeKind =
+  | 'valley' | 'woodland' | 'highland' | 'wetland' | 'steppe'
+  | 'coast' | 'desert' | 'swamp' | 'grassland';
+
+/** The shape of a biome's water. */
+export type WaterShape = 'river' | 'creek' | 'lake' | 'delta' | 'oasis' | 'marsh' | 'brook';
+
+export type TreeSpecies = 'pine' | 'oak' | 'birch' | 'palm' | 'mangrove' | 'acacia';
+
+/**
+ * The settlement plan. Nine biomes, nine plans — a town built around a
+ * crossroads is a different object from one that clings to a shoreline, and
+ * this is the field that says which.
+ */
+export type LayoutKind =
+  | 'hub'       // a square with roads spoking out of it
+  | 'clearing'  // a tight core with paths winding into the trees
+  | 'terrace'   // two lanes at different heights, joined by ramps
+  | 'causeway'  // a spine over wet ground with platforms off it
+  | 'lane'      // one long street with spurs alternating either side
+  | 'harbour'   // an arc following the shore, piers pointing at the water
+  | 'oasis'     // a ring around the only water for miles
+  | 'scatter'   // hamlets on dry hummocks, linked by boardwalk
+  | 'ring';     // a road enclosing a common green
+
+/** Ground cover a biome favours where nothing else claims the tile. */
+export type GroundKind = 'grass' | 'dune' | 'marsh' | 'scrub';
 
 export interface BiomeProfile {
   kind: BiomeKind;
@@ -32,6 +59,10 @@ export interface BiomeProfile {
   rockThreshold: number;
   /** How often meadow gives way to flowers. */
   bloom: number;
+  /** What the open ground is made of when it is not wood, rock or field. */
+  ground: GroundKind;
+  /** How much of the open ground takes the biome's own cover, 0-1. */
+  groundCover: number;
 
   water: WaterShape;
   /** Multiplies river width. */
@@ -40,6 +71,10 @@ export interface BiomeProfile {
   pondScale: number;
   /** How much of the map rises into a shelf, 0 for none. */
   plateau: number;
+
+  layout: LayoutKind;
+  /** Roughly how many people the land supports. */
+  populationScale: number;
 
   trees: TreeSpecies[];
   /** Trades the land supports, on top of the civic core. */
@@ -51,8 +86,9 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     label: 'River Valley',
     blurb: 'Broad fertile ground either side of fast water, with woodland on the slopes.',
     groundTint: 0xffffff, foliageTint: 0xffffff, buildingTint: 0xffffff,
-    forest: 0, rockThreshold: 0.76, bloom: 0.68,
+    forest: 0, rockThreshold: 0.76, bloom: 0.68, ground: 'grass', groundCover: 0,
     water: 'river', waterScale: 1, pondScale: 1, plateau: 1,
+    layout: 'hub', populationScale: 1,
     trees: ['oak', 'birch', 'pine'],
     trades: ['Farm', 'Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Blacksmith', 'Tailor', 'Quarry', 'Mine'],
   },
@@ -60,8 +96,9 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     label: 'Deep Woodland',
     blurb: 'Old forest on every side. Timber is everywhere; open ground is not.',
     groundTint: 0xdff0d8, foliageTint: 0xd8f2c8, buildingTint: 0xf0f4ea,
-    forest: 0.16, rockThreshold: 0.84, bloom: 0.74,
+    forest: 0.16, rockThreshold: 0.84, bloom: 0.74, ground: 'grass', groundCover: 0,
     water: 'creek', waterScale: 0.7, pondScale: 0.8, plateau: 0.5,
+    layout: 'clearing', populationScale: 0.85,
     trees: ['pine', 'oak', 'pine'],
     trades: ['Woodcutter', 'Woodcutter', 'Carpenter', 'Carpenter', 'Farm', 'Mill', 'Bakery', 'Tailor'],
   },
@@ -69,8 +106,9 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     label: 'Highland Shelf',
     blurb: 'Stone near the surface and iron in the hills. Hard ground, rich under it.',
     groundTint: 0xe8ecf0, foliageTint: 0xdce8e0, buildingTint: 0xe6ecf2,
-    forest: -0.1, rockThreshold: 0.58, bloom: 0.8,
+    forest: -0.1, rockThreshold: 0.58, bloom: 0.8, ground: 'grass', groundCover: 0,
     water: 'creek', waterScale: 0.8, pondScale: 0.7, plateau: 1.9,
+    layout: 'terrace', populationScale: 0.8,
     trees: ['pine', 'pine', 'birch'],
     trades: ['Mine', 'Mine', 'Quarry', 'Quarry', 'Blacksmith', 'Woodcutter', 'Farm', 'Mill', 'Bakery'],
   },
@@ -78,8 +116,9 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     label: 'Wetland Fen',
     blurb: 'Braided water and reed beds. Good soil where it is dry enough to plough.',
     groundTint: 0xe6f4e4, foliageTint: 0xe0f4d8, buildingTint: 0xf0f6f0,
-    forest: 0.05, rockThreshold: 0.88, bloom: 0.58,
+    forest: 0.05, rockThreshold: 0.88, bloom: 0.58, ground: 'marsh', groundCover: 0.35,
     water: 'delta', waterScale: 1.35, pondScale: 1.7, plateau: 0,
+    layout: 'causeway', populationScale: 1.05,
     trees: ['birch', 'oak', 'birch'],
     trades: ['Farm', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Woodcutter', 'Carpenter'],
   },
@@ -87,19 +126,51 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     label: 'Open Steppe',
     blurb: 'Wide grassland under a big sky. Little shade, and a long way to the trees.',
     groundTint: 0xfff2d8, foliageTint: 0xf6e8b8, buildingTint: 0xfff4e2,
-    forest: -0.2, rockThreshold: 0.7, bloom: 0.5,
+    forest: -0.2, rockThreshold: 0.7, bloom: 0.5, ground: 'scrub', groundCover: 0.4,
     water: 'creek', waterScale: 0.6, pondScale: 1.2, plateau: 0.6,
-    trees: ['oak', 'birch', 'oak'],
+    layout: 'lane', populationScale: 0.8,
+    trees: ['oak', 'birch', 'acacia'],
     trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Quarry', 'Woodcutter'],
   },
   coast: {
     label: 'Coastal Shallows',
     blurb: 'A great lake at the edge of it, sand along the shore, and shelter inland.',
     groundTint: 0xf0f6ee, foliageTint: 0xe8f6e4, buildingTint: 0xf4f8fa,
-    forest: 0.02, rockThreshold: 0.8, bloom: 0.64,
+    forest: 0.02, rockThreshold: 0.8, bloom: 0.64, ground: 'grass', groundCover: 0,
     water: 'lake', waterScale: 1.1, pondScale: 2.2, plateau: 0.4,
+    layout: 'harbour', populationScale: 1.05,
     trees: ['pine', 'birch', 'oak'],
     trades: ['Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Tailor', 'Quarry'],
+  },
+  desert: {
+    label: 'Red Desert',
+    blurb: 'Dune and bare rock to the horizon, and one spring the whole town is built around.',
+    groundTint: 0xffe4bc, foliageTint: 0xf2dfa8, buildingTint: 0xffeed2,
+    forest: -0.55, rockThreshold: 0.62, bloom: 0.94, ground: 'dune', groundCover: 0.82,
+    water: 'oasis', waterScale: 0.35, pondScale: 1.15, plateau: 1.2,
+    layout: 'oasis', populationScale: 0.62,
+    trees: ['palm', 'acacia', 'palm'],
+    trades: ['Quarry', 'Quarry', 'Mine', 'Mine', 'Blacksmith', 'Tailor', 'Farm', 'Bakery'],
+  },
+  swamp: {
+    label: 'Blackwater Swamp',
+    blurb: 'Standing water under a closed canopy. Everything here is built up on stilts.',
+    groundTint: 0xcfe0cc, foliageTint: 0xbcd8b4, buildingTint: 0xdde6da,
+    forest: 0.22, rockThreshold: 0.93, bloom: 0.86, ground: 'marsh', groundCover: 0.66,
+    water: 'marsh', waterScale: 1.7, pondScale: 0.85, plateau: 0,
+    layout: 'scatter', populationScale: 0.75,
+    trees: ['mangrove', 'mangrove', 'birch'],
+    trades: ['Woodcutter', 'Woodcutter', 'Carpenter', 'Tailor', 'Farm', 'Mill', 'Bakery'],
+  },
+  grassland: {
+    label: 'Green Grassland',
+    blurb: 'Deep pasture and gentle rises, a stream through the middle of it, room to grow.',
+    groundTint: 0xf2ffe8, foliageTint: 0xeafbdc, buildingTint: 0xf8fbf0,
+    forest: -0.05, rockThreshold: 0.86, bloom: 0.58, ground: 'grass', groundCover: 0,
+    water: 'brook', waterScale: 0.75, pondScale: 1.35, plateau: 0.3,
+    layout: 'ring', populationScale: 1.15,
+    trees: ['oak', 'oak', 'birch'],
+    trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Mill', 'Bakery', 'Tailor', 'Carpenter', 'Woodcutter', 'Quarry'],
   },
 };
 
@@ -142,6 +213,17 @@ export const WATER_ROUTES: Record<WaterShape, [number, number][][]> = {
     [[88, 2], [78, 7], [67, 12], [56, 17], [45, 22], [35, 29], [28, 39], [24, 52], [25, 66], [30, 80], [37, 95]],
     [[56, 17], [50, 27], [46, 38], [45, 50], [48, 63], [54, 76], [61, 90]],
   ],
+  // A spring has no run to it. The pond is the whole of the water.
+  oasis: [],
+  // Blackwater: several sluggish channels that never quite become a river.
+  marsh: [
+    [[92, 10], [82, 16], [71, 21], [60, 27], [50, 34], [42, 44], [38, 56], [39, 70], [44, 84]],
+    [[70, 4], [64, 14], [61, 25], [62, 37], [67, 49], [74, 61]],
+    [[16, 34], [23, 44], [27, 57], [28, 71], [33, 85]],
+  ],
+  brook: [[
+    [78, 3], [70, 10], [61, 17], [51, 23], [41, 29], [33, 37], [29, 48], [30, 60], [35, 73], [42, 86], [48, 98],
+  ]],
 };
 
 /** Where the standing water sits, and how big it is before the biome scales it. */
@@ -150,4 +232,7 @@ export const PONDS: Record<WaterShape, { x: number; y: number; r: number }> = {
   creek: { x: 22, y: 62, r: 7 },
   lake: { x: 74, y: 26, r: 15 },
   delta: { x: 34, y: 70, r: 9 },
+  oasis: { x: 50, y: 50, r: 7 },
+  marsh: { x: 55, y: 68, r: 11 },
+  brook: { x: 26, y: 66, r: 8 },
 };

@@ -11,13 +11,18 @@
  * regenerates identically.
  */
 
-import { ROAD_EDGES, ROAD_NODES, type Building, type World } from '../simulation';
+import { waterOf, type Building, type World } from '../simulation';
 import { GRID, worldToTile } from './iso';
-import { PONDS, WATER_ROUTES, biomeProfile, type BiomeProfile } from './biomes';
+import { biomeProfile, type BiomeProfile } from './biomes';
+import { BRIDGE_SPAN, type WorldLayout } from './layout';
+import { fbm, heightField } from './relief';
+import { hash2, nearestOn, valueNoise, type Polyline, type WaterField } from './water';
 
 export enum Tile {
   Grass, Flowers, Meadow, Forest, Soil, Tilled, CropWheat, CropVeg,
   Path, Plaza, Rock, Sand, Water, WaterShore,
+  /** Biome ground: wind-rippled desert sand, sodden fen, dry steppe scrub. */
+  Dune, Marsh, Scrub,
 }
 
 /** Art key prefix and variant count for each tile kind. */
@@ -36,6 +41,9 @@ export const TILE_ART: Record<Tile, { key: string; variants: number }> = {
   [Tile.Sand]: { key: 'tile.sand', variants: 1 },
   [Tile.Water]: { key: 'tile.water', variants: 4 },
   [Tile.WaterShore]: { key: 'tile.watershore', variants: 4 },
+  [Tile.Dune]: { key: 'tile.dune', variants: 3 },
+  [Tile.Marsh]: { key: 'tile.marsh', variants: 3 },
+  [Tile.Scrub]: { key: 'tile.scrub', variants: 3 },
 };
 
 /** Flat colour per terrain kind, for minimaps and plot previews. */
@@ -54,6 +62,9 @@ export const TILE_COLOR: Record<Tile, string> = {
   [Tile.Sand]: '#c2ab72',
   [Tile.Water]: '#26688a',
   [Tile.WaterShore]: '#3a90ab',
+  [Tile.Dune]: '#d8b878',
+  [Tile.Marsh]: '#5d7a4a',
+  [Tile.Scrub]: '#93a558',
 };
 
 export interface PropInstance {
@@ -90,96 +101,12 @@ export interface WorldMap {
 }
 
 /* ------------------------------------------------------------------ *
- * Noise
- * ------------------------------------------------------------------ */
-
-function hash2(seed: number, x: number, y: number) {
-  let h = seed ^ Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1);
-  h = Math.imul(h ^ (h >>> 15), h | 1);
-  h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
-  return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
-}
-
-const smooth = (t: number) => t * t * (3 - 2 * t);
-
-function valueNoise(seed: number, x: number, y: number) {
-  const xi = Math.floor(x), yi = Math.floor(y);
-  const xf = x - xi, yf = y - yi;
-  const a = hash2(seed, xi, yi), b = hash2(seed, xi + 1, yi);
-  const c = hash2(seed, xi, yi + 1), d = hash2(seed, xi + 1, yi + 1);
-  const u = smooth(xf), v = smooth(yf);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-
-function fbm(seed: number, x: number, y: number, octaves = 4) {
-  let sum = 0, amp = 1, freq = 1, norm = 0;
-  for (let i = 0; i < octaves; i++) {
-    sum += valueNoise(seed + i * 977, x * freq, y * freq) * amp;
-    norm += amp;
-    amp *= 0.5;
-    freq *= 2;
-  }
-  return sum / norm;
-}
-
-/* ------------------------------------------------------------------ *
  * Water and elevation
- * ------------------------------------------------------------------ */
-
-/**
- * Water for a biome.
  *
- * Routes come from the biome table and are chosen in isometric screen space:
- * a channel laid along a world axis projects to the straight edge of a diamond
- * and reads as a moat rather than a river.
- */
-function waterFor(profile: BiomeProfile) {
-  const pond = PONDS[profile.water];
-  return {
-    routes: WATER_ROUTES[profile.water],
-    pond: { x: pond.x, y: pond.y, r: pond.r * profile.pondScale },
-  };
-}
-
-/** Where the north road crosses the water, a bridge is drawn instead of a ford. */
-const BRIDGE = { x: 46, y: 16 };
-
-function riverWidth(seed: number, t: number, scale: number) {
-  return (2.5 + valueNoise(seed + 313, t * 2.4, 0) * 1.7) * scale;
-}
-
-interface Polyline { pts: [number, number][]; widths: number[] }
-
-function buildRiver(seed: number, profile: BiomeProfile): Polyline {
-  const pts: [number, number][] = [];
-  const widths: number[] = [];
-  for (const route of waterFor(profile).routes) {
-    for (let i = 0; i < route.length - 1; i++) {
-      const [ax, ay] = route[i];
-      const [bx, by] = route[i + 1];
-      const steps = 14;
-      for (let s = 0; s < steps; s++) {
-        const t = s / steps;
-        // Meander perpendicular to the run so the bank is never a straight edge.
-        const dx = bx - ax, dy = by - ay;
-        const len = Math.hypot(dx, dy) || 1;
-        const nx = -dy / len, ny = dx / len;
-        const wobble = (valueNoise(seed + 71, (i + t) * 1.7, 0) - 0.5) * 3.2;
-        pts.push([ax + dx * t + nx * wobble, ay + dy * t + ny * wobble]);
-        widths.push(riverWidth(seed, i + t, profile.waterScale));
-      }
-    }
-  }
-  return { pts, widths };
-}
-
-/** Elevation field: a raised shelf in the north-east that the mine road climbs. */
-function heightField(seed: number, wx: number, wy: number, plateau: number) {
-  if (plateau <= 0) return 0;
-  const ridge = ((wx - 70) * 0.06 + (34 - wy) * 0.045) * plateau;
-  const noise = (fbm(seed + 4001, wx * 0.05, wy * 0.05, 3) - 0.5) * 0.7;
-  return Math.max(0, Math.min(1, ridge + noise));
-}
+ * Both now come from shared modules. The terrain generator used to build its
+ * own river from the biome routes and the simulation had no idea where it was,
+ * which is how citizens ended up walking across it.
+ * ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ *
  * Roads
@@ -190,45 +117,37 @@ function heightField(seed: number, wx: number, wy: number, plateau: number) {
  * along straight edges; drawing them with a deterministic meander is what makes
  * the result read as worn stone paths instead of a graph.
  */
-function buildRoads(seed: number): Polyline {
+function buildRoads(seed: number, layout: WorldLayout): Polyline {
   const pts: [number, number][] = [];
   const widths: number[] = [];
   const seen = new Set<string>();
-  ROAD_EDGES.forEach((neighbours, a) => neighbours.forEach((b) => {
+  layout.edges.forEach((neighbours, a) => neighbours.forEach((b) => {
     const key = a < b ? `${a}-${b}` : `${b}-${a}`;
     if (seen.has(key)) return;
     seen.add(key);
-    const [ax, ay] = ROAD_NODES[a];
-    const [bx, by] = ROAD_NODES[b];
+    const [ax, ay] = layout.nodes[a];
+    const [bx, by] = layout.nodes[b];
     const dx = bx - ax, dy = by - ay;
     const len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len, ny = dx / len;
-    const phase = hash2(seed + 613, a, b) * Math.PI * 2;
-    const amp = 1.1 + hash2(seed + 811, b, a) * 1.8;
+    const phase = valueNoise(seed + 613, a * 1.7, b * 2.3) * Math.PI * 2;
+    const amp = 1.1 + valueNoise(seed + 811, b * 1.3, a * 0.9) * 1.8;
     const steps = Math.max(10, Math.round(len * 1.6));
     for (let s = 0; s <= steps; s++) {
       const t = s / steps;
       // A single arc across the segment, tapering to zero at both junctions.
       const bend = Math.sin(t * Math.PI) * amp * Math.sin(phase + t * 1.4);
       pts.push([ax + dx * t + nx * bend, ay + dy * t + ny * bend]);
-      // Main streets are wider than the lanes out to the farm and forest.
-      const major = (a <= 8 && b <= 8) ? 1 : 0;
-      widths.push(1.35 + major * 0.65 + valueNoise(seed + 97, (a + t) * 3, b) * 0.55);
+      // A street between two core nodes is the main one, and is drawn wider
+      // than the track out to a mine head.
+      const major = layout.roles[a] !== 'work' && layout.roles[b] !== 'work' ? 1 : 0;
+      widths.push(1.35 + major * 0.6 + valueNoise(seed + 97, (a + t) * 3, b) * 0.55);
     }
   }));
   return { pts, widths };
 }
 
-/** Squared distance from a point to the nearest sample, plus that sample's width. */
-function nearest(line: Polyline, x: number, y: number): { d: number; w: number } {
-  let best = Infinity, w = 0;
-  for (let i = 0; i < line.pts.length; i++) {
-    const dx = line.pts[i][0] - x, dy = line.pts[i][1] - y;
-    const d = dx * dx + dy * dy;
-    if (d < best) { best = d; w = line.widths[i]; }
-  }
-  return { d: Math.sqrt(best), w };
-}
+const nearest = nearestOn;
 
 /* ------------------------------------------------------------------ *
  * Generation
@@ -252,9 +171,11 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   const cliffs = new Uint8Array(n);
   const tone = new Float32Array(n);
   const profile = biomeProfile(world.biome);
-  const water = waterFor(profile);
-  const river = buildRiver(seed, profile);
-  const roads = buildRoads(seed);
+  const layout = world.layout;
+  const water: WaterField = waterOf(world);
+  const river = water.river;
+  const roads = buildRoads(seed, layout);
+  const PLAZA = layout.plaza;
   const props: PropInstance[] = [];
   const waterfalls: { tx: number; ty: number }[] = [];
 
@@ -266,7 +187,12 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   const blocked = (wx: number, wy: number, pad = 0) =>
     footprints.some((f) => (f.x - wx) ** 2 + (f.y - wy) ** 2 < (f.r + pad) ** 2);
 
-  const farm = world.buildings.find((b) => b.type === 'Farm');
+  // Every farm gets fields, not just the first one. A grassland with three of
+  // them used to plough only one.
+  const farms = world.buildings.filter((b) => b.type === 'Farm');
+  const core = layout.plaza;
+  const bridgeNear = (wx: number, wy: number) =>
+    layout.bridges.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < BRIDGE_SPAN * BRIDGE_SPAN);
 
   for (let ty = 0; ty < grid; ty++) {
     for (let tx = 0; tx < grid; tx++) {
@@ -277,45 +203,65 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
       field[i] = h;
       steps[i] = h > 0.5 ? 1 : 0;
 
-      const riverHit = nearest(river, wx, wy);
+      // The wet test is the shared mask, not a second opinion. Painting water
+      // where the simulation thinks there is none is exactly the disagreement
+      // that let citizens walk on the river.
+      const inWater = water.isWater(wx, wy);
+      const riverHit = river.pts.length ? nearest(river, wx, wy) : { d: Infinity, w: 0 };
       const pondD = Math.hypot(wx - water.pond.x, wy - water.pond.y);
       const pondEdge = water.pond.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
-      const inWater = (riverHit.d < riverHit.w && steps[i] === 0) || pondD < pondEdge;
       const nearWater = riverHit.d < riverHit.w + 0.9 || pondD < pondEdge + 1.1;
 
       const roadHit = nearest(roads, wx, wy);
       const roadEdge = roadHit.w + (valueNoise(seed + 191, wx * 0.3, wy * 0.3) - 0.5) * 1.0;
       const onRoad = roadHit.d < roadEdge;
-      const inPlaza = Math.hypot(wx - PLAZA.x, wy - PLAZA.y) < PLAZA.r + (valueNoise(seed + 37, wx * 0.2, wy * 0.2) - 0.5) * 2.4;
+      const inPlaza = Math.hypot(wx - core.x, wy - core.y) < core.r + (valueNoise(seed + 37, wx * 0.2, wy * 0.2) - 0.5) * 2.4;
+      const field2 = farms.find((f) => Math.hypot(wx - f.x, wy - f.y) < 14);
 
       let tile: Tile;
       if (inWater) {
-        tile = nearWater && !((riverHit.d < riverHit.w - 1.6) || pondD < pondEdge - 1.8) ? Tile.WaterShore : Tile.Water;
+        // A deck carries the road over the water instead of interrupting it.
+        tile = bridgeNear(wx, wy) && onRoad ? Tile.Path
+          : nearWater && !((riverHit.d < riverHit.w - 1.6) || pondD < pondEdge - 1.8) ? Tile.WaterShore
+            : Tile.Water;
       } else if (inPlaza) {
         tile = Tile.Plaza;
       } else if (onRoad) {
         tile = Tile.Path;
       } else if (nearWater) {
-        tile = Tile.Sand;
-      } else if (farm && Math.hypot(wx - farm.x, wy - farm.y) < 15 && !blocked(wx, wy, 1)) {
+        tile = profile.ground === 'marsh' ? Tile.Marsh : Tile.Sand;
+      } else if (field2 && !blocked(wx, wy, 1)) {
         // Ploughed strips around the farm, alternating crop and fallow.
-        const strip = Math.floor((wx - farm.x + wy * 0.35) / 4.5);
+        const strip = Math.floor((wx - field2.x + wy * 0.35) / 4.5);
         tile = strip % 3 === 0 ? Tile.Tilled : strip % 3 === 1 ? Tile.CropWheat : Tile.CropVeg;
       } else if (steps[i] === 1) {
-        // The shelf is rock where it is exposed and upland meadow everywhere else,
-        // so the highland still reads as part of a lush world.
-        tile = fbm(seed + 700, wx * 0.09, wy * 0.09, 3) > 0.52 ? Tile.Rock : Tile.Meadow;
+        // The shelf is rock where it is exposed and upland cover everywhere
+        // else, so a highland still reads as part of a lived-in world.
+        tile = fbm(seed + 700, wx * 0.09, wy * 0.09, 3) > 0.52 ? Tile.Rock
+          : profile.ground === 'dune' ? Tile.Dune : Tile.Meadow;
       } else if (fbm(seed + 700, wx * 0.06, wy * 0.06, 3) > profile.rockThreshold) {
         tile = Tile.Rock;
       } else {
         const forest = fbm(seed + 1300, wx * 0.045, wy * 0.045, 4);
         const bloom = fbm(seed + 2600, wx * 0.09, wy * 0.09, 3);
-        // Keep the settlement core open; push woodland out to the edges.
-        const fromCore = Math.hypot(wx - 50, wy - 50) / 60;
+        // Keep the settlement core open; push woodland out to the edges. The
+        // core is wherever this world's square ended up, not the map's middle —
+        // and the reach is capped, because a town near one corner would
+        // otherwise read every far tile as remote and grow a forest over the
+        // entire map.
+        const fromCore = Math.min(Math.hypot(wx - core.x, wy - core.y), 34) / 60;
+        // Ground cover the biome brings with it: dune, fen or scrub claims the
+        // open ground before grass gets a look in.
+        const cover = profile.groundCover > 0
+          && fbm(seed + 3300, wx * 0.05, wy * 0.05, 3) < profile.groundCover
+          ? profile.ground : 'grass';
         tile = forest + fromCore * 0.28 + profile.forest > 0.62 ? Tile.Forest
-          : bloom > profile.bloom ? Tile.Flowers
-            : bloom < 0.34 ? Tile.Meadow
-              : Tile.Grass;
+          : cover === 'dune' ? Tile.Dune
+            : cover === 'marsh' ? Tile.Marsh
+              : cover === 'scrub' ? Tile.Scrub
+                : bloom > profile.bloom ? Tile.Flowers
+                  : bloom < 0.34 ? Tile.Meadow
+                    : Tile.Grass;
       }
 
       tiles[i] = tile;
@@ -340,8 +286,9 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
         if ((f.x - wx) ** 2 + (f.y - wy) ** 2 > reach ** 2) continue;
         const kind = tiles[i] as Tile;
         if (kind !== Tile.Water && kind !== Tile.WaterShore && kind !== Tile.Sand) continue;
-        tiles[i] = Tile.Grass;
-        variants[i] = Math.floor(hash2(seed + 88, tx, ty) * TILE_ART[Tile.Grass].variants);
+        const dry = profile.ground === 'dune' ? Tile.Dune : profile.ground === 'marsh' ? Tile.Marsh : Tile.Grass;
+        tiles[i] = dry;
+        variants[i] = Math.floor(hash2(seed + 88, tx, ty) * TILE_ART[dry].variants);
       }
     }
   }
@@ -379,7 +326,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
 
   if (options.props !== false) {
     scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, roads, river, heightAt, profile });
-    placeSettlementProps(props, world, roads, seed, water.pond);
+    placeSettlementProps(props, world, roads, seed, water.pond, layout, profile.ground);
   }
 
   return { grid, tiles, variants, steps, field, cliffs, tone, waterfalls, props, heightAt, tileAt };
@@ -454,8 +401,31 @@ function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
           else if (r3 < 0.46 && !steps[i]) { name = 'prop.tree.dead'; sway = 0.5; }
           else if (r3 < 0.52 && !steps[i]) { name = SMALL_TREES[0]; sway = 1; }
         } else if (tile === Tile.Sand) {
-          if (r3 < 0.26) { name = 'prop.reeds'; sway = 0.8; }
+          // A desert bank grows palms, not bulrushes.
+          if (profile.ground === 'dune') {
+            if (r3 < 0.12) { name = TREES[0]; sway = 1; }
+            else if (r3 < 0.2) { name = `prop.bush.${Math.floor(r3 * 40) % 3}`; sway = 0.5; }
+          } else if (r3 < 0.26) { name = 'prop.reeds'; sway = 0.8; }
           else if (r3 < 0.32) name = 'prop.rock.small';
+        } else if (tile === Tile.Dune) {
+          // Sparse by design: emptiness is what a desert is made of.
+          if (nearRoad) continue;
+          if (r3 < 0.018) { name = SMALL_TREES[Math.floor(r3 * 200) % 3]; sway = 1; }
+          else if (r3 < 0.05) { name = `prop.bush.${Math.floor(r3 * 90) % 3}`; sway = 0.5; }
+          else if (r3 < 0.075) name = 'prop.rock.small';
+          else if (r3 < 0.085) name = 'prop.tree.dead';
+        } else if (tile === Tile.Marsh) {
+          if (nearRoad) { if (r3 < 0.14) { name = 'prop.reeds'; sway = 0.8; } }
+          else if (r3 < 0.3) { name = 'prop.reeds'; sway = 0.8; }
+          else if (r3 < 0.42) { name = TREES[Math.floor(r3 * 20) % 3]; sway = 1; }
+          else if (r3 < 0.5) { name = `prop.bush.${Math.floor(r3 * 50) % 3}`; sway = 0.6; }
+          else if (r3 < 0.54) name = 'prop.stump';
+        } else if (tile === Tile.Scrub) {
+          if (nearRoad) continue;
+          if (r3 < 0.06) { name = SMALL_TREES[Math.floor(r3 * 70) % 3]; sway = 1; }
+          else if (r3 < 0.2) { name = `prop.bush.${Math.floor(r3 * 60) % 3}`; sway = 0.6; }
+          else if (r3 < 0.26) { name = `prop.flowers.${Math.floor(r3 * 80) % 4}`; sway = 0.4; }
+          else if (r3 < 0.29) name = 'prop.rock.small';
         } else if (tile === Tile.Water) {
           if (r3 < 0.05) { name = 'prop.lilypad'; sway = 0.2; }
         }
@@ -468,15 +438,17 @@ function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
 }
 
 /** Hand-placed settlement dressing that reads as somewhere people have built this place. */
-function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline, seed: number, pond: { x: number; y: number; r: number }) {
+function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline, seed: number, pond: { x: number; y: number; r: number }, layout: WorldLayout, bank: BiomeProfile['ground']) {
   const at = (type: string) => world.buildings.find((b) => b.type === type);
   const push = (wx: number, wy: number, name: string, sway = 0, glowing = false) =>
     out.push({ wx, wy, name, sway, glow: glowing });
 
-  // Bridge where the north road crosses the river.
-  push(BRIDGE.x, BRIDGE.y, 'prop.bridge');
+  // A deck at every place the plan found a road crossing water, rather than one
+  // bridge at a fixed spot that most biomes had no river under.
+  for (const bridge of layout.bridges) push(bridge.x, bridge.y, 'prop.bridge');
 
   // Well and benches in the square.
+  const PLAZA = layout.plaza;
   push(PLAZA.x + 3.5, PLAZA.y + 1.5, 'prop.well');
   push(PLAZA.x - 5, PLAZA.y + 2.5, 'prop.bench');
   push(PLAZA.x + 5.5, PLAZA.y - 3, 'prop.bench');
@@ -504,8 +476,7 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
     push(market.x + 4, market.y + 8.5, 'prop.campfire.0', 0, true);
   }
 
-  const farm = at('Farm');
-  if (farm) {
+  for (const farm of world.buildings.filter((b) => b.type === 'Farm')) {
     push(farm.x + 6.5, farm.y + 2, 'prop.haybale');
     push(farm.x + 9, farm.y + 3.5, 'prop.haybale');
     push(farm.x - 6.5, farm.y + 3, 'prop.crates');
@@ -547,13 +518,17 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
     push(quarry.x + 2, quarry.y + 6, 'prop.rock.small');
   }
 
-  // Reeds and lilies around the pond edge.
+  // Reeds and lilies around the pond edge. A desert spring gets palms instead.
   const rim = Math.max(18, Math.round(pond.r * 3));
+  const desert = world.buildings.length > 0 && bank === 'dune';
   for (let i = 0; i < rim; i++) {
     const a = (i / rim) * Math.PI * 2;
     const r = pond.r + 0.6 + hash2(seed + 404, i, 1) * 1.6;
-    push(pond.x + Math.cos(a) * r, pond.y + Math.sin(a) * r * 0.9, i % 3 === 0 ? 'prop.reeds' : 'prop.bush.0', 0.8);
+    const name = desert
+      ? (i % 4 === 0 ? 'prop.tree.palm.small' : 'prop.bush.0')
+      : (i % 3 === 0 ? 'prop.reeds' : 'prop.bush.0');
+    push(pond.x + Math.cos(a) * r, pond.y + Math.sin(a) * r * 0.9, name, 0.8);
   }
 }
 
-export { BRIDGE, PLAZA };
+

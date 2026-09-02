@@ -44,6 +44,32 @@ interface HudProps {
   onCancelBuild: () => void;
 }
 
+/**
+ * Whether the interface is running on a screen too small for the rail.
+ *
+ * A media query rather than a width guess, and it drives which layout is
+ * *rendered* rather than which one is hidden: the panels below are composed
+ * into a right-hand rail on a large screen and into a slide-up sheet on a
+ * small one, so neither layout pays for the other's markup.
+ *
+ * The query must stay identical to the one in `globals.css`. A phone held
+ * sideways is wide and short, and when the two disagreed it got the sheet's
+ * styling with the rail's markup.
+ */
+export const COMPACT_QUERY = '(max-width: 780px), (max-height: 520px)';
+
+function useCompact() {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia(COMPACT_QUERY);
+    const apply = () => setCompact(query.matches);
+    apply();
+    query.addEventListener('change', apply);
+    return () => query.removeEventListener('change', apply);
+  }, []);
+  return compact;
+}
+
 function Meter({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
     <div className="meter">
@@ -218,6 +244,81 @@ function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow,
   );
 }
 
+function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['woodland'] }) {
+  return (
+    <section className="panel">
+      <h3>WORLD STATUS <span>✦</span></h3>
+      <Stat icon="◍" label="Population" value={`${view.population}`} />
+      <Stat icon="♥" label="Happiness" value={`${view.happiness}%`} />
+      <Stat icon="⚡" label="Energy" value={`${view.energy}%`} />
+      <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label="Day" value={`${view.day} · ${view.clock}`} />
+      {woodland && (
+        <Stat
+          icon="♣"
+          label="Woodland"
+          value={woodland.stumps + woodland.saplings > 0
+            ? `${woodland.standing} · ${woodland.stumps + woodland.saplings} regrowing`
+            : `${woodland.standing} trees`}
+        />
+      )}
+      <div className="status-foot">
+        <span>{view.season} · {view.weather}</span>
+        <span>{view.employed} working · {view.outdoors} outdoors</span>
+      </div>
+    </section>
+  );
+}
+
+function EventsPanel({ view }: { view: Snapshot }) {
+  return (
+    <section className="panel">
+      <h3>ACTIVE EVENTS</h3>
+      {view.events.length === 0 && <p className="muted small">Nothing scheduled today.</p>}
+      {view.events.map((e) => (
+        <div key={e.id} className={`event-row ${e.status}`}>
+          <span>{e.name}</span>
+          <b>{e.time}</b>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function FeedPanel({ view }: { view: Snapshot }) {
+  return (
+    <section className="panel feed-panel">
+      <h3>WORLD FEED <span>✦</span></h3>
+      <div className="feed-scroll">
+        {view.feed.map((entry) => (
+          <div key={entry.id} className={`feed-row kind-${entry.kind}`}>
+            <i>{FEED_ICON[entry.kind]}</i>
+            <span>{entry.text}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EconomyRow({ view, activePanel, onPanel }: {
+  view: Snapshot; activePanel: PanelKey; onPanel: (panel: PanelKey) => void;
+}) {
+  return (
+    <div className="economy-row">
+      <button className="treasury-chip" onClick={() => onPanel(activePanel === 'bank' ? null : 'bank')}>
+        <span>TREASURY</span>
+        <b>{Math.floor(view.treasury).toLocaleString()}</b>
+        <em>GOLD</em>
+      </button>
+      <button className="market-chip" onClick={() => onPanel(activePanel === 'market' ? null : 'market')}>
+        <span>MARKET</span>
+        <b>{view.food}</b>
+        <em>FOOD IN STORE</em>
+      </button>
+    </div>
+  );
+}
+
 const ACTIONS: { key: Exclude<PanelKey, null> | 'observe'; icon: string; label: string; blurb: string }[] = [
   { key: 'observe', icon: '◎', label: 'OBSERVE', blurb: 'Watch the world and its stories' },
   { key: 'build', icon: '⚒', label: 'BUILD', blurb: 'Create places and resources' },
@@ -227,6 +328,8 @@ const ACTIONS: { key: Exclude<PanelKey, null> | 'observe'; icon: string; label: 
 
 export function Hud(props: HudProps) {
   const { view, paused, speed, placing, activePanel } = props;
+  const compact = useCompact();
+  const [railOpen, setRailOpen] = useState(false);
   // The opening titles have said their piece by the time the world is worth
   // looking at, so they get out of the way.
   const [introShown, setIntroShown] = useState(true);
@@ -281,51 +384,33 @@ export function Hud(props: HudProps) {
         </div>
       </div>
 
-      <aside className="right-rail">
-        <section className="panel">
-          <h3>WORLD STATUS <span>✦</span></h3>
-          <Stat icon="◍" label="Population" value={`${view.population}`} />
-          <Stat icon="♥" label="Happiness" value={`${view.happiness}%`} />
-          <Stat icon="⚡" label="Energy" value={`${view.energy}%`} />
-          <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label="Day" value={`${view.day} · ${view.clock}`} />
-          {props.woodland && (
-            <Stat
-              icon="♣"
-              label="Woodland"
-              value={props.woodland.stumps + props.woodland.saplings > 0
-                ? `${props.woodland.standing} · ${props.woodland.stumps + props.woodland.saplings} regrowing`
-                : `${props.woodland.standing} trees`}
-            />
-          )}
-          <div className="status-foot">
-            <span>{view.season} · {view.weather}</span>
-            <span>{view.employed} working · {view.outdoors} outdoors</span>
-          </div>
-        </section>
-
-        <section className="panel">
-          <h3>ACTIVE EVENTS</h3>
-          {view.events.length === 0 && <p className="muted small">Nothing scheduled today.</p>}
-          {view.events.map((e) => (
-            <div key={e.id} className={`event-row ${e.status}`}>
-              <span>{e.name}</span>
-              <b>{e.time}</b>
-            </div>
-          ))}
-        </section>
-
-        <section className="panel feed-panel">
-          <h3>WORLD FEED <span>✦</span></h3>
-          <div className="feed-scroll">
-            {view.feed.map((entry) => (
-              <div key={entry.id} className={`feed-row kind-${entry.kind}`}>
-                <i>{FEED_ICON[entry.kind]}</i>
-                <span>{entry.text}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      </aside>
+      {compact
+        ? (
+          <>
+            <button
+              className={`rail-toggle ${railOpen ? 'on' : ''}`}
+              onClick={() => setRailOpen((open) => !open)}
+              aria-expanded={railOpen}
+            >
+              <span>✦</span>
+              <b>{railOpen ? 'CLOSE' : 'WORLD'}</b>
+            </button>
+            <aside className={`phone-sheet ${railOpen ? 'open' : ''}`} aria-hidden={!railOpen}>
+              <div className="sheet-grip" />
+              <StatusPanel view={view} woodland={props.woodland} />
+              <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
+              <EventsPanel view={view} />
+              <FeedPanel view={view} />
+            </aside>
+          </>
+        )
+        : (
+          <aside className="right-rail">
+            <StatusPanel view={view} woodland={props.woodland} />
+            <EventsPanel view={view} />
+            <FeedPanel view={view} />
+          </aside>
+        )}
 
       <div className="bottom-left">
         {view.focus
@@ -343,7 +428,10 @@ export function Hud(props: HudProps) {
           : (
             <section className="panel hint-card">
               <div className="being-eyebrow">OBSERVE</div>
-              <p>Click any being or place to follow their story. Drag to pan, scroll to zoom.</p>
+              <p>
+                Tap any being or place to follow their story.
+                {compact ? ' Drag to pan, pinch to zoom.' : ' Drag to pan, scroll to zoom.'}
+              </p>
             </section>
           )}
       </div>
@@ -371,30 +459,31 @@ export function Hud(props: HudProps) {
         </div>
       </nav>
 
-      <aside className="bottom-right">
-        <section className="panel minimap-panel">
-          <h3>WORLD MAP</h3>
-          <Minimap draw={props.drawMinimap} onJump={props.onMinimapJump} />
-          <div className="map-tools">
-            <button onClick={() => props.onZoom(1.18)} aria-label="Zoom in">+</button>
-            <button onClick={() => props.onZoom(0.85)} aria-label="Zoom out">−</button>
+      {compact
+        ? (
+          // A minimap is not worth a third of a phone screen, but zoom controls
+          // are: not every touch device is comfortable to pinch on.
+          <div className="touch-zoom">
+            <button onClick={() => props.onZoom(1.25)} aria-label="Zoom in">+</button>
+            <button onClick={() => props.onZoom(0.8)} aria-label="Zoom out">−</button>
             <button onClick={props.onResetView} aria-label="Reset view">⌂</button>
-            <span>{view.unlockedAreas.length} areas</span>
           </div>
-        </section>
-        <div className="economy-row">
-          <button className="treasury-chip" onClick={() => props.onPanel(activePanel === 'bank' ? null : 'bank')}>
-            <span>TREASURY</span>
-            <b>{Math.floor(view.treasury).toLocaleString()}</b>
-            <em>GOLD</em>
-          </button>
-          <button className="market-chip" onClick={() => props.onPanel(activePanel === 'market' ? null : 'market')}>
-            <span>MARKET</span>
-            <b>{view.food}</b>
-            <em>FOOD IN STORE</em>
-          </button>
-        </div>
-      </aside>
+        )
+        : (
+          <aside className="bottom-right">
+            <section className="panel minimap-panel">
+              <h3>WORLD MAP</h3>
+              <Minimap draw={props.drawMinimap} onJump={props.onMinimapJump} />
+              <div className="map-tools">
+                <button onClick={() => props.onZoom(1.18)} aria-label="Zoom in">+</button>
+                <button onClick={() => props.onZoom(0.85)} aria-label="Zoom out">−</button>
+                <button onClick={props.onResetView} aria-label="Reset view">⌂</button>
+                <span>{view.unlockedAreas.length} areas</span>
+              </div>
+            </section>
+            <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
+          </aside>
+        )}
 
       {placing && (
         <div className="placement-bar">

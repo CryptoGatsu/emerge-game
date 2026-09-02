@@ -222,6 +222,65 @@ function sandTile(seed: number): Pixels {
   return p;
 }
 
+/**
+ * Desert sand.
+ *
+ * Wind ripples run along the tile's north-east axis, the same direction the
+ * ploughed furrows use, so a dune field reads as one continuous surface with
+ * weather over it rather than as tiles that each have their own pattern.
+ */
+function duneTile(seed: number, variant: number): Pixels {
+  const p = tile();
+  fillDiamond(p, GROUND.dune);
+  speckle(p, seed, 250, [GROUND.duneDark, GROUND.duneLight, shade(GROUND.dune, 0.06)], clip);
+  const r = rng(seed + 811);
+  const ripples = 3 + variant;
+  for (let i = 0; i < ripples; i++) {
+    const offset = -14 + i * (28 / ripples) + r() * 3;
+    for (let t = 0; t < TILE_W; t++) {
+      const y = Math.round(TILE_H / 2 + (t - TILE_W / 2) * 0.5 + offset + Math.sin(t * 0.12 + i) * 1.4);
+      if (!insideDiamond(t, y)) continue;
+      rect(p, t, y, 1, 1, GROUND.duneLight);
+      if (insideDiamond(t, y + 1)) rect(p, t, y + 1, 1, 1, GROUND.duneDark);
+    }
+  }
+  scuff(p, seed + 618, GROUND.dune);
+  return p;
+}
+
+/** Sodden fen: dark ground, standing puddles, tussocks of reed. */
+function marshTile(seed: number, variant: number): Pixels {
+  const p = tile();
+  fillDiamond(p, GROUND.marsh);
+  speckle(p, seed, 250, [GROUND.marshDark, shade(GROUND.marsh, 0.12), GROUND.moss], clip);
+  const r = rng(seed + 902);
+  // Puddles, drawn as flat blots rather than rings so they sit in the ground.
+  for (let i = 0; i < 2 + variant; i++) {
+    const cx = 10 + Math.floor(r() * (TILE_W - 20));
+    const cy = 6 + Math.floor(r() * (TILE_H - 12));
+    const w = 5 + Math.floor(r() * 9);
+    for (let y = 0; y < 3; y++) {
+      const inset = Math.abs(y - 1) * 2;
+      if (!insideDiamond(cx + inset, cy + y)) continue;
+      rect(p, cx + inset, cy + y, Math.max(1, w - inset * 2), 1, y === 0 ? GROUND.marshWet : shade(GROUND.marshWet, -0.08));
+    }
+  }
+  blades(p, seed + 55, 30, [shade(GROUND.marsh, 0.26), GROUND.scrubDry, GROUND.moss]);
+  scuff(p, seed + 619, GROUND.marsh);
+  return p;
+}
+
+/** Dry steppe: bleached grass with the dust showing through it. */
+function scrubTile(seed: number, variant: number): Pixels {
+  const p = tile();
+  fillDiamond(p, GROUND.scrub);
+  speckle(p, seed, 260, [GROUND.scrubDark, GROUND.scrubDry, shade(GROUND.scrub, 0.08)], clip);
+  speckle(p, seed + 141, 40 + variant * 20, [GROUND.duneDark], clip, 2);
+  blades(p, seed + 27, 40, [GROUND.scrubDry, shade(GROUND.scrubDry, 0.18), GROUND.scrubDark]);
+  scuff(p, seed + 620, GROUND.scrub);
+  return p;
+}
+
 function snowTile(seed: number): Pixels {
   const p = tile();
   fillDiamond(p, GROUND.snow);
@@ -389,6 +448,9 @@ export function buildTiles(): TileArt[] {
   for (let i = 0; i < 2; i++) add(`tile.rock.${i}`, rockTile(2800 + i * 47));
   add('tile.sand.0', sandTile(3000));
   add('tile.snow.0', snowTile(3100));
+  for (let i = 0; i < 3; i++) add(`tile.dune.${i}`, duneTile(3600 + i * 41, i));
+  for (let i = 0; i < 3; i++) add(`tile.marsh.${i}`, marshTile(3700 + i * 59, i));
+  for (let i = 0; i < 3; i++) add(`tile.scrub.${i}`, scrubTile(3800 + i * 67, i));
   for (let f = 0; f < 4; f++) add(`tile.water.${f}`, waterTile(3200, f, false));
   for (let f = 0; f < 4; f++) add(`tile.watershore.${f}`, waterTile(3300, f, true));
   add('tile.cliff.0', cliffFace(3400));
@@ -401,4 +463,5 @@ export function buildTiles(): TileArt[] {
 export const TILE_VARIANTS: Record<string, number> = {
   grass: 4, flowers: 2, meadow: 2, forest: 2, soil: 1, tilled: 2,
   path: 3, plaza: 2, rock: 2, sand: 1, snow: 1, water: 4, watershore: 4,
+  dune: 3, marsh: 3, scrub: 3,
 };

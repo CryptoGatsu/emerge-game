@@ -33,8 +33,16 @@ import PlotSelect from './PlotSelect';
 import { Hud } from './Hud';
 import { Panels, type PanelKey } from './Panels';
 
-/** Game hours per real second at 1x. A full day takes a minute. */
-const HOURS_PER_SECOND = 0.4;
+/**
+ * Game hours per real second at 1x.
+ *
+ * A day takes about two and a half minutes. It used to be one, and at that rate
+ * citizens crossed the settlement in seconds and read as sped-up footage rather
+ * than as people going about a day. Everything in the simulation is expressed
+ * in game hours, so slowing the clock slows walking, work and trade together
+ * and nothing needed rebalancing to match.
+ */
+const HOURS_PER_SECOND = 0.15;
 /** How often the interface refreshes from the world. */
 const HUD_INTERVAL = 180;
 

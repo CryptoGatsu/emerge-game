@@ -31,6 +31,17 @@ export const GROUND = {
   rockDark: '#54533f',
   rockLight: '#95927f',
   snow: '#dfe9e4',
+  // Biome ground. Desert sand runs warmer and lighter than the river banks,
+  // fen mud is green-black, and steppe scrub is bleached grass over dust.
+  dune: '#d8b878',
+  duneDark: '#b3934f',
+  duneLight: '#ecd39a',
+  marsh: '#5d7a4a',
+  marshDark: '#415733',
+  marshWet: '#3d5946',
+  scrub: '#93a558',
+  scrubDark: '#74833f',
+  scrubDry: '#b8ac6d',
 } as const;
 
 export const WATER = {
@@ -56,6 +67,16 @@ export const FOLIAGE = {
   trunk: '#5b432c',
   trunkDark: '#3f2e1e',
   trunkLight: '#77593a',
+  // The three species the new biomes brought with them.
+  palmLight: '#7cb356',
+  palm: '#5c9440',
+  palmDark: '#3d6b2c',
+  mangroveLight: '#4a7d4a',
+  mangrove: '#33613a',
+  mangroveDark: '#204227',
+  acaciaLight: '#9cb45e',
+  acacia: '#7b9647',
+  acaciaDark: '#586d31',
 } as const;
 
 export const BLOOM = {
