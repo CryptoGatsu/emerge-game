@@ -104,6 +104,16 @@ function deadTree(seed: number): Pixels {
   return p;
 }
 
+/** A young tree, the middle stage between a stump and a full canopy. */
+function sapling(seed: number): Pixels {
+  const p = surface(22, 30);
+  groundShadow(p, 11, 28, 6, 2, 0.26);
+  trunk(p, 11, 28, 14, 3);
+  canopy(p, 11, 11, 8, 7, seed, FOLIAGE.oakLight, FOLIAGE.oak, FOLIAGE.oakDark);
+  outline(p, DARK, 0.8);
+  return p;
+}
+
 function bush(seed: number, berries: boolean): Pixels {
   const p = surface(30, 26);
   groundShadow(p, 15, 24, 9, 3, 0.28);
@@ -469,6 +479,7 @@ export function buildProps(): PropArt[] {
     add(`prop.tree.${species}.small`, tree(species.length * 733 + 19, species, false));
   }
   add('prop.tree.dead', deadTree(555));
+  add('prop.sapling', sapling(560));
   add('prop.bush.0', bush(610, false));
   add('prop.bush.1', bush(611, true));
   add('prop.bush.2', bush(612, false));

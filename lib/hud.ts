@@ -37,6 +37,7 @@ export type Focus = FocusCitizen | FocusBuilding;
 export interface EventCard { id: string; name: string; time: string; status: 'now' | 'later' | 'tomorrow'; attendees: number }
 
 export interface Snapshot {
+  name: string;
   seed: number;
   day: number;
   hour: number;
@@ -140,6 +141,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
   const avg = (pick: (c: (typeof people)[number]) => number) => people.reduce((s, c) => s + pick(c), 0) / count;
 
   return {
+    name: world.name,
     seed: world.seed,
     day: world.day,
     hour: world.hour,

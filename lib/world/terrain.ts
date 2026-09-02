@@ -37,6 +37,24 @@ export const TILE_ART: Record<Tile, { key: string; variants: number }> = {
   [Tile.WaterShore]: { key: 'tile.watershore', variants: 4 },
 };
 
+/** Flat colour per terrain kind, for minimaps and plot previews. */
+export const TILE_COLOR: Record<Tile, string> = {
+  [Tile.Grass]: '#4c8a3d',
+  [Tile.Flowers]: '#5f9d4a',
+  [Tile.Meadow]: '#6cae51',
+  [Tile.Forest]: '#2c4f27',
+  [Tile.Soil]: '#5d452c',
+  [Tile.Tilled]: '#6a4e30',
+  [Tile.CropWheat]: '#b79c47',
+  [Tile.CropVeg]: '#4e8c3a',
+  [Tile.Path]: '#a89468',
+  [Tile.Plaza]: '#9d9682',
+  [Tile.Rock]: '#767466',
+  [Tile.Sand]: '#c2ab72',
+  [Tile.Water]: '#26688a',
+  [Tile.WaterShore]: '#3a90ab',
+};
+
 export interface PropInstance {
   /** World units, so props sort against citizens using the same depth rule. */
   wx: number;
@@ -210,7 +228,12 @@ function nearest(line: Polyline, x: number, y: number): { d: number; w: number }
 
 const PLAZA = { x: 50, y: 47, r: 5.6 };
 
-export function generateWorldMap(world: World): WorldMap {
+export interface MapOptions {
+  /** Skip prop scattering. Plot previews only need the ground. */
+  props?: boolean;
+}
+
+export function generateWorldMap(world: World, options: MapOptions = {}): WorldMap {
   const seed = world.seed;
   const grid = GRID;
   const n = grid * grid;
@@ -344,8 +367,10 @@ export function generateWorldMap(world: World): WorldMap {
     return tiles[ty * grid + tx] as Tile;
   };
 
-  scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, roads, river, heightAt });
-  placeSettlementProps(props, world, roads, seed);
+  if (options.props !== false) {
+    scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, roads, river, heightAt });
+    placeSettlementProps(props, world, roads, seed);
+  }
 
   return { grid, tiles, variants, steps, field, cliffs, tone, waterfalls, props, heightAt, tileAt };
 }

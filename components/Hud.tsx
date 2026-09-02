@@ -9,7 +9,7 @@
  * looking at, and what you can do.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FEED_ICON, WEATHER_ICON, type Focus, type Snapshot } from '@/lib/hud';
 import type { PickTarget } from '@/lib/render/scene';
 import type { PanelKey } from './Panels';
@@ -20,6 +20,8 @@ interface HudProps {
   paused: boolean;
   speed: Speed;
   placing: string | null;
+  following: string | null;
+  woodland: { standing: number; stumps: number; saplings: number; total: number } | null;
   hover: { title: string; lines: string[] } | null;
   activePanel: PanelKey;
   onTogglePause: () => void;
@@ -27,6 +29,7 @@ interface HudProps {
   onPanel: (panel: PanelKey) => void;
   onInspire: () => void;
   onFocus: (target: PickTarget) => void;
+  onToggleFollow: () => void;
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
   onResetView: () => void;
@@ -108,7 +111,10 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, onClear, onFocus }: { focus: Focus; onClear: () => void; onFocus: (t: PickTarget) => void }) {
+function BeingCard({ focus, following, onClear, onFocus, onToggleFollow }: {
+  focus: Focus; following: string | null;
+  onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
+}) {
   if (focus.kind === 'building') {
     return (
       <section className="panel being-card">
@@ -152,6 +158,13 @@ function BeingCard({ focus, onClear, onFocus }: { focus: Focus; onClear: () => v
       <div className="being-status">
         <span className="pulse" />
         {focus.status}
+        <button
+          className={`follow-toggle ${following === focus.id ? 'on' : ''}`}
+          onClick={onToggleFollow}
+          title="Keep the camera on this being (F)"
+        >
+          {following === focus.id ? 'Following' : 'Follow'}
+        </button>
       </div>
       {focus.project && <div className="being-note">Working on {focus.project}</div>}
       {focus.friends.length > 0 && (
@@ -175,17 +188,31 @@ const ACTIONS: { key: Exclude<PanelKey, null> | 'observe' | 'inspire'; icon: str
 
 export function Hud(props: HudProps) {
   const { view, paused, speed, placing, activePanel } = props;
+  // The opening titles have said their piece by the time the world is worth
+  // looking at, so they get out of the way.
+  const [introShown, setIntroShown] = useState(true);
+  useEffect(() => {
+    const id = window.setTimeout(() => setIntroShown(false), 7000);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <div className="hud">
       <HoverTip hover={props.hover} />
 
-      <header className="brand-block">
+      {!introShown && (
+        <button className="world-chip" onClick={() => setIntroShown(true)} title="About Emerge">
+          <span>✦</span>
+          <b>{view.name}</b>
+        </button>
+      )}
+
+      <header className={`brand-block ${introShown ? '' : 'hidden'}`} aria-hidden={!introShown}>
         <div className="brand-line">
           <div className="brand-mark">✦</div>
           <div>
             <div className="wordmark">EMERGE</div>
-            <div className="tagline">THE AI WORLD</div>
+            <div className="tagline">{view.name === 'Emerge' ? 'THE AI WORLD' : view.name.toUpperCase()}</div>
           </div>
         </div>
         <p className="brand-copy">A living world of autonomous AI beings. They think. They socialise. They build. They evolve.</p>
@@ -215,6 +242,15 @@ export function Hud(props: HudProps) {
           <Stat icon="♥" label="Happiness" value={`${view.happiness}%`} />
           <Stat icon="⚡" label="Energy" value={`${view.energy}%`} />
           <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label="Day" value={`${view.day} · ${view.clock}`} />
+          {props.woodland && (
+            <Stat
+              icon="♣"
+              label="Woodland"
+              value={props.woodland.stumps + props.woodland.saplings > 0
+                ? `${props.woodland.standing} · ${props.woodland.stumps + props.woodland.saplings} regrowing`
+                : `${props.woodland.standing} trees`}
+            />
+          )}
           <div className="status-foot">
             <span>{view.season} · {view.weather}</span>
             <span>{view.employed} working · {view.outdoors} outdoors</span>
@@ -247,7 +283,15 @@ export function Hud(props: HudProps) {
 
       <div className="bottom-left">
         {view.focus
-          ? <BeingCard focus={view.focus} onClear={props.onClearSelection} onFocus={props.onFocus} />
+          ? (
+            <BeingCard
+              focus={view.focus}
+              following={props.following}
+              onClear={props.onClearSelection}
+              onFocus={props.onFocus}
+              onToggleFollow={props.onToggleFollow}
+            />
+          )
           : (
             <section className="panel hint-card">
               <div className="being-eyebrow">OBSERVE</div>

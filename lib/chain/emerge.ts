@@ -164,6 +164,49 @@ export interface TokenAction {
   ready: boolean;
 }
 
+export interface ClaimRequest {
+  seed: number;
+  region: string;
+  worldName: string;
+  price: number;
+  address: string | null;
+}
+
+export interface ClaimResult {
+  /** True only when the claim was actually written to the chain. */
+  settled: boolean;
+  txHash: string | null;
+  /** Why it did not settle, in words a player can act on. */
+  reason: string | null;
+}
+
+/**
+ * Claim a plot.
+ *
+ * Settlement needs a deployed registry contract on Robinhood Chain. Until that
+ * exists this returns `settled: false` with the reason, and the caller records
+ * the claim locally so the world is still playable. It deliberately does not
+ * fake a transaction: a player should never be shown a hash that buys nothing.
+ */
+export async function claimPlot(request: ClaimRequest, config: ChainConfig = ACTIVE_CHAIN): Promise<ClaimResult> {
+  if (!chainConfigured(config)) {
+    return { settled: false, txHash: null, reason: `${config.label} is not configured in this build, so the claim is local to this browser.` };
+  }
+  if (!config.tokenAddress) {
+    return { settled: false, txHash: null, reason: `The ${TOKEN.ticker} contract address is not set, so the claim is local to this browser.` };
+  }
+  if (!request.address) {
+    return { settled: false, txHash: null, reason: 'No wallet is connected, so the claim is local to this browser.' };
+  }
+  // The land registry contract is not deployed yet. When it is, the transfer of
+  // `price` $EMERGE and the plot registration go here.
+  return {
+    settled: false,
+    txHash: null,
+    reason: 'The land registry contract is not deployed yet. Your world is saved locally and can be re-claimed on chain later.',
+  };
+}
+
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {
   const ready = chainConfigured(config) && !!config.tokenAddress;
   return [

@@ -119,10 +119,159 @@ button {
 .panel-close:hover { color: var(--cream); background: rgba(255, 255, 255, 0.06); }
 
 /* ------------------------------------------------------------------ *
+ * Land office
+ * ------------------------------------------------------------------ */
+
+.land-office {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  background:
+    radial-gradient(ellipse at 20% -10%, rgba(40, 92, 48, 0.55), transparent 55%),
+    radial-gradient(ellipse at 85% 110%, rgba(28, 70, 44, 0.5), transparent 55%),
+    linear-gradient(180deg, #0a1a10, #050b07 70%);
+}
+.land-inner { max-width: 1240px; margin: 0 auto; padding: 46px 32px 60px; }
+
+.land-head { max-width: 640px; margin-bottom: 30px; }
+.land-head p { margin: 18px 0 0; font-size: 14px; line-height: 1.7; color: #b9cfae; }
+
+.land-body { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 22px; align-items: start; }
+
+.plot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; }
+
+.plot-card {
+  display: flex; flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--panel-edge-soft);
+  background: var(--panel);
+  text-align: left;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.plot-card:hover { border-color: var(--panel-edge); transform: translateY(-2px); }
+.plot-card.selected { border-color: var(--emerald); box-shadow: 0 0 0 1px rgba(139, 241, 107, 0.35), var(--shadow); }
+
+.plot-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  background: #08170f;
+  border-bottom: 1px solid var(--panel-edge-soft);
+}
+.plot-meta { padding: 13px 15px 15px; }
+.plot-meta h3 { margin: 0; font-size: 16px; color: var(--cream); }
+.plot-meta p { margin: 5px 0 10px; font-size: 12px; line-height: 1.5; color: var(--muted); min-height: 36px; }
+.plot-facts { display: flex; align-items: baseline; gap: 10px; font-size: 11px; color: var(--muted); }
+.plot-facts b { margin-left: auto; font-size: 13px; color: var(--gold); }
+
+.land-claim {
+  position: sticky;
+  top: 46px;
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.land-claim h2 { margin: 6px 0 10px; font-size: 22px; color: var(--cream); }
+.land-claim > p { font-size: 12.5px; line-height: 1.6; }
+
+.plot-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.plot-traits span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(139, 241, 107, 0.1);
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  color: #c2d6b8;
+  text-transform: capitalize;
+}
+
+.name-field { display: block; margin: 16px 0 14px; }
+.name-field span { display: block; font-size: 9px; letter-spacing: 2.2px; color: var(--muted); margin-bottom: 6px; }
+.name-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--cream);
+  font: inherit;
+  font-size: 14px;
+}
+.name-field input:focus { outline: none; border-color: var(--emerald); }
+
+.claim-price {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--panel-edge-soft);
+  border-bottom: 1px solid var(--panel-edge-soft);
+}
+.claim-price span { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+.claim-price b { margin-left: auto; font-size: 24px; color: var(--gold); }
+.claim-price em { font-style: normal; font-size: 10px; letter-spacing: 1.2px; color: var(--muted); }
+
+.claim-wallet { margin: 14px 0; min-height: 34px; display: flex; align-items: center; }
+.wallet-ok { font-size: 12.5px; color: var(--emerald); }
+.ghost {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+.ghost:hover { border-color: var(--panel-edge); color: var(--emerald); }
+
+.claim-button {
+  width: 100%;
+  padding: 13px;
+  border-radius: 10px;
+  border: 1px solid var(--emerald);
+  background: rgba(139, 241, 107, 0.16);
+  color: var(--emerald);
+  font-size: 13.5px;
+  letter-spacing: 1px;
+}
+.claim-button:hover:not(:disabled) { background: rgba(139, 241, 107, 0.28); }
+.claim-button:disabled { opacity: 0.6; cursor: progress; }
+.land-claim .muted.small { display: block; margin-top: 12px; line-height: 1.55; }
+
+@media (max-width: 900px) {
+  .land-body { grid-template-columns: 1fr; }
+  .land-claim { position: static; }
+}
+
+/* ------------------------------------------------------------------ *
  * Brand
  * ------------------------------------------------------------------ */
 
-.brand-block { position: absolute; top: 24px; left: 26px; max-width: 330px; }
+.brand-block {
+  position: absolute;
+  top: 24px; left: 26px;
+  max-width: 330px;
+  transition: opacity 1.4s ease, transform 1.4s ease;
+}
+.brand-block.hidden { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+
+.world-chip {
+  position: absolute;
+  top: 24px; left: 26px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(9px);
+  animation: chip-in 0.9s ease both;
+}
+.world-chip span { color: var(--emerald); }
+.world-chip b { font-size: 12.5px; letter-spacing: 1.4px; color: var(--cream); }
+.world-chip:hover { border-color: var(--emerald); }
+@keyframes chip-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 /* A soft scrim so the wordmark stays legible over bright terrain. */
 .brand-block::before {
   content: "";
@@ -296,6 +445,18 @@ button {
   animation: pulse 1.8s ease-in-out infinite;
 }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.follow-toggle {
+  margin-left: auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge-soft);
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+.follow-toggle:hover { border-color: var(--panel-edge); color: var(--cream); }
+.follow-toggle.on { border-color: var(--emerald); color: var(--emerald); background: rgba(139, 241, 107, 0.12); }
 
 .being-note { font-size: 12px; color: var(--gold); }
 .being-people { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; }
@@ -592,6 +753,14 @@ button {
 }
 .connect-card button:hover:not(:disabled) { background: rgba(139, 241, 107, 0.2); }
 .connect-card button:disabled { opacity: 0.6; cursor: progress; }
+.connect-card button.danger {
+  margin-left: 8px;
+  border-color: rgba(224, 120, 95, 0.5);
+  background: rgba(224, 120, 95, 0.1);
+  color: #e0785f;
+}
+.connect-card button.danger:hover { background: rgba(224, 120, 95, 0.2); }
+.connect-card .name-field { margin: 14px 0 12px; }
 
 .area-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .area-list li {

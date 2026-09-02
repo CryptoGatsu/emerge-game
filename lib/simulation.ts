@@ -44,6 +44,8 @@ export interface Citizen {
   path: number[]; dwell: number; wanderIdx: number; errand: boolean;
   phase: Phase; activity: Activity; facing: Facing; moving: boolean;
   targetBuildingId?: string; inside: boolean;
+  /** Game hours spent making no progress toward the destination. */
+  stalled: number;
   /** Cosmetic seed the renderer turns into a stable appearance. Never read by logic. */
   look: number;
 }
@@ -52,7 +54,7 @@ export interface Building { id: string; type: string; x: number; y: number; work
 export interface MarketQuote { price: number; supply: number; demand: number; volume: number; trend: number }
 
 export interface World {
-  id: string; seed: number; day: number; hour: number; terrain: Terrain[];
+  id: string; name: string; seed: number; day: number; hour: number; terrain: Terrain[];
   season: Season; weather: Weather; weatherSeed: number; treasury: number; population: number;
   families: Family[]; citizens: Citizen[]; buildings: Building[];
   resources: Record<Resource, number>; market: Record<Resource, MarketQuote>;
@@ -60,6 +62,9 @@ export interface World {
   unlockedAreas: string[];
   /** Accumulates game hours so the market trades on the clock, not per frame. */
   marketClock: number;
+  /** What each resource actually gained yesterday. The renderer reads this to
+   *  fell exactly as many trees as the woodcutters really cut. */
+  lastProduction: Partial<Record<Resource, number>>;
   counter: number;
 }
 
@@ -295,7 +300,57 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
 
 function hasArrived(c: Citizen) { return c.path.length === 0 && Math.hypot(c.destX - c.x, c.destY - c.y) < 0.06; }
 
-function stepCitizen(c: Citizen, hours: number) {
+export interface Obstacle { x: number; y: number; r: number; id: string }
+
+/** Footprints citizens steer around. Kept a little tighter than the drawn
+ *  building so people hug the walls rather than taking absurd detours. */
+function buildObstacles(world: World): Obstacle[] {
+  return world.buildings.map((b) => ({
+    x: b.x,
+    y: b.y,
+    r: b.type === 'Market' || b.type === 'Town Hall' ? 4.2 : b.type === 'House' ? 2.6 : 3.2,
+    id: b.id,
+  }));
+}
+
+/**
+ * Steer a desired direction around building footprints.
+ *
+ * Any obstacle that contains the immediate target is ignored — road junctions
+ * and doorways sit inside footprints by design, and a citizen pushed away from
+ * the very spot they are walking to would never arrive.
+ */
+function avoid(c: Citizen, dx: number, dy: number, obstacles: Obstacle[], tx: number, ty: number, destId?: string): [number, number] {
+  let ax = dx, ay = dy;
+  for (const o of obstacles) {
+    if (o.id === destId) continue;
+    const toTargetX = o.x - tx, toTargetY = o.y - ty;
+    if (toTargetX * toTargetX + toTargetY * toTargetY < o.r * o.r) continue;
+
+    const ox = o.x - c.x, oy = o.y - c.y;
+    const dist = Math.hypot(ox, oy) || 0.0001;
+    const reach = o.r + 2.2;
+    if (dist > reach) continue;
+
+    const nx = ox / dist, ny = oy / dist;
+    if (dist < o.r) {
+      // Already overlapping: leave, and strongly.
+      ax -= nx * 2.4; ay -= ny * 2.4;
+      continue;
+    }
+    if (ax * nx + ay * ny <= 0) continue; // not heading into it
+    // Slide along whichever tangent keeps us moving forward.
+    const side = ax * ny - ay * nx > 0 ? 1 : -1;
+    const weight = ((reach - dist) / (reach - o.r)) * 1.8;
+    ax += -ny * side * weight;
+    ay += nx * side * weight;
+  }
+  const len = Math.hypot(ax, ay) || 1;
+  return [ax / len, ay / len];
+}
+
+
+function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[]) {
   let budget = (c.age < 16 ? 9 : 12.5) * hours;
   c.moving = false;
   let guard = 0;
@@ -305,17 +360,24 @@ function stepCitizen(c: Citizen, hours: number) {
     const ty = final ? c.destY : roadNodes[c.path[0]][1];
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
     if (d < 0.0001) { if (final) break; c.path.shift(); continue; }
-    if (Math.abs(dx) > Math.abs(dy)) c.facing = dx > 0 ? 'e' : 'w'; else c.facing = dy > 0 ? 's' : 'n';
+
+    const [sx, sy] = avoid(c, dx / d, dy / d, obstacles, tx, ty, c.destId);
+    if (Math.abs(sx) > Math.abs(sy)) c.facing = sx > 0 ? 'e' : 'w'; else c.facing = sy > 0 ? 's' : 'n';
     const step = Math.min(d, budget);
-    c.x = clamp(c.x + (dx / d) * step, 2, 98);
-    c.y = clamp(c.y + (dy / d) * step, 4, 96);
+    c.x = clamp(c.x + sx * step, 2, 98);
+    c.y = clamp(c.y + sy * step, 4, 96);
     c.moving = true;
     budget -= step;
-    if (step >= d && !final) c.path.shift(); else if (step >= d) break;
+    // Steering can carry us past a waypoint sideways, so advance on proximity
+    // rather than on having consumed the whole distance.
+    if (!final && Math.hypot(tx - c.x, ty - c.y) < 1.2) { c.path.shift(); continue; }
+    if (step >= d && final) break;
+    if (step >= d && !final) c.path.shift();
   }
 }
 
 function moveCitizens(world: World, hours: number) {
+  const obstacles = buildObstacles(world);
   for (const c of world.citizens) {
     if (c.age < 16) c.job = 'unemployed';
     let phase = phaseFor(c, world.hour);
@@ -331,7 +393,22 @@ function moveCitizens(world: World, hours: number) {
       }
     }
 
-    stepCitizen(c, hours);
+    const beforeX = c.x, beforeY = c.y;
+    const wasAway = Math.hypot(c.destX - c.x, c.destY - c.y);
+    stepCitizen(c, hours, obstacles);
+    const nowAway = Math.hypot(c.destX - c.x, c.destY - c.y);
+
+    // Safety net: steering around a crowded corner can occasionally leave
+    // someone shuffling on the spot. If they make no headway, pick somewhere
+    // else to be rather than let them stand there for the rest of the day.
+    const moved = Math.hypot(c.x - beforeX, c.y - beforeY);
+    if (!hasArrived(c) && (moved < hours * 0.5 || nowAway > wasAway - hours * 0.2)) {
+      c.stalled += hours;
+      if (c.stalled > 0.75) { c.stalled = 0; assignDestination(world, c, phase); }
+    } else {
+      c.stalled = 0;
+    }
+
     const arrived = hasArrived(c);
     c.activity = arrived ? activityFor(phase) : 'walking';
     c.inside = arrived && !!c.destId && phase !== 'wandering';
@@ -422,6 +499,21 @@ function chooseJobFromSeed(terrain: Terrain[], n: number): WorkingJob {
   return a[Math.abs(n + terrain.reduce((s, t) => s + t.length, 0)) % a.length];
 }
 
+const WORLD_NAMES = ['Emerge', 'Greenhollow', 'Fernrest', 'Alderwatch', 'Mosswater', 'Thornebrook', 'Sunmere', 'Elderford'];
+
+/** A name for a world the player did not name themselves. */
+export function defaultWorldName(seed: number) {
+  return WORLD_NAMES[Math.abs(seed) % WORLD_NAMES.length];
+}
+
+/** Rename a world in place. Citizens refer to it by name when they speak. */
+export function renameWorld(world: World, name: string) {
+  const trimmed = name.trim().slice(0, 24);
+  if (!trimmed) return;
+  world.name = trimmed;
+  pushFeed(world, 'world', `This place is called ${trimmed} now.`);
+}
+
 /** Starter settlement, laid out as a village around the square. */
 function starterBuildings(): Building[] {
   const make = (id: string, type: string, x: number, y: number): Building => ({ id, type, x, y, workers: [], active: true });
@@ -450,7 +542,7 @@ const HOUSE_PLOTS: [number, number][] = [
   [46, 62], [24, 62], [37, 55], [28, 74],
 ];
 
-export function createWorld(seed = 481516): World {
+export function createWorld(seed = 481516, name?: string): World {
   const rand = mulberry32(seed);
   const terrain = Array.from({ length: 3 }, () => (['fertile', 'forest', 'mountain', 'rocky', 'coastal', 'river'] as Terrain[])[Math.floor(rand() * 6)]);
   const count = 20 + Math.floor(rand() * 11);
@@ -469,7 +561,7 @@ export function createWorld(seed = 481516): World {
       hunger: 82 + rand() * 18, rest: 72 + rand() * 28, social: 60 + rand() * 40, clothing: 72 + rand() * 28,
       purpose: 55 + rand() * 45, happiness: 78, wage: 0, wallet: 45 + Math.floor(rand() * 55),
       x, y, destX: x, destY: y, path: [], dwell: 0, wanderIdx: i * 5, errand: false,
-      phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
+      phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false, stalled: 0,
       look: Math.floor(rand() * 0xffffff),
     };
     citizens.push(citizen);
@@ -482,15 +574,15 @@ export function createWorld(seed = 481516): World {
   });
 
   const world: World = {
-    id: `world-${seed.toString(36)}`, seed, day: 1, hour: 8, terrain, season: 'Spring',
+    id: `world-${seed.toString(36)}`, name: name?.trim() || defaultWorldName(seed), seed, day: 1, hour: 8, terrain, season: 'Spring',
     weather: weatherFor('Spring', seed, 1), weatherSeed: seed, treasury: 3000, population: count,
     families, citizens, buildings,
     resources: { wheat: 60, vegetables: 30, wood: 50, stone: 20, ironOre: 10, wool: 8, flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10 },
     market: createMarket(),
     feed: [], gatherings: [], bonds: {}, projects: [], unlockedAreas: ['Settlement'],
-    marketClock: 0, counter: 0,
+    marketClock: 0, lastProduction: {}, counter: 0,
   };
-  pushFeed(world, 'world', 'Your world has emerged.');
+  pushFeed(world, 'world', `${world.name} has emerged.`);
   pushFeed(world, 'world', 'Families are settling into their homes.');
   pushFeed(world, 'market', 'The market is open and trade has begun.');
   scheduleGatherings(world);
@@ -684,6 +776,7 @@ function chooseJob(world: World, counts?: Partial<Record<Job, number>>): Working
 }
 
 function produce(world: World) {
+  const before: Partial<Record<Resource, number>> = { ...world.resources };
   const counts: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) counts[c.job] = (counts[c.job] || 0) + 1;
   for (const [job, count] of Object.entries(counts)) {
@@ -694,6 +787,11 @@ function produce(world: World) {
     if (recipe.input && !Object.entries(recipe.input).every(([r, n]) => world.resources[r as Resource] >= (n as number) * workers)) continue;
     for (const [r, n] of Object.entries(recipe.input || {})) world.resources[r as Resource] -= (n as number) * workers;
     for (const [r, n] of Object.entries(recipe.output)) world.resources[r as Resource] += (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather;
+  }
+  world.lastProduction = {};
+  for (const key of Object.keys(world.resources) as Resource[]) {
+    const gained = world.resources[key] - (before[key] ?? 0);
+    if (gained > 0) world.lastProduction[key] = gained;
   }
   if (counts.farmer) pushFeed(world, 'work', `${counts.farmer} farmers tended the fields.`);
   if (counts.woodcutter) pushFeed(world, 'work', `${counts.woodcutter} woodcutters worked the forest.`);

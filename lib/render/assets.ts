@@ -170,6 +170,20 @@ function activityIcon(kind: 'work' | 'eat' | 'social' | 'sleep' | 'trade'): Pixe
   return p;
 }
 
+/** A bird in silhouette, two frames of wingbeat. */
+function bird(frame: number): Pixels {
+  const p = surface(14, 10);
+  const up = frame === 0;
+  const body = '#2a3326';
+  rect(p, 6, 5, 3, 2, body);
+  if (up) {
+    for (let i = 0; i < 5; i++) { rect(p, 5 - i, 4 - i, 2, 1, body); rect(p, 8 + i, 4 - i, 2, 1, body); }
+  } else {
+    for (let i = 0; i < 5; i++) { rect(p, 5 - i, 5 + Math.floor(i * 0.6), 2, 1, body); rect(p, 8 + i, 5 + Math.floor(i * 0.6), 2, 1, body); }
+  }
+  return p;
+}
+
 /** A leaf that drifts across the world in autumn wind. */
 function leafMote(color: string): Pixels {
   const p = surface(6, 6);
@@ -280,6 +294,8 @@ export function loadAssets(): AssetLibrary {
   put('fx.select', selectionRing(UI.emerald, 2));
   put('fx.hover', selectionRing(UI.cream, 1));
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
+  put('fx.bird.0', bird(0));
+  put('fx.bird.1', bird(1));
   put('fx.leaf.0', leafMote('#c98a3a'));
   put('fx.leaf.1', leafMote('#a85a2a'));
   put('fx.leaf.2', leafMote('#d8b24a'));

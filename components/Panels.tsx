@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import type { ClaimedWorld } from '@/lib/world/plots';
 import { maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import {
@@ -20,8 +21,11 @@ export type PanelKey = 'market' | 'bank' | 'build' | 'connect' | null;
 interface PanelsProps {
   panel: PanelKey;
   view: Snapshot;
+  claimed: ClaimedWorld;
   onClose: () => void;
   onBuild: (type: string, cost: number) => void;
+  onRename: (name: string) => void;
+  onLeave: () => void;
 }
 
 /** Buildable structures. Upkeep is read from the simulation so it never drifts. */
@@ -141,9 +145,13 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
   );
 }
 
-function ConnectPanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
+function ConnectPanel({ view, claimed, onClose, onRename, onLeave }: {
+  view: Snapshot; claimed: ClaimedWorld; onClose: () => void;
+  onRename: (name: string) => void; onLeave: () => void;
+}) {
   const [wallet, setWallet] = useState<WalletState>(INITIAL_WALLET);
   const [notice, setNotice] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState(view.name);
   const configured = chainConfigured();
 
   useEffect(() => {
@@ -158,7 +166,12 @@ function ConnectPanel({ view, onClose }: { view: Snapshot; onClose: () => void }
   const switchChain = async () => setNotice(await switchToEmergeChain());
 
   return (
-    <Shell title="Connect" subtitle={`Emerge is a hybrid world: the settlement runs off-chain, and ${TOKEN.ticker} on ${ACTIVE_CHAIN.label} carries ownership and value.`} onClose={onClose} wide>
+    <Shell
+      title="Connect"
+      subtitle={`Emerge is a hybrid world: the settlement runs off-chain, and ${TOKEN.ticker} on ${ACTIVE_CHAIN.label} carries ownership and value.`}
+      onClose={onClose}
+      wide
+    >
       <div className="connect-grid">
         <div className="connect-card">
           <span className="eyebrow">WALLET</span>
@@ -189,20 +202,24 @@ function ConnectPanel({ view, onClose }: { view: Snapshot; onClose: () => void }
         </div>
 
         <div className="connect-card">
-          <span className="eyebrow">THIS WORLD</span>
-          <h3>Seed {view.seed}</h3>
-          <p className="muted">Day {view.day} · {view.population} beings · {view.familyCount} families</p>
-          <ul className="area-list">
-            {view.unlockedAreas.map((area) => <li key={area}>{area}</li>)}
-          </ul>
-          {view.projects.length > 0 && (
-            <>
-              <span className="eyebrow">IN PROGRESS</span>
-              <ul className="area-list">
-                {view.projects.map((p) => <li key={p.id}>{p.owner} — {p.name}</li>)}
-              </ul>
-            </>
-          )}
+          <span className="eyebrow">YOUR PLOT</span>
+          <h3>{claimed.region}</h3>
+          <p className="muted">
+            Claimed for {claimed.price} {TOKEN.ticker} · seed {view.seed} · day {view.day}
+          </p>
+          <p className="muted small">
+            {claimed.txHash
+              ? `Settled on chain: ${claimed.txHash}`
+              : 'Recorded in this browser. Not settled on chain yet.'}
+          </p>
+          <label className="name-field">
+            <span>WORLD NAME</span>
+            <input value={draftName} maxLength={24} onChange={(e) => setDraftName(e.target.value)} />
+          </label>
+          <button onClick={() => onRename(draftName)} disabled={!draftName.trim() || draftName === view.name}>
+            Rename world
+          </button>
+          <button className="danger" onClick={onLeave}>Choose another plot</button>
         </div>
       </div>
 
@@ -227,10 +244,12 @@ function ConnectPanel({ view, onClose }: { view: Snapshot; onClose: () => void }
   );
 }
 
-export function Panels({ panel, view, onClose, onBuild }: PanelsProps) {
+export function Panels({ panel, view, claimed, onClose, onBuild, onRename, onLeave }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'bank') return <BankPanel view={view} onClose={onClose} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;
-  if (panel === 'connect') return <ConnectPanel view={view} onClose={onClose} />;
+  if (panel === 'connect') {
+    return <ConnectPanel view={view} claimed={claimed} onClose={onClose} onRename={onRename} onLeave={onLeave} />;
+  }
   return null;
 }

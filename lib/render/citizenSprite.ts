@@ -141,7 +141,7 @@ export class CitizenSprite {
   /**
    * Advance the sprite by `dt` seconds toward the citizen's current simulation
    * state. `doorPoint` is supplied when the citizen is inside a building, so
-   * they stand visibly in the doorway instead of vanishing.
+   * they walk to the doorway before fading out of sight indoors.
    */
   update(citizen: Citizen, dt: number, height: number, doorPoint?: { x: number; y: number }): CitizenView {
     const targetX = doorPoint ? doorPoint.x : citizen.x;
@@ -184,10 +184,14 @@ export class CitizenSprite {
     this.shadow.position.set(0, -1);
     this.shadow.scale.set(this.appearance.scale * (this.state === 'sleep' ? 1.2 : 1));
 
-    // Inside a building: dimmed and slightly darkened, reading as "in the doorway".
-    const wantAlpha = citizen.inside ? 0.72 : 1;
-    this.alpha += (wantAlpha - this.alpha) * Math.min(1, dt * 6);
+    // Walking into a building means going inside it: the citizen fades out at
+    // the doorway and fades back in there when they come out again. The
+    // building's occupancy badge carries who is in there meanwhile.
+    const wantAlpha = citizen.inside ? 0 : 1;
+    this.alpha += (wantAlpha - this.alpha) * Math.min(1, dt * 7);
+    if (Math.abs(wantAlpha - this.alpha) < 0.01) this.alpha = wantAlpha;
     this.container.alpha = this.alpha;
+    this.container.visible = this.alpha > 0.01;
 
     return { wx: this.wx, wy: this.wy, screenX: screen.x, screenY: screen.y };
   }

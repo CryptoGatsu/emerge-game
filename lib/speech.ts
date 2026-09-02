@@ -20,7 +20,7 @@ const BY_ACTIVITY: Record<string, Line[]> = {
     'The settlement needs this finished.',
   ],
   walking: [
-    'Beautiful day in Emerge.',
+    'Beautiful day in {world}.',
     'Long way round today.',
     'The path by the water is worth it.',
     'Heading over now.',
@@ -28,6 +28,7 @@ const BY_ACTIVITY: Record<string, Line[]> = {
   ],
   trading: [
     'Anyone want to trade resources?',
+    'Best market in {world}.',
     'Just finished my new song.',
     'You should have seen the market today.',
     'Tell me what you have been building.',
@@ -46,6 +47,7 @@ const BY_ACTIVITY: Record<string, Line[]> = {
     'Home at last.',
   ],
   idle: [
+    'I like it here in {world}.',
     'Watching the world go by.',
     'Wonder what is over the ridge.',
     'Nothing to do but look at the trees.',
@@ -74,10 +76,10 @@ const BY_NEED: { test: (c: Citizen) => boolean; lines: Line[] }[] = [
 
 /** Time of day colours what people say as much as what they are doing. */
 const BY_HOUR: { from: number; to: number; lines: Line[] }[] = [
-  { from: 0, to: 5.5, lines: ['Cannot sleep tonight.', 'The settlement is so quiet now.', 'Just the stars out here.'] },
+  { from: 0, to: 5.5, lines: ['Cannot sleep tonight.', '{world} is so quiet now.', 'Just the stars out here.'] },
   { from: 5.5, to: 8, lines: ['Early start today.', 'Nobody else is up yet.', 'Cold this morning.'] },
   { from: 19, to: 21.5, lines: ['Lanterns are on.', 'Long day. Worth it.', 'Meet you at the tavern?'] },
-  { from: 21.5, to: 24, lines: ['Heading home.', 'One more song and I will turn in.', 'Good night, Emerge.'] },
+  { from: 21.5, to: 24, lines: ['Heading home.', 'One more song and I will turn in.', 'Good night, {world}.'] },
 ];
 
 const BY_WEATHER: Partial<Record<string, Line[]>> = {
@@ -107,7 +109,8 @@ export function speechFor(world: World, c: Citizen, beat: number): string | null
   if (!hour) pools.push(BY_ACTIVITY[c.activity] ?? BY_ACTIVITY.idle);
 
   const pool = pools[(c.hash + beat) % pools.length];
-  return pool[(c.hash * 7 + beat * 3) % pool.length];
+  // Citizens name the place they live in, whatever the player called it.
+  return pool[(c.hash * 7 + beat * 3) % pool.length].replace('{world}', world.name);
 }
 
 /** One-line status used by the inspector and the selected-being card. */

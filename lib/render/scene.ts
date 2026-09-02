@@ -24,7 +24,7 @@ import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, worldToScreen } from '../world/iso';
-import { TILE_ART, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
+import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
 
 export type PickTarget = { kind: 'citizen' | 'building'; id: string } | null;
 
@@ -60,22 +60,30 @@ interface Bubble {
 
 interface Particle { sprite: Sprite; vx: number; vy: number; life: number; max: number }
 
-/** Flat colours used for the minimap, one per terrain kind. */
-const MINIMAP_COLORS: Record<Tile, string> = {
-  [Tile.Grass]: '#4c8a3d',
-  [Tile.Flowers]: '#5f9d4a',
-  [Tile.Meadow]: '#6cae51',
-  [Tile.Forest]: '#2c4f27',
-  [Tile.Soil]: '#5d452c',
-  [Tile.Tilled]: '#6a4e30',
-  [Tile.CropWheat]: '#b79c47',
-  [Tile.CropVeg]: '#4e8c3a',
-  [Tile.Path]: '#a89468',
-  [Tile.Plaza]: '#9d9682',
-  [Tile.Rock]: '#767466',
-  [Tile.Sand]: '#c2ab72',
-  [Tile.Water]: '#26688a',
-  [Tile.WaterShore]: '#3a90ab',
+/**
+ * A tree the woodcutters can actually fell.
+ *
+ * Felling is driven by the wood the simulation really produced yesterday, so a
+ * settlement with no woodcutters never loses a tree, and a busy one visibly
+ * clears the ground around its camps. Stumps put out saplings and grow back.
+ */
+interface TreeEntry {
+  sprite: Sprite;
+  wx: number;
+  wy: number;
+  texture: Texture;
+  scale: number;
+  state: 'standing' | 'falling' | 'stump' | 'sapling';
+  /** Seconds of fall animation left, or game days until the next growth stage. */
+  timer: number;
+}
+
+/** Foliage colour through the year. Autumn turns the woods; winter greys them. */
+const FOLIAGE_SEASON: Record<string, number> = {
+  Spring: 0xffffff,
+  Summer: 0xf0ffe0,
+  Autumn: 0xe0a055,
+  Winter: 0xc4d6dd,
 };
 
 /**
@@ -92,6 +100,9 @@ function groundTint(tone: number) {
 
 /** Tile kinds drawn over grass so their ragged edges blend into it. */
 const BLENDED = new Set<Tile>([Tile.Path, Tile.Plaza, Tile.Sand, Tile.Tilled, Tile.CropWheat, Tile.CropVeg]);
+
+/** How long a tree takes to go over. */
+const FALL_SECONDS = 1.15;
 
 const MAX_BUBBLES = 6;
 const BUBBLE_ROTATE = 5.5;
@@ -275,6 +286,14 @@ export class EmergeScene {
       this.objectLayer.addChild(sprite);
       this.propSprites.push({ sprite, prop, phase: (prop.wx * 7.3 + prop.wy * 3.1) % (Math.PI * 2) });
 
+      if (prop.sway >= 0.4) this.foliage.push({ sprite, baseTint: sprite.tint as number });
+      if (prop.name.startsWith('prop.tree.') && prop.name !== 'prop.tree.dead') {
+        this.trees.push({
+          sprite, wx: prop.wx, wy: prop.wy, texture: sprite.texture,
+          scale: size, state: 'standing', timer: 0,
+        });
+      }
+
       if (prop.name.startsWith('prop.campfire')) this.campfires.push(sprite);
       if (prop.glow) {
         const glow = new Sprite(this.assets.get('fx.lampglow'));
@@ -289,6 +308,12 @@ export class EmergeScene {
   }
 
   private lampGlows: Sprite[] = [];
+  private trees: TreeEntry[] = [];
+  private foliage: { sprite: Sprite; baseTint: number }[] = [];
+  private birds: Particle[] = [];
+  private lastDay = 0;
+  private lastSeason = '';
+  private followId: string | null = null;
 
   private buildRings() {
     this.selectRing.texture = this.assets.get('fx.select');
@@ -451,6 +476,13 @@ export class EmergeScene {
       this.weatherLayer.addChild(sprite);
       this.weatherParticles.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
     }
+    for (let i = 0; i < 7; i++) {
+      const sprite = new Sprite(this.assets.get('fx.bird.0'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.worldRoot.addChild(sprite);
+      this.birds.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
     for (let i = 0; i < 46; i++) {
       const sprite = new Sprite(this.assets.get('fx.firefly'));
       sprite.anchor.set(0.5, 0.5);
@@ -508,6 +540,8 @@ export class EmergeScene {
   }
 
   panBy(dx: number, dy: number) {
+    // Taking the camera by hand means you want to look somewhere else.
+    if (Math.abs(dx) + Math.abs(dy) > 2) this.followId = null;
     this.camera.x -= dx / this.camera.zoom;
     this.camera.y -= dy / this.camera.zoom;
     this.applyCamera();
@@ -630,6 +664,10 @@ export class EmergeScene {
     this.updateSmoke(clamped);
     this.updateWeather(clamped);
     this.updateMotes(clamped);
+    this.updateBirds(clamped);
+    this.updateForestry(clamped);
+    this.updateSeason();
+    this.updateFollow(clamped);
     this.updateBubbles(clamped);
 
     this.cullTimer += clamped;
@@ -876,8 +914,9 @@ export class EmergeScene {
       const x = pos.x - bubble.root.width / 2;
       const y = pos.y - 34 * this.camera.zoom - bubble.root.height;
       bubble.root.position.set(Math.round(x), Math.round(y));
-      // Hide rather than clip when the speaker leaves the viewport.
-      bubble.root.visible = x > -40 && x < w + 40 && y > -30 && y < h - 10 && this.camera.zoom > 0.55;
+      // Hide rather than let a bubble slide under the side panels or off screen.
+      const clearOfPanels = x > 24 && x + bubble.root.width < w - 296;
+      bubble.root.visible = clearOfPanels && y > 96 && y < h - 190 && this.camera.zoom > 0.55;
       bubble.life -= dt;
     }
   }
@@ -937,6 +976,175 @@ export class EmergeScene {
   }
 
   /* ---------------------------------------------------------------- *
+   * Forestry
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Fell and regrow trees.
+   *
+   * Once per game day the woodcutters' actual output decides how many trees
+   * come down, and they come down nearest the camps that cut them. A felled
+   * tree tips over, leaves a stump, puts out a sapling and eventually grows
+   * back, so a worked wood visibly thins and recovers.
+   */
+  private updateForestry(dt: number) {
+    if (this.world.day !== this.lastDay) {
+      const newDay = this.lastDay !== 0;
+      this.lastDay = this.world.day;
+      if (newDay) {
+        this.fellTrees(this.world.lastProduction.wood ?? 0);
+        this.growTrees();
+      }
+    }
+
+    for (const tree of this.trees) {
+      if (tree.state !== 'falling') continue;
+      tree.timer -= dt;
+      const t = Math.max(0, Math.min(1, 1 - tree.timer / FALL_SECONDS));
+      // Slow start, fast finish: a tree hesitates before it goes over.
+      tree.sprite.rotation = (t * t) * 1.45 * (tree.wx % 2 === 0 ? 1 : -1);
+      if (tree.timer <= 0) {
+        tree.sprite.rotation = 0;
+        tree.sprite.texture = this.assets.get('prop.stump');
+        tree.sprite.scale.set(tree.scale);
+        tree.state = 'stump';
+        tree.timer = 4 + (Math.abs(tree.wx * 7) % 4);
+        this.burstLeaves(tree.wx, tree.wy);
+      }
+    }
+  }
+
+  private fellTrees(woodProduced: number) {
+    const camps = this.world.buildings.filter((b) => b.type === 'Woodcutter' && b.active);
+    if (!camps.length || woodProduced <= 0) return;
+    // One tree for roughly every cartload of timber.
+    const count = Math.min(6, Math.round(woodProduced / 14));
+    if (count <= 0) return;
+
+    const camp = camps[this.world.day % camps.length];
+    const standing = this.trees
+      .filter((t) => t.state === 'standing')
+      .map((t) => ({ t, d: (t.wx - camp.x) ** 2 + (t.wy - camp.y) ** 2 }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, count * 4);
+
+    for (let i = 0; i < count && standing.length; i++) {
+      // Pick from the nearest cluster rather than always the single closest, so
+      // a camp does not eat a perfect circle out of the wood.
+      const pick = standing.splice(Math.floor((this.world.counter + i * 7) % standing.length), 1)[0];
+      pick.t.state = 'falling';
+      pick.t.timer = FALL_SECONDS;
+      pick.t.sprite.visible = true;
+    }
+  }
+
+  private growTrees() {
+    for (const tree of this.trees) {
+      if (tree.state === 'standing' || tree.state === 'falling') continue;
+      tree.timer -= 1;
+      if (tree.timer > 0) continue;
+      if (tree.state === 'stump') {
+        tree.state = 'sapling';
+        tree.sprite.texture = this.assets.get('prop.sapling');
+        tree.sprite.scale.set(tree.scale * 0.8);
+        tree.timer = 4 + (Math.abs(tree.wy * 5) % 4);
+      } else {
+        tree.state = 'standing';
+        tree.sprite.texture = tree.texture;
+        tree.sprite.scale.set(tree.scale);
+      }
+    }
+  }
+
+  private burstLeaves(wx: number, wy: number) {
+    const pos = worldToScreen(wx, wy, this.map.heightAt(wx, wy));
+    for (let i = 0; i < 7; i++) {
+      const p = this.motes.find((m) => m.life <= 0);
+      if (!p) break;
+      p.sprite.texture = this.assets.get(`fx.leaf.${i % 3}`);
+      p.sprite.visible = true;
+      p.sprite.position.set(pos.x + (Math.random() - 0.5) * 30, pos.y - 30 - Math.random() * 30);
+      p.vx = (Math.random() - 0.5) * 40;
+      p.vy = 14 + Math.random() * 20;
+      p.max = 1.6 + Math.random();
+      p.life = p.max;
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Seasons, birds and the follow camera
+   * ---------------------------------------------------------------- */
+
+  /** Turn the woods with the year. Only runs when the season actually changes. */
+  private updateSeason() {
+    if (this.world.season === this.lastSeason) return;
+    this.lastSeason = this.world.season;
+    const tint = FOLIAGE_SEASON[this.world.season] ?? 0xffffff;
+    for (const leaf of this.foliage) leaf.sprite.tint = tint;
+  }
+
+  private updateBirds(dt: number) {
+    const frame = Math.floor(this.time * 7) % 2;
+    for (const b of this.birds) {
+      if (b.life > 0) {
+        b.life -= dt;
+        b.sprite.position.x += b.vx * dt;
+        b.sprite.position.y += b.vy * dt + Math.sin(this.time * 2.4 + b.max) * 9 * dt;
+        b.sprite.texture = this.assets.get(`fx.bird.${frame}`);
+        if (b.life <= 0) b.sprite.visible = false;
+        continue;
+      }
+      // Birds are a daytime thing, and rare enough to feel like a moment.
+      if (this.nightAmount > 0.4 || Math.random() > dt * 0.16) continue;
+      const fromLeft = Math.random() < 0.5;
+      const start = worldToScreen(fromLeft ? 4 : 96, 8 + Math.random() * 70);
+      b.sprite.visible = true;
+      b.sprite.alpha = 0.85;
+      b.sprite.scale.set(0.8 + Math.random() * 0.7);
+      b.sprite.position.set(start.x, start.y - 150 - Math.random() * 90);
+      b.vx = (fromLeft ? 1 : -1) * (90 + Math.random() * 70);
+      b.vy = -10 + Math.random() * 26;
+      b.sprite.scale.x = Math.abs(b.sprite.scale.x) * (fromLeft ? 1 : -1);
+      b.max = 14 + Math.random() * 8;
+      b.life = b.max;
+    }
+  }
+
+  /** Keep the camera on one citizen as they go about their day. */
+  private updateFollow(dt: number) {
+    if (!this.followId) return;
+    const sprite = this.citizens.get(this.followId);
+    if (!sprite) { this.followId = null; return; }
+    const pos = worldToScreen(sprite.wx, sprite.wy, this.map.heightAt(sprite.wx, sprite.wy));
+    const k = Math.min(1, dt * 3.2);
+    this.camera.x += (pos.x - this.camera.x) * k;
+    this.camera.y += (pos.y - this.camera.y) * k;
+    this.applyCamera();
+  }
+
+  /**
+   * The state of the woodland. Surfaced so the interface can show the forest
+   * shrinking and recovering as the woodcutters work it.
+   */
+  woodland() {
+    let standing = 0, stumps = 0, saplings = 0;
+    for (const tree of this.trees) {
+      if (tree.state === 'standing') standing++;
+      else if (tree.state === 'sapling') saplings++;
+      else stumps++;
+    }
+    return { standing, stumps, saplings, total: this.trees.length };
+  }
+
+  /** Follow a citizen, or pass null to stop. */
+  setFollow(id: string | null) {
+    this.followId = id;
+    if (id) this.camera.zoom = Math.max(this.camera.zoom, 1.35);
+  }
+
+  get following() { return this.followId; }
+
+  /* ---------------------------------------------------------------- *
    * Minimap
    * ---------------------------------------------------------------- */
 
@@ -955,7 +1163,7 @@ export class EmergeScene {
     for (let ty = 0; ty < this.map.grid; ty++) {
       for (let tx = 0; tx < this.map.grid; tx++) {
         const kind = this.map.tiles[ty * this.map.grid + tx] as Tile;
-        ctx.fillStyle = MINIMAP_COLORS[kind];
+        ctx.fillStyle = TILE_COLOR[kind];
         const x = half + (tx - ty) * (scale / 2) - scale / 2;
         const y = (tx + ty) * (scale / 4) - this.map.steps[ty * this.map.grid + tx] * 1.5;
         ctx.fillRect(x, y, scale, scale / 2 + 1);
