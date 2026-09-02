@@ -21,6 +21,23 @@ export { hash2, valueNoise };
 /** Cells per side of the sampled mask. One cell is a little over a world unit. */
 export const WATER_CELLS = 96;
 
+/**
+ * How far back from the water's edge a citizen has to stop, in world units.
+ *
+ * The mask records where the water is; the renderer draws it as whole
+ * isometric tiles, each a little over two units across and painted wet if its
+ * centre is. So the drawn shoreline reaches up to a tile's half-width past the
+ * mask's edge, and a citizen walking right up to that edge is standing on
+ * painted water — measured at one per cent of desert samples, every one of them
+ * on a tile the player can see is a pond.
+ *
+ * Movement therefore stops clear of the drawn tile: one and a half units, which
+ * is the distance from a tile's centre to its corner. Painting and placement
+ * still use the exact mask, because that is what they are drawing and building
+ * on.
+ */
+export const WALK_MARGIN = 1.5;
+
 export interface Polyline {
   pts: [number, number][];
   widths: number[];
@@ -30,8 +47,23 @@ export interface WaterField {
   /** The channels, for the terrain generator to paint and meander. */
   river: Polyline;
   pond: { x: number; y: number; r: number };
-  /** True where a citizen would be standing in water. */
+  /** True where the mask says there is water: what the renderer paints. */
   isWater(wx: number, wy: number): boolean;
+  /**
+   * True where a citizen may not walk — the water, plus the margin that covers
+   * the drawn tile's overhang past the mask.
+   */
+  blocks(wx: number, wy: number): boolean;
+  /**
+   * Unit vector to the nearest ground a citizen may stand on, and how far.
+   *
+   * `toLand` only answers for positions actually in the water, which left
+   * anyone inside the margin with no way out at all: one was measured standing
+   * on the same spot for an entire working day, her stall timer firing over and
+   * over and handing her a new destination she could not take a single step
+   * toward.
+   */
+  toClear(wx: number, wy: number): { x: number; y: number; d: number };
   /**
    * Unit vector toward the nearest dry ground, and how far it is. Zero-length
    * on land. This is what pushes someone who has ended up in the river back to
@@ -254,6 +286,59 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
     }
   }
 
+  // The walkable mask: the water, dilated by a real radius.
+  //
+  // The breadth-first sweep above counts hops, not distance, so a cell
+  // diagonally next to the water reads as two cells away — and comparing that
+  // against a Euclidean margin let citizens stand on painted shore tiles while
+  // the field insisted they were two units clear of the water. This dilation
+  // measures the distance it claims to.
+  const reach = Math.ceil(WALK_MARGIN / cell);
+  const blocked = new Uint8Array(n * n);
+  for (let gy = 0; gy < n; gy++) {
+    for (let gx = 0; gx < n; gx++) {
+      const i = gy * n + gx;
+      if (mask[i]) { blocked[i] = 1; continue; }
+      for (let dy = -reach; dy <= reach && !blocked[i]; dy++) {
+        for (let dx = -reach; dx <= reach; dx++) {
+          const nx = gx + dx, ny = gy + dy;
+          if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+          if (!mask[ny * n + nx]) continue;
+          if (Math.hypot(dx, dy) * cell > WALK_MARGIN) continue;
+          blocked[i] = 1;
+          break;
+        }
+      }
+    }
+  }
+
+  // And the way out of the blocked zone, for anyone who ends up inside it.
+  const clearX = new Float32Array(n * n);
+  const clearY = new Float32Array(n * n);
+  const clearD = new Float32Array(n * n).fill(Infinity);
+  const clearQueue: number[] = [];
+  for (let i = 0; i < blocked.length; i++) {
+    if (blocked[i]) continue;
+    clearD[i] = 0;
+    clearX[i] = (i % n + 0.5) * cell;
+    clearY[i] = (Math.floor(i / n) + 0.5) * cell;
+    clearQueue.push(i);
+  }
+  for (let head = 0; head < clearQueue.length; head++) {
+    const i = clearQueue[head];
+    const gx = i % n, gy = (i / n) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const nx = gx + dx, ny = gy + dy;
+      if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+      const j = ny * n + nx;
+      if (clearD[j] !== Infinity) continue;
+      clearD[j] = clearD[i] + 1;
+      clearX[j] = clearX[i];
+      clearY[j] = clearY[i];
+      clearQueue.push(j);
+    }
+  }
+
   const indexOf = (wx: number, wy: number) => {
     const gx = Math.max(0, Math.min(n - 1, Math.floor(wx / cell)));
     const gy = Math.max(0, Math.min(n - 1, Math.floor(wy / cell)));
@@ -265,6 +350,15 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
     pond,
     coverage: wet / mask.length,
     isWater: (wx, wy) => mask[indexOf(wx, wy)] === 1,
+    blocks: (wx, wy) => blocked[indexOf(wx, wy)] === 1,
+    toClear(wx, wy) {
+      const i = indexOf(wx, wy);
+      if (!blocked[i]) return { x: 0, y: 0, d: 0 };
+      const dx = clearX[i] - wx, dy = clearY[i] - wy;
+      const d = Math.hypot(dx, dy);
+      if (!Number.isFinite(d) || d < 0.0001) return { x: 0, y: 1, d: cell };
+      return { x: dx / d, y: dy / d, d: d + 0.35 };
+    },
     // A world with no water at all leaves the sweep at infinity; report a
     // distance larger than the map instead, so callers can compare it freely.
     distanceToWater(wx, wy) {
@@ -277,7 +371,11 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
       const dx = fromX[i] - wx, dy = fromY[i] - wy;
       const d = Math.hypot(dx, dy);
       if (d < 0.0001) return { x: 0, y: 1, d: cell };
-      return { x: dx / d, y: dy / d, d };
+      // Far enough to clear the drawn tile as well as the mask, or the escape
+      // leaves them standing on the water they were just pulled out of. The
+      // sweep counts hops, so the reported distance is already generous; a
+      // little over the margin on top of it is enough.
+      return { x: dx / d, y: dy / d, d: d + WALK_MARGIN * 0.5 };
     },
     landAt: (wx, wy) => land[indexOf(wx, wy)],
     mainland,

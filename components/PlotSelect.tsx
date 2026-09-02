@@ -24,7 +24,7 @@ import {
   ISLANDS, drawPlotPreview, drawRegionMap, loadPlayer, marketPlots, prospectPlot, savePlayer,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
-import { ACTIVE_CHAIN, TOKEN, chainConfigured, claimPlot } from '@/lib/chain/emerge';
+import { ACTIVE_CHAIN, TOKEN, claimPlot, tokenLive } from '@/lib/chain/emerge';
 import { LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { WalletPicker, useWallet } from './WalletPicker';
 
@@ -113,7 +113,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
   // On a phone the map and the claim panel cannot both be on screen, so the
   // panel becomes a sheet that the map opens.
   const [sheetOpen, setSheetOpen] = useState(false);
-  const configured = chainConfigured();
+  const configured = tokenLive();
 
   useEffect(() => { setPlayer(loadPlayer()); }, []);
 
@@ -273,8 +273,9 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
 
             {!configured && (
               <p className="muted small">
-                {ACTIVE_CHAIN.label} is not configured in this build, so claims are recorded in this
-                browser rather than on chain, and you start with a local development allocation of
+                This build talks to {ACTIVE_CHAIN.label} (chain {ACTIVE_CHAIN.chainId}), but the
+                {' '}{TOKEN.ticker} contract is not deployed there yet, so claims are recorded in this browser
+                rather than on chain and you start with a local development allocation of
                 {' '}{LOCAL_TEST_ALLOCATION.toLocaleString()} {TOKEN.ticker}. Neither is a token transfer.
               </p>
             )}

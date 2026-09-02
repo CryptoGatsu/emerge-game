@@ -439,16 +439,53 @@ function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
 /** Hand-placed settlement dressing that reads as somewhere people have built this place. */
 function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline, seed: number, pond: { x: number; y: number; r: number }, layout: WorldLayout, bank: BiomeProfile['ground']) {
   const at = (type: string) => world.buildings.find((b) => b.type === type);
-  const push = (wx: number, wy: number, name: string, sway = 0, glowing = false) =>
+  const water = waterOf(world);
+
+  /**
+   * Somewhere a piece of dressing can stand without looking like a mistake.
+   *
+   * Every offset below is measured from the thing the prop belongs to — five
+   * units east of the smithy, eight south of the farm — and none of them knows
+   * what is already there. So a barrel landed in the river, a haybale sat
+   * inside a neighbour's wall, and two farms half a plot apart put their crates
+   * on the same square of ground. This is the one gate they all pass through:
+   * on dry land, out of every building, off the plaza, and not on top of
+   * another piece of dressing.
+   */
+  const placed: { x: number; y: number }[] = [];
+  const clear = (wx: number, wy: number, gap = 1.3, offPlaza = true) => {
+    if (wx < 2 || wy < 2 || wx > 98 || wy > 98) return false;
+    if (water.blocks(wx, wy)) return false;
+    if (offPlaza && Math.hypot(wx - layout.plaza.x, wy - layout.plaza.y) < layout.plaza.r) return false;
+    for (const b of world.buildings) {
+      const r = b.type === 'Market' || b.type === 'Town Hall' ? 4.2 : b.type === 'House' ? 2.6 : 3.2;
+      if (Math.hypot(wx - b.x, wy - b.y) < r + 0.4) return false;
+    }
+    for (const p of placed) if (Math.hypot(wx - p.x, wy - p.y) < gap) return false;
+    return true;
+  };
+
+  const push = (wx: number, wy: number, name: string, sway = 0, glowing = false) => {
     out.push({ wx, wy, name, sway, glow: glowing });
+    placed.push({ x: wx, y: wy });
+  };
+  /** Dressing that gives up rather than stand somewhere daft. Returns whether it went down. */
+  const tuck = (wx: number, wy: number, name: string, sway = 0, glowing = false) => {
+    if (!clear(wx, wy)) return false;
+    push(wx, wy, name, sway, glowing);
+    return true;
+  };
 
   // A deck at every place the plan found a road crossing water, laid along the
   // whole span rather than as a single sprite at the midpoint — a crossing is
   // as long as the water under it.
   for (const bridge of layout.bridges) {
-    const sections = Math.max(1, Math.round(bridge.span / 2.6));
+    // `deck`, not `span`: the walkable ramp runs well past the planks so that
+    // the approach is wider than a person, but drawing it that long turned a
+    // one-unit stream into seven units of boardwalk.
+    const sections = Math.max(1, Math.round(bridge.deck / 2.6));
     for (let i = -sections; i <= sections; i++) {
-      const t = (i / Math.max(1, sections)) * bridge.span;
+      const t = (i / sections) * bridge.deck;
       push(bridge.x + Math.cos(bridge.angle) * t, bridge.y + Math.sin(bridge.angle) * t, 'prop.bridge');
     }
   }
@@ -463,60 +500,96 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
     else push(amenity.x, amenity.y, `prop.stall.${(Math.round(amenity.x + amenity.y)) % 3}`);
   }
 
+  // The plaza's own dressing belongs on the plaza, so it skips that one test —
+  // but not the rest: a settlement whose square runs down to the water had its
+  // signpost planted in the river.
   const PLAZA = layout.plaza;
-  push(PLAZA.x - 4.5, PLAZA.y - 3.5, 'prop.planter', 0.4);
-  push(PLAZA.x + 1.5, PLAZA.y + 5.5, 'prop.planter', 0.4);
-  push(PLAZA.x - 7.5, PLAZA.y - 1, 'prop.signpost');
+  const onPlaza = (wx: number, wy: number, name: string, sway = 0) => {
+    if (clear(wx, wy, 1.3, false)) push(wx, wy, name, sway);
+  };
+  onPlaza(PLAZA.x - 4.5, PLAZA.y - 3.5, 'prop.planter', 0.4);
+  onPlaza(PLAZA.x + 1.5, PLAZA.y + 5.5, 'prop.planter', 0.4);
+  onPlaza(PLAZA.x - 7.5, PLAZA.y - 1, 'prop.signpost');
 
   // Lanterns spaced along the main streets.
   const lanternEvery = 46;
   for (let i = 0; i < roads.pts.length; i += lanternEvery) {
     const [x, y] = roads.pts[i];
     const side = hash2(seed + 909, i, 3) > 0.5 ? 1 : -1;
-    push(x + side * 2.6, y + side * 1.4, 'prop.lantern', 0, true);
+    // Try the far side before giving up: a lantern is worth a second look,
+    // since a dark stretch of street is more noticeable than a missing post.
+    if (!tuck(x + side * 2.6, y + side * 1.4, 'prop.lantern', 0, true)) {
+      tuck(x - side * 2.6, y - side * 1.4, 'prop.lantern', 0, true);
+    }
   }
 
   const market = at('Market');
   if (market) {
-    push(market.x - 10, market.y + 2.5, 'prop.crates');
-    push(market.x + 10.5, market.y + 2, 'prop.barrel');
+    tuck(market.x - 10, market.y + 2.5, 'prop.crates');
+    tuck(market.x + 10.5, market.y + 2, 'prop.barrel');
   }
 
+  /**
+   * A paddock behind each farm.
+   *
+   * Two runs meeting at a corner, each along a true isometric axis with the
+   * segment that matches it, so the posts join into a line instead of pointing
+   * across it. The corner is chosen per farm from its own position, which
+   * spreads the paddocks of neighbouring farms rather than laying three
+   * identical rows through the same ground; segments falling on water, on a
+   * building or on somebody else's dressing are simply left out, so a fence
+   * stops at the bank rather than wading in.
+   *
+   * `SEG` is what one segment covers on the ground: the sprite is 32 screen
+   * pixels wide, a tile is 64 across and 48 tiles span the hundred world units,
+   * which puts a segment a shade over two units long on either axis.
+   */
+  const SEG = 32 / ((GRID / 100) * (64 / 2));
   for (const farm of world.buildings.filter((b) => b.type === 'Farm')) {
-    push(farm.x + 6.5, farm.y + 2, 'prop.haybale');
-    push(farm.x + 9, farm.y + 3.5, 'prop.haybale');
-    push(farm.x - 6.5, farm.y + 3, 'prop.crates');
-    for (let i = 0; i < 6; i++) push(farm.x - 11 + i * 3.4, farm.y + 8.5, i % 2 ? 'prop.fence.ne' : 'prop.fence.nw');
+    tuck(farm.x + 6.5, farm.y + 2, 'prop.haybale');
+    tuck(farm.x + 9, farm.y + 3.5, 'prop.haybale');
+    tuck(farm.x - 6.5, farm.y + 3, 'prop.crates');
+    // Which way the paddock opens, so two farms side by side do not fence the
+    // same ground.
+    const flip = hash2(seed + 771, Math.round(farm.x), Math.round(farm.y)) > 0.5 ? -1 : 1;
+    const cornerX = farm.x + 5.4 * flip;
+    const cornerY = farm.y + 5.4;
+    for (let i = 1; i <= 4; i++) {
+      // Along world x: the segment that falls to the right on screen.
+      tuck(cornerX - flip * i * SEG, cornerY, 'prop.fence.nw');
+      // Along world y: the segment that rises to the right.
+      tuck(cornerX, cornerY - i * SEG, 'prop.fence.ne');
+    }
   }
 
   const wood = at('Woodcutter');
   if (wood) {
-    push(wood.x + 5.5, wood.y + 2.5, 'prop.woodpile');
-    push(wood.x - 5, wood.y + 2, 'prop.woodpile');
-    push(wood.x + 2.5, wood.y + 5, 'prop.stump');
+    tuck(wood.x + 5.5, wood.y + 2.5, 'prop.woodpile');
+    tuck(wood.x - 5, wood.y + 2, 'prop.woodpile');
+    tuck(wood.x + 2.5, wood.y + 5, 'prop.stump');
   }
 
   const smith = at('Blacksmith');
   if (smith) {
-    push(smith.x + 5.5, smith.y + 2.5, 'prop.barrel');
-    push(smith.x - 5, smith.y + 3, 'prop.crates');
+    tuck(smith.x + 5.5, smith.y + 2.5, 'prop.barrel');
+    tuck(smith.x - 5, smith.y + 3, 'prop.crates');
   }
 
   const storage = at('Storage');
   if (storage) {
-    push(storage.x - 6, storage.y + 3, 'prop.crates');
-    push(storage.x + 6.5, storage.y + 2.5, 'prop.barrel');
-    push(storage.x + 4, storage.y + 5, 'prop.crates');
+    tuck(storage.x - 6, storage.y + 3, 'prop.crates');
+    tuck(storage.x + 6.5, storage.y + 2.5, 'prop.barrel');
+    tuck(storage.x + 4, storage.y + 5, 'prop.crates');
   }
 
   const tavern = at('Tavern');
-  if (tavern) push(tavern.x + 8, tavern.y + 1, 'prop.lantern', 0, true);
+  if (tavern) tuck(tavern.x + 8, tavern.y + 1, 'prop.lantern', 0, true);
 
   const quarry = at('Quarry');
   if (quarry) {
-    push(quarry.x - 6, quarry.y + 3, 'prop.rock.big');
-    push(quarry.x + 6.5, quarry.y + 2, 'prop.rock.big');
-    push(quarry.x + 2, quarry.y + 6, 'prop.rock.small');
+    tuck(quarry.x - 6, quarry.y + 3, 'prop.rock.big');
+    tuck(quarry.x + 6.5, quarry.y + 2, 'prop.rock.big');
+    tuck(quarry.x + 2, quarry.y + 6, 'prop.rock.small');
   }
 
   // Reeds and lilies around the pond edge. A desert spring gets palms instead.
@@ -528,7 +601,12 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
     const name = desert
       ? (i % 4 === 0 ? 'prop.tree.palm.small' : 'prop.bush.0')
       : (i % 3 === 0 ? 'prop.reeds' : 'prop.bush.0');
-    push(pond.x + Math.cos(a) * r, pond.y + Math.sin(a) * r * 0.9, name, 0.8);
+    const px = pond.x + Math.cos(a) * r, py = pond.y + Math.sin(a) * r * 0.9;
+    // Reeds stand in the shallows; a palm or a bush floating on open water does
+    // not. The rim is a circle and the pond is not, so a good third of it lands
+    // in the wet on a lobed pool.
+    if (name !== 'prop.reeds' && water.isWater(px, py)) continue;
+    push(px, py, name, 0.8);
   }
 }
 

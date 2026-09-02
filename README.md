@@ -386,23 +386,35 @@ is reserved for ownership, the token economy and player actions that want verifi
 settlement. `lib/chain/emerge.ts` is a dependency-free EIP-1193 layer that the simulation
 never calls, so no wallet or contract interaction can stall a frame.
 
-Network details are read from the environment, so the same build can target a development
-network or mainnet:
+Both Robinhood Chain networks are built in, because an RPC endpoint and a chain id are
+public facts about the network rather than deployment secrets:
+
+| | RPC | Chain ID |
+| --- | --- | --- |
+| Mainnet | `https://rpc.mainnet.chain.robinhood.com` | 4663 |
+| Testnet | `https://rpc.testnet.chain.robinhood.com/rpc` | 46630 |
+
+So a fresh clone already knows how to reach the chain, and the Connect panel's "switch
+network" really does add Robinhood Chain to MetaMask or Trust Wallet. The environment
+still wins where it is set, which is how you point a build at a fork or a local node:
 
 ```
-NEXT_PUBLIC_CHAIN_TARGET=testnet|mainnet
-NEXT_PUBLIC_ROBINHOOD_CHAIN_ID=
-NEXT_PUBLIC_ROBINHOOD_RPC_URL=
+NEXT_PUBLIC_CHAIN_TARGET=testnet|mainnet   # default: testnet
+NEXT_PUBLIC_ROBINHOOD_CHAIN_ID=            # default: 4663
+NEXT_PUBLIC_ROBINHOOD_RPC_URL=             # default: https://rpc.mainnet.chain.robinhood.com
 NEXT_PUBLIC_ROBINHOOD_EXPLORER=
 NEXT_PUBLIC_EMERGE_TOKEN=
-NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID=
-NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL=
+NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID=    # default: 46630
+NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL=     # default: https://rpc.testnet.chain.robinhood.com/rpc
 NEXT_PUBLIC_ROBINHOOD_TESTNET_EXPLORER=
 NEXT_PUBLIC_EMERGE_TOKEN_TESTNET=
 ```
 
-Until these are set, the Connect panel says so plainly and lists the actions the economy
-layer is designed around rather than pretending to be wired up.
+What is *not* built in, and cannot be, is the $EMERGE token address and the land registry:
+those are this game's own deployments and do not exist yet. `tokenLive()` is the test the
+interface actually asks, and while it is false the panels say plainly that balances,
+claims and listings live in this browser rather than showing a transaction that bought
+nothing.
 
 ## Where this still needs work
 

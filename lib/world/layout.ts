@@ -22,13 +22,43 @@
 
 import type { BiomeProfile, LayoutKind } from './biomes';
 import { heightField } from './relief';
-import type { WaterField } from './water';
+import { WALK_MARGIN, type WaterField } from './water';
 
 /** What a road node is for, which is how sites are derived from the plan. */
 export type NodeRole = 'core' | 'street' | 'residential' | 'work';
 
 /** How far a deck reaches either side of the road's centre line. */
 export const BRIDGE_HALF_WIDTH = 2.2;
+
+/**
+ * How far a deck reaches past the water at each end.
+ *
+ * It has to clear the margin citizens keep from the water's edge, with room to
+ * spare, or the approach to the bridge is a slot narrower than a person: the
+ * deck ended 1.8 units past the water while the margin held people back 1.5,
+ * leaving three tenths of a unit of usable ramp. Every settlement with a bridge
+ * had citizens shuffling at the foot of one for days on end — nineteen of
+ * twenty-one in one valley — while the three biomes that generate no bridges at
+ * all had none at all.
+ */
+export const BRIDGE_RAMP = WALK_MARGIN + 1.6;
+
+/**
+ * How far the drawn planks reach past the water, as opposed to the walkable
+ * ramp. Just past the margin, so nobody is ever standing on bare ground the
+ * water rule has already claimed.
+ */
+export const DECK_OVERHANG = WALK_MARGIN + 0.2;
+
+/**
+ * How close two crossings may be before the second one is redundant.
+ *
+ * A road graph that crosses the same river in five places gets five decks, and
+ * a settlement of twenty people does not build five bridges over one stream.
+ * Crossings nearer than this are thinned to the cheapest one, but only where
+ * the road it carried has somewhere else to go.
+ */
+const MIN_CROSSING_GAP = 16;
 
 /**
  * Whether a point is on one of these bridges.
@@ -83,6 +113,17 @@ export interface Bridge {
    * freezing where they stood.
    */
   span: number;
+  /**
+   * Half the length of the deck as it is *drawn*, which is shorter.
+   *
+   * The walkable span has to clear the margin citizens keep from the water at
+   * both ends, plus room to turn — three units of ramp on a stream one unit
+   * across, so a village with five crossings had seventy units of planking laid
+   * over thirteen units of water and read as a boardwalk town. The planks are
+   * therefore drawn over the water and a short landing at each bank, while the
+   * ground under the rest of the ramp stays the bank it looks like.
+   */
+  deck: number;
 }
 
 export interface WorldLayout {
@@ -461,28 +502,83 @@ function buildRing(c: Point, angle: number, rand: () => number): Plan {
  * ------------------------------------------------------------------ */
 
 /**
- * Shift a node onto the mainland, if it is not there already.
+ * Put a road node somewhere a citizen can actually stand.
  *
- * Nearest dry ground is not good enough: a road node beached onto an islet is a
- * junction nobody can walk to, and everything routed through it walks at the
- * water instead.
+ * Two conditions, and both are load-bearing. It has to be on the settlement's
+ * own landmass, or the junction is one nobody can reach and everything routed
+ * through it walks at the water instead. And it has to be outside the margin
+ * citizens keep from the water's edge — a node a single unit from the bank is a
+ * junction that cannot be occupied, so anyone routed through it walks up to the
+ * margin, finds every direction refused, and stops there. That was the largest
+ * remaining source of citizens standing still: sixteen of twenty in one
+ * woodland, for a hundred and forty game hours at a stretch.
  */
 function beach(p: Point, water: WaterField): Point {
-  if (water.landAt(p[0], p[1]) === water.mainland) return p;
-  const out = water.isWater(p[0], p[1]) ? water.toMainland(p[0], p[1]) : water.toMainland(p[0], p[1]);
-  if (out.d <= 0) {
-    const dry = water.toLand(p[0], p[1]);
-    return [clamp(p[0] + dry.x * (dry.d + 1.6), 8, 92), clamp(p[1] + dry.y * (dry.d + 1.6), 10, 90)];
+  let [x, y] = p;
+  if (water.landAt(x, y) !== water.mainland) {
+    const home = water.toMainland(x, y);
+    const out = home.d > 0 ? home : water.toLand(x, y);
+    x = clamp(x + out.x * (out.d + 1.6), 8, 92);
+    y = clamp(y + out.y * (out.d + 1.6), 10, 90);
   }
-  return [clamp(p[0] + out.x * (out.d + 1.6), 8, 92), clamp(p[1] + out.y * (out.d + 1.6), 10, 90)];
+  if (water.blocks(x, y)) {
+    const clear = water.toClear(x, y);
+    if (clear.d > 0) {
+      x = clamp(x + clear.x * (clear.d + 0.6), 8, 92);
+      y = clamp(y + clear.y * (clear.d + 0.6), 10, 90);
+    }
+  }
+  return [x, y];
+}
+
+/** Whether every node reachable before is still reachable with an edge cut. */
+function stillConnected(edges: number[][], cut: [number, number]) {
+  const n = edges.length;
+  const passable = (a: number, b: number) =>
+    !((a === cut[0] && b === cut[1]) || (a === cut[1] && b === cut[0]));
+  const seen = new Uint8Array(n);
+  const queue = [0];
+  seen[0] = 1;
+  let reached = 1;
+  while (queue.length) {
+    const a = queue.pop()!;
+    for (const b of edges[a]) {
+      if (seen[b] || !passable(a, b)) continue;
+      seen[b] = 1;
+      reached++;
+      queue.push(b);
+    }
+  }
+  // Islands the graph never reached in the first place are not this cut's
+  // doing: compare against the same walk with nothing cut.
+  const all = new Uint8Array(n);
+  const q2 = [0];
+  all[0] = 1;
+  let total = 1;
+  while (q2.length) {
+    const a = q2.pop()!;
+    for (const b of edges[a]) {
+      if (all[b]) continue;
+      all[b] = 1;
+      total++;
+      q2.push(b);
+    }
+  }
+  return reached === total;
 }
 
 /**
  * Find the places a road still crosses water after the nodes have been beached,
  * so the terrain generator can lay a deck there. A causeway town is mostly this.
+ *
+ * Crossings are then thinned: where two are close enough to be the same reach
+ * of the same river, the longer one is dropped along with the road it carried,
+ * provided the network is still whole without it. A causeway town, whose whole
+ * plan is bridges, keeps them all — there the water is the street, and every
+ * deck is load-bearing rather than a second way over one stream.
  */
-function findBridges(nodes: Point[], edges: number[][], water: WaterField): Bridge[] {
-  const bridges: Bridge[] = [];
+function findBridges(nodes: Point[], edges: number[][], water: WaterField, thin: boolean): Bridge[] {
+  const found: { bridge: Bridge; edge: [number, number] }[] = [];
   const seen = new Set<string>();
   edges.forEach((neighbours, a) => neighbours.forEach((bIdx) => {
     const key = a < bIdx ? `${a}-${bIdx}` : `${bIdx}-${a}`;
@@ -504,17 +600,42 @@ function findBridges(nodes: Point[], edges: number[][], water: WaterField): Brid
         const runEnd = wet ? s : s - 1;
         const mid = ((runStart + runEnd) / 2) / steps;
         const runLength = ((runEnd - runStart + 1) / steps) * len;
-        bridges.push({
-          x: ax + (bx - ax) * mid,
-          y: ay + (by - ay) * mid,
-          angle: Math.atan2(by - ay, bx - ax),
-          span: runLength / 2 + 1.8,
+        found.push({
+          bridge: {
+            x: ax + (bx - ax) * mid,
+            y: ay + (by - ay) * mid,
+            angle: Math.atan2(by - ay, bx - ax),
+            span: runLength / 2 + BRIDGE_RAMP,
+            deck: runLength / 2 + DECK_OVERHANG,
+          },
+          edge: [a, bIdx],
         });
         runStart = -1;
       }
     }
   }));
-  return bridges;
+
+  if (!thin) return found.map((f) => f.bridge);
+
+  // Cheapest crossings first, so the one that survives a cluster is the one
+  // over the narrowest water.
+  found.sort((p, q) => p.bridge.span - q.bridge.span);
+  const kept: Bridge[] = [];
+  for (const { bridge, edge } of found) {
+    const crowded = kept.some((k) => Math.hypot(k.x - bridge.x, k.y - bridge.y) < MIN_CROSSING_GAP);
+    // An edge that crosses water twice contributes two bridges; cutting it for
+    // one would strand the other, so only cut an edge nothing else needs.
+    const doubled = found.some((o) => o.bridge !== bridge && o.edge[0] === edge[0] && o.edge[1] === edge[1]);
+    if (crowded && !doubled && stillConnected(edges, edge)) {
+      const from = edges[edge[0]].indexOf(edge[1]);
+      if (from >= 0) edges[edge[0]].splice(from, 1);
+      const back = edges[edge[1]].indexOf(edge[0]);
+      if (back >= 0) edges[edge[1]].splice(back, 1);
+      continue;
+    }
+    kept.push(bridge);
+  }
+  return kept;
 }
 
 /** Shortest distance from a point to any road in the plan. */
@@ -703,7 +824,7 @@ export function createLayout(seed: number, profile: BiomeProfile, water: WaterFi
         nodes[a][0] + (nodes[b][0] - nodes[a][0]) * t,
         nodes[a][1] + (nodes[b][1] - nodes[a][1]) * t,
       ];
-      if (water.landAt(p[0], p[1]) === water.mainland) wanderSpots.push(p);
+      if (water.landAt(p[0], p[1]) === water.mainland && !water.blocks(p[0], p[1])) wanderSpots.push(p);
     }
   }));
 
@@ -716,7 +837,7 @@ export function createLayout(seed: number, profile: BiomeProfile, water: WaterFi
     civic: civic as [number, number][],
     workSites: workSites as [number, number][],
     housePlots: housePlots as [number, number][],
-    bridges: findBridges(nodes, edges, water),
+    bridges: findBridges(nodes, edges, water, kind !== 'causeway'),
     wanderSpots: wanderSpots as [number, number][],
   };
 }

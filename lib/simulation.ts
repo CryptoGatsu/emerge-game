@@ -12,7 +12,7 @@
  */
 
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
-import { createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
+import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
 import { buildWater, type WaterField } from './world/water';
 
 export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 'river';
@@ -311,7 +311,7 @@ function dryLine(water: WaterField, layout: WorldLayout, ax: number, ay: number,
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
     const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
-    if (water.isWater(x, y) && !onBridge(layout, x, y)) return false;
+    if (water.blocks(x, y) && !onBridge(layout, x, y)) return false;
   }
   return true;
 }
@@ -509,7 +509,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   // this they walk to a spot they cannot stand on, get pushed out, and walk
   // back to it — the same loop that footprints used to cause.
   const water = waterOf(world);
-  if (water.isWater(c.destX, c.destY)) {
+  if (water.blocks(c.destX, c.destY)) {
     const out = water.toLand(c.destX, c.destY);
     c.destX = clamp(c.destX + out.x * (out.d + 1.2), 3, 97);
     c.destY = clamp(c.destY + out.y * (out.d + 1.2), 5, 95);
@@ -635,12 +635,20 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
   // which on a fen is most of the town: measured at fourteen per cent of frames
   // spent inside somebody's wall. So the escape is a short search for a spot
   // that is both dry and clear, and only settles for merely dry.
-  if (!onBridge && water.isWater(c.x, c.y)) {
+  // Never on a deck. A bridge is where a citizen is *supposed* to be over the
+  // water, and nudging them toward the bank from it fights their own next step:
+  // they walked a fifth of a unit along the crossing and were pushed a third of
+  // one back, every frame, for as long as they were on it. That is the jitter,
+  // exactly. The dead-end case this was meant to cover — a deck with every exit
+  // blocked — is handled where it belongs, by walking the deck's own axis.
+  if (!onBridge && water.blocks(c.x, c.y)) {
     // Toward the mainland when there is one within reach, so nobody is shoved
-    // out of a channel onto an islet they can never leave.
+    // out of a channel onto an islet they can never leave. Otherwise toward the
+    // nearest ground they are actually allowed to stand on — which, unlike the
+    // way out of the water itself, also answers for someone inside the margin.
     const home = water.toMainland(c.x, c.y);
-    const out = home.d > 0 && home.d < 14 ? home : water.toLand(c.x, c.y);
-    const reach = out.d + 0.8;
+    const out = home.d > 0 && home.d < 14 ? home : water.toClear(c.x, c.y);
+    const reach = out.d + 0.2;
     let bestX = clamp(c.x + out.x * reach, 2, 98);
     let bestY = clamp(c.y + out.y * reach, 4, 96);
     for (const turn of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
@@ -649,7 +657,7 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
       const ny = out.x * sin + out.y * cos;
       const x = clamp(c.x + nx * reach, 2, 98);
       const y = clamp(c.y + ny * reach, 4, 96);
-      if (water.isWater(x, y)) continue;
+      if (water.blocks(x, y)) continue;
       if (turn === 0) { bestX = x; bestY = y; }
       const clear = obstacles.every((o) => o.id === c.destId || (o.x - x) ** 2 + (o.y - y) ** 2 >= o.r * o.r);
       if (clear) { bestX = x; bestY = y; break; }
@@ -703,29 +711,48 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
     // Do not step into the water in the first place.
     //
     // Undoing the step afterwards looked equivalent and was not: walking in,
-    // being shoved out and walking in again is a limit cycle, and it showed up
-    // as a direction reversal on one frame in six across the fen and the swamp
-    // — the same signature as the vibration that predictive steering used to
-    // cause. Refusing the step and sliding along the bank instead is stable,
-    // and it makes people walk around an inlet the way they walk around a wall.
-    if (water.isWater(nx, ny) && !onBridge(layout, nx, ny)) {
-      const out = water.toLand(nx, ny);
-      // Slide along the bank: the tangent to the escape direction, taking
-      // whichever way points closer to where they are going.
-      // The side is fixed per citizen rather than chosen by which tangent
-      // points nearer the target. Choosing per frame flips as the geometry
-      // changes and the citizen shuffles left and right against the bank —
-      // measured at a reversal on one frame in five, worse than not sliding at
-      // all. This is the same fix the wall push needed.
-      const first = c.hash % 2 === 0 ? 0 : 1;
-      const tangents: [number, number][] = [[-out.y, out.x], [out.y, -out.x]];
+    // being shoved out and walking in again is a limit cycle. Refusing the step
+    // and going round is stable, and it makes people walk around an inlet the
+    // way they walk around a wall.
+    //
+    // Going round is an angular sweep, not a pair of tangents. Two candidates
+    // at right angles to the shore fail whenever both happen to be blocked —
+    // and then the citizen simply stops, for good. One was measured standing on
+    // the same spot for an entire working day with six of sixteen directions
+    // around her free. Sweeping outward from the heading she wants also turns
+    // her by the smallest angle that clears the obstacle rather than snapping
+    // her ninety degrees, which is what made rounding a corner look mechanical.
+    if (water.blocks(nx, ny) && !onBridge(layout, nx, ny)) {
+      const heading = Math.atan2(dy, dx);
+      const side = c.hash % 2 === 0 ? 1 : -1;
       let slid = false;
-      for (const t of [tangents[first], tangents[1 - first]]) {
-        const sx = clamp(c.x + t[0] * step, 2, 98);
-        const sy = clamp(c.y + t[1] * step, 4, 96);
-        if (water.isWater(sx, sy)) continue;
-        nx = sx; ny = sy; slid = true;
-        break;
+      for (const turn of [0.35, 0.7, 1.05, 1.4, 1.75, 2.1]) {
+        for (const sign of [side, -side]) {
+          const a = heading + turn * sign;
+          const sx = clamp(c.x + Math.cos(a) * step, 2, 98);
+          const sy = clamp(c.y + Math.sin(a) * step, 4, 96);
+          if (water.blocks(sx, sy) && !onBridge(layout, sx, sy)) continue;
+          nx = sx; ny = sy; slid = true;
+          break;
+        }
+        if (slid) break;
+      }
+      // Standing on a bridge with nowhere to go but the water: walk the deck.
+      //
+      // A citizen who ends up on a crossing whose far side is not on their
+      // route has every heading refused, because the deck is surrounded by
+      // water on both sides. Following the deck's own axis to whichever end is
+      // nearer their target always gets them back onto open ground, and normal
+      // navigation takes over from there.
+      if (!slid) {
+        const here = deckAt(layout.bridges, c.x, c.y);
+        if (here) {
+          const cos = Math.cos(here.bridge.angle), sin = Math.sin(here.bridge.angle);
+          const forward = cos * dx + sin * dy >= 0 ? 1 : -1;
+          nx = clamp(c.x + cos * step * forward, 2, 98);
+          ny = clamp(c.y + sin * step * forward, 4, 96);
+          slid = true;
+        }
       }
       if (!slid) { blocked = true; break; }
       c.x = nx; c.y = ny;
@@ -749,12 +776,22 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
   // refuses every direction and leaves them standing in the river. Two in five
   // citizen-samples were on a deck, and thirty-five of the settlement's forty
   // five deaths were those people freezing where they stood.
-  const deck = deckAt(layout.bridges, c.x, c.y);
-  if (deck && Math.abs(deck.across) > 0.35) {
-    const pull = Math.min(Math.abs(deck.across) - 0.2, 0.5) * Math.sign(deck.across);
-    const cos = Math.cos(deck.bridge.angle), sin = Math.sin(deck.bridge.angle);
-    c.x = clamp(c.x + sin * pull, 2, 98);
-    c.y = clamp(c.y - cos * pull, 4, 96);
+  //
+  // Only while they are actually over the water. A deck's rectangle also covers
+  // the dry ground at either end of it, and anyone walking a different road
+  // through that ground was being hauled back to the bridge's centre line every
+  // frame — half a unit of correction against a step of a fifth of one, which
+  // cancels their movement exactly. Whole settlements stood still: nineteen of
+  // twenty-one citizens in one, shuffling for days at a junction that happened
+  // to sit near a crossing.
+  if (water.isWater(c.x, c.y)) {
+    const deck = deckAt(layout.bridges, c.x, c.y);
+    if (deck && Math.abs(deck.across) > 0.35) {
+      const pull = Math.min(Math.abs(deck.across) - 0.2, 0.25) * Math.sign(deck.across);
+      const cos = Math.cos(deck.bridge.angle), sin = Math.sin(deck.bridge.angle);
+      c.x = clamp(c.x + sin * pull, 2, 98);
+      c.y = clamp(c.y - cos * pull, 4, 96);
+    }
   }
 
   // Facing comes from the whole frame's movement, not from each sub-step, and
@@ -822,11 +859,21 @@ function moveCitizens(world: World, hours: number) {
     // accounted for four thousand of the settlement's direction reversals doing
     // exactly that. Dropping the rest of the route once the destination is both
     // visible and nearer than the next junction only ever shortens the walk.
-    if (c.path.length > 0 && dryLine(water, world.layout, c.x, c.y, c.destX, c.destY)) {
-      const next = world.layout.nodes[c.path[0]];
-      const viaNode = Math.hypot(next[0] - c.x, next[1] - c.y)
-        + Math.hypot(c.destX - next[0], c.destY - next[1]);
-      if (Math.hypot(c.destX - c.x, c.destY - c.y) <= viaNode) c.path.length = 0;
+    if (c.path.length === 1 && dryLine(water, world.layout, c.x, c.y, c.destX, c.destY)) {
+      const last = world.layout.nodes[c.path[0]];
+      // Only when that junction is no longer on the way — when standing at it
+      // would put them no closer to where they are going than they already are.
+      //
+      // The test used to be whether the direct line was shorter than the route
+      // through the junction, which is the triangle inequality and therefore
+      // always true. Every citizen threw away the entire road network on the
+      // first frame and walked at their destination in a straight line, across
+      // open country and through whatever buildings were in the way. That is
+      // most of the jitter: a beeline runs into walls the roads were laid to
+      // avoid, and each one is a shove.
+      if (Math.hypot(c.destX - c.x, c.destY - c.y) <= Math.hypot(c.destX - last[0], c.destY - last[1])) {
+        c.path.length = 0;
+      }
     }
 
     const blocked = stepCitizen(c, hours, obstacles, world.layout, water);
@@ -861,7 +908,35 @@ function moveCitizens(world: World, hours: number) {
       c.stalled = 0;
     } else {
       c.stalled += hours;
-      if (c.stalled > 0.75) { c.stalled = 0; assignDestination(world, c, phase); }
+      if (c.stalled > 2.5) {
+        // Nothing has worked for two and a half hours: not the route, not the
+        // sweep, not a fresh destination. Rather than let them stand there for
+        // the rest of the week — one grassland citizen managed eighty-six game
+        // hours — send them at the nearest spot they can definitely reach, off
+        // the road network entirely, and let the day resume from wherever that
+        // leaves them.
+        c.stalled = 0;
+        c.bestAway = Infinity;
+        c.path = [];
+        let best: [number, number] | null = null;
+        let bestD = Infinity;
+        for (const spot of world.layout.wanderSpots) {
+          const d = (spot[0] - c.x) ** 2 + (spot[1] - c.y) ** 2;
+          if (d >= bestD || d < 4) continue;
+          if (!dryLine(water, world.layout, c.x, c.y, spot[0], spot[1])) continue;
+          bestD = d; best = spot;
+        }
+        if (best) {
+          c.destX = best[0];
+          c.destY = best[1];
+          c.destId = undefined;
+          c.dwell = 0.5;
+        } else {
+          assignDestination(world, c, phase);
+        }
+      } else if (c.stalled > 0.75 && c.stalled - hours <= 0.75) {
+        assignDestination(world, c, phase);
+      }
     }
 
     const arrived = hasArrived(c);
@@ -1247,7 +1322,7 @@ function buildAmenities(buildings: Building[], layout: WorldLayout, water: Water
   let n = 0;
   const at = (type: string) => buildings.find((b) => b.type === type);
   const add = (kind: AmenityKind, x: number, y: number, capacity: number) => {
-    if (water.isWater(x, y)) return;
+    if (water.blocks(x, y)) return;
     if (x < 4 || x > 96 || y < 6 || y > 94) return;
     // Never inside a wall: an amenity you cannot reach is worse than none.
     for (const b of buildings) {
@@ -1841,7 +1916,8 @@ function completeBridge(world: World, works: BridgeWorks) {
     x: (works.fromX + works.toX) / 2,
     y: (works.fromY + works.toY) / 2,
     angle,
-    span: span / 2 + 1.8,
+    span: span / 2 + BRIDGE_RAMP,
+    deck: span / 2 + DECK_OVERHANG,
   });
 
   // Two new junctions, one either side, joined to each other and to whichever
@@ -2328,7 +2404,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   // Refuse the river rather than quietly moving the building somewhere else:
   // a player who clicked on water should be told no, not have their choice
   // silently overridden.
-  if (waterOf(world).isWater(x, y)) return null;
+  if (waterOf(world).blocks(x, y)) return null;
   const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, 6, 94), y: clamp(y, 8, 92), workers: [], active: true };
   world.treasury -= cost;
   world.buildings.push(building);

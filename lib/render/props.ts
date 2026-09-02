@@ -291,24 +291,33 @@ function lilypad(seed: number): Pixels {
   return p;
 }
 
-/** Fence segments along each of the two isometric axes. */
+/**
+ * A fence segment along one of the two isometric axes.
+ *
+ * Both variants used to draw the same line. `nw` mirrored the drawing order —
+ * right to left instead of left to right — but mirrored the rise with it, so it
+ * came out at the same slope as `ne` rather than the opposite one. A run of
+ * alternating segments was therefore not two axes but one, repeated, while the
+ * row of positions marched down the other axis: every post pointed across the
+ * line it was standing in. That is the scattered fencing.
+ *
+ * `ne` rises to the right, which is the ground direction of increasing world y.
+ * `nw` falls to the right, which is increasing world x. Both cover a full 32
+ * pixels of screen width, so consecutive segments meet post to post.
+ */
 function fence(axis: 'ne' | 'nw'): Pixels {
   const p = surface(34, 26);
-  const dir = axis === 'ne' ? 1 : -1;
-  const x0 = axis === 'ne' ? 1 : 32;
+  const rise = axis === 'ne' ? -1 : 1;
+  const y0 = axis === 'ne' ? 20 : 4;
+  const railAt = (i: number) => y0 + rise * (i * 0.5);
   for (let i = 0; i <= 32; i += 8) {
-    const x = x0 + dir * i;
-    const y = 20 - Math.round(i * 0.5) * (axis === 'ne' ? 1 : 1) + (axis === 'ne' ? 0 : 0);
-    const yy = axis === 'ne' ? 20 - Math.round(i * 0.5) : 4 + Math.round(i * 0.5);
-    rect(p, x, yy - 9, 2, 11, FOLIAGE.trunkDark);
-    rect(p, x, yy - 9, 1, 11, FOLIAGE.trunk);
-    void y;
+    const yy = Math.round(railAt(i));
+    rect(p, 1 + i, yy - 9, 2, 11, FOLIAGE.trunkDark);
+    rect(p, 1 + i, yy - 9, 1, 11, FOLIAGE.trunk);
   }
   for (const off of [3, 7]) {
     for (let i = 0; i <= 32; i++) {
-      const x = x0 + dir * i;
-      const yy = (axis === 'ne' ? 20 - i * 0.5 : 4 + i * 0.5) - 9 + off;
-      rect(p, x, Math.round(yy), 1, 2, FOLIAGE.trunk);
+      rect(p, 1 + i, Math.round(railAt(i) - 9 + off), 1, 2, FOLIAGE.trunk);
     }
   }
   outline(p, DARK, 0.7);

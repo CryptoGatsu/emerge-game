@@ -19,9 +19,17 @@ export const TOKEN = {
 } as const;
 
 /**
- * Network descriptors. RPC and chain id are read from the environment so the
- * same build can target a development network or mainnet; the placeholders keep
- * the UI honest about which one is configured.
+ * Network descriptors.
+ *
+ * The two Robinhood Chain networks are built in: their RPC endpoints and chain
+ * ids are public facts about the network, not deployment secrets, so a build
+ * with no environment set still knows how to reach the chain and can ask a
+ * wallet to switch to it. The environment still wins where it is set, so a fork
+ * or a local node is a matter of one variable.
+ *
+ * What is *not* built in is the $EMERGE token address and the land registry —
+ * those are this game's own deployments, and until they exist the interface
+ * says so rather than pretending a claim settled.
  */
 export interface ChainConfig {
   key: 'robinhood' | 'robinhood-testnet';
@@ -32,25 +40,32 @@ export interface ChainConfig {
   tokenAddress: string | null;
 }
 
-const envNumber = (value: string | undefined) => {
+const envNumber = (value: string | undefined, fallback: number | null = null) => {
   const n = value ? Number(value) : NaN;
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : fallback;
 };
+
+/** Robinhood Chain mainnet. */
+export const MAINNET_RPC = 'https://rpc.mainnet.chain.robinhood.com';
+export const MAINNET_CHAIN_ID = 4663;
+/** Robinhood Chain testnet. Note the `/rpc` path — the host alone is not an endpoint. */
+export const TESTNET_RPC = 'https://rpc.testnet.chain.robinhood.com/rpc';
+export const TESTNET_CHAIN_ID = 46630;
 
 export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
   robinhood: {
     key: 'robinhood',
     label: 'Robinhood Chain',
-    chainId: envNumber(process.env.NEXT_PUBLIC_ROBINHOOD_CHAIN_ID),
-    rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ?? null,
+    chainId: envNumber(process.env.NEXT_PUBLIC_ROBINHOOD_CHAIN_ID, MAINNET_CHAIN_ID),
+    rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ?? MAINNET_RPC,
     explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_EXPLORER ?? null,
     tokenAddress: process.env.NEXT_PUBLIC_EMERGE_TOKEN ?? null,
   },
   'robinhood-testnet': {
     key: 'robinhood-testnet',
     label: 'Robinhood Chain (test)',
-    chainId: envNumber(process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID),
-    rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL ?? null,
+    chainId: envNumber(process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID, TESTNET_CHAIN_ID),
+    rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL ?? TESTNET_RPC,
     explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_TESTNET_EXPLORER ?? null,
     tokenAddress: process.env.NEXT_PUBLIC_EMERGE_TOKEN_TESTNET ?? null,
   },
@@ -60,9 +75,20 @@ export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
 export const ACTIVE_CHAIN: ChainConfig =
   process.env.NEXT_PUBLIC_CHAIN_TARGET === 'mainnet' ? CHAINS.robinhood : CHAINS['robinhood-testnet'];
 
-/** True once the deployment has real chain details wired in. */
+/** True once the build knows how to reach the network. Built in, so: always. */
 export const chainConfigured = (config: ChainConfig = ACTIVE_CHAIN) =>
   config.chainId !== null && !!config.rpcUrl;
+
+/**
+ * True once the $EMERGE contract itself is deployed and known to this build.
+ *
+ * This is the honest test, and the one the interface should ask. Knowing the
+ * network's RPC does not mean there is a token to move: until an address is
+ * set, a balance on screen is a local development allocation and every claim is
+ * a row in this browser's storage.
+ */
+export const tokenLive = (config: ChainConfig = ACTIVE_CHAIN) =>
+  chainConfigured(config) && !!config.tokenAddress;
 
 /* ------------------------------------------------------------------ *
  * Wallet
@@ -282,7 +308,7 @@ export async function claimPlot(request: ClaimRequest, config: ChainConfig = ACT
 }
 
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {
-  const ready = chainConfigured(config) && !!config.tokenAddress;
+  const ready = tokenLive(config);
   return [
     { id: 'own', label: 'Claim world ownership', detail: `Register this world's seed to your wallet on ${config.label}.`, ready },
     { id: 'fund', label: `Fund treasury with ${TOKEN.ticker}`, detail: 'Convert tokens into world Gold that citizens can earn and spend.', ready },

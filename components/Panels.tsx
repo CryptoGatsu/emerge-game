@@ -11,7 +11,7 @@ import { useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import { maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
-import { ACTIVE_CHAIN, TOKEN, chainConfigured, tokenActions } from '@/lib/chain/emerge';
+import { ACTIVE_CHAIN, TOKEN, tokenActions, tokenLive } from '@/lib/chain/emerge';
 import {
   EMERGE_PER_GOLD, RENAME_COST_EMERGE, WITHDRAW_BURN_RATE,
   deposit, quoteWithdraw, withdraw, type VaultLedger,
@@ -254,7 +254,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
 }) {
   const [draftName, setDraftName] = useState(view.name);
   const [askPrice, setAskPrice] = useState(String(Math.round(claimed.price * 1.25)));
-  const configured = chainConfigured();
+  const configured = tokenLive();
   const affordable = player.ledger.balance >= RENAME_COST_EMERGE;
   const changed = draftName.trim().length > 0 && draftName.trim() !== view.name;
   const listing = player.listings.find((l) => l.seed === claimed.seed);
@@ -324,9 +324,10 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
       <h4>{TOKEN.ticker} on {ACTIVE_CHAIN.label}</h4>
       {!configured && (
         <p className="muted small">
-          Chain details are not wired into this deployment yet. Set the Robinhood Chain RPC, chain id and token
-          address in the environment to enable settlement; until then these are the actions the economy layer is
-          designed around, and balances and listings are local to this browser.
+          This build reaches {ACTIVE_CHAIN.label} at {ACTIVE_CHAIN.rpcUrl} (chain {ACTIVE_CHAIN.chainId}), and
+          your wallet can switch to it. What is missing is the {TOKEN.ticker} contract and the land registry:
+          until those are deployed and their addresses set, these are the actions the economy layer is designed
+          around, and balances and listings are local to this browser.
         </p>
       )}
       <div className="token-grid">
