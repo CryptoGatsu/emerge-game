@@ -8,9 +8,9 @@
  */
 
 import {
-  ACTIVITY_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS, RESOURCE_LABELS,
-  activeGathering, describeTemperature, friendsOf, ledgerTotals,
-  type FeedEntry, type Gathering, type LedgerLine, type MarketQuote, type Resource, type World,
+  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS, RESOURCE_LABELS,
+  activeGathering, describeTemperature, friendsOf, ledgerTotals, readiness, talkingWith,
+  type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource, type World,
 } from './simulation';
 import { statusLine } from './speech';
 
@@ -34,7 +34,11 @@ export interface FocusBuilding {
 
 export type Focus = FocusCitizen | FocusBuilding;
 
-export interface EventCard { id: string; name: string; time: string; status: 'now' | 'later' | 'tomorrow'; attendees: number }
+export interface EventCard {
+  id: string; name: string; time: string; status: 'now' | 'later' | 'tomorrow'; attendees: number;
+  /** What came of it, once it has finished. Absent while it is still to come. */
+  outcome?: string;
+}
 
 export interface Snapshot {
   name: string;
@@ -75,6 +79,18 @@ export interface Snapshot {
   spentYesterday: number;
   incomeLines: { key: LedgerLine; label: string; amount: number }[];
   outgoingLines: { key: LedgerLine; label: string; amount: number }[];
+  /** The standing decision of the last town meeting, while it holds. */
+  resolution: { text: string; voters: number; day: number } | null;
+  /** What the settlement's showcases have produced, newest first. */
+  artworks: { id: string; title: string; maker: string; day: number }[];
+  /** What is going wrong right now, and what it is doing. */
+  hazards: { id: string; kind: HazardKind; label: string; effect: string; days: number }[];
+  /**
+   * How ready the settlement is for each kind of trouble, as a percentage, with
+   * the thing that would improve it. Shown whether or not anything is
+   * happening, because the point is to build the defence before the fire.
+   */
+  readiness: { kind: HazardKind; label: string; percent: number; defence: string }[];
   feed: FeedEntry[];
   events: EventCard[];
   resources: { key: Resource; label: string; amount: number }[];
@@ -112,6 +128,7 @@ function eventCards(world: World): EventCard[] {
     time: live?.id === g.id ? 'Happening now' : world.hour > g.hour + g.duration ? 'Tomorrow' : eventTime(g.hour),
     status: live?.id === g.id ? 'now' : world.hour > g.hour + g.duration ? 'tomorrow' : 'later',
     attendees: g.attendees.length,
+    outcome: g.outcome,
   }));
   return cards.sort((a, b) => (a.status === 'now' ? -1 : b.status === 'now' ? 1 : 0));
 }
@@ -128,7 +145,12 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       kind: 'citizen',
       id: c.id, name: c.name, handle: c.handle, age: Math.floor(c.age),
       job: JOB_LABELS[c.job], activity: ACTIVITY_LABELS[c.activity], phase: PHASE_LABELS[c.phase],
-      status: statusLine(c),
+      // "Socialising" tells the player nothing when the person is in the middle
+      // of an actual conversation with somebody they can name.
+      status: (() => {
+        const with_ = talkingWith(world, c.id);
+        return with_ ? `Talking with ${with_.name}` : statusLine(c);
+      })(),
       family: family?.name ?? 'Unknown',
       home: home ? `${family?.name} House` : null,
       mood: c.happiness, energy: c.rest, purpose: c.purpose, hunger: c.hunger, social: c.social,
@@ -171,6 +193,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
   const avg = (pick: (c: (typeof people)[number]) => number) => people.reduce((s, c) => s + pick(c), 0) / count;
   const today = ledgerTotals(world.ledger);
   const closed = ledgerTotals(world.ledgerYesterday);
+  const ready = readiness(world);
 
   return {
     name: world.name,
@@ -203,6 +226,19 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     spentYesterday: closed.spent,
     incomeLines: ledgerLines(world.ledgerYesterday.in),
     outgoingLines: ledgerLines(world.ledgerYesterday.out),
+    resolution: world.resolution
+      ? { text: world.resolution.text, voters: world.resolution.voters, day: world.resolution.day }
+      : null,
+    artworks: world.artworks.slice(0, 8).map((a) => ({ id: a.id, title: a.title, maker: a.maker, day: a.day })),
+    hazards: world.hazards.map((h) => ({ id: h.id, kind: h.kind, label: h.label, effect: h.effect, days: h.days })),
+    readiness: (Object.entries(ready) as [HazardKind, number][])
+      .map(([kind, value]) => ({
+        kind,
+        label: HAZARD_LABELS[kind],
+        percent: Math.round(value * 100),
+        defence: HAZARD_DEFENCE[kind],
+      }))
+      .sort((a, b) => a.percent - b.percent),
     feed: world.feed.slice(0, 14),
     events: eventCards(world),
     resources: (Object.keys(RESOURCE_LABELS) as Resource[]).map((key) => ({ key, label: RESOURCE_LABELS[key], amount: world.resources[key] })),

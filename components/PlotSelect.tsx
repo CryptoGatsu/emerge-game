@@ -21,7 +21,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
-  ISLANDS, drawPlotPreview, drawRegionMap, loadPlayer, marketPlots, prospectPlot, savePlayer,
+  CHART_COUNT, HOME_CHART_INDEX, chartName, chartRoom, drawPlotPreview, drawRegionMap, islandsFor,
+  loadPlayer, marketPlots, prospectPlot, savePlayer, usedSlots,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
 import { ACTIVE_CHAIN, TOKEN, claimPlot, tokenLive } from '@/lib/chain/emerge';
@@ -48,21 +49,24 @@ function PlotPreview({ seed }: { seed: number }) {
  * the markers are real buttons laid over it, so they can be tabbed to, focused
  * and read by a screen reader instead of being pixels with a hit test.
  */
-function RegionMap({ plots, selected, onSelect }: {
+function RegionMap({ plots, selected, chart, onSelect }: {
   plots: Plot[];
-  selected: Plot;
+  selected: Plot | null;
+  chart: number;
   onSelect: (plot: Plot) => void;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
-    if (ref.current) drawRegionMap(ref.current, plots);
-  }, [plots]);
+    if (ref.current) drawRegionMap(ref.current, plots, chart);
+  }, [plots, chart]);
 
   return (
     <div className="region">
       <canvas ref={ref} width={900} height={570} className="region-canvas" aria-hidden />
       <div className="region-pins">
-        {ISLANDS.filter((island) => plots.some((p) => p.island === island.name)).map((island) => (
+        {/* Every island is named, surveyed or not: an empty coast the player
+            can see is what makes prospecting somewhere to go. */}
+        {islandsFor(chart).map((island) => (
           <span
             key={island.name}
             className="island-name"
@@ -77,27 +81,26 @@ function RegionMap({ plots, selected, onSelect }: {
             key={plot.id}
             // A marker on the right-hand side of the map hangs its label to the
             // left, or it runs off the edge.
-            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected.seed ? 'selected' : ''}`}
+            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''}`}
             style={{ left: `${plot.mapX * 100}%`, top: `${plot.mapY * 100}%` }}
             onClick={() => onSelect(plot)}
-            aria-pressed={plot.seed === selected.seed}
+            aria-pressed={plot.seed === selected?.seed}
           >
             <span className="pin-dot" aria-hidden />
             <span className="pin-label">
               <b>{plot.region}</b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}
-              {plot.seed === selected.seed && <em>{plot.biomeLabel}</em>}
+              {plot.seed === selected?.seed && <em>{plot.biomeLabel}</em>}
             </span>
           </button>
         ))}
       </div>
       <div className="region-legend">
         <span>
-          {plots.length} plots across {new Set(plots.map((p) => p.island)).size}
-          {new Set(plots.map((p) => p.island)).size === 1 ? ' island' : ' islands'}
+          {plots.length} {plots.length === 1 ? 'plot' : 'plots'} surveyed on {islandsFor(chart).length} islands
         </span>
-        <span>Tap a marker to inspect the land</span>
+        <span>{plots.length ? 'Tap a marker to inspect the land' : 'Nothing here has been surveyed yet'}</span>
       </div>
     </div>
   );
@@ -105,6 +108,7 @@ function RegionMap({ plots, selected, onSelect }: {
 
 export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld) => void }) {
   const [player, setPlayer] = useState<PlayerRecord | null>(null);
+  const [chart, setChart] = useState(HOME_CHART_INDEX);
   const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
   const [name, setName] = useState('');
   const { wallet } = useWallet();
@@ -117,7 +121,8 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
 
   useEffect(() => { setPlayer(loadPlayer()); }, []);
 
-  const plots = useMemo(() => (player ? marketPlots(player) : []), [player]);
+  const plots = useMemo(() => (player ? marketPlots(player, chart) : []), [player, chart]);
+  const room = useMemo(() => (player ? chartRoom(player, chart) : { capacity: 0, used: 0, free: 0 }), [player, chart]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
 
   const choose = useCallback((plot: Plot) => {
@@ -131,18 +136,31 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
       setNotice(`Prospecting costs ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
       return;
     }
-    const found = prospectPlot(player.prospected.length);
+    // Land is finite. When a chart is surveyed out the answer is to sail to
+    // another one, not to stack another marker on the same skerry.
+    const found = prospectPlot(chart, usedSlots(player, chart));
+    if (!found) {
+      setNotice(`Every island on ${chartName(chart)} has been surveyed. Sail to another chart to find new land.`);
+      return;
+    }
     const next: PlayerRecord = {
       ...player,
       ledger: { ...player.ledger, balance: player.ledger.balance - PROSPECT_COST_EMERGE },
-      prospected: [...player.prospected, found.seed],
+      prospected: [...player.prospected, { seed: found.seed, chart: found.chart, slot: found.slot }],
     };
     savePlayer(next);
     setPlayer(next);
     setSelectedSeed(found.seed);
     setSheetOpen(true);
-    setNotice(`Surveyed ${found.region} — ${found.biomeLabel.toLowerCase()}.`);
-  }, [player]);
+    setNotice(`Surveyed ${found.region} on ${found.island} — ${found.biomeLabel.toLowerCase()}.`);
+  }, [player, chart]);
+
+  const sail = useCallback((delta: number) => {
+    setChart((c) => (c + delta + CHART_COUNT) % CHART_COUNT);
+    setSelectedSeed(null);
+    setSheetOpen(false);
+    setNotice(null);
+  }, []);
 
   const claim = useCallback(async () => {
     if (!selected) return;
@@ -176,7 +194,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
     setPlayer(next);
   }, [player]);
 
-  if (!player || !selected) return <main className="land-office" />;
+  if (!player) return <main className="land-office" />;
 
   return (
     <main className="land-office">
@@ -202,16 +220,50 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
             <button
               className="ghost prospect"
               onClick={prospect}
-              disabled={player.ledger.balance < PROSPECT_COST_EMERGE}
+              disabled={player.ledger.balance < PROSPECT_COST_EMERGE || room.free === 0}
             >
-              Prospect new land · {PROSPECT_COST_EMERGE.toLocaleString()} {TOKEN.ticker}
+              {room.free === 0
+                ? 'This chart is fully surveyed'
+                : `Prospect new land · ${PROSPECT_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
             </button>
           </div>
         </header>
 
-        <div className="land-body">
-          <RegionMap plots={plots} selected={selected} onSelect={choose} />
+        {/* Where in the world you are looking. Each chart holds a fixed number
+            of plots; when it is full the only way to new land is to sail. */}
+        <nav className="charts">
+          <button className="ghost" onClick={() => sail(-1)} aria-label="Previous chart">‹</button>
+          <div className="chart-name">
+            <b>{chartName(chart)}</b>
+            <em>
+              {room.used} of {room.capacity} plots surveyed
+              {room.free === 0 ? ' · nothing left to find here' : ` · room for ${room.free} more`}
+            </em>
+          </div>
+          <button className="ghost" onClick={() => sail(1)} aria-label="Next chart">›</button>
+        </nav>
 
+        <div className="land-body">
+          <RegionMap plots={plots} selected={selected} chart={chart} onSelect={choose} />
+
+          {!selected ? (
+            <aside className="land-claim empty">
+              <span className="eyebrow">UNSURVEYED</span>
+              <h2>{chartName(chart)}</h2>
+              <p className="muted">
+                Nobody has set foot on these islands. There is room for {room.capacity} settlements out
+                here; survey one to see what the land is made of.
+              </p>
+              <button
+                className="claim-button"
+                onClick={prospect}
+                disabled={player.ledger.balance < PROSPECT_COST_EMERGE}
+              >
+                Survey a plot · {PROSPECT_COST_EMERGE.toLocaleString()} {TOKEN.ticker}
+              </button>
+              {notice && <p className="warn">{notice}</p>}
+            </aside>
+          ) : (
           <aside className={`land-claim ${sheetOpen ? 'open' : ''}`}>
             <button className="sheet-close" onClick={() => setSheetOpen(false)} aria-label="Back to the map">×</button>
             <span className="eyebrow">CLAIM</span>
@@ -281,6 +333,7 @@ export default function PlotSelect({ onEnter }: { onEnter: (world: ClaimedWorld)
             )}
             {notice && <p className="warn">{notice}</p>}
           </aside>
+          )}
         </div>
       </div>
     </main>

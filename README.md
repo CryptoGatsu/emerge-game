@@ -310,10 +310,19 @@ place. The land is painted from the plots themselves — each one's territory ta
 biome's colour, with a seam where two claims meet — so choosing where to settle is a
 decision about a place rather than a scroll through a list of cards.
 
-Plots are spread thinly across eight islands, and the capacities are small on purpose.
-A marker carries a name, so it is about a sixth of the map wide; nine of them will not
-fit on one island however they are arranged. Crowding twenty-five onto a single
-landmass produced a wall of overlapping labels with no sense of place left in it.
+Plots are spread thinly across the islands, and each island's capacity is set by how
+much coast it actually has: four on the largest, one on a skerry a twentieth of the map
+wide. A marker carries a name, so it is about a sixth of the map wide, and a skerry
+carrying three settlements put their markers within thirty pixels of each other. At full
+capacity on every chart, no two markers now come within fifty pixels of one another.
+
+**Charts.** The archipelago is not the only water there is. Six charts sit side by side —
+the home chart, plus five more mirrored from it and renamed — and the land office sails
+between them. Each holds fifteen to seventeen plots, and when a chart is fully surveyed
+prospecting there is refused outright: the button says so, and the only way to new land
+is to sail. That is deliberate. Land that never runs out is not land, and the previous
+behaviour — stacking every plot past the chain's capacity onto the last skerry — is what
+put fifty-six markers on eight islands.
 
 Each plot is a seed. Selecting one shows its real terrain, drawn by running the terrain
 generator on that seed, so the ground shown is the ground you get. Name the world and
@@ -352,8 +361,12 @@ once the contract exists.
 
 The land office sells the nine catalogue plots and anything you have prospected.
 Prospecting spends $EMERGE and surveys a brand-new seed into existence, so no two
-prospected plots are the same land. An owned plot can be listed for resale from the
-Connect panel and appears in the land office until it is withdrawn.
+prospected plots are the same land; it lands in the first free slot on the chart you are
+looking at, and is refused when that chart is full. Place names are drawn from the biome,
+six per biome, so a busy chart repeats them — later arrivals step along their biome's
+list to the first name nobody on that chart is using, because a map with the same name
+printed twice on it is a map you cannot navigate by. An owned plot can be listed for
+resale from the Connect panel and appears in the land office until it is withdrawn.
 
 Resale between players needs the plot registry contract. Until it is deployed a listing
 is recorded in this browser and nobody else can see it, and the panel says exactly that
@@ -415,6 +428,67 @@ those are this game's own deployments and do not exist yet. `tokenLive()` is the
 interface actually asks, and while it is false the panels say plainly that balances,
 claims and listings live in this browser rather than showing a transaction that bought
 nothing.
+
+## Gatherings
+
+The evening holds one gathering, always at seven, and it does something.
+
+| | |
+| --- | --- |
+| **Town Meetup** | The town resolves on the thing it most needs — housing while anyone is roofless, ground broken while the stores are low, a trade the land supports. The resolution stands for three days and **outranks what the settlement would otherwise build**, and it will accept a thinner cushion for what it voted on: ten days of running costs instead of a fortnight, twice the cost in hand instead of three times. |
+| **Art Showcase** | Whoever came with the most to say makes a piece, named and titled, and it goes into the settlement's body of work. The gallery is in the events panel. |
+| **Market Day** | Runs over the middle of the day and draws the lunch crowd to the stalls. Stock moves nearly twice as fast in both directions while it runs, and the stallholders' takings are real Gold, booked as exports. |
+| **Harvest Feast** | Held when the larder can carry one. It eats real bread and vegetables, and everyone who came goes home fed and warm. |
+
+Attendance is measured where people are standing, not where they said they were going.
+It used to be recorded when a citizen chose the venue as a destination, which only ran
+when somebody picked a new one — so in a desert, where most of the town is sat at a fire
+against the cold, the meetings recorded nobody present on thirty-one days out of forty
+while three people stood in the square. A gathering also rings a bell: anyone out and
+about when it starts re-picks their destination once, so they can actually go.
+
+Over forty game days in each of the nine biomes, every gathering type now draws people
+in every biome — all eight market days, every meeting bar a handful, and enough
+showcases to build a gallery of twenty-odd pieces.
+
+## Conversations
+
+Citizens talk to each other. A conversation is real state in the simulation — two
+people, one subject, four turns taken in order — and the speech bubble shows whichever
+line is being spoken, so a bubble is an utterance rather than a mood. Subjects come from
+the world they are both standing in: the weather on their skin and an empty larder come
+first because they are urgent, and the rest — the last meeting, the piece shown at the
+showcase, the work they share, the children, a project going up, the season — are
+chosen among rather than ranked, because running it as a priority chain made the town
+meeting the subject of four conversations in five.
+
+Talking is what builds friendships now, not standing in the same room. Over twenty game
+days a settlement holds a hundred and twenty to three hundred and seventy conversations,
+at most six at once.
+
+## Danger
+
+Four things can go wrong, each drawn from the world's own state rather than a die roll
+against nothing, and each with a defence the player can build:
+
+| | Comes from | Costs | Defence |
+| --- | --- | --- | --- |
+| **Fire** | Dry heat, and hearths | A building out of use, and timber | Wells, and hands to pass the buckets |
+| **Blight** | A growing season, and fields | A share of the crop, and half the harvest while it lasts | A granary and food put by |
+| **Wolves** | A cold night, near woodland | Wool, warmth and sleep | Fires burning, and numbers |
+| **Flood** | A storm, on a river | A riverside building out of use, and stone | Building back from the bank |
+
+One at a time, never in the first five days, and readiness decides what it costs rather
+than whether it happens — at full readiness a fire is put out the same day and the
+wolves turn back at the treeline. Readiness is measured against the size of the thing
+being defended, so a town that builds fast outgrows its wells until the next one goes
+in; the panel shows all four bars whether or not anything is wrong, because the point of
+them is to be acted on before the fire.
+
+Over a hundred and twenty game days, settlements saw three to twelve hazards, never two
+at once, and none ended with a building permanently out of use. Against the same worlds
+with hazards switched off, deaths rose by nought to four in eight of the nine biomes,
+and the largest cost was one woodland ending fifteen people smaller. Nothing collapsed.
 
 ## Where this still needs work
 

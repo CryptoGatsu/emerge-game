@@ -275,6 +275,46 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
   );
 }
 
+/**
+ * What is going wrong, and how ready the settlement is for the next thing.
+ *
+ * The readiness bars are here whether or not anything is happening, because
+ * the whole point of them is that they are something to act on before the fire
+ * rather than a post-mortem after it.
+ */
+function DangerPanel({ view }: { view: Snapshot }) {
+  const worst = view.readiness[0];
+  return (
+    <section className="panel">
+      <h3>WHAT COULD GO WRONG</h3>
+      {view.hazards.map((h) => (
+        <div key={h.id} className={`hazard ${h.kind}`}>
+          <div className="hazard-head">
+            <span>{h.label}</span>
+            <b>{h.days === 1 ? 'today' : `${h.days} days`}</b>
+          </div>
+          <em>{h.effect}</em>
+        </div>
+      ))}
+      {view.hazards.length === 0 && (
+        <p className="muted small">
+          Nothing is wrong today.{worst && worst.percent < 60 ? ` The settlement is least ready for ${worst.label.toLowerCase()}.` : ''}
+        </p>
+      )}
+      <div className="readiness">
+        {view.readiness.map((r) => (
+          <div key={r.kind} className="ready-row" title={r.defence}>
+            <span>{r.label}</span>
+            <div className="ready-bar"><i style={{ width: `${r.percent}%` }} className={r.percent < 40 ? 'low' : r.percent < 75 ? 'mid' : ''} /></div>
+            <b>{r.percent}%</b>
+          </div>
+        ))}
+      </div>
+      {worst && worst.percent < 75 && <p className="muted small">{worst.defence}</p>}
+    </section>
+  );
+}
+
 function EventsPanel({ view }: { view: Snapshot }) {
   return (
     <section className="panel">
@@ -282,10 +322,36 @@ function EventsPanel({ view }: { view: Snapshot }) {
       {view.events.length === 0 && <p className="muted small">Nothing scheduled today.</p>}
       {view.events.map((e) => (
         <div key={e.id} className={`event-row ${e.status}`}>
-          <span>{e.name}</span>
-          <b>{e.time}</b>
+          <div className="event-head">
+            <span>{e.name}</span>
+            <b>{e.time}</b>
+          </div>
+          {/* What actually came of it. A meeting that resolved nothing and a
+              showcase nobody attended both say so. */}
+          {e.outcome && <em className="event-outcome">{e.outcome}</em>}
+          {!e.outcome && e.status === 'now' && e.attendees > 0 && (
+            <em className="event-outcome">{e.attendees} there</em>
+          )}
         </div>
       ))}
+      {view.resolution && (
+        <div className="resolution">
+          <span>THE TOWN RESOLVED</span>
+          <p>{view.resolution.text[0].toUpperCase()}{view.resolution.text.slice(1)}.</p>
+          <em>{view.resolution.voters} in the room, day {view.resolution.day}</em>
+        </div>
+      )}
+      {view.artworks.length > 0 && (
+        <div className="gallery">
+          <span>THE SETTLEMENT&rsquo;S WORK</span>
+          {view.artworks.slice(0, 4).map((a) => (
+            <div key={a.id} className="gallery-row">
+              <span>&ldquo;{a.title}&rdquo;</span>
+              <em>{a.maker}</em>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -406,6 +472,7 @@ export function Hud(props: HudProps) {
               <StatusPanel view={view} woodland={props.woodland} />
               <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
               <EventsPanel view={view} />
+              <DangerPanel view={view} />
               <FeedPanel view={view} />
             </aside>
           </>
@@ -414,6 +481,7 @@ export function Hud(props: HudProps) {
           <aside className="right-rail">
             <StatusPanel view={view} woodland={props.woodland} />
             <EventsPanel view={view} />
+            <DangerPanel view={view} />
             <FeedPanel view={view} />
           </aside>
         )}

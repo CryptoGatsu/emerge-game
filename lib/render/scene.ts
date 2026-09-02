@@ -1146,6 +1146,11 @@ export class EmergeScene {
       this.assignBubbles();
     }
     const w = this.app.renderer.width, h = this.app.renderer.height;
+    // Where the bubbles already placed this frame are sitting, so the next one
+    // can be lifted clear of them. Two people talking to each other stand a
+    // few paces apart by definition, which put their two bubbles in exactly
+    // the same piece of sky and made an exchange unreadable.
+    const taken: { x: number; y: number; w: number; h: number }[] = [];
     for (const bubble of this.bubbles) {
       if (!bubble.citizenId) { bubble.root.visible = false; continue; }
       const sprite = this.citizens.get(bubble.citizenId);
@@ -1154,11 +1159,24 @@ export class EmergeScene {
       const height = this.map.heightAt(sprite.wx, sprite.wy);
       const scene = worldToScreen(sprite.wx, sprite.wy, height);
       const pos = this.sceneToScreen(scene.x, scene.y + sprite.headOffset * this.camera.zoom / this.camera.zoom);
-      const x = pos.x - bubble.root.width / 2;
-      const y = pos.y - 34 * this.camera.zoom - bubble.root.height;
+      const bw = bubble.root.width, bh = bubble.root.height;
+      const x = pos.x - bw / 2;
+      let y = pos.y - 34 * this.camera.zoom - bh;
+
+      // Lift it above anything it would land on, up to a few tries. Overlapping
+      // is preferred to flying off the top of the screen, so the search stops
+      // rather than climbing forever.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const clash = taken.find((t) =>
+          x < t.x + t.w + 6 && x + bw + 6 > t.x && y < t.y + t.h + 4 && y + bh + 4 > t.y);
+        if (!clash) break;
+        y = clash.y - bh - 6;
+      }
+      taken.push({ x, y, w: bw, h: bh });
+
       bubble.root.position.set(Math.round(x), Math.round(y));
       // Hide rather than let a bubble slide under the side panels or off screen.
-      const clearOfPanels = x > 24 && x + bubble.root.width < w - 296;
+      const clearOfPanels = x > 24 && x + bw < w - 296;
       bubble.root.visible = clearOfPanels && y > 96 && y < h - 190 && this.camera.zoom > 0.55;
       bubble.life -= dt;
     }
@@ -1168,11 +1186,18 @@ export class EmergeScene {
     const candidates = this.world.citizens.filter((c) => !c.inside && c.age >= 10);
     // Prefer whoever is selected, then citizens nearest the middle of the view.
     const centre = this.screenToScene(this.app.renderer.width / 2, this.app.renderer.height / 2);
+    // Anyone mid-conversation is worth showing over anyone musing to
+    // themselves: an exchange only reads as one if both sides of it are on
+    // screen, and there are only so many bubbles.
+    const talking = new Set<string>();
+    for (const talk of this.world.conversations) { talking.add(talk.a); talking.add(talk.b); }
     const scored = candidates.map((c) => {
       const sprite = this.citizens.get(c.id);
       const pos = sprite ? worldToScreen(sprite.wx, sprite.wy) : { x: 0, y: 0 };
       const d = Math.hypot(pos.x - centre.x, pos.y - centre.y);
-      const priority = this.selected?.kind === 'citizen' && this.selected.id === c.id ? -1e6 : d;
+      const priority = this.selected?.kind === 'citizen' && this.selected.id === c.id
+        ? -1e6
+        : talking.has(c.id) ? d - 5000 : d;
       return { c, priority };
     }).sort((a, b) => a.priority - b.priority);
 

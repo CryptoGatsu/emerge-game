@@ -7,7 +7,7 @@
  * frame. Nothing here feeds back into the simulation.
  */
 
-import { JOB_LABELS, type Citizen, type World } from './simulation';
+import { JOB_LABELS, spokenLine, type Citizen, type World } from './simulation';
 
 type Line = string;
 
@@ -91,6 +91,13 @@ const BY_WEATHER: Partial<Record<string, Line[]>> = {
 
 /** A line for a citizen at the current beat, or null when they have nothing to say. */
 export function speechFor(world: World, c: Citizen, beat: number): string | null {
+  // An actual conversation outranks anything this module can invent. When
+  // somebody is mid-exchange the bubble is their turn in it, so two people
+  // standing together take turns on one subject instead of saying two
+  // unrelated things at each other.
+  const spoken = spokenLine(world, c.id);
+  if (spoken) return spoken.text;
+
   const roll = (c.hash * 31 + beat * 17) % 100;
   // Most citizens are quiet most of the time; a crowded settlement of constant
   // talkers reads as noise rather than life.

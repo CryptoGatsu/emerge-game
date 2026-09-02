@@ -34,9 +34,91 @@ export interface Gathering {
   id: string; name: string; kind: GatheringKind;
   day: number; hour: number; duration: number;
   buildingId: string; attendees: string[];
+  /**
+   * What came of it, once it has finished. A gathering used to be a place
+   * people walked to and nothing more: the meeting decided nothing, the
+   * showcase showed nothing, and market day traded exactly like a Tuesday.
+   * This is set when the last hour runs out, and only once.
+   */
+  outcome?: string;
+}
+
+/**
+ * What a town meeting decided, and how long the decision stands.
+ *
+ * The settlement builds what it is short of, and left to itself it always
+ * reads that shortage the same way. A resolution is the town's own answer to
+ * the same question, taken in front of everybody, and it outranks the default
+ * for as long as it holds — so a meeting is a thing that changes what gets
+ * built rather than a crowd standing in a tavern.
+ */
+export interface Resolution {
+  /** What was resolved, in the words the feed and the panel use. */
+  text: string;
+  /** The building the town wants raised, if the resolution names one. */
+  want: string | null;
+  /** The day it was taken. It stands for three days. */
+  day: number;
+  /** How many were in the room. */
+  voters: number;
+}
+
+/** A work made at a showcase, kept so the settlement has a body of work. */
+export interface Artwork { id: string; title: string; maker: string; day: number; subject: string }
+
+export type HazardKind = 'fire' | 'blight' | 'wolves' | 'flood';
+
+/**
+ * Something going wrong.
+ *
+ * A settlement with no way to fail is a diorama. These are drawn from the
+ * world's own state rather than a die roll against nothing: a fire starts in
+ * dry heat and takes hold when there is no water nearby, blight comes to a
+ * town living hand to mouth off its own fields, wolves come out of a hard
+ * winter to a settlement with no fires burning, and a flood follows a storm on
+ * a river. Each has a defence the player can actually build, each is announced
+ * in the feed with what it cost, and none of them can kill a prepared town.
+ */
+export interface Hazard {
+  id: string;
+  kind: HazardKind;
+  /** What it is, in a heading. */
+  label: string;
+  /** What it is doing, in a sentence the panel can print. */
+  effect: string;
+  day: number;
+  /** Days left to run. */
+  days: number;
+  /** A building it has taken out of use, restored when it passes. */
+  buildingId?: string;
 }
 
 export interface Bond { a: string; b: string; strength: number; friends: boolean }
+
+/**
+ * Two people talking to each other.
+ *
+ * Citizens have always had something to say — a line drawn from what they are
+ * doing, the hour and the weather — but they said it into the air, and two of
+ * them standing together said two unrelated things at once. A conversation is
+ * a real exchange held in the simulation: an opening, a reply, an answer and a
+ * closing, all on one subject that both of them have a reason to raise, with
+ * the turns taken in order. The renderer shows whichever line is being spoken
+ * now, so a bubble is an utterance rather than a mood.
+ */
+export interface Conversation {
+  id: string;
+  /** The two of them, in the order they speak. */
+  a: string;
+  b: string;
+  /** What it is about, for the inspector and the feed. */
+  topic: string;
+  /** The exchange, alternating a, b, a, b. */
+  lines: string[];
+  /** Which line is being spoken, and how long it has been up. */
+  index: number;
+  held: number;
+}
 export interface Project { id: string; ownerId: string; name: string; buildingId: string; progress: number; length: number }
 
 export interface Citizen {
@@ -87,6 +169,12 @@ export interface Citizen {
   warmth: number;
   /** Amenity they are currently occupying, if any: a bench, a fire, the well. */
   usingId?: string;
+  /**
+   * The last gathering this person was called to, so the bell rings once.
+   * Without it, someone settled at a fire before the meeting was called never
+   * re-picks a destination and never goes.
+   */
+  calledTo?: string;
   /** True while sat on a bench or crouched at a fire, which the renderer draws. */
   seated: boolean;
   /**
@@ -173,6 +261,14 @@ export interface World {
   families: Family[]; citizens: Citizen[]; buildings: Building[];
   resources: Record<Resource, number>; market: Record<Resource, MarketQuote>;
   feed: FeedEntry[]; gatherings: Gathering[]; bonds: Record<string, Bond>; projects: Project[];
+  /** Conversations happening right now. */
+  conversations: Conversation[];
+  /** Whatever is currently going wrong. */
+  hazards: Hazard[];
+  /** The standing decision of the last town meeting, if it is still in force. */
+  resolution: Resolution | null;
+  /** Everything the settlement's showcases have produced, newest first. */
+  artworks: Artwork[];
   unlockedAreas: string[];
   /** Accumulates game hours so the market trades on the clock, not per frame. */
   marketClock: number;
@@ -506,7 +602,6 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     const gathering = activeGathering(world);
     const venue = gathering && world.buildings.find((b) => b.id === gathering.buildingId);
     if (venue) {
-      if (gathering && !gathering.attendees.includes(c.id)) gathering.attendees.push(c.id);
       target = venue;
       spread = 4.0;
     } else {
@@ -1056,6 +1151,281 @@ function socialStep(world: World, hours: number) {
 }
 
 /**
+ * How long one line of an exchange stays up, in game hours.
+ *
+ * Long enough to read at the ordinary clock and not so long that a four-line
+ * conversation outlasts the evening. At the default speed this is a little
+ * under three seconds a line.
+ */
+const LINE_HOLD = 0.42;
+
+/**
+ * How close two people stand to be talking rather than merely near each other.
+ *
+ * A shade over the four units a crowd spreads itself around a venue, so two
+ * people at the same gathering can be in earshot without everybody in the
+ * square counting as one conversation.
+ */
+const TALKING_RANGE = 4.6;
+
+/**
+ * Whether somebody is out and about with time to talk.
+ *
+ * The phase, not the activity. `activity` only reads 'trading' inside the
+ * third of a unit that counts as having arrived, and arriving at a building
+ * puts the person inside it — so across four game days in three biomes the
+ * number of citizens who were both outdoors and 'trading' averaged one in ten.
+ * Nobody ever met anybody. Phase is what the person is doing with their
+ * afternoon, which is the thing that decides whether they will stop and speak.
+ */
+function outAndAbout(c: Citizen) {
+  return c.age >= 16 && !c.inside && (c.phase === 'socialising' || c.phase === 'eating' || c.phase === 'wandering');
+}
+
+/**
+ * What these two have to talk about.
+ *
+ * Read from the world they are both standing in, in order of how immediate it
+ * is: the weather on their skin, then the day's news, then the work they share,
+ * then each other. Every branch returns a full exchange — an opening, a reply,
+ * an answer and a closing — so a conversation is on one subject from start to
+ * finish rather than four unrelated lines taking turns.
+ */
+function conversationFor(world: World, a: Citizen, b: Citizen): { topic: string; lines: string[] } {
+  const shared = a.job !== 'unemployed' && a.job === b.job;
+  const friends = world.bonds[bondKey(a.id, b.id)]?.friends ?? false;
+  const art = world.artworks[0];
+
+  // Urgent business first, because these are things happening to the two of
+  // them right now and nobody talks about the price of wool in a blizzard.
+  if (world.weather === 'Storm' || world.weather === 'Snow') {
+    return {
+      topic: 'the weather',
+      lines: [
+        world.weather === 'Snow' ? 'Cold enough to see your breath out here.' : 'That wind is getting up.',
+        world.weather === 'Snow' ? 'Second fall this season. Earlier than last year.' : 'It will be through here by dark.',
+        'Have you enough firewood put by?',
+        'Enough for a week. Come round if you run short.',
+      ],
+    };
+  }
+
+  if (a.hunger < 32 || b.hunger < 32) {
+    return {
+      topic: 'the stores',
+      lines: [
+        'Have you eaten today?',
+        world.resources.bread > 4 ? 'There was bread at the market this morning.' : 'The stores were bare when I looked.',
+        world.resources.bread > 4 ? 'I will go down before it goes.' : 'Somebody ought to say something at the meeting.',
+        'I will walk with you.',
+      ],
+    };
+  }
+
+  // Everything else is small talk, and small talk is a choice among the things
+  // both of them could reasonably raise — not a fixed order. Running it as a
+  // priority chain made the last town meeting the subject of four
+  // conversations in five, for the three days a resolution stands.
+  const options: { topic: string; lines: string[] }[] = [];
+
+  if (world.resolution && world.day - world.resolution.day <= 1) {
+    options.push({
+      topic: 'the meeting',
+      lines: [
+        `They resolved ${world.resolution.text}.`,
+        `${world.resolution.voters} in the room, I heard.`,
+        'About time somebody decided it.',
+        'We will see if it comes to anything.',
+      ],
+    });
+  }
+
+  if (art && world.day - art.day <= 2) {
+    options.push({
+      topic: 'the showcase',
+      lines: [
+        `Did you see ${art.maker}'s piece? “${art.title}”.`,
+        'I stood in front of it a good while.',
+        'It is the light on it that gets me.',
+        'They should show another.',
+      ],
+    });
+  }
+
+  if (shared) {
+    options.push({
+      topic: `the ${JOB_LABELS[a.job].toLowerCase()}'s work`,
+      lines: [
+        'How did you get on today?',
+        'Slow start, then it came right after noon.',
+        'Same. My hands are finished.',
+        'Tomorrow, then.',
+      ],
+    });
+    options.push({
+      topic: `the ${JOB_LABELS[a.job].toLowerCase()}'s work`,
+      lines: [
+        'Are you on the same run as me tomorrow?',
+        'If the weather holds I will be.',
+        'Two of us would halve it.',
+        'Then two of us it is.',
+      ],
+    });
+  }
+
+  if (friends) {
+    options.push({
+      topic: 'each other',
+      lines: [
+        `Good to see you, ${b.name}.`,
+        'And you. It has been days.',
+        'Come by the house this week.',
+        'I will bring something.',
+      ],
+    });
+  }
+
+  const babies = world.citizens.filter((c) => c.age < 3).length;
+  if (babies > 0) {
+    options.push({
+      topic: 'the children',
+      lines: [
+        babies === 1 ? 'There is a new one in the settlement.' : `${babies} little ones about the place now.`,
+        'They will need somewhere to live before long.',
+        'They always do. We managed.',
+        'We did at that.',
+      ],
+    });
+  }
+
+  const site = world.projects[0];
+  if (site) {
+    options.push({
+      topic: site.name,
+      lines: [
+        `Have you seen how far along ${site.name.toLowerCase()} is?`,
+        'I walked past this morning. Further than I expected.',
+        'It will change this end of town.',
+        'For the better, I hope.',
+      ],
+    });
+  }
+
+  options.push({
+    topic: world.name,
+    lines: [
+      `${JOB_LABELS[a.job]}, is it? I do not think we have spoken.`,
+      `${b.name}. I am mostly down the other end of ${world.name}.`,
+      'Long enough here to know the shortcuts, then.',
+      'Ask me any time.',
+    ],
+  });
+
+  // The weather as a thing you can say out loud. Dropping `weather` straight
+  // into a sentence gives you "and the cloudy with it".
+  const skies: Record<Weather, string> = {
+    Clear: 'these bright mornings',
+    Cloudy: 'this flat grey light',
+    Rain: 'all this rain',
+    Storm: 'the wind that comes with it',
+    Fog: 'the fog off the water',
+    Snow: 'the snow on top of it',
+  };
+  options.push({
+    topic: 'the season',
+    lines: [
+      `${world.season} always comes round faster than I expect.`,
+      `It does. And ${skies[world.weather]}.`,
+      'Still, it is a good place to be in it.',
+      'It is.',
+    ],
+  });
+
+  return options[(a.hash + b.hash + world.day) % options.length];
+}
+
+/**
+ * Start conversations, run the ones already going, and end them.
+ *
+ * A pair talks when they are both out socialising, standing within a few
+ * paces, and neither is already in an exchange. The talking itself is worth
+ * more than passing co-presence — people who have actually spoken get on
+ * faster than people who merely stood in the same room — so this is the thing
+ * that builds friendships, not proximity alone.
+ */
+function converse(world: World, hours: number) {
+  const busy = new Set<string>();
+  for (const talk of world.conversations) { busy.add(talk.a); busy.add(talk.b); }
+
+  // Run and retire the exchanges already going.
+  for (let i = world.conversations.length - 1; i >= 0; i--) {
+    const talk = world.conversations[i];
+    const a = world.citizens.find((c) => c.id === talk.a);
+    const b = world.citizens.find((c) => c.id === talk.b);
+    // Someone walked off, went inside or died: the conversation is over, which
+    // is what happens to conversations.
+    if (!a || !b || a.inside || b.inside || Math.hypot(a.x - b.x, a.y - b.y) > TALKING_RANGE + 2.5) {
+      world.conversations.splice(i, 1);
+      continue;
+    }
+    talk.held += hours;
+    if (talk.held >= LINE_HOLD) {
+      talk.held = 0;
+      talk.index++;
+    }
+    if (talk.index >= talk.lines.length) {
+      const bond = world.bonds[bondKey(a.id, b.id)] ?? (world.bonds[bondKey(a.id, b.id)] = { a: a.id, b: b.id, strength: 0, friends: false });
+      bond.strength = Math.min(100, bond.strength + 9);
+      a.social = Math.min(100, a.social + 10);
+      b.social = Math.min(100, b.social + 10);
+      if (!bond.friends && bond.strength >= 78) {
+        bond.friends = true;
+        pushFeed(world, 'social', `${a.name} and ${b.name} are now good friends.`);
+      }
+      world.conversations.splice(i, 1);
+    }
+  }
+
+  // Start new ones. Bounded, because thirty people all talking at once is a
+  // crowd scene rather than a settlement.
+  const open = world.citizens.filter((c) => outAndAbout(c) && !busy.has(c.id));
+  for (let i = 0; i < open.length && world.conversations.length < 6; i++) {
+    const a = open[i];
+    if (busy.has(a.id)) continue;
+    for (let j = i + 1; j < open.length; j++) {
+      const b = open[j];
+      if (busy.has(b.id)) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) > TALKING_RANGE) continue;
+      // Not every meeting of eyes is a conversation.
+      if ((a.hash + b.hash + Math.floor(world.hour * 4)) % 5 !== 0) continue;
+      const { topic, lines } = conversationFor(world, a, b);
+      world.conversations.push({ id: `t${world.counter++}`, a: a.id, b: b.id, topic, lines, index: 0, held: 0 });
+      busy.add(a.id); busy.add(b.id);
+      break;
+    }
+  }
+}
+
+/** The line this citizen is speaking right now, if they are in a conversation. */
+export function spokenLine(world: World, id: string): { text: string; topic: string } | null {
+  for (const talk of world.conversations) {
+    const speaker = talk.index % 2 === 0 ? talk.a : talk.b;
+    if (speaker !== id) continue;
+    const text = talk.lines[talk.index];
+    if (!text) return null;
+    return { text, topic: talk.topic };
+  }
+  return null;
+}
+
+/** Who this citizen is talking to right now, for the inspector. */
+export function talkingWith(world: World, id: string): Citizen | null {
+  const talk = world.conversations.find((t) => t.a === id || t.b === id);
+  if (!talk) return null;
+  return world.citizens.find((c) => c.id === (talk.a === id ? talk.b : talk.a)) ?? null;
+}
+
+/**
  * Bonds fade a little each day. Without this, thirty citizens sharing one tavern
  * eventually befriend everyone, and "X and Y are now good friends" stops meaning
  * anything.
@@ -1412,6 +1782,18 @@ function buildAmenities(buildings: Building[], layout: WorldLayout, water: Water
     for (const [dx, dy] of spots) add('stall', market.x + dx, market.y + dy, 1);
   }
 
+  // A town that spreads sinks another well and keeps another fire, out at the
+  // junctions rather than all in the square. They are what stands between a
+  // kitchen fire and a burnt-out bakery, and between a hard winter and wolves
+  // in among the pens — and they go in slower than the town grows, so a
+  // settlement that builds fast is briefly more exposed than one that does not.
+  const extra = Math.floor(buildings.length / 9);
+  for (let i = 0; i < extra && layout.nodes.length; i++) {
+    const node = layout.nodes[(i * 7 + 3) % layout.nodes.length];
+    if (i % 2 === 0) add('well', node[0] + 2.2, node[1] + 1.6, 2);
+    else add('campfire', node[0] - 2.4, node[1] + 1.8, 4);
+  }
+
   return out;
 }
 
@@ -1471,7 +1853,9 @@ export function createWorld(seed = 481516, name?: string): World {
     families, citizens, buildings,
     resources: { wheat: 60, vegetables: 30, wood: 50, stone: 20, ironOre: 10, wool: 8, flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10 },
     market: createMarket(),
-    feed: [], gatherings: [], bonds: {}, projects: [], unlockedAreas: ['Settlement'],
+    feed: [], gatherings: [], bonds: {}, projects: [], conversations: [], hazards: [],
+    resolution: null, artworks: [],
+    unlockedAreas: ['Settlement'],
     marketClock: 0, flow: { produced: {}, consumed: {} },
     ledger: emptyLedger(), ledgerYesterday: emptyLedger(), counter: 0,
   };
@@ -1491,10 +1875,222 @@ function scheduleGatherings(world: World) {
   const market = findBuilding(world, 'Market');
   const square = tavern ?? market;
   const next: Gathering[] = [];
-  if (square) next.push({ id: `g${world.day}-meetup`, name: 'Town Meetup', kind: 'meetup', day: world.day, hour: 19, duration: 2, buildingId: square.id, attendees: [] });
-  if (market && rand() < 0.7) next.push({ id: `g${world.day}-showcase`, name: 'Art Showcase', kind: 'showcase', day: world.day, hour: 21, duration: 1.5, buildingId: market.id, attendees: [] });
+  // A feast when there is genuinely enough to feast on. It eats real bread, so
+  // a settlement that throws one on the strength of a good harvest is a little
+  // shorter afterwards — which is the point of a feast. A feast is the whole
+  // evening: nothing else is scheduled against it, because the evening is the
+  // only window when people are neither at work nor asleep, and two gatherings
+  // in it means one of them draws nobody.
+  //
+  // One thing per evening, and it is always the same hour.
+  //
+  // The evening is narrow: the working day ends somewhere between half four
+  // and half six depending on the person, and the walk home starts at eight.
+  // Two gatherings stacked into it meant one of them was always held while
+  // half the town was still at work or already in bed — the showcase drew
+  // nobody at all on twenty-six of forty days at half five, and on twenty-six
+  // of forty at nine at night. So the evening holds one gathering: a feast
+  // when the stores can carry one, a showcase now and then, and otherwise the
+  // meeting.
+  const larder = world.resources.bread + world.resources.vegetables;
+  const feasting = square && larder > world.citizens.length * 4 && world.day % 6 === 3;
+  if (feasting) {
+    next.push({ id: `g${world.day}-feast`, name: 'Harvest Feast', kind: 'feast', day: world.day, hour: 19, duration: 2.5, buildingId: square!.id, attendees: [] });
+  } else if (square && rand() < 0.35) {
+    // At the same place the town gathers anyway. Holding it at the market
+    // instead sounds better and worked worse: one valley's market stands
+    // thirteen units from its tavern, and every one of its eleven showcases
+    // was held to an empty room while the town drank down the road.
+    next.push({ id: `g${world.day}-showcase`, name: 'Art Showcase', kind: 'showcase', day: world.day, hour: 19, duration: 2, buildingId: square.id, attendees: [] });
+  } else if (square) {
+    next.push({ id: `g${world.day}-meetup`, name: 'Town Meetup', kind: 'meetup', day: world.day, hour: 19, duration: 2, buildingId: square.id, attendees: [] });
+  }
+  // Market day is the exception: it runs over the middle of the day, when the
+  // town is at work, and draws the lunch crowd to the stalls rather than the
+  // evening crowd to a room.
   if (market && world.day % 5 === 0) next.push({ id: `g${world.day}-market`, name: 'Market Day', kind: 'market', day: world.day, hour: 10, duration: 4, buildingId: market.id, attendees: [] });
   world.gatherings = next;
+}
+
+/** Is a market day running right now? Trade moves faster while one is. */
+export function marketDayRunning(world: World) {
+  const live = activeGathering(world);
+  return live?.kind === 'market';
+}
+
+/**
+ * What the town would resolve on, given the state it is actually in.
+ *
+ * Read in order of how badly it hurts: a roofless family first, then hunger,
+ * then the cold, then the trades the land supports and the settlement has not
+ * taken up. The last case is not a building at all — a town with nothing
+ * pressing resolves to put something by, which is a real decision even though
+ * it raises nothing.
+ */
+function meetingBusiness(world: World): { text: string; want: string | null } {
+  const homeless = world.citizens.filter((c) => c.age >= 16 && !homeOf(world, c)).length;
+  if (homeless > 0) {
+    return {
+      want: 'House',
+      text: `to raise more housing — ${homeless} ${homeless === 1 ? 'person has' : 'people have'} nowhere to live`,
+    };
+  }
+  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+  if (food < world.citizens.length * 2.5) {
+    return { want: 'Farm', text: 'to break more ground for crops, with the stores this low' };
+  }
+  if (world.resources.wood < 20) {
+    return { want: 'Woodcutter', text: 'to put more hands to the timber, with the yard nearly bare' };
+  }
+  if (world.temperature < 4 && !world.amenities.some((a) => a.kind === 'campfire')) {
+    return { want: null, text: 'to keep a fire burning in the square through the cold' };
+  }
+  const trade = biomeProfile(world.biome).trades.find((type) => !world.buildings.some((b) => b.type === type));
+  if (trade && world.treasury > 2200) {
+    return { want: trade, text: `to open a ${trade.toLowerCase()}, which this land will support` };
+  }
+  if (!findBuilding(world, 'Tavern')) {
+    return { want: 'Tavern', text: 'to build somewhere proper to gather' };
+  }
+  return { want: null, text: 'that things are well enough, and to put the surplus by' };
+}
+
+const ART_SUBJECTS = [
+  'the river at first light', 'the long field after harvest', 'a neighbour asleep by the fire',
+  'the road out of town', 'the hills under snow', 'hands at work', 'the market on a full day',
+  'the old tree by the well', 'a storm coming in', 'the bridge, from below',
+];
+
+/**
+ * Close out a gathering that has just finished, once.
+ *
+ * This is where a gathering stops being a place people walked to. A meeting
+ * takes a resolution that outranks what the settlement would otherwise build;
+ * a showcase produces a named work by a named maker; a market day pays out the
+ * stallholders' takings; a feast eats real food and lifts everyone who came.
+ */
+function concludeGatherings(world: World) {
+  markAttendance(world);
+  for (const g of world.gatherings) {
+    if (g.outcome !== undefined) continue;
+    if (g.day !== world.day || world.hour < g.hour + g.duration) continue;
+    const present = g.attendees
+      .map((id) => world.citizens.find((c) => c.id === id))
+      .filter((c): c is Citizen => !!c);
+
+    // Nobody came. That is an outcome, and an honest one.
+    if (present.length < 2) {
+      g.outcome = 'Nobody came.';
+      continue;
+    }
+
+    if (g.kind === 'meetup') {
+      const business = meetingBusiness(world);
+      world.resolution = { text: business.text, want: business.want, day: world.day, voters: present.length };
+      g.outcome = `Resolved ${business.text}.`;
+      pushFeed(world, 'social', `${present.length} met at the ${venueName(world, g)}. They resolved ${business.text}.`);
+      // A town that has just agreed on something feels better about itself.
+      for (const c of present) {
+        c.purpose = Math.min(100, c.purpose + 5);
+        c.social = Math.min(100, c.social + 12);
+      }
+    } else if (g.kind === 'showcase') {
+      // The maker is whoever came with the most to say — the highest sense of
+      // purpose in the room — so the showcase belongs to somebody in
+      // particular rather than to a random attendee.
+      const maker = present.reduce((best, c) => (c.purpose > best.purpose ? c : best), present[0]);
+      const subject = ART_SUBJECTS[(maker.hash + world.day) % ART_SUBJECTS.length];
+      const title = `${subject[0].toUpperCase()}${subject.slice(1)}`;
+      world.artworks.unshift({ id: `art${world.counter++}`, title, maker: maker.name, day: world.day, subject });
+      if (world.artworks.length > 24) world.artworks.length = 24;
+      g.outcome = `${maker.name} showed “${title}”.`;
+      pushFeed(world, 'social', `${maker.name} showed a piece at the showcase: “${title}”. ${present.length - 1} stayed to look.`);
+      maker.purpose = Math.min(100, maker.purpose + 14);
+      for (const c of present) {
+        c.happiness = Math.min(100, c.happiness + 4);
+        c.social = Math.min(100, c.social + 9);
+      }
+    } else if (g.kind === 'market') {
+      // Visiting traders. The takings are real Gold, booked as exports, and
+      // scale with how many stallholders turned out.
+      const takings = Math.round(present.length * 6 + world.resources.wheat * 0.2 + world.resources.furniture * 1.2);
+      earn(world, 'exports', takings);
+      g.outcome = `${takings} Gold taken across the stalls.`;
+      pushFeed(world, 'market', `Market day drew ${present.length} to the stalls and took ${takings} Gold.`);
+      for (const c of present) c.social = Math.min(100, c.social + 8);
+    } else {
+      // A feast eats what the settlement has, and everyone who came goes home
+      // fed, warm and better company than they were.
+      const wanted = present.length * 1.6;
+      const bread = Math.min(world.resources.bread, wanted * 0.7);
+      const veg = Math.min(world.resources.vegetables, wanted - bread);
+      world.resources.bread -= bread;
+      world.resources.vegetables -= veg;
+      note(world, 'consumed', 'bread', bread);
+      note(world, 'consumed', 'vegetables', veg);
+      g.outcome = `${present.length} ate together.`;
+      pushFeed(world, 'social', `${present.length} sat down to the harvest feast at the ${venueName(world, g)}.`);
+      for (const c of present) {
+        c.hunger = Math.min(100, c.hunger + 30);
+        c.social = Math.min(100, c.social + 20);
+        c.happiness = Math.min(100, c.happiness + 7);
+        c.warmth = Math.min(100, c.warmth + 12);
+      }
+    }
+  }
+
+  // A resolution stands for three days, then the town is free to think again.
+  if (world.resolution && world.day - world.resolution.day > 3) world.resolution = null;
+}
+
+/**
+ * Who is actually at the gathering that is running.
+ *
+ * Attendance used to be recorded when a citizen chose the venue as their
+ * destination, which is a statement of intent and not the same thing. It only
+ * ran when someone picked a new destination, so anyone already settled — and
+ * in a desert, that is most of the town, sat at a fire against the cold —
+ * never counted: the desert's meetings recorded nobody present on
+ * thirty-one days out of forty while three people stood in the square.
+ *
+ * So it is measured where they are standing. Being at a market day means
+ * buying your dinner at the stalls; being at anything else means standing
+ * about with people, which is what socialising is.
+ */
+function markAttendance(world: World) {
+  const g = activeGathering(world);
+  if (!g) return;
+  const venue = world.buildings.find((b) => b.id === g.buildingId);
+  if (!venue) return;
+  const wanted: Phase = g.kind === 'market' ? 'eating' : 'socialising';
+  const reach = g.kind === 'market' ? 11 : 9;
+  for (const c of world.citizens) {
+    if (c.age < 16) continue;
+    // The bell. Someone already settled somewhere only re-picks a destination
+    // when their dwell runs out, which can be an hour or more — long enough to
+    // miss the whole meeting from a bench two streets away. Being called
+    // reassigns them once, which sends them to the venue.
+    if (c.phase === wanted && c.calledTo !== g.id) {
+      c.calledTo = g.id;
+      assignDestination(world, c, c.phase);
+    }
+    // What they are doing, not what they are doing this frame. `activity` reads
+    // 'walking' for as long as someone is on their way, so testing it counted
+    // only the people who had already sat down: at half twelve on a market day
+    // eight citizens were in the eating phase and not one of them registered.
+    if (c.phase !== wanted) continue;
+    // A stall *is* the market day, wherever the town put it, so being at one
+    // counts without measuring back to the market building. Everything else is
+    // measured from the venue.
+    const atStall = g.kind === 'market' && c.usingId !== undefined
+      && world.amenities.some((a) => a.id === c.usingId && a.kind === 'stall');
+    if (!atStall && Math.hypot(c.x - venue.x, c.y - venue.y) > reach) continue;
+    if (!g.attendees.includes(c.id)) g.attendees.push(c.id);
+  }
+}
+
+function venueName(world: World, g: Gathering) {
+  return (world.buildings.find((b) => b.id === g.buildingId)?.type ?? 'square').toLowerCase();
 }
 
 /**
@@ -1551,6 +2147,7 @@ function marketStep(world: World, hours: number) {
   // one line a day. Left unthrottled it buries every friendship and discovery.
   const reportedToday = world.feed.some((e) => e.kind === 'market' && e.day === world.day);
   let reported = reportedToday;
+  const busy = marketDayRunning(world);
 
   const localOutputs = new Set<Resource>();
   for (const [job, recipe] of Object.entries(jobs)) {
@@ -1574,14 +2171,17 @@ function marketStep(world: World, hours: number) {
     // produce, the market only steps in during a real shortage — otherwise it
     // spends the treasury buying back the bread its own bakery is making.
     const importer = !localOutputs.has(r);
+    // A market day is a market day: stock moves faster in both directions while
+    // one is running, which is what makes it worth walking to.
+    const pace = busy ? 1.8 : 1;
     if (stock < buffer * (importer ? 0.65 : 0.3)) {
-      const qty = Math.min(Math.max(1, Math.round((buffer - stock) * .2 * hours)), Math.max(0, buffer - stock)), cost = qty * q.price;
+      const qty = Math.min(Math.max(1, Math.round((buffer - stock) * .2 * pace * hours)), Math.max(0, buffer - stock)), cost = qty * q.price;
       if (qty > 0 && world.treasury >= cost) {
         world.resources[r] += qty; spend(world, 'imports', cost); q.volume += qty;
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market bought ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${cost.toFixed(0)} Gold.`); }
       }
     } else if (stock > buffer * 1.2) {
-      const qty = Math.min(Math.max(1, Math.round((stock - buffer) * .25 * hours)), Math.floor(stock - buffer));
+      const qty = Math.min(Math.max(1, Math.round((stock - buffer) * .25 * pace * hours)), Math.floor(stock - buffer));
       if (qty > 0) {
         const revenue = qty * q.price; world.resources[r] -= qty; earn(world, 'exports', revenue); q.volume += qty;
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market sold ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${revenue.toFixed(0)} Gold.`); }
@@ -1673,6 +2273,9 @@ function produce(world: World) {
     if (!job || job === 'unemployed' || !count) continue;
     const wj = job as WorkingJob, recipe = jobs[wj], workers = Math.min(count, jobCapacity(world, wj));
     const seasonal = world.season === 'Winter' && wj === 'farmer' ? .65 : world.season === 'Summer' && wj === 'farmer' ? 1.15 : 1;
+    // Blight is in the fields, not in the mine: it costs the farmers and only
+    // the farmers, which is what makes a granary the answer to it.
+    const blighted = wj === 'farmer' && hazardActive(world, 'blight') ? 0.45 : 1;
     const weather = world.weather === 'Storm' ? .65 : world.weather === 'Rain' && wj === 'farmer' ? 1.08 : world.weather === 'Snow' ? .7 : 1;
     if (recipe.input && !Object.entries(recipe.input).every(([r, n]) => world.resources[r as Resource] >= (n as number) * workers)) continue;
     for (const [r, n] of Object.entries(recipe.input || {})) {
@@ -1681,7 +2284,7 @@ function produce(world: World) {
       note(world, 'consumed', r as Resource, used);
     }
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather;
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted;
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -1703,6 +2306,203 @@ function discoveries(world: World) {
   world.resources[rare] += amount;
   finder.purpose = Math.min(100, finder.purpose + 12);
   pushFeed(world, 'discovery', `${finder.name} discovered a rich seam of ${RESOURCE_LABELS[rare].toLowerCase()}.`);
+}
+
+/**
+ * How ready the settlement is for each kind of trouble, 0 to 1.
+ *
+ * Everything here is something the player can change: wells and a fire brigade
+ * of people awake nearby, a full granary and somewhere to keep it, fires
+ * burning through the winter, buildings set back from the bank. Readiness does
+ * not stop a hazard starting — a dry summer is a dry summer — but it decides
+ * what the hazard costs, and at full readiness the answer is close to nothing.
+ */
+export function readiness(world: World): Record<HazardKind, number> {
+  const wells = world.amenities.filter((a) => a.kind === 'well').length;
+  const fires = world.amenities.filter((a) => a.kind === 'campfire').length;
+  const stores = world.buildings.filter((b) => b.type === 'Storage' && b.active).length;
+  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+  const mouths = Math.max(1, world.citizens.length);
+  const water = waterOf(world);
+  const buildings = world.buildings.length || 1;
+  const backFromBank = world.buildings.filter((b) => water.distanceToWater(b.x, b.y) >= 6).length / buildings;
+  // Measured against the size of the thing being defended, not as a flat
+  // count: one well was enough for a hamlet of eight and read as complete
+  // readiness for a town of thirty-one, which meant nothing could ever burn.
+  return {
+    fire: clamp(wells / (1 + buildings / 8), 0, 1),
+    blight: clamp(food / (mouths * 9) * 0.7 + stores * 0.3, 0, 1),
+    wolves: clamp(fires / (1 + mouths / 14), 0, 1),
+    flood: clamp(backFromBank, 0, 1),
+  };
+}
+
+/** Labels for the panel, so a hazard is named the same way everywhere. */
+export const HAZARD_LABELS: Record<HazardKind, string> = {
+  fire: 'Fire',
+  blight: 'Blight',
+  wolves: 'Wolves',
+  flood: 'Flood',
+};
+
+export const HAZARD_DEFENCE: Record<HazardKind, string> = {
+  fire: 'Wells within reach, and enough hands to pass the buckets.',
+  blight: 'A granary and a season of food put by.',
+  wolves: 'Fires burning through the night, and numbers.',
+  flood: 'Buildings set back from the bank.',
+};
+
+/**
+ * Whether a hazard of this kind is plausible today, given the world.
+ *
+ * The point is that trouble comes from somewhere. A fire wants heat and dry
+ * air; blight wants a growing season and fields; wolves want a cold night and
+ * woodland; a flood wants a storm and a river.
+ */
+function hazardChance(world: World, kind: HazardKind): number {
+  const water = waterOf(world);
+  if (kind === 'fire') {
+    if (world.temperature < 17 || world.weather === 'Rain' || world.weather === 'Snow') return 0;
+    const hearths = world.buildings.filter((b) => b.type === 'Bakery' || b.type === 'Blacksmith' || b.type === 'House').length;
+    return Math.min(0.09, 0.006 * hearths) * (world.season === 'Summer' ? 1.6 : 1);
+  }
+  if (kind === 'blight') {
+    if (world.season === 'Winter') return 0;
+    const farms = world.buildings.filter((b) => b.type === 'Farm' && b.active).length;
+    if (!farms) return 0;
+    return Math.min(0.07, 0.022 * farms);
+  }
+  if (kind === 'wolves') {
+    if (world.temperature > 6) return 0;
+    const woods = world.biome === 'woodland' || world.biome === 'valley' || world.biome === 'swamp' ? 1.5 : 1;
+    return 0.035 * woods;
+  }
+  // Flood: a storm, on a settlement that has water in it at all.
+  if (world.weather !== 'Storm') return 0;
+  return water.mainland >= 0 ? 0.16 : 0;
+}
+
+/**
+ * Run the day's trouble: retire what has passed, and see what starts.
+ *
+ * One hazard at a time. Two at once is not drama, it is a settlement being
+ * bullied — and the feed becomes a list of disasters rather than a story about
+ * a place.
+ */
+function hazards(world: World) {
+  // Retire what has run its course, and give back what it took.
+  for (let i = world.hazards.length - 1; i >= 0; i--) {
+    const h = world.hazards[i];
+    h.days -= 1;
+    if (h.days > 0) continue;
+    if (h.buildingId) {
+      const b = world.buildings.find((x) => x.id === h.buildingId);
+      if (b) {
+        b.active = true;
+        pushFeed(world, 'build', `The ${b.type.toLowerCase()} is back in use.`);
+      }
+    }
+    world.hazards.splice(i, 1);
+  }
+  if (world.hazards.length) return;
+  // Nothing happens to a settlement in its first days. A town that burns down
+  // before it has a well is not a challenge, it is a bad opening hand.
+  if (world.day < 5) return;
+
+  const rand = mulberry32(world.seed + world.day * 3319);
+  const ready = readiness(world);
+  const kinds: HazardKind[] = ['fire', 'blight', 'wolves', 'flood'];
+  for (const kind of kinds) {
+    const chance = hazardChance(world, kind);
+    if (chance <= 0 || rand() > chance) continue;
+    startHazard(world, kind, ready[kind], rand);
+    return;
+  }
+}
+
+function startHazard(world: World, kind: HazardKind, ready: number, rand: () => number) {
+  // How badly it lands. Full readiness is not immunity — it is the difference
+  // between a bad afternoon and a bad month.
+  const severity = Math.max(0.12, 1 - ready);
+  const days = Math.max(1, Math.round(1 + severity * 4));
+  const add = (effect: string, buildingId?: string) => {
+    world.hazards.push({ id: `h${world.counter++}`, kind, label: HAZARD_LABELS[kind], effect, day: world.day, days, buildingId });
+  };
+
+  if (kind === 'fire') {
+    const candidates = world.buildings.filter((b) => b.active && b.type !== 'Market');
+    const hit = candidates[Math.floor(rand() * candidates.length)];
+    if (!hit) return;
+    if (ready > 0.75) {
+      pushFeed(world, 'world', `A fire started at the ${hit.type.toLowerCase()} and was put out before it spread. The wells did their job.`);
+      add('Put out the same day. No lasting damage.');
+      world.hazards[world.hazards.length - 1].days = 1;
+      return;
+    }
+    hit.active = false;
+    const wood = Math.min(world.resources.wood, Math.round(12 * severity));
+    world.resources.wood -= wood;
+    note(world, 'consumed', 'wood', wood);
+    pushFeed(world, 'world', `Fire took hold at the ${hit.type.toLowerCase()}. It is out of use, and ${wood} timber went with it.`);
+    add(`The ${hit.type.toLowerCase()} is out of use.`, hit.id);
+    return;
+  }
+
+  if (kind === 'blight') {
+    const lost = Math.round((world.resources.wheat + world.resources.vegetables) * 0.35 * severity);
+    const wheat = Math.min(world.resources.wheat, Math.round(lost * 0.6));
+    const veg = Math.min(world.resources.vegetables, lost - wheat);
+    world.resources.wheat -= wheat;
+    world.resources.vegetables -= veg;
+    note(world, 'consumed', 'wheat', wheat);
+    note(world, 'consumed', 'vegetables', veg);
+    pushFeed(world, 'world', lost > 0
+      ? `Blight is through the fields. ${wheat + veg} of the crop is gone and the harvest will be short for days.`
+      : 'Blight is through the fields. There was little standing to lose.');
+    add('The fields yield less while it lasts.');
+    return;
+  }
+
+  if (kind === 'wolves') {
+    const outdoors = world.citizens.filter((c) => !c.inside && c.age >= 16);
+    if (ready > 0.7 || !outdoors.length) {
+      pushFeed(world, 'world', 'Wolves came down to the edge of the settlement in the night and turned back at the fires.');
+      add('Kept at the treeline by the fires.');
+      world.hazards[world.hazards.length - 1].days = 1;
+      return;
+    }
+    const wool = Math.min(world.resources.wool, Math.round(6 * severity));
+    world.resources.wool -= wool;
+    note(world, 'consumed', 'wool', wool);
+    for (const c of outdoors) {
+      c.warmth = Math.max(0, c.warmth - 14 * severity);
+      c.happiness = Math.max(0, c.happiness - 9 * severity);
+    }
+    pushFeed(world, 'world', `Wolves were in among the pens overnight. ${wool} wool lost, and nobody outdoors slept well.`);
+    add('Nobody wants to be out after dark.');
+    return;
+  }
+
+  // Flood.
+  const bank = world.buildings.filter((b) => b.active && waterOf(world).distanceToWater(b.x, b.y) < 6);
+  if (!bank.length || ready > 0.85) {
+    pushFeed(world, 'world', 'The river came up in the storm and went down again. The settlement is built well back from it.');
+    add('The water stayed in its channel.');
+    world.hazards[world.hazards.length - 1].days = 1;
+    return;
+  }
+  const hit = bank[Math.floor(rand() * bank.length)];
+  hit.active = false;
+  const stone = Math.min(world.resources.stone, Math.round(8 * severity));
+  world.resources.stone -= stone;
+  note(world, 'consumed', 'stone', stone);
+  pushFeed(world, 'world', `The river came over its bank and into the ${hit.type.toLowerCase()}. It is out of use until the ground dries.`);
+  add(`The ${hit.type.toLowerCase()} is flooded out.`, hit.id);
+}
+
+/** Whether a hazard of this kind is running. Production and needs both ask. */
+export function hazardActive(world: World, kind: HazardKind) {
+  return world.hazards.some((h) => h.kind === kind);
 }
 
 const PROJECT_NAMES = ['a new workshop bench', 'a river footbridge', 'a set of lanterns for the square', 'a mural for the market wall', 'a longer harvest cart', 'a stone well', 'a bench by the pond'];
@@ -2133,22 +2933,31 @@ function settlementBuilds(world: World) {
   const homeless = world.citizens.filter((c) => c.age >= 16 && !homeOf(world, c)).length;
   const crowded = world.citizens.length > houses * 3.4;
 
-  let want: string | null = null;
-  if (homeless > 0 || crowded) want = 'House';
-  else if (world.resources.wood < 22 && !world.buildings.some((b) => b.type === 'Woodcutter')) want = 'Woodcutter';
-  else if (world.resources.wheat + world.resources.bread < world.citizens.length * 2.5) want = 'Farm';
+  // What the settlement would choose on its own, reading its own shortages.
+  let ownChoice: string | null = null;
+  if (homeless > 0 || crowded) ownChoice = 'House';
+  else if (world.resources.wood < 22 && !world.buildings.some((b) => b.type === 'Woodcutter')) ownChoice = 'Woodcutter';
+  else if (world.resources.wheat + world.resources.bread < world.citizens.length * 2.5) ownChoice = 'Farm';
   else if (world.treasury > 4000) {
     // A settlement with money it does not need takes up a trade its land
     // supports and it has not opened yet. Otherwise the gold simply piles up:
     // a grassland reached thirty-five thousand and never spent a coin of it.
-    want = biomeProfile(world.biome).trades
+    ownChoice = biomeProfile(world.biome).trades
       .find((type) => !world.buildings.some((b) => b.type === type)) ?? null;
   }
+
+  // What the last town meeting resolved on outranks that, for as long as the
+  // resolution stands. That is the whole point of holding one. Housing and
+  // farmland are always wanted more of; a trade building only until the town
+  // has one.
+  const resolved = world.resolution?.want ?? null;
+  const stillWanted = resolved !== null
+    && (resolved === 'House' || resolved === 'Farm' || !world.buildings.some((b) => b.type === resolved));
+  const want = stillWanted ? resolved : ownChoice;
+  const bySay = stillWanted && resolved !== ownChoice;
   if (!want) return;
 
   const cost = SELF_BUILD_COST[want] ?? TRADE_BUILD_COST[want] ?? 250;
-  // Three times over, and a fortnight of running costs left standing.
-  //
   // The cost multiple alone was not a brake: a desert kept raising houses it
   // could not staff, and every one of them added upkeep and wages until it
   // could not meet payroll on a hundred and thirty-seven days out of two
@@ -2157,7 +2966,13 @@ function settlementBuilds(world: World) {
     .filter((c) => c.age >= 16 && c.job !== 'unemployed')
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
   const upkeep = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + maintenanceCost(b.type), 0);
-  if (world.treasury < cost * 3 || world.treasury < (payroll + upkeep) * 14) return;
+  // Three times over, and a fortnight of running costs left standing — unless
+  // the town resolved on this in front of everybody, in which case it will
+  // accept a thinner cushion for it. That is what a vote is worth: the same
+  // settlement, slightly braver about the thing it agreed on.
+  const reserveDays = bySay ? 10 : 14;
+  const multiple = bySay ? 2 : 3;
+  if (world.treasury < cost * multiple || world.treasury < (payroll + upkeep) * reserveDays) return;
   // Gold is not enough: the timber and stone have to be in the yard. A town
   // that has run its forest down waits for it to grow rather than conjuring a
   // house out of its treasury.
@@ -2176,9 +2991,11 @@ function settlementBuilds(world: World) {
   drawMaterials(world, want);
   world.buildings.push({ id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true });
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
-  pushFeed(world, 'build', want === 'House'
-    ? 'The settlement raised another house.'
-    : `The settlement built a ${want.toLowerCase()}.`);
+  pushFeed(world, 'build', bySay
+    ? `The settlement built a ${want.toLowerCase()}, as the meeting resolved.`
+    : want === 'House'
+      ? 'The settlement raised another house.'
+      : `The settlement built a ${want.toLowerCase()}.`);
 }
 
 /** A legal, empty plot from the settlement's own plan. */
@@ -2449,6 +3266,7 @@ function daily(world: World) {
   produce(world);
   consume(world);
   lifeAndDeath(world);
+  hazards(world);
   discoveries(world);
   projects(world);
   decayBonds(world);
@@ -2477,6 +3295,8 @@ export function advance(world: World, hours: number): World {
   world.temperature = temperatureAt(world);
   updateBuildingWorkers(world);
   socialStep(world, hours);
+  converse(world, hours);
+  concludeGatherings(world);
 
   // What the air is doing to a person standing in it. Indoors and beside a fire
   // are both shelter; clothing is the difference between the rest.
