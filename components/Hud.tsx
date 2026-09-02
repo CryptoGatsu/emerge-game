@@ -14,7 +14,7 @@ import { FEED_ICON, WEATHER_ICON, type Focus, type Snapshot } from '@/lib/hud';
 import type { PickTarget } from '@/lib/render/scene';
 import type { PlayerRecord } from '@/lib/world/plots';
 import { RENAME_CITIZEN_EMERGE } from '@/lib/chain/vault';
-import { TOKEN } from '@/lib/chain/emerge';
+import { TOKEN, shortAddress } from '@/lib/chain/emerge';
 import type { PanelKey } from './Panels';
 import { SPEEDS, type Speed } from './EmergeClient';
 
@@ -44,6 +44,12 @@ interface HudProps {
   onMinimapJump: (u: number, v: number) => void;
   drawMinimap: (canvas: HTMLCanvasElement) => void;
   onCancelBuild: () => void;
+  /** How many people have this world open, the player included. */
+  watching: number;
+  /** Set when this is somebody else's settlement, being looked at. */
+  visiting: { worldName: string; ownerName: string; owner: string; at: number } | null;
+  /** Stop visiting and go back to the world map. */
+  onEndVisit: () => void;
 }
 
 /**
@@ -145,8 +151,10 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish }: {
+function BeingCard({ focus, following, player, readOnly, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish }: {
   focus: Focus; following: string | null; player: PlayerRecord;
+  /** True on somebody else's world: you can look and follow, not change. */
+  readOnly: boolean;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
   onDemolish: (id: string) => void;
@@ -175,7 +183,7 @@ function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow,
             </button>
           ))}
         </div>
-        {focus.demolishable && (
+        {focus.demolishable && !readOnly && (
           <div className="demolish">
             <button
               className={confirming === focus.id ? 'danger armed' : 'danger'}
@@ -203,13 +211,15 @@ function BeingCard({ focus, following, player, onClear, onFocus, onToggleFollow,
         <div>
           <h2>
             {focus.name}
-            <button
-              className="rename-pen"
-              title={`Rename for ${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
-              onClick={() => { setDraft(focus.name); setRenaming((r) => !r); }}
-            >
-              ✎
-            </button>
+            {!readOnly && (
+              <button
+                className="rename-pen"
+                title={`Rename for ${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
+                onClick={() => { setDraft(focus.name); setRenaming((r) => !r); }}
+              >
+                ✎
+              </button>
+            )}
           </h2>
           <div className="being-handle">{focus.handle}</div>
           <p className="muted">{focus.job} · age {focus.age} · {focus.family} family</p>
@@ -487,6 +497,17 @@ function Purse({ view, player, onPanel }: {
  * any legible size — they used to run off both edges, with ON-CHAIN half
  * cut off — so the narrow layout uses one word each and drops the blurb.
  */
+/** How long ago a visited world was published, in words. */
+function sinceWhen(at: number) {
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
+  if (minutes < 2) return 'live';
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+}
+
 const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; short: string; blurb: string }[] = [
   { key: 'guide', icon: '◎', label: 'GAME GUIDE', short: 'GUIDE', blurb: 'How all of this works' },
   { key: 'build', icon: '⚒', label: 'BUILD', short: 'BUILD', blurb: 'Places and resources' },
@@ -508,8 +529,19 @@ export function Hud(props: HudProps) {
     return () => window.clearTimeout(id);
   }, []);
 
+  /*
+   * A visitor gets the doors that make sense from outside.
+   *
+   * Building, prospecting and the on-chain panel all act on a settlement the
+   * visitor does not own. Leaving them on screen greyed out would be six
+   * buttons of which three do nothing; leaving them working would be worse.
+   */
+  const actions = props.visiting
+    ? ACTIONS.filter((a) => a.key === 'guide' || a.key === 'market' || a.key === 'chat')
+    : ACTIONS;
+
   return (
-    <div className="hud">
+    <div className={`hud ${props.visiting ? 'is-visiting' : ''}`}>
       <HoverTip hover={props.hover} />
 
       {!introShown && (
@@ -557,7 +589,32 @@ export function Hud(props: HudProps) {
           </button>
         </div>
         <Purse view={view} player={props.player} onPanel={props.onPanel} />
+        {/* Who is looking. One person is only ever you, and a badge that
+            always reads "1" is furniture, so it appears when somebody else
+            arrives. */}
+        {props.watching > 1 && (
+          <div className="watching" title={`${props.watching} people have this world open`}>
+            <span aria-hidden>◉</span>
+            <b>{props.watching}</b>
+            <em>watching</em>
+          </div>
+        )}
       </div>
+
+      {/* Somebody else's settlement. Said plainly and permanently, because
+          every control on screen behaves differently here and a player who
+          forgot where they were would read the difference as a bug. */}
+      {props.visiting && (
+        <div className="visiting-bar">
+          <span className="eyebrow">VISITING</span>
+          <b>{props.visiting.worldName}</b>
+          <em>
+            {props.visiting.ownerName?.trim() ? props.visiting.ownerName : shortAddress(props.visiting.owner)}
+            {' · '}{sinceWhen(props.visiting.at)}
+          </em>
+          <button className="ghost" onClick={props.onEndVisit}>Leave</button>
+        </div>
+      )}
 
       {compact
         ? (
@@ -596,6 +653,7 @@ export function Hud(props: HudProps) {
               focus={view.focus}
               following={props.following}
               player={props.player}
+              readOnly={!!props.visiting}
               onClear={props.onClearSelection}
               onFocus={props.onFocus}
               onToggleFollow={props.onToggleFollow}
@@ -615,9 +673,9 @@ export function Hud(props: HudProps) {
       </div>
 
       <nav className="action-bar">
-        <div className="action-title">WHAT WILL YOU DO?</div>
+        <div className="action-title">{props.visiting ? 'SOMEBODY ELSE\u2019S WORLD' : 'WHAT WILL YOU DO?'}</div>
         <div className="action-row">
-          {ACTIONS.map((action) => {
+          {actions.map((action) => {
             const active = action.key === activePanel;
             return (
               <button

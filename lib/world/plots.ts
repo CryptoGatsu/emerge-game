@@ -77,7 +77,7 @@ const BIOME_PREMIUM: Record<BiomeKind, number> = {
  *
  * Every plot used to sit on one landmass, and with twenty-five of them claimed
  * the map was a wall of overlapping labels with no sense of place left in it.
- * Now the region is a chain of islands, and even the nine plots the land office
+ * Now the region is a chain of islands, and even the nine plots the world map
  * opens with are spread across it.
  *
  * The capacities are small on purpose. A marker carries a name, so it is about
@@ -149,20 +149,20 @@ const ISLAND_NAMES = [
   'Turnstone', 'Cairnmuir',
 ];
 
-/** The first chart, kept as a name because the land office opens on it. */
+/** The first chart, kept as a name because the world map opens on it. */
 export const HOME_CHART_INDEX = 0;
 
 /**
  * How many charts a player can sail between.
  *
  * Not unlimited, because "somewhere else to look" stops meaning anything when
- * there is always somewhere else: with enough charts the land office becomes a
+ * there is always somewhere else: with enough charts the world map becomes a
  * slot machine rather than a map. Six is enough that running one dry is a
  * decision about where to go next.
  */
 export const CHART_COUNT = 6;
 
-/** A chart's name, as the land office prints it. */
+/** A chart's name, as the world map prints it. */
 export function chartName(chart: number) {
   return chart === HOME_CHART_INDEX ? 'The Home Chart' : `Chart ${chart + 1}`;
 }
@@ -477,7 +477,7 @@ export interface Listing { seed: number; region: string; price: number; listedAt
  * The player's record, kept separately from whichever world they are in.
  *
  * The $EMERGE balance belongs to the player, not the plot: leaving a world to
- * look at the land office must not take their tokens with it.
+ * look at the world map must not take their tokens with it.
  */
 /**
  * A plot the player found by surveying, and where on the chain it landed.
@@ -514,7 +514,7 @@ export interface PlayerRecord {
    * Plots this player owns.
    *
    * Leaving a world used to delete the claim outright, so walking back to the
-   * land office meant paying for the same land again. A claim is a purchase; it
+   * world map meant paying for the same land again. A claim is a purchase; it
    * survives leaving, and a player can hold several and move between them.
    */
   claims: ClaimedWorld[];
@@ -534,7 +534,19 @@ export function newPlayerName() {
 }
 
 const WORLD_KEY = 'emerge.world.v1';
+/**
+ * Where a player's holdings are kept.
+ *
+ * Keyed by wallet address, because that is what actually owns the land. A
+ * single shared key meant two people testing on the same machine, or one person
+ * with two wallets, read each other's plots and each other's balance — and it
+ * meant "how many plots do I have" had no way to follow the wallet the claims
+ * were made with. The wallet-less key still exists so somebody can look around
+ * before connecting; nothing bought with it, because claiming needs a wallet.
+ */
 const PLAYER_KEY = 'emerge.player.v1';
+const playerKeyFor = (address: string | null) =>
+  address ? `emerge.player.${address.toLowerCase()}.v1` : PLAYER_KEY;
 
 function readJson<T>(key: string): T | null {
   if (typeof window === 'undefined') return null;
@@ -542,7 +554,7 @@ function readJson<T>(key: string): T | null {
     const raw = window.localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
-    // A corrupt entry should send the player to the land office, never crash
+    // A corrupt entry should send the player to the world map, never crash
     // the app on boot.
     return null;
   }
@@ -571,8 +583,8 @@ export function clearClaimedWorld() {
   try { window.localStorage.removeItem(WORLD_KEY); } catch { /* nothing to do */ }
 }
 
-export function loadPlayer(): PlayerRecord {
-  const parsed = readJson<Partial<PlayerRecord>>(PLAYER_KEY);
+export function loadPlayer(address: string | null = null): PlayerRecord {
+  const parsed = readJson<Partial<PlayerRecord>>(playerKeyFor(address));
   return {
     ledger: normaliseLedger(parsed?.ledger),
     name: typeof parsed?.name === 'string' && parsed.name.trim() ? parsed.name : newPlayerName(),
@@ -612,7 +624,30 @@ export function claimOf(record: PlayerRecord, seed: number): ClaimedWorld | null
   return record.claims.find((c) => c.seed === seed) ?? null;
 }
 
-export const savePlayer = (record: PlayerRecord) => writeJson(PLAYER_KEY, record);
+export const savePlayer = (record: PlayerRecord, address: string | null = null) =>
+  writeJson(playerKeyFor(address), record);
+
+/**
+ * Move a browsing session's record onto a wallet the first time one connects.
+ *
+ * Somebody who looked around, chose a name and surveyed a plot before
+ * connecting should not lose that when they do. It only ever runs into an
+ * empty wallet record: an address that has played before keeps its own
+ * holdings, and nothing is merged across two wallets.
+ */
+export function adoptRecord(address: string): PlayerRecord {
+  const held = loadPlayer(address);
+  const anonymous = readJson<Partial<PlayerRecord>>(PLAYER_KEY);
+  const fresh = held.claims.length === 0 && held.prospected.length === 0 && held.nameChanges === 0;
+  if (!fresh || !anonymous) return held;
+  const carried: PlayerRecord = {
+    ...loadPlayer(),
+    // The balance belongs to the wallet, not to the browsing session.
+    ledger: held.ledger,
+  };
+  savePlayer(carried, address);
+  return carried;
+}
 
 /**
  * Read back a player's found plots, including from a save written before they

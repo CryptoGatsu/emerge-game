@@ -30,7 +30,7 @@ const SAVE_VERSION = 1;
 
 const keyFor = (seed: number) => `emerge.save.${seed}.v${SAVE_VERSION}`;
 
-interface SavedWorld {
+export interface SavedWorld {
   version: number;
   /** Which world this is, checked against the seed being opened. */
   seed: number;
@@ -62,14 +62,7 @@ const KEEP = [
 
 export function saveWorld(world: World) {
   if (typeof window === 'undefined') return;
-  const slim: Record<string, unknown> = {};
-  for (const field of KEEP) slim[field] = world[field];
-  const payload: SavedWorld = {
-    version: SAVE_VERSION,
-    seed: world.seed,
-    at: Date.now(),
-    world: slim,
-  };
+  const payload = snapshotOf(world);
   try {
     window.localStorage.setItem(keyFor(world.seed), JSON.stringify(payload));
   } catch {
@@ -98,30 +91,48 @@ export function loadWorld(seed: number, name: string): World | null {
   if (!raw) return null;
 
   try {
-    const parsed = JSON.parse(raw) as SavedWorld;
-    if (parsed?.version !== SAVE_VERSION || parsed.seed !== seed) return null;
-    const saved = parsed.world as Partial<World>;
-    if (!Array.isArray(saved?.citizens) || !Array.isArray(saved.buildings)) return null;
-    if (!saved.layout || !Array.isArray(saved.layout.nodes)) return null;
-    if (!Number.isFinite(saved.day) || !Number.isFinite(saved.treasury)) return null;
-
-    // Start from a fresh world of the same seed and lay the saved state over
-    // it. Anything a future version adds that this save predates keeps the
-    // value a new world would have given it, rather than arriving undefined.
-    const world = createWorld(seed, name);
-    for (const field of KEEP) {
-      const value = (saved as Record<string, unknown>)[field];
-      if (value !== undefined) (world as unknown as Record<string, unknown>)[field] = value;
-    }
-    // Never revived: see above.
-    world.conversations = [];
-    // The name comes from the claim, which the player can have changed in the
-    // land office since.
-    world.name = name;
-    return world;
+    return worldFromSave(JSON.parse(raw) as SavedWorld, seed, name);
   } catch {
     return null;
   }
+}
+
+/**
+ * Build a world from a save payload, wherever it came from.
+ *
+ * Local storage is one source; a snapshot another player published so their
+ * settlement can be visited is the other. Both go through the same checks,
+ * because a payload off the network deserves at least the suspicion given to
+ * one out of this browser's own storage.
+ */
+export function worldFromSave(parsed: SavedWorld | null, seed: number, name: string): World | null {
+  if (parsed?.version !== SAVE_VERSION || parsed.seed !== seed) return null;
+  const saved = parsed.world as Partial<World>;
+  if (!Array.isArray(saved?.citizens) || !Array.isArray(saved.buildings)) return null;
+  if (!saved.layout || !Array.isArray(saved.layout.nodes)) return null;
+  if (!Number.isFinite(saved.day) || !Number.isFinite(saved.treasury)) return null;
+
+  // Start from a fresh world of the same seed and lay the saved state over
+  // it. Anything a future version adds that this save predates keeps the
+  // value a new world would have given it, rather than arriving undefined.
+  const world = createWorld(seed, name);
+  for (const field of KEEP) {
+    const value = (saved as Record<string, unknown>)[field];
+    if (value !== undefined) (world as unknown as Record<string, unknown>)[field] = value;
+  }
+  // Never revived: see above.
+  world.conversations = [];
+  // The name comes from the claim, which the player can have changed in the
+  // world map since.
+  world.name = name;
+  return world;
+}
+
+/** The save payload for a world, to hand to the relay for visitors. */
+export function snapshotOf(world: World): SavedWorld {
+  const slim: Record<string, unknown> = {};
+  for (const field of KEEP) slim[field] = world[field];
+  return { version: SAVE_VERSION, seed: world.seed, at: Date.now(), world: slim };
 }
 
 /** Forget a settlement. Used when a plot is given up. */

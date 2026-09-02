@@ -26,13 +26,19 @@ import {
   renameCitizen, renameWorld,
   type World,
 } from '@/lib/simulation';
-import { clearWorld, loadWorld, saveWorld } from '@/lib/world/save';
+import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
 import {
-  clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld, withClaim, withoutClaim,
+  adoptRecord, clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld,
+  withClaim, withoutClaim,
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
+import {
+  HEARTBEAT_INTERVAL, departWorld, fetchWorld, heartbeat, publishWorld, releasePlot, visitorId,
+} from '@/lib/net/registry';
+import { useWallet } from './WalletPicker';
+import { Notices, useNotices } from './Notices';
 import {
   EARNING_PLOT_LIMIT, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   type VaultLedger,
@@ -59,16 +65,53 @@ const SAVE_INTERVAL = 15_000;
 /** How often the interface refreshes from the world. */
 const HUD_INTERVAL = 180;
 
-export const SPEEDS = [1, 2, 6] as const;
+/**
+ * How often the owner puts their settlement up for visitors, in milliseconds.
+ *
+ * Slower than the local save: a visitor watching a world a minute behind is
+ * indistinguishable from one watching it live, and a snapshot is tens of
+ * kilobytes rather than a field update.
+ */
+const PUBLISH_INTERVAL = 45_000;
+
+/**
+ * The speeds on offer.
+ *
+ * 6x is gone. Yield is paced by the wall clock, so a fast-forward never paid
+ * anything extra — but it let a player watch a year go by in an afternoon and
+ * skip the part they are actually being paid for, which is attending to the
+ * place. What is left is ordinary time and a gentle nudge.
+ */
+export const SPEEDS = [1, 2] as const;
 export type Speed = (typeof SPEEDS)[number];
+
+/**
+ * Somebody else's world, open in front of you.
+ *
+ * A visit is a real look at the settlement its owner built, restored from the
+ * snapshot they published, rather than a world regenerated from the seed with
+ * none of their people in it. It runs, because a still picture of a life
+ * simulator is not worth visiting — but nothing here is yours: no building, no
+ * treasury, no yield.
+ */
+export interface Visit {
+  seed: number;
+  worldName: string;
+  region: string;
+  owner: string;
+  ownerName: string;
+  /** When the owner last published. Shown, because a stale world should say so. */
+  at: number;
+  save: SavedWorld;
+}
 
 export default function EmergeClient() {
   // `undefined` means we have not looked in storage yet, which avoids flashing
-  // the land office at a player who already owns a world.
+  // the world map at a player who already owns a world.
   const [claimed, setClaimed] = useState<ClaimedWorld | null | undefined>(undefined);
   // The last world we rendered. Kept after the player leaves so the renderer,
   // its WebGL context and the generated texture atlas survive a trip back to
-  // the land office instead of being torn down and rebuilt.
+  // the world map instead of being torn down and rebuilt.
   const [mounted, setMounted] = useState<ClaimedWorld | null>(null);
   // The $EMERGE balance and everything bought with it belongs to the player,
   // not to whichever plot they happen to be standing on.
@@ -76,22 +119,41 @@ export default function EmergeClient() {
   // Which world the yield being credited belongs to. Read inside the state
   // updater, where the current `claimed` is not in scope.
   const claimedSeedRef = useRef<number | null>(null);
+  // Somebody else's settlement, when the player has gone to look at one.
+  const [visit, setVisit] = useState<Visit | null>(null);
+  const { wallet } = useWallet();
+  const address = wallet.address;
 
   useEffect(() => {
     const stored = loadClaimedWorld();
     setClaimed(stored);
     if (stored) { setMounted(stored); claimedSeedRef.current = stored.seed; }
+  }, []);
+
+  /*
+   * Holdings follow the wallet.
+   *
+   * What a player owns, what they are called and what they have to spend all
+   * belong to the address that bought them, so the record is re-read whenever
+   * the connected wallet changes — including on the first connection, where a
+   * browsing session's chosen name and surveyed plots are carried across once
+   * into an empty wallet record rather than being thrown away.
+   */
+  useEffect(() => {
+    const record = address ? adoptRecord(address) : loadPlayer();
     // Write the opening record straight back. `loadPlayer` invents a name for
     // a player who has none, and until something else saved, that name was
     // re-invented on every reload — so the person you were in chat yesterday
     // was a stranger today.
-    const record = loadPlayer();
-    savePlayer(record);
+    savePlayer(record, address);
     setPlayer(record);
-  }, []);
+  }, [address]);
+
+  const addressRef = useRef<string | null>(address);
+  addressRef.current = address;
 
   const updatePlayer = useCallback((next: PlayerRecord) => {
-    savePlayer(next);
+    savePlayer(next, addressRef.current);
     setPlayer(next);
   }, []);
 
@@ -115,7 +177,7 @@ export default function EmergeClient() {
         .some((c) => c.seed === claimedSeedRef.current);
       if (!earning) return prev;
       const next = { ...prev, ledger: accrue(prev.ledger, emerge) };
-      savePlayer(next);
+      savePlayer(next, addressRef.current);
       return next;
     });
   }, []);
@@ -128,15 +190,44 @@ export default function EmergeClient() {
     setPlayer((prev) => {
       if (!prev) return prev;
       const next = withClaim(prev, world);
-      savePlayer(next);
+      savePlayer(next, addressRef.current);
       return next;
     });
+    setVisit(null);
     setClaimed(world);
     setMounted(world);
   }, []);
 
   /**
-   * Back to the land office, still owning the place.
+   * Go and look at somebody else's settlement.
+   *
+   * Nothing is shown until the relay actually hands over a world: a visit that
+   * silently fell back to a freshly generated one would look exactly like a
+   * successful visit and be a different place entirely.
+   */
+  const goVisit = useCallback(async (seed: number): Promise<string | null> => {
+    const { world, reason } = await fetchWorld(seed);
+    if (!world) return reason ?? 'That world is not published yet.';
+    const save = world.snapshot as SavedWorld;
+    if (!worldFromSave(save, seed, world.worldName)) {
+      return 'That world could not be read. Its owner may be running an older version.';
+    }
+    setVisit({
+      seed,
+      worldName: world.worldName,
+      region: world.worldName,
+      owner: world.owner,
+      ownerName: world.ownerName,
+      at: world.at,
+      save,
+    });
+    return null;
+  }, []);
+
+  const endVisit = useCallback(() => setVisit(null), []);
+
+  /**
+   * Back to the world map, still owning the place.
    *
    * This used to delete the claim, so a player who looked at the map had to buy
    * their own world back off the shelf.
@@ -150,10 +241,13 @@ export default function EmergeClient() {
   const release = useCallback((seed: number) => {
     clearClaimedWorld();
     clearWorld(seed);
+    // And out of the registry, or the plot stays unavailable to everybody else
+    // for ever while being owned by nobody.
+    if (addressRef.current) releasePlot(seed, addressRef.current);
     setPlayer((prev) => {
       if (!prev) return prev;
       const next = withoutClaim(prev, seed);
-      savePlayer(next);
+      savePlayer(next, addressRef.current);
       return next;
     });
     setClaimed(null);
@@ -165,26 +259,58 @@ export default function EmergeClient() {
     <>
       {mounted && (
         <WorldView
+          key="own"
           claimed={mounted}
           player={player}
-          hidden={claimed === null}
+          hidden={claimed === null || visit !== null}
           onLeave={leave}
           onRelease={() => release(mounted.seed)}
           onRename={enter}
           onPlayer={updatePlayer}
           onEarn={earn}
+          onVisit={goVisit}
         />
       )}
-      {claimed === null && <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} />}
+      {/* A visit is its own scene. Keying it on the seed means walking from one
+          world to another rebuilds it rather than leaving the previous
+          settlement's people standing in the new one's streets. */}
+      {visit && (
+        <WorldView
+          key={`visit-${visit.seed}`}
+          claimed={{
+            seed: visit.seed,
+            name: visit.worldName,
+            region: visit.region,
+            price: 0,
+            claimedAt: visit.at,
+            owner: visit.owner,
+            txHash: null,
+          }}
+          player={player}
+          hidden={false}
+          visit={visit}
+          onLeave={endVisit}
+          onRelease={endVisit}
+          onRename={() => { /* not yours to rename */ }}
+          onPlayer={updatePlayer}
+          onEarn={() => { /* a visitor earns nothing */ }}
+          onVisit={goVisit}
+        />
+      )}
+      {claimed === null && !visit && (
+        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} />
+      )}
     </>
   );
 }
 
-function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPlayer, onEarn }: {
+function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRename, onPlayer, onEarn, onVisit }: {
   claimed: ClaimedWorld;
   player: PlayerRecord;
-  /** True while the land office is open over the top of a running world. */
+  /** True while the world map is open over the top of a running world. */
   hidden: boolean;
+  /** Set when this is somebody else's settlement, being looked at. */
+  visit?: Visit | null;
   onLeave: () => void;
   /** Give this plot up entirely, rather than merely stepping out of it. */
   onRelease: () => void;
@@ -192,7 +318,10 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
   onPlayer: (record: PlayerRecord) => void;
   /** Credit stewardship yield the simulation has accrued. */
   onEarn: (emerge: number) => void;
+  /** Go and look at somebody else's settlement. Resolves to a refusal, or null. */
+  onVisit: (seed: number) => Promise<string | null>;
 }) {
+  const spectating = !!visit;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<World | null>(null);
   const sceneRef = useRef<EmergeScene | null>(null);
@@ -218,7 +347,13 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
   const [sound, setSound] = useState(false);
 
   // The settlement as it was left, or a new one if there is nothing to read.
-  if (!worldRef.current) worldRef.current = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
+  // A visit reads the owner's published snapshot instead: their settlement, not
+  // this browser's idea of what the seed grows.
+  if (!worldRef.current) {
+    worldRef.current = visit
+      ? worldFromSave(visit.save, visit.seed, visit.worldName) ?? createWorld(visit.seed, visit.worldName)
+      : loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
+  }
 
   /* -------------------------------------------------------------- *
    * Boot: renderer, simulation loop and HUD sampling
@@ -241,7 +376,9 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
         },
         onCarry: (id, phase, at) => {
           const live = worldRef.current;
-          if (!live) return;
+          // A visitor may look and follow. Picking somebody up out of a
+          // settlement that is not yours is not looking.
+          if (!live || spectating) return;
           if (phase === 'start') pickUpCitizen(live, id);
           else if (phase === 'move') carryCitizenTo(live, id, at.x, at.y);
           else if (phase === 'drop') dropCitizen(live, id, at.x, at.y);
@@ -275,18 +412,22 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
       // still until the page was reloaded.
       const live = worldRef.current;
       // The real seconds are passed alongside the game hours: the yield is paid
-      // against the wall clock, so running at 6x shows the player more of the
-      // settlement's life without paying them six times as much for it.
+      // against the wall clock, so running at 2x shows the player more of the
+      // settlement's life without paying them twice as much for it.
       if (live && !pausedRef.current) advance(live, dt * HOURS_PER_SECOND * speedRef.current, dt);
     };
     frame = requestAnimationFrame(step);
 
     // Write the settlement down every so often, and again the moment the tab
     // goes away — a phone backgrounding the page never runs another timer.
+    //
+    // Never during a visit: writing somebody else's settlement into this
+    // browser's slot for that seed would overwrite the visitor's own world if
+    // they ever claimed the same land, and would make a visit leave traces.
     const saveTimer = window.setInterval(() => {
-      if (worldRef.current) saveWorld(worldRef.current);
+      if (worldRef.current && !spectating) saveWorld(worldRef.current);
     }, SAVE_INTERVAL);
-    const persist = () => { if (worldRef.current) saveWorld(worldRef.current); };
+    const persist = () => { if (worldRef.current && !spectating) saveWorld(worldRef.current); };
     document.addEventListener('visibilitychange', persist);
     window.addEventListener('pagehide', persist);
 
@@ -296,9 +437,11 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
         setView(snapshot(live, selectedRef.current));
         // The world is regenerated from its seed every time it is opened, so
         // the running total cannot live in it: drain what it has accrued into
-        // the player's ledger, which is what persists.
+        // the player's ledger, which is what persists. On a visit it is still
+        // drained — so it cannot pile up — and then dropped, because watching
+        // somebody else's settlement is not stewarding it.
         const earned = collectYield(live);
-        if (earned > 0) onEarnRef.current(earned);
+        if (earned > 0 && !spectating) onEarnRef.current(earned);
       }
       setWoodland(sceneRef.current?.woodland() ?? null);
     }, HUD_INTERVAL);
@@ -313,6 +456,10 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
       scene.destroy();
       sceneRef.current = null;
     };
+    // `spectating` is fixed for the life of this component: the two cases are
+    // rendered as separately keyed elements, so a change remounts rather than
+    // re-running this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The soundscape follows the world's conditions, and only ever after the
@@ -356,13 +503,95 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
     setView(snapshot(next, null));
   }, [claimed.seed, claimed.name]);
 
-  // The world keeps running behind the land office, but there is no reason to
+  // The world keeps running behind the world map, but there is no reason to
   // spend frames drawing it while nobody can see it.
   useEffect(() => {
     const app = sceneRef.current?.app;
     if (!app?.renderer) return;
     if (hidden) app.stop(); else app.start();
   }, [hidden]);
+
+  /* -------------------------------------------------------------- *
+   * Who else is here, and putting this world up for them
+   * -------------------------------------------------------------- */
+
+  const [watching, setWatching] = useState(0);
+  const { wallet } = useWallet();
+
+  /*
+   * Say you are here, every so often, and read back how many others are.
+   *
+   * A heartbeat rather than a sign-in: nobody closes a tab politely, so the
+   * only definition of "watching" that survives a killed browser is "said
+   * something in the last minute".
+   */
+  useEffect(() => {
+    // Not while this view is behind something else. A player looking at
+    // somebody else's settlement still has their own mounted underneath, and
+    // counting them as present in both would have them watching a world they
+    // are demonstrably not looking at.
+    if (hidden) { setWatching(0); return; }
+    const seed = claimed.seed;
+    const who = wallet.address ?? visitorId();
+    let live = true;
+    const beat = async () => {
+      const count = await heartbeat(seed, who);
+      if (live) setWatching(count);
+    };
+    beat();
+    const timer = window.setInterval(beat, HEARTBEAT_INTERVAL);
+    const leaving = () => departWorld(seed, who);
+    window.addEventListener('pagehide', leaving);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      window.removeEventListener('pagehide', leaving);
+      leaving();
+    };
+  }, [claimed.seed, wallet.address, hidden]);
+
+  /*
+   * Put this settlement up so it can be visited.
+   *
+   * Only the owner publishes, and only with a wallet: the relay checks the
+   * address against the registry, so an unsigned or borrowed snapshot is
+   * refused there as well as here.
+   */
+  useEffect(() => {
+    if (spectating || !wallet.address) return;
+    const seed = claimed.seed;
+    const owner = wallet.address;
+    let live = true;
+    const put = () => {
+      const world = worldRef.current;
+      if (!live || !world) return;
+      publishWorld({
+        seed,
+        owner,
+        ownerName: player.name,
+        worldName: world.name,
+        day: world.day,
+        population: world.population,
+        snapshot: snapshotOf(world),
+      });
+    };
+    // The first one after a short delay, so a player passing through a world
+    // does not push a snapshot for every plot they open.
+    const first = window.setTimeout(put, 6_000);
+    const timer = window.setInterval(put, PUBLISH_INTERVAL);
+    return () => {
+      live = false;
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [claimed.seed, wallet.address, player.name, spectating]);
+
+  const { notices, dismiss } = useNotices({
+    seed: claimed.seed,
+    chatOpen: panel === 'chat',
+    mine: { address: wallet.address, name: player.name },
+    onOpenChat: () => setPanel('chat'),
+  });
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { speedRef.current = speed; }, [speed]);
@@ -531,7 +760,6 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
       if (e.code === 'Space') { e.preventDefault(); setPaused((p) => !p); }
       else if (e.key === '1') setSpeed(1);
       else if (e.key === '2') setSpeed(2);
-      else if (e.key === '3') setSpeed(6);
       else if (e.key === 'f' || e.key === 'F') toggleFollow();
       else if (e.key === 'Escape') { setPanel(null); cancelBuild(); setSelected(null); }
     };
@@ -580,7 +808,11 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
             onMinimapJump={minimapJump}
             drawMinimap={drawMinimap}
             onCancelBuild={cancelBuild}
+            watching={watching}
+            visiting={visit ?? null}
+            onEndVisit={onLeave}
           />
+          <Notices notices={notices} onDismiss={dismiss} />
           <Panels
             panel={panel}
             view={view}
@@ -596,6 +828,8 @@ function WorldView({ claimed, player, hidden, onLeave, onRelease, onRename, onPl
             onList={listPlot}
             onPlayer={onPlayer}
             onDig={dig}
+            onVisit={onVisit}
+            spectating={spectating}
           />
         </>
       )}

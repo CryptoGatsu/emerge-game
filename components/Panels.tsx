@@ -23,6 +23,7 @@ import {
   type ChannelKind, type ChatState,
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
+import { fetchClaims, type Claim } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'connect' | null;
@@ -50,6 +51,10 @@ interface PanelsProps {
    * why they did not go.
    */
   onDig: () => { prize: Prize; story: string } | string;
+  /** Travel to somebody else's settlement. Resolves to a refusal, or null. */
+  onVisit: (seed: number) => Promise<string | null>;
+  /** True when this is somebody else's world, being looked at. */
+  spectating: boolean;
 }
 
 /** Buildable structures. Upkeep is read from the simulation so it never drifts. */
@@ -205,6 +210,7 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
           <h4>The first ten minutes</h4>
           <p>Your plot opens as a camp: a handful of families, a market, a shed, and not much Gold.</p>
           <ol>
+            <li>Connect a wallet first. Your plots, your balance and your name belong to an address, not to this browser.</li>
             <li>Watch. Tap somebody and follow them around for a day — it will tell you more than this panel does.</li>
             <li>Open the <b>Bank</b>. That opening treasury will not last a week; wages come out of it every single day.</li>
             <li>Deposit some {TOKEN.ticker} to buy Gold. This is the one thing only you can do.</li>
@@ -216,10 +222,11 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         <section>
           <h4>Time moves fast here</h4>
           <p>
-            A day passes in a few minutes; the speed control at the top runs it at 1×, 2× or 6×. But
-            half a <em>year</em> passes each of those days, which is the part that catches people
-            out: children born while you are reading this will be old enough to work by tomorrow
-            evening, and the farmer you got attached to on Monday has a name on the feed by Friday.
+            A day passes in a few minutes; the speed control at the top runs it at 1× or 2×. But
+            half a <em>year</em> passes in each of those days, which is the part that catches
+            people out: children born while you are reading this will be old enough to work by
+            tomorrow evening, and the farmer you grew attached to on Monday is a line in the feed
+            by Friday.
           </p>
           <p>
             A year is twenty-four days and four seasons. Winter is not decorative — it gets cold
@@ -285,9 +292,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             placed across water will have a bridge started toward it.
           </p>
           <p>
-            Anything except the market and a lived-in house can be <b>pulled down</b> from its card.
-            You get half the timber and stone back. The Gold does not come back: it went on wages
-            and haulage and those were spent.
+            Anything can be <b>pulled down</b> from its card except the market, the bank and the town
+            hall — those hold the settlement together — and any house somebody still lives in,
+            which has to be emptied first. You get half the timber and stone back. The Gold does
+            not: it went on wages and haulage, and those were spent.
           </p>
         </section>
 
@@ -297,7 +305,7 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             Every evening at seven the settlement holds one gathering, and each does something real:
           </p>
           <ul>
-            <li><b>Town meeting</b> — the town resolves on what it most needs, and that resolution outranks what the settlement would otherwise build for three days.</li>
+            <li><b>Town meetup</b> — the town resolves on what it most needs, and that resolution outranks what the settlement would otherwise build for three days.</li>
             <li><b>Art showcase</b> — somebody makes a piece, named and titled, kept in the settlement&rsquo;s body of work.</li>
             <li><b>Market day</b> — over the middle of the day, every fifth day: stock moves nearly twice as fast and the stalls take real Gold.</li>
             <li><b>Harvest feast</b> — when the larder can carry one. It eats real food and everybody goes home fed and warm.</li>
@@ -359,10 +367,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             </li>
           </ul>
           <p>
-            <b>The speed control does not pay.</b> At 6× a settlement lives a hundred and thirty-six
-            days in a real hour, and paying against that clock would have made the fast-forward
-            button worth millions an hour. Yield is paced by the wall clock, so speed is a way to see
-            more of your world sooner and nothing else.
+            <b>The speed control does not pay.</b> Yield is paced by the wall clock rather than by the
+            settlement&rsquo;s calendar, so 2× shows you more of your world in the same hour and pays
+            exactly the same for it. There was a 6× once, and it is gone: what you are paid for is
+            attending to the place, and a button that skips a year of it skips the game.
           </p>
           <p>
             So: a world you have not touched for two days earns about 1,700 {TOKEN.ticker} a day. One
@@ -423,15 +431,19 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             back. Close the tab mid-winter and you return to that winter.
           </p>
           <p>
-            It is kept in this browser, so clearing your site data loses it, and it does not follow
-            you to another device. Giving a plot up erases its settlement for good.
+            The settlement itself is kept in this browser, so clearing your site data loses it and
+            it does not follow you to another device. What <em>does</em> travel is your holdings —
+            which plots are yours, and your balance — because those belong to your wallet address
+            and are held in the registry. The snapshot other players visit is a copy sent out while
+            you play; it is not a backup, and it is not read back into your own game. Giving a plot
+            up erases its settlement for good.
           </p>
         </section>
 
         <section>
           <h4>Land</h4>
           <p>
-            The land office is a chart of islands, and there are six charts to sail between. Each
+            The world map is a chart of islands, and there are six charts to sail between. Each
             holds fifteen to seventeen plots and no more: when a chart is fully surveyed, prospecting
             there is refused and you have to go elsewhere. Surveying costs
             {' '}{PROSPECT_COST_EMERGE.toLocaleString()} {TOKEN.ticker} and turns up a brand-new seed, so no
@@ -442,6 +454,33 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             nobody receives it. Leaving a world does not release it — your plots are marked on the
             chart and you can walk back into any of them. Giving one up is a separate, deliberate
             action.
+          </p>
+        </section>
+
+        <section>
+          <h4>Other people&rsquo;s worlds</h4>
+          <p>
+            The world map shows every plot anybody has claimed, not only yours. Land somebody else
+            has settled is marked as theirs, and you cannot claim it — the registry keeps one owner
+            per plot and refuses the second person to ask, so nothing you pay for can be taken out
+            from under you.
+          </p>
+          <p>
+            You can go and look. Tap a settled marker and <b>visit</b>, or tap somebody&rsquo;s name
+            in chat to travel straight to the world they built. What you see is their settlement as
+            they last left it — their people, their buildings, their weather — restored from a
+            snapshot they publish while they play, not a fresh world grown from the same seed. The
+            bar at the top says whose it is and how recent it is.
+          </p>
+          <p>
+            A visit is a visit. You can watch, follow anybody around and read the feed; you cannot
+            build, pull anything down, pick anyone up or earn a single {TOKEN.ticker} there. When
+            somebody is looking at <em>your</em> world an eye appears by your purse with a count.
+          </p>
+          <p>
+            You will also hear about it when somebody says something and you are not looking at
+            chat, and when anybody anywhere claims a plot. Both arrive as a small card in the
+            corner that goes away on its own.
           </p>
         </section>
 
@@ -483,9 +522,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
  * seconds; what is on screen is whatever the relay has, plus a local cache so
  * a reload does not wipe the conversation.
  */
-function ChatPanel({ view, claimed, player, onClose, onPlayer }: {
+function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord;
   onClose: () => void; onPlayer: (record: PlayerRecord) => void;
+  onVisit: (seed: number) => Promise<string | null>;
 }) {
   const [state, setState] = useState<ChatState | null>(null);
   const [kind, setKind] = useState<ChannelKind>('world');
@@ -493,8 +533,52 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer }: {
   const [notice, setNotice] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [reach, setReach] = useState<{ shared: boolean; offline: boolean }>({ shared: false, offline: false });
+  const [travelling, setTravelling] = useState<number | null>(null);
   const { wallet } = useWallet();
   const endRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * Which of the people talking own somewhere you can go.
+   *
+   * Chat carries an address; the registry says what that address holds. Joining
+   * the two here is what turns a name in a conversation into a door — you read
+   * that somebody's mill finally got staffed, and you can go and look at it.
+   */
+  const [worldsBy, setWorldsBy] = useState<Map<string, Claim>>(new Map());
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      const { claims } = await fetchClaims();
+      if (!live) return;
+      const byOwner = new Map<string, Claim>();
+      for (const claim of claims) {
+        const key = claim.owner.toLowerCase();
+        // Somebody with several worlds is visited at the one they took first,
+        // which is the one they have most likely been playing longest.
+        const held = byOwner.get(key);
+        if (!held || claim.at < held.at) byOwner.set(key, claim);
+        if (claim.ownerName?.trim()) {
+          const named = claim.ownerName.trim();
+          const heldName = byOwner.get(named);
+          if (!heldName || claim.at < heldName.at) byOwner.set(named, claim);
+        }
+      }
+      setWorldsBy(byOwner);
+    };
+    tick();
+    const timer = window.setInterval(tick, 20_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, []);
+
+  const worldOf = (author: string) =>
+    worldsBy.get(author.toLowerCase()) ?? worldsBy.get(author) ?? null;
+
+  const travelTo = async (claim: Claim) => {
+    setTravelling(claim.seed);
+    const refused = await onVisit(claim.seed);
+    setTravelling(null);
+    if (refused) setNotice(refused);
+  };
 
   const channel = kind === 'global' ? 'global' : worldChannel(claimed.seed);
 
@@ -593,13 +677,31 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer }: {
               : `Nothing said about ${view.name} yet.`}
           </p>
         )}
-        {messages.map((m) => (
-          <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''}`}>
-            <b>{m.wallet ? shortAddress(m.author) : m.author}</b>
-            <span>{m.text}</span>
-            <em>{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</em>
-          </div>
-        ))}
+        {messages.map((m) => {
+          const theirs = worldOf(m.author);
+          const label = m.wallet ? shortAddress(m.author) : m.author;
+          const self = m.author === player.name
+            || (!!wallet.address && m.author.toLowerCase() === wallet.address.toLowerCase());
+          return (
+            <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''}`}>
+              {theirs && !self ? (
+                <button
+                  className="chat-who"
+                  title={`Visit ${theirs.worldName}`}
+                  disabled={travelling !== null}
+                  onClick={() => travelTo(theirs)}
+                >
+                  {label}
+                  <i>{travelling === theirs.seed ? '…' : '↗'}</i>
+                </button>
+              ) : (
+                <b>{label}</b>
+              )}
+              <span>{m.text}</span>
+              <em>{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</em>
+            </div>
+          );
+        })}
         <div ref={endRef} />
       </div>
 
@@ -1033,7 +1135,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
           {/* Leaving is not selling. It used to be: stepping out of a world
               deleted the claim, so a player who wanted a look at the map had to
               buy their own land back. */}
-          <button className="ghost" onClick={onLeave}>Back to the land office</button>
+          <button className="ghost" onClick={onLeave}>Back to the world map</button>
           <button className="danger" onClick={() => {
             if (releasing) onRelease();
             else setReleasing(true);
@@ -1071,7 +1173,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList, onPlayer, onDig }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList, onPlayer, onDig, onVisit, spectating }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'bank') {
     // Which of the player's worlds pay is decided by claim order, so the panel
@@ -1084,7 +1186,12 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenam
   }
   if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
   if (panel === 'chat') {
-    return <ChatPanel view={view} claimed={claimed} player={player} onClose={onClose} onPlayer={onPlayer} />;
+    return (
+      <ChatPanel
+        view={view} claimed={claimed} player={player}
+        onClose={onClose} onPlayer={onPlayer} onVisit={onVisit}
+      />
+    );
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;

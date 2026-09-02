@@ -1755,7 +1755,7 @@ function createMarket(): Record<Resource, MarketQuote> {
  *
  * Short on purpose. At a hundred and twenty days a season lasted about eighty
  * real minutes and most players would never see winter at all; at twenty-four,
- * a full turn of the year takes about an hour at 1x and ten minutes at 6x, so
+ * a full turn of the year takes about an hour at 1x and half that at 2x, so
  * the seasons are something you watch happen rather than read about.
  */
 export const DAYS_PER_YEAR = 24;
@@ -4131,12 +4131,45 @@ export function carryCitizenTo(world: World, id: string, x: number, y: number) {
  * they start swimming for the nearest bank, which is the honest answer to being
  * dropped in a river: not standing on it, and not disappearing.
  */
+/**
+ * Where somebody actually lands when they are let go over a building.
+ *
+ * Dropping a person onto a roof left them standing inside the walls, which the
+ * walking code spends its whole life preventing: they either sat there unable
+ * to path anywhere or squeezed out through a wall on the next step. The nearest
+ * point outside the footprint is where a person put down on a building would
+ * end up anyway, so that is where they go.
+ */
+function outsideBuildings(world: World, x: number, y: number) {
+  let px = x;
+  let py = y;
+  // A few passes, because stepping clear of one building can put somebody
+  // inside its neighbour on a tight terrace.
+  for (let pass = 0; pass < 6; pass++) {
+    let moved = false;
+    for (const b of world.buildings) {
+      const need = footprintRadius(b) + 0.9;
+      let dx = px - b.x;
+      let dy = py - b.y;
+      let d = Math.hypot(dx, dy);
+      if (d >= need) continue;
+      if (d < 0.0001) { dx = 1; dy = 0; d = 1; }
+      px = b.x + (dx / d) * need;
+      py = b.y + (dy / d) * need;
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return { x: clamp(px, 2, 98), y: clamp(py, 4, 96) };
+}
+
 export function dropCitizen(world: World, id: string, x: number, y: number) {
   const c = world.citizens.find((x2) => x2.id === id);
   if (!c?.carried) return;
   c.carried = false;
-  c.x = clamp(x, 2, 98);
-  c.y = clamp(y, 4, 96);
+  const spot = outsideBuildings(world, clamp(x, 2, 98), clamp(y, 4, 96));
+  c.x = spot.x;
+  c.y = spot.y;
   const water = waterOf(world);
   if (water.blocks(c.x, c.y)) {
     c.swimming = true;

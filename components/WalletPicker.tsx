@@ -15,18 +15,47 @@ import {
   type DiscoveredWallet, type WalletState,
 } from '@/lib/chain/emerge';
 
+/**
+ * One wallet, shared by everything that asks for it.
+ *
+ * This used to be ordinary component state, which meant every caller of
+ * `useWallet` had its own copy: connecting on the world map left the chat
+ * panel and the On-Chain panel still reading "no wallet", and the player record
+ * — which is keyed by address — could not agree with itself about whose it was.
+ * A module-level value with subscribers is the smallest thing that fixes it,
+ * and a wallet connection genuinely is one per page rather than one per panel.
+ */
+let current: WalletState = INITIAL_WALLET;
+const listeners = new Set<(state: WalletState) => void>();
+
+function publish(next: WalletState) {
+  current = next;
+  for (const listener of listeners) listener(next);
+}
+
+/** What is connected right now, for code that is not a component. */
+export const currentWallet = () => current;
+
 export function useWallet() {
-  const [wallet, setWallet] = useState<WalletState>(INITIAL_WALLET);
+  const [wallet, setLocal] = useState<WalletState>(current);
   const [available, setAvailable] = useState<DiscoveredWallet[]>([]);
+
+  useEffect(() => {
+    listeners.add(setLocal);
+    // Another component may have connected between this one's first render and
+    // its subscription; take whatever is current rather than the render-time copy.
+    setLocal(current);
+    return () => { listeners.delete(setLocal); };
+  }, []);
 
   useEffect(() => discoverWallets(setAvailable), []);
 
   const connect = useCallback(async (choice?: DiscoveredWallet) => {
-    setWallet((w) => ({ ...w, status: 'connecting' }));
-    setWallet(await connectWallet(choice));
+    publish({ ...current, status: 'connecting' });
+    publish(await connectWallet(choice));
   }, []);
 
-  return { wallet, available, connect, setWallet };
+  return { wallet, available, connect, setWallet: publish };
 }
 
 export function WalletPicker({ compact = false }: { compact?: boolean }) {

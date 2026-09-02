@@ -283,7 +283,7 @@ npm run build   # production build
 | Scroll / pinch | Zoom about the cursor or the pinch |
 | Click | Select a citizen or building |
 | Space | Pause / resume |
-| `1` `2` `3` | 1x, 2x, 6x simulation speed |
+| `1` `2` | 1x, 2x simulation speed |
 | `F` | Follow the selected being with the camera |
 | Esc | Close panels, cancel placement, clear selection |
 
@@ -296,12 +296,17 @@ for the other's markup. The same query lives in `app/globals.css`; they have to 
 identical, because a phone held sideways is wide and short, and when they disagreed it
 got the sheet's styling with the rail's markup.
 
-The sheet carries world status, the treasury and market chips, active events and the
-world feed; on a screen too short for all four the feed is ordered first. The minimap is
-dropped on phones — it is not worth a third of the screen — and replaced with zoom
-buttons, since not every touch device is comfortable to pinch on. Pinch and two-finger
-pan are handled by tracking every live pointer, with a separate path for Safari, which
-answers a pinch with gesture events and no second pointer.
+The sheet carries world status, the market chip, active events and the world feed; on a
+screen too short for all four the feed is ordered first. The minimap is dropped on
+phones — it is not worth a third of the screen — and replaced with zoom buttons, since
+not every touch device is comfortable to pinch on. Pinch and two-finger pan are handled
+by tracking every live pointer, with a separate path for Safari, which answers a pinch
+with gesture events and no second pointer.
+
+The action bar is a full-width tab bar on a phone and a card anchored *between* the two
+side columns on a desktop. Centred on the viewport with a fixed-width row it collided
+with the observe card and the minimap at every laptop width below about 1600px, and ran
+off both edges of a 390px screen at once.
 
 ## Claiming a plot
 
@@ -317,7 +322,7 @@ carrying three settlements put their markers within thirty pixels of each other.
 capacity on every chart, no two markers now come within fifty pixels of one another.
 
 **Charts.** The archipelago is not the only water there is. Six charts sit side by side —
-the home chart, plus five more mirrored from it and renamed — and the land office sails
+the home chart, plus five more mirrored from it and renamed — and the world map sails
 between them. Each holds fifteen to seventeen plots, and when a chart is fully surveyed
 prospecting there is refused outright: the button says so, and the only way to new land
 is to sail. That is deliberate. Land that never runs out is not land, and the previous
@@ -328,11 +333,19 @@ Each plot is a seed. Selecting one shows its real terrain, drawn by running the 
 generator on that seed, so the ground shown is the ground you get. Name the world and
 claim it. On a phone the claim panel is a sheet that slides up over the map.
 
-Claims are honest about where they stand. With no registry contract deployed, the plot
-is recorded in the browser and the panel says exactly that — it never shows a
-transaction hash for something that did not happen. `claimPlot()` in
-`lib/chain/emerge.ts` is where the $EMERGE transfer and plot registration go once the
-contract exists. "Choose another plot" in the Connect panel releases the current world.
+**A wallet is required.** A plot belongs to an address, and so does everything a player
+owns: the record of which plots are theirs, their balance, their name and their unspent
+naming rights are all keyed by wallet in `lib/world/plots.ts`. Without one you can look
+around and survey, but not claim. Connecting for the first time carries a browsing
+session's chosen name and surveyed plots across into the wallet's record once, and never
+merges two wallets.
+
+**One owner per plot.** `/api/plots` is the registry, and it is the server's word rather
+than the browser's: a claim is accepted or refused there, and a refusal is final. Two
+players cannot settle the same land. Releasing a plot frees it again. When the registry
+contract is deployed, `claimPlot()` in `lib/chain/emerge.ts` is where the $EMERGE
+transfer and on-chain registration go, and the chain's answer replaces the relay's
+without anything above this line changing.
 
 ## The vault
 
@@ -371,6 +384,45 @@ resale from the Connect panel and appears in the land office until it is withdra
 Resale between players needs the plot registry contract. Until it is deployed a listing
 is recorded in this browser and nobody else can see it, and the panel says exactly that
 rather than implying a market that does not exist.
+
+## Other players
+
+Three server routes, all backed by `lib/server/kv.ts` — Upstash over REST where
+`KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, process memory otherwise, and
+every interface built on it says which one is running rather than degrading to
+"you can see your own writes and sometimes other people's".
+
+**`/api/plots` — the land registry.** One row per plot seed with the owner's
+address. This is the only thing standing between two players and both owning the
+same land until the registry contract exists, and it is deliberately the
+server's word: a claim is accepted or refused there, and a browser that says it
+already owns something is not evidence. A refusal is final on the client too —
+falling back to "claim it locally anyway" is exactly the bug this exists to fix.
+The claimed-by-somebody-else case is marked on the map and its price is never
+charged.
+
+**`/api/worlds` — visiting.** The owner publishes a snapshot of their settlement
+every forty-five seconds; a visitor reads it back and the world is restored from
+it. Without this a visit could only show a world regenerated from the seed — the
+same land, but not the place the owner built and with none of their people in
+it, which would look like a visit and be a fiction. Only the address holding the
+claim may publish, checked against the registry. Snapshots expire after
+thirty-six hours, so abandoned worlds fall out on their own.
+
+A visit is read-only and enforced in three places: the scene refuses to pick
+anybody up, the action bar drops build, prospect and on-chain, and the local
+save and the yield credit are both skipped. Nothing a visitor does touches the
+world they are looking at or the one they own.
+
+**`/api/presence` — who is watching.** A heartbeat with a timeout rather than a
+sign-in, because nobody closes a tab politely: the only definition of "here"
+that survives a killed browser is "said something in the last minute". An eye
+appears beside the purse with a count once somebody other than you is looking.
+
+**Notices.** Chat messages that arrive while the chat panel is closed, and plots
+claimed by anybody, surface as a short-lived card in the corner. Neither
+interrupts the world; both are things a player would otherwise miss. Your own
+messages and your own claims are never announced back to you.
 
 ## Sound
 
@@ -510,18 +562,33 @@ entry should cost a player their progress, never their ability to open the game.
 
 ## Earning is paced by the wall clock
 
-The yield used to be paid per settlement day. At 6× a settlement lives a hundred
-and thirty-six days in a real hour, so the fast-forward button was worth roughly
-2.8 million $EMERGE an hour — an order of magnitude worse than the reload
-exploit it was hiding behind.
+The yield used to be paid per settlement day. At the 6× that existed then, a
+settlement lived a hundred and thirty-six days in a real hour, so the
+fast-forward button was worth roughly 2.8 million $EMERGE an hour — an order of
+magnitude worse than the reload exploit it was hiding behind.
 
 Yield is now accrued against real elapsed seconds, and attention decays over
-real hours. Measured across a real hour of play: **875–897 $EMERGE at 1×, 2× and
-6× alike.** Speed shows you more of your world sooner and pays you nothing extra
-for it. A settlement untouched for a day and a half falls to 1,686 $EMERGE a day
-against 20,682 for one being actively run, and a per-player ceiling of 30,000 a
-real day means holding six plots is six worlds to enjoy rather than six times
-the income.
+real hours. Measured across a real hour of play: **875–897 $EMERGE at every
+speed alike.** Speed shows you more of your world sooner and pays you nothing
+extra for it. 6× has since been removed outright — what the player is paid for
+is attending to the place, and a button that skips a year of it skips the game —
+leaving 1× and 2×.
+
+A settlement untouched for a day and a half falls to 1,686 $EMERGE a day against
+20,682 for one being actively run.
+
+**Four plots pay.** A player may hold as many as they can afford, but only the
+four claimed first earn, so income tops out at four well-run settlements —
+100,000 $EMERGE a real day — rather than scaling with the size of a wallet. The
+Bank says plainly when the world you are standing in is beyond the four, instead
+of showing a yield it will not credit. Give one of the four up and the next in
+line starts earning.
+
+**Nothing the game charges is collected.** `charge()` in `lib/chain/vault.ts`
+burns what it takes and adds it to the ledger's burn total, so a claim, a
+survey, a rename and a dig all shrink supply rather than feeding an address.
+There is no fee address anywhere in the codebase. The only revenue the token
+carries is the trading fee on the coin itself.
 
 ## Starting small
 
@@ -584,24 +651,28 @@ the clock, the people and their relationships, work and the market, building and
 demolition, gatherings, the four hazards and their defences, how $EMERGE is
 actually earned, the land charts, and what the chain does and does not do yet.
 
-**Chat** has a global channel and one per world. The channels, the identity a
-message is signed with (a wallet address, or a local handle), the history, the
-ordering and the limits are all real. The transport is not: there is no relay in
-this build, so a message stays in the browser that typed it, and the panel says
-so rather than showing a room that looks populated and is not. `deliver()` in
-`lib/chat.ts` is the one function that changes when a relay exists.
+**Chat** has a global channel and one per world, behind a real relay
+(`/api/chat`). Messages are stored server-side and polled at a few seconds a
+tick — indistinguishable from a push at a settlement game's message rate, and it
+survives a serverless deployment where a long-lived socket does not. Everything
+a client sends is treated as hostile: the channel name is pattern-matched, the
+text is length-capped and stripped of control characters, the author is capped,
+and the timestamp is set by the server, because a client that could set it could
+pin one message above every other for ever.
+
+A name in chat is a door. Where the speaker's address holds a plot, their name
+becomes a button that travels to the world they built.
 
 ## Where this still needs work
 
 - Final sprites are generated procedurally; the pipeline is ready for authored art but the
   authored art does not exist yet. This remains the largest gap against the reference.
-- Relationships track co-presence and friendship only — no rivalries, families across
-  generations, or memory.
+
 - Nine settlement archetypes cover nine biomes, one each. Two plots of the same biome
   differ in where the town sits and how the plan is rotated and jittered, but they are
   recognisably the same kind of village.
-- Relationships are co-presence, friendship and now households; there are still no
-  rivalries, no memory, and no kinship beyond the family a citizen lives in.
+- Kinship goes no further than the family a citizen lives in: there is no tracking of
+  cousins, in-laws or descent across generations.
 - Only three of the nine biomes generate land the settlement cannot already walk to, so
   bridge-building is something you see on a fen, a coast or a swamp and rarely
   elsewhere.
@@ -609,7 +680,14 @@ so rather than showing a room that looks populated and is not. `deliver()` in
   twenty-four, against none at nine.
 - The highland shelf exists in the elevation field and drives the terrace plan, but its
   cliffs read weakly on screen; the relief deserves more than one elevation step.
-- No contracts are deployed; the chain layer is connection and configuration only, so
-  plot claims and vault balances are local to the browser and labelled as such.
-- A claimed world lives in `localStorage` and is not synced anywhere, so clearing site
-  data loses it.
+- No contracts are deployed. The chain layer is connection and configuration only:
+  ownership is enforced by the relay rather than by a registry contract, and balances are
+  local to the wallet's record in this browser. Every panel says so.
+- A settlement lives in `localStorage`, so clearing site data loses it. The snapshot
+  other players visit is a copy sent out while you play, not a backup — it is never read
+  back into the owner's own game.
+- `takeClaim` reads then writes without a transaction, so two people claiming the same
+  seed inside the same few milliseconds would race. Not a load this game sees before the
+  contract exists, and the contract removes the question.
+- Resale between players is still local: a listing is recorded in the browser that made
+  it and nobody else can see it. The registry knows who owns what, not what is for sale.

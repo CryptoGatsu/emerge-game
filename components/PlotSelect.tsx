@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The land office.
+ * The world map.
  *
  * A map of the whole region, with every plot on it in its place. The land is
  * painted from the plots themselves — each one's territory takes the colour of
@@ -13,9 +13,11 @@
  * will run the world once it is claimed, so the ground shown is the ground you
  * get.
  *
- * Claims and listings are honest about where they stand: with no registry
- * contract deployed they are recorded in this browser, and the panel says so
- * rather than showing a transaction that bought nothing.
+ * Claims are shared. The relay holds one row per plot, so land another player
+ * took is marked here as theirs and cannot be claimed a second time — and their
+ * settlement can be visited from the marker. That registry is the server's
+ * word, not this browser's; when the contract is deployed it becomes the
+ * chain's, and nothing above this line changes.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -30,17 +32,17 @@ import {
   type PlotOwnership,
 } from '@/lib/chain/emerge';
 import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, charge } from '@/lib/chain/vault';
+import { fetchClaims, takePlot, type Claim } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 /**
- * Ask the land registry who owns a plot.
+ * Ask the chain who owns a plot.
  *
- * A claim made in another player's browser is invisible here by construction —
- * two browsers share no storage — so this is the only route to seeing anybody
- * else's land, and it needs the registry contract. Until that exists the hook
- * reports why rather than pretending the plot is unclaimed.
+ * Only answers once the registry contract exists. The shared relay below is
+ * what actually keeps two players off the same land today; this is here so
+ * that the moment the contract is deployed the chain's answer is the one shown.
  */
-function useRegistry(seed: number | null) {
+function useChainOwner(seed: number | null) {
   const [state, setState] = useState<PlotOwnership | null>(null);
   useEffect(() => {
     if (seed === null || !registryLive()) { setState(null); return; }
@@ -50,6 +52,33 @@ function useRegistry(seed: number | null) {
     return () => { live = false; };
   }, [seed]);
   return state;
+}
+
+/** How often the map re-reads who owns what, in milliseconds. */
+const CLAIMS_POLL = 12_000;
+
+/**
+ * Every claim anybody holds, kept fresh.
+ *
+ * Polled rather than pushed: land changes hands a few times an hour at most,
+ * and a poll survives a serverless deployment where a socket does not.
+ */
+function useAllClaims() {
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [shared, setShared] = useState(true);
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      const result = await fetchClaims();
+      if (!live) return;
+      setClaims(result.claims);
+      setShared(result.shared && !result.offline);
+    };
+    tick();
+    const timer = window.setInterval(tick, CLAIMS_POLL);
+    return () => { live = false; window.clearInterval(timer); };
+  }, []);
+  return { claims, shared, setClaims };
 }
 
 function PlotPreview({ seed }: { seed: number }) {
@@ -72,12 +101,14 @@ function PlotPreview({ seed }: { seed: number }) {
  * the markers are real buttons laid over it, so they can be tabbed to, focused
  * and read by a screen reader instead of being pixels with a hit test.
  */
-function RegionMap({ plots, selected, chart, owned, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, taken, onSelect }: {
   plots: Plot[];
   selected: Plot | null;
   chart: number;
   /** Seeds this player holds, so their own land is marked on the map. */
   owned: Set<number>;
+  /** Seeds somebody else holds, by seed, so their land is marked as theirs. */
+  taken: Map<number, Claim>;
   onSelect: (plot: Plot) => void;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -101,25 +132,33 @@ function RegionMap({ plots, selected, chart, owned, onSelect }: {
             {island.name}
           </span>
         ))}
-        {plots.map((plot) => (
+        {plots.map((plot) => {
+          const mine = owned.has(plot.seed);
+          const theirs = !mine ? taken.get(plot.seed) : undefined;
+          return (
           <button
             key={plot.id}
             // A marker on the right-hand side of the map hangs its label to the
             // left, or it runs off the edge.
-            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''} ${owned.has(plot.seed) ? 'owned' : ''}`}
+            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''} ${mine ? 'owned' : ''} ${theirs ? 'settled' : ''}`}
             style={{ left: `${plot.mapX * 100}%`, top: `${plot.mapY * 100}%` }}
             onClick={() => onSelect(plot)}
             aria-pressed={plot.seed === selected?.seed}
           >
             <span className="pin-dot" aria-hidden />
             <span className="pin-label">
-              <b>{plot.region}{owned.has(plot.seed) && <i className="yours">yours</i>}</b>
+              <b>
+                {plot.region}
+                {mine && <i className="yours">yours</i>}
+                {theirs && <i className="settled-tag">settled</i>}
+              </b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}
               {plot.seed === selected?.seed && <em>{plot.biomeLabel}</em>}
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
       <div className="region-legend">
         <span>
@@ -131,10 +170,12 @@ function RegionMap({ plots, selected, chart, owned, onSelect }: {
   );
 }
 
-export default function PlotSelect({ player, onPlayer, onEnter }: {
+export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
   player: PlayerRecord;
   onPlayer: (record: PlayerRecord) => void;
   onEnter: (world: ClaimedWorld) => void;
+  /** Go and look at somebody else's settlement. Resolves to a refusal, or null. */
+  onVisit: (seed: number) => Promise<string | null>;
 }) {
   const [chart, setChart] = useState(HOME_CHART_INDEX);
   const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
@@ -151,8 +192,28 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
   const room = useMemo(() => chartRoom(player, chart), [player, chart]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
   const held = selected ? claimOf(player, selected.seed) : null;
-  const registry = useRegistry(selected?.seed ?? null);
+  const registry = useChainOwner(selected?.seed ?? null);
   const ownedSeeds = useMemo(() => new Set(player.claims.map((c) => c.seed)), [player.claims]);
+  const { claims: allClaims, shared: registryShared, setClaims } = useAllClaims();
+  const [visiting, setVisiting] = useState(false);
+
+  /*
+   * Who holds what, minus this player's own land.
+   *
+   * Compared by address, not by whether the seed appears in this browser's
+   * record: a player who cleared their site data still owns their plots, and
+   * should be shown them as theirs rather than as somebody else's.
+   */
+  const takenByOthers = useMemo(() => {
+    const map = new Map<number, Claim>();
+    for (const claim of allClaims) {
+      const mine = wallet.address && claim.owner.toLowerCase() === wallet.address.toLowerCase();
+      if (!mine) map.set(claim.seed, claim);
+    }
+    return map;
+  }, [allClaims, wallet.address]);
+
+  const heldByOther = selected ? takenByOthers.get(selected.seed) ?? null : null;
 
   const choose = useCallback((plot: Plot) => {
     setSelectedSeed(plot.seed);
@@ -192,18 +253,57 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
     setNotice(null);
   }, []);
 
+  /**
+   * Take a plot.
+   *
+   * Three things have to be true, and the order matters. A wallet must be
+   * connected, because a plot belongs to an address and everything the player
+   * owns is keyed by it. The shared registry has to accept the claim — this is
+   * what stops two people settling the same land, and a refusal here is final:
+   * falling back to "claim it locally anyway" is exactly the bug this exists to
+   * fix. Only then is the price charged, so a refused claim never costs
+   * anything.
+   */
   const claim = useCallback(async () => {
     if (!selected) return;
     // Already yours: this is the door back in, not a second purchase.
     const held = claimOf(player, selected.seed);
     if (held) { onEnter(held); return; }
+    if (!wallet.address) {
+      setNotice('Connect a wallet first. A plot belongs to an address, and so does everything you earn on it.');
+      return;
+    }
+    const other = takenByOthers.get(selected.seed);
+    if (other) {
+      setNotice(`${selected.region} already belongs to ${other.ownerName || shortAddress(other.owner)}.`);
+      return;
+    }
     if (player.ledger.balance < selected.price) {
       setNotice(`${selected.region} costs ${selected.price.toLocaleString()} ${TOKEN.ticker}.`);
       return;
     }
+
     setClaiming(true);
     setNotice(null);
     const worldName = name.trim() || defaultWorldName(selected.seed);
+
+    const registered = await takePlot({
+      seed: selected.seed,
+      region: selected.region,
+      worldName,
+      owner: wallet.address,
+      ownerName: player.name,
+      price: selected.price,
+    });
+    if (!registered.ok) {
+      setClaiming(false);
+      setNotice(registered.reason);
+      // Show the land as theirs straight away rather than making the player
+      // wait for the next poll to understand why they were refused.
+      if (registered.taken) setClaims((held2) => [...held2.filter((c) => c.seed !== registered.taken!.seed), registered.taken!]);
+      return;
+    }
+
     const result = await claimPlot({
       seed: selected.seed,
       region: selected.region,
@@ -212,7 +312,7 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
       address: wallet.address,
     });
     setClaiming(false);
-    if (result.reason) setNotice(result.reason);
+
     // Claiming costs what the plot is priced at, and the price is burned — it
     // used to cost nothing at all, the price being shown and never charged.
     const paid = charge(player.ledger, selected.price);
@@ -227,7 +327,16 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
       owner: wallet.address,
       txHash: result.txHash,
     });
-  }, [name, selected, wallet.address, onEnter, onPlayer, player]);
+  }, [name, selected, wallet.address, onEnter, onPlayer, player, takenByOthers, setClaims]);
+
+  /** Go and look at the settlement somebody else built here. */
+  const visit = useCallback(async (seed: number) => {
+    setVisiting(true);
+    setNotice(null);
+    const refused = await onVisit(seed);
+    setVisiting(false);
+    if (refused) setNotice(refused);
+  }, [onVisit]);
 
   const unlist = useCallback((seed: number) => {
     onPlayer({ ...player, listings: player.listings.filter((l) => l.seed !== seed) });
@@ -235,7 +344,7 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
 
 
   return (
-    <main className="land-office">
+    <main className="world-map">
       <div className="land-inner">
         <header className="land-head">
           <div className="brand-line">
@@ -282,7 +391,7 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
         </nav>
 
         <div className="land-body">
-          <RegionMap plots={plots} selected={selected} chart={chart} owned={ownedSeeds} onSelect={choose} />
+          <RegionMap plots={plots} selected={selected} chart={chart} owned={ownedSeeds} taken={takenByOthers} onSelect={choose} />
 
           {!selected ? (
             <aside className="land-claim empty">
@@ -304,13 +413,14 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
           ) : (
           <aside className={`land-claim ${sheetOpen ? 'open' : ''}`}>
             <button className="sheet-close" onClick={() => setSheetOpen(false)} aria-label="Back to the map">×</button>
-            <span className="eyebrow">{held ? 'YOUR WORLD' : 'CLAIM'}</span>
-            <h2>{held ? held.name : selected.region}</h2>
+            <span className="eyebrow">{held ? 'YOUR WORLD' : heldByOther ? 'SETTLED' : 'CLAIM'}</span>
+            <h2>{held ? held.name : heldByOther ? heldByOther.worldName : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{selected.biomeLabel}</span>
               <span>{selected.island}</span>
               <span>{selected.population} beings</span>
               {held && <span className="owned-tag">Yours</span>}
+              {heldByOther && <span className="settled-tag-big">Taken</span>}
             </div>
             {held && (
               <p className="muted small">
@@ -319,17 +429,28 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
                 {held.txHash ? ` Settled on chain: ${held.txHash}.` : ' Recorded in this browser, not on chain.'}
               </p>
             )}
-            {/* Who else holds this land. Only the chain can answer that — a
-                claim in another player's browser is invisible from here. */}
-            {registry?.onChain && registry.owner && !held && (
+            {/* Who else holds this land. */}
+            {heldByOther && (
+              <div className="settled-by">
+                <p className="muted small">
+                  Settled by <b>{heldByOther.ownerName || shortAddress(heldByOther.owner)}</b>
+                  {' '}on {new Date(heldByOther.at).toLocaleDateString()}, and called
+                  {' '}<b>{heldByOther.worldName}</b>.
+                </p>
+                <button className="ghost" onClick={() => visit(heldByOther.seed)} disabled={visiting}>
+                  {visiting ? 'Travelling…' : `Visit ${heldByOther.worldName}`}
+                </button>
+              </div>
+            )}
+            {registry?.onChain && registry.owner && !held && !heldByOther && (
               <p className="muted small">
                 Held on {ACTIVE_CHAIN.label} by <b>{shortAddress(registry.owner)}</b>.
               </p>
             )}
-            {!registryLive() && !held && (
+            {!registryShared && !held && (
               <p className="muted small">
-                Unclaimed as far as this browser knows. Claims by other players become visible once the land
-                registry is deployed on {ACTIVE_CHAIN.label}; until then each browser sees only its own.
+                This build has no shared registry behind it, so the only claims on this map are the ones
+                made in this browser. Other players&rsquo; land will not show until one is configured.
               </p>
             )}
 
@@ -363,17 +484,31 @@ export default function PlotSelect({ player, onPlayer, onEnter }: {
 
             <button
               className="claim-button"
-              onClick={claim}
-              disabled={claiming || (!held && player.ledger.balance < selected.price)}
+              onClick={() => (heldByOther ? visit(heldByOther.seed) : claim())}
+              disabled={
+                claiming || visiting
+                || (!held && !heldByOther && !wallet.address)
+                || (!held && !heldByOther && player.ledger.balance < selected.price)
+              }
             >
               {claiming
                 ? 'Claiming…'
                 : held
                   ? `Enter ${held.name}`
-                  : player.ledger.balance < selected.price
-                    ? `Not enough ${TOKEN.ticker}`
-                    : `Claim ${selected.region} · ${selected.price.toLocaleString()} ${TOKEN.ticker}`}
+                  : heldByOther
+                    ? (visiting ? 'Travelling…' : `Visit ${heldByOther.worldName}`)
+                    : !wallet.address
+                      ? 'Connect a wallet to claim land'
+                      : player.ledger.balance < selected.price
+                        ? `Not enough ${TOKEN.ticker}`
+                        : `Claim ${selected.region} · ${selected.price.toLocaleString()} ${TOKEN.ticker}`}
             </button>
+            {!wallet.address && !held && !heldByOther && (
+              <p className="muted small">
+                Your plots, your balance and your name all belong to a wallet address rather than to this
+                browser, so there is nothing for a claim to belong to until one is connected.
+              </p>
+            )}
 
             {player.claims.length > 0 && (
               <>
