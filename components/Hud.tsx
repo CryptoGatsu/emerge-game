@@ -15,6 +15,7 @@ import type { PickTarget } from '@/lib/render/scene';
 import type { PlayerRecord } from '@/lib/world/plots';
 import { RENAME_CITIZEN_EMERGE } from '@/lib/chain/vault';
 import { TOKEN, shortAddress } from '@/lib/chain/emerge';
+import { BrandMark } from './Brand';
 import type { PanelKey } from './Panels';
 import { SPEEDS, type Speed } from './EmergeClient';
 
@@ -586,7 +587,7 @@ export function Hud(props: HudProps) {
 
       <header className={`brand-block ${introShown ? '' : 'hidden'}`} aria-hidden={!introShown}>
         <div className="brand-line">
-          <div className="brand-mark">✦</div>
+          <BrandMark />
           <div>
             <div className="wordmark">EMERGE</div>
             <div className="tagline">{view.name === 'Emerge' ? 'THE AI WORLD' : view.name.toUpperCase()}</div>

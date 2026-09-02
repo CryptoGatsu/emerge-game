@@ -45,6 +45,7 @@ import {
   liveToken, type VaultLedger,
 } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
+import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
@@ -281,8 +282,21 @@ export default function EmergeClient() {
     setClaimed(null);
   }, []);
 
-  /** Give a plot up for good. The land goes back on the market. */
+  /**
+   * Give a plot up for good. The land goes back on the market.
+   *
+   * Where the title is on chain that is where it has to be given up: the token
+   * is burned by its holder, and only then does the seed become claimable
+   * again. Releasing it in the relay alone would leave the contract still
+   * saying the plot is theirs, and the next person to claim it would pay and be
+   * reverted.
+   */
   const release = useCallback((seed: number) => {
+    if (addressRef.current && onChainClaimsLive()) {
+      // The signature is the release. Everything below is bookkeeping that
+      // follows it, so a refused signature must leave the plot alone.
+      void releaseOnChain(addressRef.current, seed);
+    }
     clearClaimedWorld();
     clearWorld(seed);
     // And out of the registry, or the plot stays unavailable to everybody else
@@ -797,6 +811,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, RENAME_COST_EMERGE, wallet.address);
     if (!paid.ok) return;
     renameWorld(world, next);
+    // The name belongs to the token, not to this browser, so where there is a
+    // token it is written there too and travels with the plot.
+    if (wallet.address && onChainClaimsLive()) {
+      void renameOnChain(wallet.address, claimed.seed, world.name);
+    }
     onPlayer({ ...player, ledger: paid.ledger });
     onRename({ ...claimed, name: world.name });
     refresh();

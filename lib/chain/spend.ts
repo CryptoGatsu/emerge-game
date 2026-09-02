@@ -78,15 +78,32 @@ export async function spend(
    * been mined yet — so the optimistic figure is used only if the read fails,
    * and the balance poll corrects it either way within half a minute.
    */
-  const fresh = await tokenBalance(address);
   return {
     ok: true,
-    ledger: {
-      ...ledger,
-      balance: fresh ?? Math.max(0, ledger.balance - cost),
-      burnedEmerge: ledger.burnedEmerge + cost,
-    },
+    ledger: await settleBurn(ledger, cost, address),
     refused: null,
     txHash: burn.txHash,
+  };
+}
+
+/**
+ * Bring the ledger up to date after tokens were burned somewhere else.
+ *
+ * The land registry takes its own payment and burns it inside the contract, so
+ * the tokens are gone without `spend()` having sent anything. The running burn
+ * total still has to count them, and the balance still has to be re-read —
+ * this is that, kept here so the arithmetic lives in one file rather than
+ * being repeated at every call site that has its own way of paying.
+ */
+export async function settleBurn(
+  ledger: VaultLedger,
+  cost: number,
+  address: string,
+): Promise<VaultLedger> {
+  const fresh = await tokenBalance(address);
+  return {
+    ...ledger,
+    balance: fresh ?? Math.max(0, ledger.balance - cost),
+    burnedEmerge: ledger.burnedEmerge + cost,
   };
 }

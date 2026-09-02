@@ -11,7 +11,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import { buildMaterials, maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
-import { ACTIVE_CHAIN, TOKEN, shortAddress, tokenActions, tokenLive } from '@/lib/chain/emerge';
+import {
+  ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
+} from '@/lib/chain/emerge';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
@@ -24,6 +26,8 @@ import {
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
+import { fetchPayouts, type Payout } from '@/lib/net/payouts';
+import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet } from './WalletPicker';
@@ -466,9 +470,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
           </p>
           <p>
             A claim is a purchase and it is yours. The price is charged in {TOKEN.ticker} and burned;
-            nobody receives it. Leaving a world does not release it — your plots are marked on the
-            chart and you can walk back into any of them. Giving one up is a separate, deliberate
-            action.
+            nobody receives it.{onChainClaimsLive() ? ' What you get back is a token in your wallet whose id is the plot\u2019s seed, so the land is yours on chain and readable by anybody.' : ''}
+            {' '}Leaving a world does not release it — your plots are marked on the chart and you can
+            walk back into any of them. Giving one up is a separate, deliberate action
+            {onChainClaimsLive() ? ' that burns the token and puts the seed back on the market.' : '.'}
           </p>
         </section>
 
@@ -541,11 +546,42 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
           </p>
           <p>
             Emerge is hybrid by design. The living world runs off-chain so it is always responsive;
-            {' '}{ACTIVE_CHAIN.label} carries ownership and value. This build reaches the network and your
-            wallet can switch to it. What does not exist yet is the {TOKEN.ticker} contract and the
-            land registry — so balances, claims and listings are recorded in this browser, every
-            panel says so, and you are never shown a transaction that did not happen.
+            {' '}{ACTIVE_CHAIN.label} carries ownership and value.
           </p>
+          {onChainClaimsLive() ? (
+            <>
+              <p>
+                <b>A plot is a token in your wallet.</b> Not a row in our database — an ERC-721
+                whose id is the plot&rsquo;s own seed, the same number that grows the land. Anyone
+                can read who owns what straight off the chain without asking this game anything,
+                and nobody, us included, can move a plot out of the wallet holding it.
+              </p>
+              <p>
+                Claiming asks for two signatures: one approving exactly what the plot costs — never
+                an open-ended allowance — and one to claim it. The contract takes the payment,
+                burns it, and mints the title in the same transaction, so there is no moment where
+                you have paid and do not own the land. The price you see is read from the contract
+                and passed back into it as a ceiling, so it cannot change between the two.
+              </p>
+              <p>
+                <b>Money in, money out.</b> Everything the game charges goes to the burn address and
+                is gone. A deposit is the exception: that is your own money, held in the vault so
+                the withdrawal door has something to give back. Taking it out again is the one
+                thing that is not instant — the vault is a wallet rather than a contract, so it
+                cannot pay you on its own. A withdrawal or a collection joins a settlement queue
+                and is paid from that wallet; the {Math.round(WITHDRAW_BURN_RATE * 100)}% share
+                stays behind to be burned. The Bank shows exactly where yours stands, and says
+                nothing has reached you until it has.
+              </p>
+            </>
+          ) : (
+            <p>
+              This build reaches the network and your wallet can switch to it. What does not exist
+              yet is the {TOKEN.ticker} contract and the land registry — so balances and claims are
+              recorded in this browser, every panel says so, and you are never shown a transaction
+              that did not happen.
+            </p>
+          )}
         </section>
       </div>
     </Shell>
@@ -973,41 +1009,77 @@ function GiftPanel({ player, visit, onClose, onGift }: {
   );
 }
 
-function BankPanel({ view, player, earning, onClose, onVault }: {
-  view: Snapshot; player: PlayerRecord; earning: boolean; onClose: () => void;
+function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
+  view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
+  onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
 }) {
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | null>(null);
+  const [queue, setQueue] = useState<Payout[]>([]);
+  const { wallet } = useWallet();
   const ledger = player.ledger;
   const steward = view.stewardship;
+
+  /** Who is asking, so a queued payout can be attributed and paid. */
+  const who = {
+    address: wallet.address,
+    name: player.name,
+    seed: claimed.seed,
+    worldName: claimed.name,
+  };
+
+  /*
+   * Where this wallet's requests stand.
+   *
+   * Read from the queue rather than from the ledger, because the ledger cannot
+   * know when somebody sent the tokens — the whole point of the queue is that
+   * a person settles it, and this is where the player finds out that they did.
+   */
+  useEffect(() => {
+    if (!liveToken() || !wallet.address) { setQueue([]); return; }
+    let live = true;
+    fetchPayouts(wallet.address).then((rows) => { if (live) setQueue(rows); });
+    return () => { live = false; };
+  }, [wallet.address]);
 
   const depositGold = Math.floor((Number(depositAmount) || 0) / EMERGE_PER_GOLD * 100) / 100;
   const quote = quoteWithdraw(Math.floor(Number(withdrawAmount) || 0));
 
-  const doDeposit = () => {
-    const result = deposit(ledger, Number(depositAmount) || 0);
+  const doDeposit = async () => {
+    setBusy('deposit');
+    const result = await deposit(ledger, Number(depositAmount) || 0, who);
+    setBusy(null);
     setMessage(result.message);
     if (result.ok) onVault(result.ledger, depositGold, `${depositGold} Gold arrived from the ${TOKEN.ticker} vault.`);
   };
 
   const netYesterday = view.earnedYesterday - view.spentYesterday;
 
-  const doWithdraw = () => {
-    const result = withdraw(ledger, Math.floor(Number(withdrawAmount) || 0), view.treasury);
+  const doWithdraw = async () => {
+    setBusy('withdraw');
+    const result = await withdraw(ledger, Math.floor(Number(withdrawAmount) || 0), view.treasury, who);
+    setBusy(null);
     setMessage(result.message);
-    if (result.ok) onVault(result.ledger, -quote.gold, `${quote.gold} Gold of principal was withdrawn to ${TOKEN.ticker}.`);
+    if (!result.ok) return;
+    onVault(result.ledger, -quote.gold, `${quote.gold} Gold of principal was withdrawn to ${TOKEN.ticker}.`);
+    if (result.queued && wallet.address) fetchPayouts(wallet.address).then(setQueue);
   };
 
-  const doClaim = () => {
+  const doClaim = async () => {
     const amount = Math.floor(Number(claimAmount) || 0) || Math.floor(ledger.earnedEmerge);
-    const result = claimEarnings(ledger, amount);
+    setBusy('collect');
+    const result = await claimEarnings(ledger, amount, who);
+    setBusy(null);
     setMessage(result.message);
+    if (!result.ok) return;
     // Collecting earnings does not touch the treasury: the settlement's Gold is
     // the settlement's, and what the player earned is for their work.
-    if (result.ok) onVault(result.ledger, 0, `${amount.toLocaleString()} ${TOKEN.ticker} of earnings was collected.`);
+    onVault(result.ledger, 0, `${amount.toLocaleString()} ${TOKEN.ticker} of earnings was collected.`);
+    if (result.queued && wallet.address) fetchPayouts(wallet.address).then(setQueue);
   };
 
   return (
@@ -1103,13 +1175,42 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
       )}
 
       {liveToken() && (
-        <p className="warn">
-          Earnings are still unsettled. The {TOKEN.ticker} contract is deployed, so what you
-          <em>spend</em> is burned on chain and your balance is read from your wallet — but paying
-          stewardship out needs a vault contract holding tokens, and there is not one yet. What you
-          collect here is recorded against this world and will be settled when that contract exists.
-          It is not in your wallet today, and nothing on this panel pretends otherwise.
+        <p className="muted small vault-note">
+          Money leaving your wallet is signed by you: a deposit is a real transfer into the vault at
+          {' '}<b>{shortAddress(VAULT_ADDRESS)}</b>, and everything the game charges is a real transfer to
+          the burn address. Money coming back is the other direction — the vault is a wallet rather
+          than a contract, so it cannot pay you on its own. A withdrawal or a collection is queued
+          below and paid out of that wallet, and the {Math.round(WITHDRAW_BURN_RATE * 100)}% burn share
+          stays behind in it to be burned. Nothing here says tokens have reached you until they have.
         </p>
+      )}
+
+      {liveToken() && (ledger.pendingEmerge > 0 || queue.length > 0) && (
+        <div className="payout-queue">
+          <span className="eyebrow">SETTLEMENT QUEUE</span>
+          {ledger.pendingEmerge > 0 && (
+            <div className="vault-line">
+              <span>Waiting to be paid</span>
+              <b>{Math.floor(ledger.pendingEmerge).toLocaleString()} {TOKEN.ticker}</b>
+            </div>
+          )}
+          {queue.slice(0, 6).map((row) => (
+            <div key={row.id} className={`payout-row ${row.paidAt ? 'paid' : ''}`}>
+              <span>
+                {row.kind === 'principal' ? `${row.gold} Gold of principal` : 'Stewardship earnings'}
+                {' · '}{new Date(row.at).toLocaleDateString()}
+              </span>
+              <b>{row.net.toLocaleString()} {TOKEN.ticker}</b>
+              <em>{row.paidAt ? 'paid' : 'queued'}</em>
+            </div>
+          ))}
+          {queue.length === 0 && ledger.pendingEmerge > 0 && (
+            <p className="muted small">
+              This browser has requests recorded that the queue cannot see. Reconnect the wallet you
+              made them with, or check that the relay is reachable.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="vault-card claim-card">
@@ -1125,15 +1226,18 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
         </label>
         <div className="vault-line"><span>Available</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
         <div className="vault-line burn"><span>Burn</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
-        <button onClick={doClaim} disabled={ledger.earnedEmerge < 1}>Collect</button>
+        <button onClick={doClaim} disabled={busy !== null || ledger.earnedEmerge < 1}>
+          {busy === 'collect' ? 'Collecting…' : liveToken() ? 'Request settlement' : 'Collect'}
+        </button>
       </div>
 
       <h4>{TOKEN.ticker} vault</h4>
       <p className="muted small">
         {EMERGE_PER_GOLD.toLocaleString()} {TOKEN.ticker} buys 1 Gold, so 1,000,000 {TOKEN.ticker} is 100 Gold.
         Deposits fund the treasury, and the same Gold can be taken back out — that is your own money and moving
-        it mints nothing. Withdrawals burn {Math.round(WITHDRAW_BURN_RATE * 100)}%. The settlement&rsquo;s own
-        surplus is not withdrawable: it is what the town pays its people with.
+        it mints nothing, which is why a deposit is the one movement in the game that is vaulted rather than
+        burned. Withdrawals take {Math.round(WITHDRAW_BURN_RATE * 100)}%, and that share is burned. The
+        settlement&rsquo;s own surplus is not withdrawable: it is what the town pays its people with.
       </p>
 
       <div className="vault-grid">
@@ -1145,8 +1249,11 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
           </label>
           <div className="vault-line"><span>Buys</span><b>{depositGold} Gold</b></div>
           <div className="vault-line"><span>Balance</span><b>{Math.floor(ledger.balance).toLocaleString()} {TOKEN.ticker}</b></div>
-          <button onClick={doDeposit} disabled={depositGold < 0.01 || Number(depositAmount) > ledger.balance}>
-            Deposit
+          <button
+            onClick={doDeposit}
+            disabled={busy !== null || depositGold < 0.01 || Number(depositAmount) > ledger.balance}
+          >
+            {busy === 'deposit' ? 'Signing…' : 'Deposit'}
           </button>
         </div>
 
@@ -1157,13 +1264,16 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
             <input value={withdrawAmount} inputMode="numeric" onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, ''))} />
           </label>
           <div className="vault-line"><span>You receive</span><b>{quote.received.toLocaleString()} {TOKEN.ticker}</b></div>
-          <div className="vault-line burn"><span>Burned</span><b>{quote.burned.toLocaleString()} {TOKEN.ticker}</b></div>
+          <div className="vault-line burn">
+            <span>{liveToken() ? 'Held back to burn' : 'Burned'}</span>
+            <b>{quote.burned.toLocaleString()} {TOKEN.ticker}</b>
+          </div>
           <div className="vault-line"><span>Principal standing</span><b>{Math.floor(ledger.principalGold).toLocaleString()} Gold</b></div>
           <button
             onClick={doWithdraw}
-            disabled={quote.gold < 1 || quote.gold > Math.floor(view.treasury) || quote.gold > Math.floor(ledger.principalGold)}
+            disabled={busy !== null || quote.gold < 1 || quote.gold > Math.floor(view.treasury) || quote.gold > Math.floor(ledger.principalGold)}
           >
-            Withdraw
+            {busy === 'withdraw' ? 'Queueing…' : liveToken() ? 'Request withdrawal' : 'Withdraw'}
           </button>
         </div>
       </div>
@@ -1174,6 +1284,8 @@ function BankPanel({ view, player, earning, onClose, onVault }: {
         <span>Earned {Math.floor(ledger.lifetimeEarned).toLocaleString()} {TOKEN.ticker}</span>
         <span>Withdrawn {ledger.withdrawnEmerge.toLocaleString()} {TOKEN.ticker}</span>
         <span>Burned {ledger.burnedEmerge.toLocaleString()} {TOKEN.ticker}</span>
+        {ledger.pendingEmerge > 0 && <span>Queued {Math.floor(ledger.pendingEmerge).toLocaleString()} {TOKEN.ticker}</span>}
+        {ledger.vaultBurn > 0 && <span>To burn from the vault {Math.floor(ledger.vaultBurn).toLocaleString()} {TOKEN.ticker}</span>}
       </div>
 
       <h4>Stores</h4>
@@ -1370,7 +1482,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenam
       .sort((a, b) => a.claimedAt - b.claimedAt)
       .slice(0, EARNING_PLOT_LIMIT)
       .some((c) => c.seed === claimed.seed);
-    return <BankPanel view={view} player={player} earning={earning} onClose={onClose} onVault={onVault} />;
+    return <BankPanel view={view} claimed={claimed} player={player} earning={earning} onClose={onClose} onVault={onVault} />;
   }
 
   // Everything that changes the settlement is the owner's alone.

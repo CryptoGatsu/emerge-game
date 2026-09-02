@@ -21,13 +21,21 @@
  *   1,000,000 $EMERGE = 100 Gold        (10,000 $EMERGE per Gold)
  *   withdrawals burn 5%
  *
- * Nothing here settles on chain yet. With no vault contract deployed the
- * balance is held locally against the claimed world and every surface says so,
- * so a player is never shown a transfer that did not happen. When the contract
- * exists, `deposit` and `withdraw` are where the transfer and burn go.
+ * **Where the tokens actually are.** Money going out of a player's wallet is
+ * signed by the player, so it needs nothing from us: a deposit is a real
+ * transfer to the vault wallet and a charge is a real transfer to the burn
+ * address. Money coming *back* is the hard direction — the vault is a wallet,
+ * not a contract, so it cannot pay anybody on its own. A withdrawal therefore
+ * books a request in the settlement queue and is paid from the vault by hand,
+ * with the burn share left behind in the vault to be burned deliberately.
+ * Nothing on any surface says a payout has arrived until it has.
  */
 
-import { ACTIVE_CHAIN, TOKEN, chainConfigured, tokenLive, type ChainConfig } from './emerge';
+import {
+  ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, chainConfigured, tokenBalance, tokenLive, transferTokens,
+  vaultLive, type ChainConfig,
+} from './emerge';
+import { askForPayout } from '../net/payouts';
 
 /** $EMERGE per unit of in-world Gold. */
 export const EMERGE_PER_GOLD = 10_000;
@@ -82,7 +90,29 @@ export interface VaultLedger {
   /** $EMERGE earned from stewardship over all time. */
   lifetimeEarned: number;
   withdrawnEmerge: number;
+  /**
+   * $EMERGE destroyed: transferred to the burn address, or, in a build with no
+   * token deployed, notionally destroyed. Every charge the game makes lands
+   * here.
+   */
   burnedEmerge: number;
+  /**
+   * $EMERGE asked for and not yet paid.
+   *
+   * A payout leaves the vault when a person sends it, so between the request
+   * and the transfer there is a real sum that is neither in the player's wallet
+   * nor in their in-game balance. Counting it as either would be a lie, so it
+   * is counted as what it is.
+   */
+  pendingEmerge: number;
+  /**
+   * The withdrawal burn share, sitting in the vault.
+   *
+   * Deliberately not added to `burnedEmerge`: these tokens still exist. They
+   * stay behind when a payout is sent and are burned from the vault by hand, so
+   * until that happens calling them burned would overstate the burn.
+   */
+  vaultBurn: number;
   /**
    * How much has been minted today, and which day that was.
    *
@@ -122,6 +152,8 @@ export const NEW_LEDGER: VaultLedger = {
   lifetimeEarned: 0,
   withdrawnEmerge: 0,
   burnedEmerge: 0,
+  pendingEmerge: 0,
+  vaultBurn: 0,
   earnedToday: 0,
   earnedOn: '',
 };
@@ -140,6 +172,8 @@ export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null)
     lifetimeEarned: Number(ledger?.lifetimeEarned) || 0,
     withdrawnEmerge: Number(ledger?.withdrawnEmerge) || 0,
     burnedEmerge: Number(ledger?.burnedEmerge) || 0,
+    pendingEmerge: Number(ledger?.pendingEmerge) || 0,
+    vaultBurn: Number(ledger?.vaultBurn) || 0,
     earnedToday: Number(ledger?.earnedToday) || 0,
     earnedOn: typeof ledger?.earnedOn === 'string' ? ledger.earnedOn : '',
   };
@@ -200,76 +234,155 @@ export interface VaultResult {
   txHash: string | null;
   message: string;
   ledger: VaultLedger;
+  /** Set when the movement is queued for settlement out of the vault. */
+  queued: boolean;
 }
 
-const unsettledNote = (config: ChainConfig) =>
+const refuse = (ledger: VaultLedger, message: string): VaultResult =>
+  ({ ok: false, settled: false, queued: false, txHash: null, message, ledger });
+
+/**
+ * Why a movement did not touch the chain.
+ *
+ * Only ever appended to a *successful* result: a player is entitled to know
+ * that the number that just changed is a number in their browser, and saying so
+ * every time is the difference between a development build and a lie.
+ */
+const localNote = (config: ChainConfig) =>
   chainConfigured(config)
-    ? 'The vault contract is not deployed yet, so this moved locally.'
+    ? `The ${TOKEN.ticker} contract is not deployed yet, so this moved locally.`
     : `${config.label} is not configured in this build, so this moved locally.`;
 
-/** Convert $EMERGE into Gold for a world's treasury. */
-export function deposit(ledger: VaultLedger, emerge: number, config: ChainConfig = ACTIVE_CHAIN): VaultResult {
+/** Who is asking, so a queued payout can be attributed and paid. */
+export interface Steward {
+  address: string | null;
+  name: string;
+  seed: number;
+  worldName: string;
+}
+
+/**
+ * Convert $EMERGE into Gold for a world's treasury.
+ *
+ * With a token deployed this is a real transfer from the player's wallet into
+ * the vault, signed by them. It is the one movement in the game that is *not*
+ * burned, and for a plain reason: this Gold is the player's own money, and the
+ * withdrawal door has to be able to give it back. Burning it would mean taking
+ * a deposit and having nothing to return.
+ *
+ * The transfer happens before the ledger moves, so a rejected signature costs
+ * nothing and buys nothing.
+ */
+export async function deposit(
+  ledger: VaultLedger,
+  emerge: number,
+  who: Steward,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<VaultResult> {
   const amount = Math.floor(emerge);
-  if (!(amount > 0)) {
-    return { ok: false, settled: false, txHash: null, message: 'Enter an amount to deposit.', ledger };
-  }
-  if (amount > ledger.balance) {
-    return { ok: false, settled: false, txHash: null, message: `Not enough ${TOKEN.ticker}.`, ledger };
-  }
+  if (!(amount > 0)) return refuse(ledger, 'Enter an amount to deposit.');
+  if (amount > ledger.balance) return refuse(ledger, `Not enough ${TOKEN.ticker}.`);
   const gold = goldForEmerge(amount);
   if (gold < 0.01) {
-    return { ok: false, settled: false, txHash: null, message: `${EMERGE_PER_GOLD.toLocaleString()} ${TOKEN.ticker} buys 1 Gold.`, ledger };
+    return refuse(ledger, `${EMERGE_PER_GOLD.toLocaleString()} ${TOKEN.ticker} buys 1 Gold.`);
   }
+
+  const banked: VaultLedger = {
+    ...ledger,
+    balance: ledger.balance - amount,
+    depositedGold: ledger.depositedGold + gold,
+    principalGold: ledger.principalGold + gold,
+  };
+
+  if (!tokenLive(config)) {
+    return {
+      ok: true, settled: false, queued: false, txHash: null, ledger: banked,
+      message: `Deposited ${amount.toLocaleString()} ${TOKEN.ticker} for ${gold} Gold. ${localNote(config)}`,
+    };
+  }
+  if (!who.address) return refuse(ledger, 'Connect a wallet to deposit.');
+  if (!vaultLive(config)) {
+    return refuse(ledger, 'The vault address is not configured in this build, so there is nowhere for a deposit to go.');
+  }
+
+  const sent = await transferTokens(who.address, VAULT_ADDRESS, amount, config);
+  if (!sent.ok) return refuse(ledger, sent.message);
+
+  // The chain is the authority once it exists. The optimistic figure is only
+  // used if the read fails, and the balance poll corrects it either way.
+  const fresh = await tokenBalance(who.address, config);
   return {
-    ok: true,
-    settled: false,
-    txHash: null,
-    message: `Deposited ${amount.toLocaleString()} ${TOKEN.ticker} for ${gold} Gold. ${unsettledNote(config)}`,
-    ledger: {
-      ...ledger,
-      balance: ledger.balance - amount,
-      depositedGold: ledger.depositedGold + gold,
-      principalGold: ledger.principalGold + gold,
-    },
+    ok: true, settled: true, queued: false, txHash: sent.txHash,
+    ledger: { ...banked, balance: fresh ?? banked.balance },
+    message: `Deposited ${amount.toLocaleString()} ${TOKEN.ticker} into the vault for ${gold} Gold.`,
   };
 }
 
 /**
- * Take principal back out: Gold the player put in, converted to $EMERGE and
- * burned at the usual rate.
+ * Take principal back out: Gold the player put in, converted to $EMERGE.
  *
  * Two ceilings, and both matter. The principal still standing, because this
  * door returns your own money and not the town's; and the treasury, because
  * you cannot take Gold out of a purse that does not hold it.
+ *
+ * With a token deployed this does not move tokens. It cannot: the vault is a
+ * wallet, so somebody has to sign the transfer out of it. What it does is book
+ * a request in the settlement queue and say so — the Gold leaves the treasury
+ * immediately, because that is ours to move, and the tokens arrive when the
+ * payout is sent. The burn share is not sent, and stays in the vault to be
+ * burned deliberately rather than being counted as burned here.
  */
-export function withdraw(ledger: VaultLedger, gold: number, treasury: number, config: ChainConfig = ACTIVE_CHAIN): VaultResult {
+export async function withdraw(
+  ledger: VaultLedger,
+  gold: number,
+  treasury: number,
+  who: Steward,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<VaultResult> {
   const amount = Math.floor(gold);
-  if (!(amount > 0)) {
-    return { ok: false, settled: false, txHash: null, message: 'Enter an amount to withdraw.', ledger };
-  }
+  if (!(amount > 0)) return refuse(ledger, 'Enter an amount to withdraw.');
   if (amount > Math.floor(ledger.principalGold)) {
-    return {
-      ok: false, settled: false, txHash: null, ledger,
-      message: ledger.principalGold < 1
-        ? `Nothing to withdraw here: this door returns Gold you deposited, and you have not deposited any. ${TOKEN.ticker} you earn by running the world is collected below.`
-        : `You have ${Math.floor(ledger.principalGold)} Gold of principal standing. The settlement's own Gold stays in the settlement.`,
-    };
+    return refuse(ledger, ledger.principalGold < 1
+      ? `Nothing to withdraw here: this door returns Gold you deposited, and you have not deposited any. ${TOKEN.ticker} you earn by running the world is collected below.`
+      : `You have ${Math.floor(ledger.principalGold)} Gold of principal standing. The settlement's own Gold stays in the settlement.`);
   }
   if (amount > Math.floor(treasury)) {
-    return { ok: false, settled: false, txHash: null, message: 'The treasury does not hold that much Gold.', ledger };
+    return refuse(ledger, 'The treasury does not hold that much Gold.');
   }
+
   const quote = quoteWithdraw(amount);
+
+  if (!tokenLive(config)) {
+    return {
+      ok: true, settled: false, queued: false, txHash: null,
+      message: `Withdrew ${amount} Gold of principal for ${quote.received.toLocaleString()} ${TOKEN.ticker}, burning ${quote.burned.toLocaleString()}. ${localNote(config)}`,
+      ledger: {
+        ...ledger,
+        balance: ledger.balance + quote.received,
+        principalGold: ledger.principalGold - amount,
+        withdrawnEmerge: ledger.withdrawnEmerge + quote.received,
+        burnedEmerge: ledger.burnedEmerge + quote.burned,
+      },
+    };
+  }
+
+  if (!who.address) return refuse(ledger, 'Connect a wallet to withdraw.');
+  const booked = await askForPayout({
+    address: who.address, name: who.name, seed: who.seed, worldName: who.worldName,
+    kind: 'principal', gold: amount, gross: quote.gross,
+  });
+  // Nothing is taken when the queue refuses: the principal is still standing
+  // and the treasury still holds its Gold.
+  if (!booked.ok) return refuse(ledger, booked.reason);
+
   return {
-    ok: true,
-    settled: false,
-    txHash: null,
-    message: `Withdrew ${amount} Gold of principal for ${quote.received.toLocaleString()} ${TOKEN.ticker}, burning ${quote.burned.toLocaleString()}. ${unsettledNote(config)}`,
+    ok: true, settled: false, queued: true, txHash: null,
+    message: `Queued ${quote.received.toLocaleString()} ${TOKEN.ticker} for settlement from the vault. ${quote.burned.toLocaleString()} stays behind to be burned.`,
     ledger: {
       ...ledger,
-      balance: ledger.balance + quote.received,
       principalGold: ledger.principalGold - amount,
-      withdrawnEmerge: ledger.withdrawnEmerge + quote.received,
-      burnedEmerge: ledger.burnedEmerge + quote.burned,
+      pendingEmerge: ledger.pendingEmerge + quote.received,
+      vaultBurn: ledger.vaultBurn + quote.burned,
     },
   };
 }
@@ -281,31 +394,53 @@ export function withdraw(ledger: VaultLedger, gold: number, treasury: number, co
  * comes through it was minted a day at a time against how well the world was
  * run. It does not touch the treasury: the settlement's Gold is the
  * settlement's, and the player's earnings are for their work.
+ *
+ * Like a withdrawal, it is paid out of the vault, so with a token deployed it
+ * books a request rather than crediting a balance.
  */
-export function claimEarnings(ledger: VaultLedger, emerge: number, config: ChainConfig = ACTIVE_CHAIN): VaultResult {
+export async function claimEarnings(
+  ledger: VaultLedger,
+  emerge: number,
+  who: Steward,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<VaultResult> {
   const amount = Math.floor(emerge);
-  if (!(amount > 0)) {
-    return { ok: false, settled: false, txHash: null, message: 'Enter an amount to collect.', ledger };
-  }
+  if (!(amount > 0)) return refuse(ledger, 'Enter an amount to collect.');
   if (amount > Math.floor(ledger.earnedEmerge)) {
-    return {
-      ok: false, settled: false, txHash: null, ledger,
-      message: `You have earned ${Math.floor(ledger.earnedEmerge).toLocaleString()} ${TOKEN.ticker} here so far.`,
-    };
+    return refuse(ledger, `You have earned ${Math.floor(ledger.earnedEmerge).toLocaleString()} ${TOKEN.ticker} here so far.`);
   }
   const burned = Math.round(amount * WITHDRAW_BURN_RATE);
   const received = amount - burned;
+
+  if (!tokenLive(config)) {
+    return {
+      ok: true, settled: false, queued: false, txHash: null,
+      message: `Collected ${received.toLocaleString()} ${TOKEN.ticker} of earnings, burning ${burned.toLocaleString()}. ${localNote(config)}`,
+      ledger: {
+        ...ledger,
+        balance: ledger.balance + received,
+        earnedEmerge: ledger.earnedEmerge - amount,
+        withdrawnEmerge: ledger.withdrawnEmerge + received,
+        burnedEmerge: ledger.burnedEmerge + burned,
+      },
+    };
+  }
+
+  if (!who.address) return refuse(ledger, 'Connect a wallet to collect earnings.');
+  const booked = await askForPayout({
+    address: who.address, name: who.name, seed: who.seed, worldName: who.worldName,
+    kind: 'earnings', gold: 0, gross: amount,
+  });
+  if (!booked.ok) return refuse(ledger, booked.reason);
+
   return {
-    ok: true,
-    settled: false,
-    txHash: null,
-    message: `Collected ${received.toLocaleString()} ${TOKEN.ticker} of earnings, burning ${burned.toLocaleString()}. ${unsettledNote(config)}`,
+    ok: true, settled: false, queued: true, txHash: null,
+    message: `Queued ${received.toLocaleString()} ${TOKEN.ticker} of earnings for settlement from the vault. ${burned.toLocaleString()} stays behind to be burned.`,
     ledger: {
       ...ledger,
-      balance: ledger.balance + received,
       earnedEmerge: ledger.earnedEmerge - amount,
-      withdrawnEmerge: ledger.withdrawnEmerge + received,
-      burnedEmerge: ledger.burnedEmerge + burned,
+      pendingEmerge: ledger.pendingEmerge + received,
+      vaultBurn: ledger.vaultBurn + burned,
     },
   };
 }

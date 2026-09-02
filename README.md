@@ -356,7 +356,7 @@ Gold is the world's currency; $EMERGE is the token behind it.
 | Rate | 10,000 $EMERGE = 1 Gold, so 1,000,000 $EMERGE = 100 Gold |
 | Deposit | $EMERGE buys Gold, which lands in the settlement's treasury |
 | Earn | The settlement's own economy grows the treasury over time |
-| Withdraw | Treasury Gold converts back to $EMERGE, burning 5% |
+| Withdraw | Principal converts back to $EMERGE, less 5% |
 | Rename a world | 50,000 $EMERGE |
 | Rename a citizen | 20,000 $EMERGE |
 | Prospect new land | 120,000 $EMERGE |
@@ -364,11 +364,27 @@ Gold is the world's currency; $EMERGE is the token behind it.
 Deposit and withdraw live in the Bank panel, which also shows what has moved through
 the vault and what has been burned.
 
-None of this settles on chain yet. With no vault contract deployed the balance is held
-locally against the claimed world, a new world opens with a clearly-labelled local
-development allocation, and every message says plainly that the movement was local.
-`deposit()` and `withdraw()` in `lib/chain/vault.ts` are where the transfer and burn go
-once the contract exists.
+**Money moves in three directions and they are deliberately different.**
+
+*Charges are burned.* Claiming, surveying, renaming, digging: every one of them
+sends $EMERGE to `0x0000000000000000000000000000000000000000` and nothing comes
+back. The project takes no cut and there is no address for one to accumulate in.
+
+*Deposits are vaulted.* A deposit is the player's own money and the withdrawal
+door has to be able to give it back, so burning it would mean taking a deposit
+with nothing left to return. Deposits transfer to the vault wallet
+`0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062`.
+
+*Payouts come out of the vault by hand.* A wallet cannot pay anybody on its own —
+somebody has to sign — so a withdrawal or an earnings collection queues a request
+at `/api/payouts` and the panel says exactly that. The 5% share is not sent with
+the payout; it stays in the vault to be burned deliberately. Nothing on any
+surface says tokens have reached a player before they have. See
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md).
+
+Without a token deployed all of this is local and clearly labelled as such: a new
+world opens with a development allocation, and every message says the movement
+was local.
 
 ## The plot market
 
@@ -381,9 +397,10 @@ list to the first name nobody on that chart is using, because a map with the sam
 printed twice on it is a map you cannot navigate by. An owned plot can be listed for
 resale from the Connect panel and appears in the land office until it is withdrawn.
 
-Resale between players needs the plot registry contract. Until it is deployed a listing
-is recorded in this browser and nobody else can see it, and the panel says exactly that
-rather than implying a market that does not exist.
+Resale between players is the one thing the registry does not do through the game: a plot
+is an ordinary ERC-721 token, so it transfers in any wallet or marketplace that handles
+them. The in-game listing is a note to yourself until a marketplace route exists, and the
+panel says exactly that rather than implying a market that does not.
 
 ## Other players
 
@@ -483,17 +500,37 @@ the deployed token address changes four things at once, with no other edit:
    balance, read from your wallet", and the world map says claiming will ask for
    a signature.
 
-**What the token alone does not fix**, and what the panels keep saying plainly:
+**The second variable turns ownership real.** Setting
+`NEXT_PUBLIC_EMERGE_REGISTRY` to a deployed `contracts/EmergeLand.sol` makes a
+plot an ERC-721 token in the player's wallet whose **token id is the plot seed**
+— the same number that generates the terrain. From that point:
 
-- **Ownership** is still the relay's word. One owner per plot is enforced for
-  every player, but it is not an on-chain title until a registry contract
-  exists. `plotOwner()` already reads `ownerOf(uint256)` against
-  `NEXT_PUBLIC_EMERGE_REGISTRY`, keyed on the plot seed as the token id, so
-  deploying one is configuration rather than code.
-- **Stewardship earnings** cannot be paid out. Spending is a burn, which needs
-  nobody's permission; paying somebody requires a contract holding tokens. Until
-  a vault exists, earnings accrue against the world and the Bank says outright
-  that they are unsettled and not in the player's wallet.
+- **The price on the button comes from the contract.** `priceOf(seed)` is read
+  before the claim and passed back in as a `maxPrice`, so the number shown is
+  the number the transaction enforces and a pricing change between the quote and
+  the signature reverts rather than overcharging.
+- **Claiming is two signatures**: `approve` for exactly this claim's price — not
+  an unlimited allowance — and then `claim`, which burns the payment inside the
+  contract and mints the title in the same transaction. There is no moment where
+  a player has paid and does not own the land.
+- **The world map reads the chain.** `registry(start, count)` returns every plot
+  anybody holds in one call; where it and the relay disagree about an owner the
+  chain wins, and a relay row the chain has never heard of is kept rather than
+  dropped, because dropping it would put land somebody holds back on the market.
+- **Giving a plot up burns the token**, on chain, and only then is the seed
+  claimable again.
+- **Nobody can take a plot.** The registry's owner can change prices and the burn
+  address and nothing else — there is no function to move, mint or seize a plot,
+  or to touch a single $EMERGE.
+
+**What is still not automatic**, and what the Bank says plainly: **paying a
+player out.** The vault is a wallet rather than a contract, so it cannot send
+anything on its own. A withdrawal or an earnings collection books a request in
+the settlement queue, which is paid by hand from the vault; the burn share stays
+behind to be burned deliberately. The queue is a list of requests rather than a
+balance — the ledger behind it lives in the player's browser — so the server
+recomputes every amount from the Gold, caps a single request, and a person reads
+it before it is paid.
 
 **Clearing the world.** `DATA_EPOCH` in `lib/limits.ts` namespaces every key
 that holds game state, on the server and in the browser. Raising it by one
@@ -507,17 +544,36 @@ they turned chat alerts off.
 
 ## The front door
 
-`components/Landing.tsx` is what a new visitor sees: what the game is, in the
-order somebody deciding whether to play needs it, and one thing to do at the end
-of it. **A wallet is required to go any further.** Nothing past this point works
-without one — a plot belongs to an address, and so do the balance, the name and
-everything earned — so the page asks at the end rather than letting somebody
-choose land and then telling them.
+`components/Landing.tsx` is what a new visitor sees, and it is deliberately one
+screen: the mark, one sentence about what this is, and the one thing there is to
+do. Three short notes sit under the fold for somebody who scrolls, and the game
+itself is where the rest is learned.
 
-It is deliberately not a wall: everything on it reads without connecting,
-because a person who has never heard of this should be able to find out what it
-is before being asked for anything. Somebody who already owns a world skips it
-entirely; coming back to a settlement should not put a pitch in the way.
+**A wallet is required to go any further.** Nothing past this point works without
+one — a plot is a token in an address, and so are the balance, the name and
+everything earned — so the page asks at the end rather than letting somebody
+choose land and then telling them. It is still not a wall: everything on it
+reads without connecting. Somebody who already owns a world skips it entirely;
+coming back to a settlement should not put a pitch in the way.
+
+**The palette is the logo's**, not chosen to go with it. Every colour in
+`app/globals.css` was sampled from `public/emerge-logo.png` — the chartreuse of
+the ring and the wordmark, the near-black the roundel sits on, the deep green
+inside it, the teal of the water, the amber of the lit windows. An interface
+tuned by eye against a mark drifts from it; one sampled from the mark cannot.
+
+`components/Brand.tsx` draws the mark everywhere it appears, and it has two
+forms. The logo is 1254px of pixel art — an island, a lit building, trees, water,
+a wordmark — and below about 64px none of that survives: nearest-neighbour
+downscaling turns it to a smudge and smoothing turns it to a blur. So small
+marks are drawn as the logo reduced to what reads at that size (the disc, its
+ring, the sparkle), and larger ones are the artwork itself, rendered `pixelated`
+because that is what it is.
+
+| | |
+| --- | --- |
+| Site | [emergerh.world](https://emergerh.world) |
+| X | [@emergerh](https://x.com/emergerh) |
 
 ## Sound
 
@@ -563,18 +619,30 @@ NEXT_PUBLIC_CHAIN_TARGET=testnet|mainnet   # default: testnet
 NEXT_PUBLIC_ROBINHOOD_CHAIN_ID=            # default: 4663
 NEXT_PUBLIC_ROBINHOOD_RPC_URL=             # default: https://rpc.mainnet.chain.robinhood.com
 NEXT_PUBLIC_ROBINHOOD_EXPLORER=
-NEXT_PUBLIC_EMERGE_TOKEN=
+NEXT_PUBLIC_EMERGE_TOKEN=                  # the ERC-20
+NEXT_PUBLIC_EMERGE_REGISTRY=               # contracts/EmergeLand.sol
 NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID=    # default: 46630
 NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL=     # default: https://rpc.testnet.chain.robinhood.com/rpc
 NEXT_PUBLIC_ROBINHOOD_TESTNET_EXPLORER=
 NEXT_PUBLIC_EMERGE_TOKEN_TESTNET=
+NEXT_PUBLIC_EMERGE_REGISTRY_TESTNET=
+
+NEXT_PUBLIC_EMERGE_VAULT=                  # default: 0x282f8A44…6062
+NEXT_PUBLIC_BURN_ADDRESS=                  # default: the zero address
+NEXT_PUBLIC_SITE_URL=                      # default: https://emergerh.world
 ```
 
-What is *not* built in, and cannot be, is the $EMERGE token address and the land registry:
-those are this game's own deployments and do not exist yet. `tokenLive()` is the test the
-interface actually asks, and while it is false the panels say plainly that balances,
-claims and listings live in this browser rather than showing a transaction that bought
-nothing.
+What is *not* built in, and cannot be, is the $EMERGE token address and the land
+registry: those are this game's own deployments. `tokenLive()` is the test the
+interface actually asks, and while it is false the panels say plainly that balances and
+claims live in this browser rather than showing a transaction that bought nothing.
+
+> **One thing to check before deploying the token.** Many ERC-20 implementations,
+> OpenZeppelin's among them, **revert on a transfer to the zero address** — which
+> would make every charge in the game fail. No code change is needed if yours
+> does: point `NEXT_PUBLIC_BURN_ADDRESS` at a dead address the token accepts.
+
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md) has the whole deployment, in order.
 
 ## Gatherings
 

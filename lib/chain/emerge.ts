@@ -419,35 +419,82 @@ export async function plotOwner(seed: number, config: ChainConfig = ACTIVE_CHAIN
 /**
  * Where burned tokens go.
  *
- * A real ERC-20 has no `burn` a stranger may call, so the honest way to
- * destroy a token you hold is to send it somewhere nobody holds the key to.
- * `0x…dEaD` is the address the whole ecosystem reads as burnt, it is visible
- * on any explorer, and it needs no contract of ours to exist — which is the
- * point: every charge in this game becomes a real, checkable burn the moment a
- * token address is configured, with nothing else to deploy.
+ * The zero address, as specified for this project. Every charge the game makes
+ * is a transfer to it, visible on any explorer, needing no contract of ours.
+ *
+ * One caveat worth knowing before launch, because it is silent until it is not:
+ * many ERC-20 implementations — OpenZeppelin's among them — **revert** on a
+ * transfer to the zero address. If the deployed $EMERGE is one of those, every
+ * charge will fail with a rejected transaction rather than a wrong balance.
+ * `NEXT_PUBLIC_BURN_ADDRESS` overrides this without a code change;
+ * `0x…dEaD` is the usual alternative and is read as burnt by every explorer
+ * and supply tracker.
  */
-export const BURN_ADDRESS = '0x000000000000000000000000000000000000dEaD';
+export const BURN_ADDRESS =
+  process.env.NEXT_PUBLIC_BURN_ADDRESS ?? '0x0000000000000000000000000000000000000000';
 
-/** One `eth_call` against the configured RPC, returning the raw hex word. */
-async function ethCall(to: string, data: string, config: ChainConfig): Promise<string | null> {
+/**
+ * The vault.
+ *
+ * Deposits — $EMERGE converted into a settlement's Gold — are transferred here
+ * rather than destroyed, because that Gold is the player's own money and the
+ * withdrawal door has to be able to give it back. The burn a withdrawal takes
+ * stays behind in this wallet rather than going to the burn address, so it can
+ * be burned from here deliberately.
+ *
+ * A wallet, not a contract: it cannot pay out on its own, which is why the
+ * withdrawal path books a settlement rather than pretending to send tokens.
+ * `docs/CONTRACTS.md` sets out what a vault contract would change.
+ */
+export const VAULT_ADDRESS =
+  process.env.NEXT_PUBLIC_EMERGE_VAULT ?? '0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062';
+
+/** True once there is somewhere for deposited tokens to actually go. */
+export const vaultLive = (config: ChainConfig = ACTIVE_CHAIN) =>
+  tokenLive(config) && /^0x[0-9a-fA-F]{40}$/.test(VAULT_ADDRESS);
+
+/**
+ * One JSON-RPC call against the configured node.
+ *
+ * Reads only — anything that changes state is signed by the player's wallet,
+ * never by us, because there is no key in this application to sign with.
+ */
+export async function rpc<T>(
+  method: string,
+  params: unknown[],
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<T | null> {
+  if (!config.rpcUrl) return null;
   try {
-    const response = await fetch(config.rpcUrl!, {
+    const response = await fetch(config.rpcUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 1, method: 'eth_call',
-        params: [{ to, data }, 'latest'],
-      }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     });
-    const json = (await response.json()) as { result?: string; error?: { message?: string } };
-    if (json.error || typeof json.result !== 'string') return null;
+    const json = (await response.json()) as { result?: T; error?: { message?: string } };
+    if (json.error || json.result === undefined || json.result === null) return null;
     return json.result;
   } catch {
     return null;
   }
 }
 
-const hexWord = (value: string) => value.replace(/^0x/, '').padStart(64, '0');
+/** One `eth_call` against the configured RPC, returning the raw hex word. */
+export async function ethCall(
+  to: string,
+  data: string,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<string | null> {
+  const result = await rpc<string>('eth_call', [{ to, data }, 'latest'], config);
+  return typeof result === 'string' ? result : null;
+}
+
+/** An ABI word: 32 bytes, right-aligned, no `0x`. */
+export const hexWord = (value: string) => value.replace(/^0x/, '').padStart(64, '0');
+
+/** A uint256 argument. */
+export const numWord = (value: bigint | number) =>
+  (typeof value === 'bigint' ? value : BigInt(Math.round(value))).toString(16).padStart(64, '0');
 
 /**
  * How many decimals the token uses.
@@ -498,14 +545,15 @@ export interface BurnResult {
 }
 
 /**
- * Actually destroy tokens, by transferring them to the burn address.
+ * Move tokens from the player to an address they choose to send them to.
  *
- * The player signs it, because it is their money: there is no custody here and
- * no approval to grant. A rejected signature is not an error, it is a player
- * changing their mind, and the caller must not charge them for it.
+ * The one primitive behind both burning and depositing: the only difference
+ * between destroying tokens and vaulting them is where they land, and keeping
+ * that a parameter means the two paths cannot drift apart.
  */
-export async function burnTokens(
+export async function transferTokens(
   from: string,
+  to: string,
   whole: number,
   config: ChainConfig = ACTIVE_CHAIN,
 ): Promise<BurnResult> {
@@ -522,16 +570,34 @@ export async function burnTokens(
     // money.
     const units = BigInt(Math.round(whole)) * 10n ** BigInt(decimals);
     // transfer(address,uint256)
-    const data = '0xa9059cbb' + hexWord(BURN_ADDRESS) + units.toString(16).padStart(64, '0');
+    const data = '0xa9059cbb' + hexWord(to) + units.toString(16).padStart(64, '0');
     const txHash = (await window.ethereum!.request({
       method: 'eth_sendTransaction',
       params: [{ from, to: config.tokenAddress, data }],
     })) as string;
-    return { ok: true, txHash, message: `Burned ${whole.toLocaleString()} ${TOKEN.ticker}.` };
+    return { ok: true, txHash, message: `Sent ${whole.toLocaleString()} ${TOKEN.ticker}.` };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The transaction was rejected.';
     return { ok: false, txHash: null, message };
   }
+}
+
+/**
+ * Actually destroy tokens, by transferring them to the burn address.
+ *
+ * The player signs it, because it is their money: there is no custody here and
+ * no approval to grant. A rejected signature is not an error, it is a player
+ * changing their mind, and the caller must not charge them for it.
+ */
+export async function burnTokens(
+  from: string,
+  whole: number,
+  config: ChainConfig = ACTIVE_CHAIN,
+): Promise<BurnResult> {
+  const sent = await transferTokens(from, BURN_ADDRESS, whole, config);
+  return sent.ok
+    ? { ...sent, message: `Burned ${whole.toLocaleString()} ${TOKEN.ticker}.` }
+    : sent;
 }
 
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {
