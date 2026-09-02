@@ -1,0 +1,1129 @@
+/**
+ * EmergeScene — the window onto the living world.
+ *
+ * The simulation is the brain and never imports this file. The scene reads world
+ * state each frame and draws it: baked terrain, animated water, depth-sorted
+ * props, buildings that light up after dark, and citizens that walk, work and
+ * talk. Camera, weather, time-of-day light and picking all live here.
+ *
+ * Layer order, bottom to top:
+ *   worldRoot   terrain, cliffs, water, then the depth-sorted object layer
+ *   ambient     one screen-space multiply pass for time of day and weather
+ *   lightsRoot  additive window glow, lanterns and forge light
+ *   weather     screen-space rain and snow
+ *   hudRoot     screen-space speech bubbles and building activity badges
+ */
+
+import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
+import {
+  ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World,
+} from '../simulation';
+import { speechFor } from '../speech';
+import { AMBIENT, SEASON_TINT, UI, WEATHER_TINT } from './palette';
+import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
+import { buildingArtKey } from './buildings';
+import { CitizenSprite } from './citizenSprite';
+import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, worldToScreen } from '../world/iso';
+import { TILE_ART, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
+
+export type PickTarget = { kind: 'citizen' | 'building'; id: string } | null;
+
+export interface SceneCallbacks {
+  onHover?: (target: PickTarget) => void;
+  onSelect?: (target: PickTarget) => void;
+  onCamera?: (zoom: number) => void;
+}
+
+interface BuildingView {
+  building: Building;
+  base: Sprite;
+  lit: Sprite;
+  glow?: Sprite;
+  badge: Container;
+  badgeIcon: Sprite;
+  badgeText: Text;
+  wheel?: Sprite;
+  artKey: string;
+  door: { x: number; y: number };
+  chimney?: { x: number; y: number };
+  height: number;
+}
+
+interface Bubble {
+  root: Container;
+  bg: Graphics;
+  label: Text;
+  citizenId: string | null;
+  text: string;
+  life: number;
+}
+
+interface Particle { sprite: Sprite; vx: number; vy: number; life: number; max: number }
+
+/** Flat colours used for the minimap, one per terrain kind. */
+const MINIMAP_COLORS: Record<Tile, string> = {
+  [Tile.Grass]: '#4c8a3d',
+  [Tile.Flowers]: '#5f9d4a',
+  [Tile.Meadow]: '#6cae51',
+  [Tile.Forest]: '#2c4f27',
+  [Tile.Soil]: '#5d452c',
+  [Tile.Tilled]: '#6a4e30',
+  [Tile.CropWheat]: '#b79c47',
+  [Tile.CropVeg]: '#4e8c3a',
+  [Tile.Path]: '#a89468',
+  [Tile.Plaza]: '#9d9682',
+  [Tile.Rock]: '#767466',
+  [Tile.Sand]: '#c2ab72',
+  [Tile.Water]: '#26688a',
+  [Tile.WaterShore]: '#3a90ab',
+};
+
+/**
+ * Gentle large-scale shading of the ground, driven by smooth noise. Varying the
+ * tone gradually across tens of tiles gives the terrain depth; varying it per
+ * tile would just draw the isometric grid.
+ */
+function groundTint(tone: number) {
+  const t = Math.max(0, Math.min(1, tone));
+  const level = Math.round(214 + t * 41);
+  const warm = Math.round(210 + t * 45);
+  return (warm << 16) | (level << 8) | Math.round(206 + t * 40);
+}
+
+/** Tile kinds drawn over grass so their ragged edges blend into it. */
+const BLENDED = new Set<Tile>([Tile.Path, Tile.Plaza, Tile.Sand, Tile.Tilled, Tile.CropWheat, Tile.CropVeg]);
+
+const MAX_BUBBLES = 6;
+const BUBBLE_ROTATE = 5.5;
+const SMOKE_POOL = 70;
+const WEATHER_POOL = 320;
+
+export class EmergeScene {
+  readonly app = new Application();
+  private assets!: AssetLibrary;
+  private map!: WorldMap;
+  private world!: World;
+
+  private worldRoot = new Container();
+  private backdrop: TilingSprite | null = null;
+  private groundLayer = new Container();
+  private waterLayer = new Container();
+  private objectLayer = new Container();
+  private lightsRoot = new Container();
+  private hudRoot = new Container();
+  private weatherLayer = new Container();
+  private ambient = new Sprite(Texture.WHITE);
+  private seasonWash = new Sprite(Texture.WHITE);
+
+  private citizens = new Map<string, CitizenSprite>();
+  private buildings = new Map<string, BuildingView>();
+  private propSprites: { sprite: Sprite; prop: PropInstance; phase: number; cleared?: boolean }[] = [];
+  private waterSprites: { sprite: Sprite; kind: 'water' | 'shore' }[] = [];
+  private waterfallSprites: Sprite[] = [];
+  private campfires: Sprite[] = [];
+  private bubbles: Bubble[] = [];
+  private smoke: Particle[] = [];
+  private weatherParticles: Particle[] = [];
+  private motes: Particle[] = [];
+  private selectRing = new Sprite();
+  private hoverRing = new Sprite();
+
+  private camera = { x: 0, y: 0, zoom: 1 };
+  private minZoom = 0.5;
+  private maxZoom = 2.4;
+  private time = 0;
+  private bubbleTimer = 0;
+  private beat = 0;
+  private cullTimer = 0;
+
+  private selected: PickTarget = null;
+  private hovered: PickTarget = null;
+  private dragging = false;
+  private dragMoved = 0;
+  private lastPointer = { x: 0, y: 0 };
+  private callbacks: SceneCallbacks = {};
+  private disposed = false;
+
+  /** Boot the renderer into `host` and build the world's visual layer. */
+  async init(host: HTMLElement, world: World, callbacks: SceneCallbacks = {}) {
+    this.world = world;
+    this.callbacks = callbacks;
+
+    await this.app.init({
+      resizeTo: host,
+      antialias: false,
+      backgroundColor: 0x0a1610,
+      // Pixel art is sampled 1:1; a higher device resolution just blurs it.
+      resolution: 1,
+      autoDensity: true,
+      preference: 'webgl',
+      sharedTicker: false,
+    });
+    if (this.disposed) { this.app.destroy(true); return; }
+    host.appendChild(this.app.canvas);
+    this.app.canvas.style.display = 'block';
+    this.app.canvas.style.touchAction = 'none';
+    this.app.canvas.style.cursor = 'grab';
+
+    this.assets = loadAssets();
+    this.map = generateWorldMap(world);
+
+    this.app.stage.addChild(this.worldRoot, this.ambient, this.lightsRoot, this.weatherLayer, this.hudRoot);
+    // Distant forest behind everything, so the diamond edge of the tile field
+    // never shows as empty space at the corners of the viewport.
+    const pad = 900;
+    this.backdrop = new TilingSprite({
+      texture: backdropTexture(),
+      x: SCENE_BOUNDS.minX - pad,
+      y: SCENE_BOUNDS.minY - pad,
+      width: SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX + pad * 2,
+      height: SCENE_BOUNDS.maxY - SCENE_BOUNDS.minY + pad * 2,
+    });
+    this.worldRoot.addChild(this.backdrop, this.groundLayer, this.waterLayer, this.objectLayer);
+    this.objectLayer.sortableChildren = true;
+    this.lightsRoot.blendMode = 'add';
+
+    this.ambient.blendMode = 'multiply';
+    this.ambient.alpha = 0;
+    this.seasonWash.blendMode = 'multiply';
+    this.seasonWash.alpha = 0;
+    this.app.stage.addChildAt(this.seasonWash, this.app.stage.children.indexOf(this.ambient));
+
+    this.buildTerrain();
+    this.buildProps();
+    this.buildRings();
+    this.syncBuildings();
+    this.syncCitizens();
+    this.buildBubbles();
+    this.buildParticles();
+
+    this.centreOn(50, 49, 1.05);
+    this.attachInput();
+
+    this.app.ticker.add((ticker) => this.update(ticker.deltaMS / 1000));
+    this.app.renderer.on('resize', () => this.onResize());
+    this.onResize();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Construction
+   * ---------------------------------------------------------------- */
+
+  private buildTerrain() {
+    const { map, assets } = this;
+    for (let ty = 0; ty < map.grid; ty++) {
+      for (let tx = 0; tx < map.grid; tx++) {
+        const i = ty * map.grid + tx;
+        const kind = map.tiles[i] as Tile;
+        const step = map.steps[i];
+        const pos = tileToScreen(tx, ty, step);
+
+        // Cliff face first, so the raised tile sits on top of its own rock wall.
+        if (map.cliffs[i]) {
+          const cliff = new Sprite(assets.get('tile.cliff.0'));
+          cliff.position.set(pos.x - TILE_W / 2, pos.y);
+          this.groundLayer.addChild(cliff);
+        }
+
+        const art = TILE_ART[kind];
+        if (kind === Tile.Water || kind === Tile.WaterShore) {
+          const sprite = new Sprite(assets.get(`${art.key}.0`));
+          sprite.position.set(pos.x - TILE_W / 2, pos.y);
+          this.waterLayer.addChild(sprite);
+          sprite.tint = groundTint(map.tone[i]);
+          this.waterSprites.push({ sprite, kind: kind === Tile.Water ? 'water' : 'shore' });
+          continue;
+        }
+
+        // Surfaces with ragged edges sit on a grass tile so the notches reveal
+        // ground rather than the backdrop.
+        if (BLENDED.has(kind)) {
+          const under = new Sprite(assets.get(`tile.grass.${(tx + ty) % 4}`));
+          under.position.set(pos.x - TILE_W / 2, pos.y);
+          under.tint = groundTint(map.tone[i]);
+          this.groundLayer.addChild(under);
+        }
+
+        const key = art.variants ? `${art.key}.${map.variants[i]}` : art.key;
+        const sprite = new Sprite(assets.get(key));
+        sprite.position.set(pos.x - TILE_W / 2, pos.y);
+        sprite.tint = groundTint(map.tone[i]);
+        this.groundLayer.addChild(sprite);
+      }
+    }
+
+    for (const { tx, ty } of map.waterfalls) {
+      const pos = tileToScreen(tx, ty, 1);
+      const sprite = new Sprite(assets.get('tile.waterfall.0'));
+      sprite.position.set(pos.x - TILE_W / 2, pos.y);
+      this.waterLayer.addChild(sprite);
+      this.waterfallSprites.push(sprite);
+    }
+  }
+
+  private buildProps() {
+    for (const prop of this.map.props) {
+      if (!this.assets.has(prop.name)) continue;
+      const sprite = new Sprite(this.assets.get(prop.name));
+      sprite.anchor.set(0.5, 1);
+      const h = this.map.heightAt(prop.wx, prop.wy);
+      const pos = worldToScreen(prop.wx, prop.wy, h);
+      sprite.position.set(pos.x, pos.y);
+      sprite.zIndex = depthOf(prop.wx, prop.wy);
+      const size = prop.scale ?? 1;
+      sprite.scale.set(prop.flip ? -size : size, size);
+      this.objectLayer.addChild(sprite);
+      this.propSprites.push({ sprite, prop, phase: (prop.wx * 7.3 + prop.wy * 3.1) % (Math.PI * 2) });
+
+      if (prop.name.startsWith('prop.campfire')) this.campfires.push(sprite);
+      if (prop.glow) {
+        const glow = new Sprite(this.assets.get('fx.lampglow'));
+        glow.anchor.set(0.5, 0.5);
+        glow.position.set(pos.x, pos.y - 22);
+        glow.alpha = 0;
+        glow.scale.set(prop.name.includes('campfire') ? 1.5 : 1);
+        this.lightsRoot.addChild(glow);
+        this.lampGlows.push(glow);
+      }
+    }
+  }
+
+  private lampGlows: Sprite[] = [];
+
+  private buildRings() {
+    this.selectRing.texture = this.assets.get('fx.select');
+    this.hoverRing.texture = this.assets.get('fx.hover');
+    for (const ring of [this.hoverRing, this.selectRing]) {
+      ring.anchor.set(0.5, 0.5);
+      ring.visible = false;
+      ring.zIndex = -1;
+      this.objectLayer.addChild(ring);
+    }
+  }
+
+  /** Create sprites for any building that does not have one yet. */
+  syncBuildings() {
+    let houseIndex = 0;
+    this.world.buildings.forEach((building) => {
+      const index = building.type === 'House' ? houseIndex++ : 0;
+      if (this.buildings.has(building.id)) {
+        this.buildings.get(building.id)!.building = building;
+        return;
+      }
+      const artKey = buildingArtKey(building.type, index);
+      const meta = this.assets.buildingMeta.get(artKey);
+      if (!meta) return;
+      const height = this.map.heightAt(building.x, building.y);
+      const pos = worldToScreen(building.x, building.y, height);
+
+      const base = new Sprite(this.assets.get(`building.${artKey}`));
+      base.anchor.set(0.5, meta.anchorY);
+      base.position.set(pos.x, pos.y);
+      // Slight bias so citizens standing at the door sort in front of the wall.
+      base.zIndex = depthOf(building.x, building.y, -0.35);
+      base.eventMode = 'static';
+      base.cursor = 'pointer';
+      base.on('pointerover', () => this.setHover({ kind: 'building', id: building.id }));
+      base.on('pointerout', () => this.setHover(null));
+      base.on('pointertap', () => this.tap({ kind: 'building', id: building.id }));
+      this.objectLayer.addChild(base);
+
+      const lit = new Sprite(this.assets.get(`building.${artKey}.lit`));
+      lit.anchor.set(0.5, meta.anchorY);
+      lit.position.set(pos.x, pos.y);
+      lit.alpha = 0;
+      this.lightsRoot.addChild(lit);
+
+      let glow: Sprite | undefined;
+      if (['Tavern', 'Bakery', 'Blacksmith', 'Market', 'Bank'].includes(building.type)) {
+        glow = new Sprite(this.assets.get('fx.lampglow'));
+        glow.anchor.set(0.5, 0.5);
+        glow.position.set(pos.x, pos.y - meta.height * 0.35);
+        glow.scale.set(2.2);
+        glow.alpha = 0;
+        this.lightsRoot.addChild(glow);
+      }
+
+      let wheel: Sprite | undefined;
+      if (building.type === 'Mill') {
+        wheel = new Sprite(this.assets.get('overlay.mill.wheel.0'));
+        wheel.anchor.set(0.5, 0.5);
+        wheel.position.set(pos.x - meta.width * 0.36, pos.y - 22);
+        wheel.zIndex = depthOf(building.x, building.y, -0.3);
+        this.objectLayer.addChild(wheel);
+      }
+
+      const { badge, icon, text } = this.makeBadge();
+      this.hudRoot.addChild(badge);
+
+      // Construction clears the ground it stands on, so a new building never
+      // grows a tree through its roof.
+      for (const entry of this.propSprites) {
+        if (entry.cleared) continue;
+        const dx = entry.prop.wx - building.x;
+        const dy = entry.prop.wy - building.y;
+        if (dx * dx + dy * dy < 30) { entry.cleared = true; entry.sprite.visible = false; entry.sprite.renderable = false; }
+      }
+
+      const doorWorld = screenToWorld(meta.door[0], meta.door[1]);
+      this.buildings.set(building.id, {
+        building, base, lit, glow, wheel, artKey, height,
+        badge, badgeIcon: icon, badgeText: text,
+        door: { x: building.x + doorWorld.x, y: building.y + doorWorld.y },
+        chimney: meta.chimney ? { x: meta.chimney[0], y: meta.chimney[1] } : undefined,
+      });
+    });
+  }
+
+  private makeBadge() {
+    const badge = new Container();
+    badge.visible = false;
+    const bg = new Graphics();
+    bg.roundRect(-19, -11, 38, 22, 11).fill({ color: 0x0b1a10, alpha: 0.88 }).stroke({ width: 1, color: 0x3f6b46 });
+    const icon = new Sprite(this.assets.get('icon.work'));
+    icon.anchor.set(0.5, 0.5);
+    icon.position.set(-7, 0);
+    icon.scale.set(1.1);
+    const text = new Text({
+      text: '0',
+      style: { fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 12, fontWeight: '700', fill: 0xd9f3c4 },
+    });
+    text.anchor.set(0.5, 0.5);
+    text.position.set(8, 0);
+    badge.addChild(bg, icon, text);
+    return { badge, icon, text };
+  }
+
+  /** Create and retire citizen sprites so the scene matches the population. */
+  syncCitizens() {
+    const seen = new Set<string>();
+    for (const citizen of this.world.citizens) {
+      seen.add(citizen.id);
+      if (this.citizens.has(citizen.id)) continue;
+      const sprite = new CitizenSprite(this.assets, citizen);
+      sprite.container.eventMode = 'static';
+      sprite.container.cursor = 'pointer';
+      sprite.container.hitArea = new Rectangle(-9, -32, 18, 34);
+      sprite.container.on('pointerover', () => this.setHover({ kind: 'citizen', id: citizen.id }));
+      sprite.container.on('pointerout', () => this.setHover(null));
+      sprite.container.on('pointertap', () => this.tap({ kind: 'citizen', id: citizen.id }));
+      this.objectLayer.addChild(sprite.container);
+      this.citizens.set(citizen.id, sprite);
+    }
+    for (const [id, sprite] of this.citizens) {
+      if (seen.has(id)) continue;
+      sprite.destroy();
+      this.citizens.delete(id);
+    }
+  }
+
+  private buildBubbles() {
+    for (let i = 0; i < MAX_BUBBLES; i++) {
+      const root = new Container();
+      root.visible = false;
+      const bg = new Graphics();
+      const label = new Text({
+        text: '',
+        style: {
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 12,
+          fill: 0x22331f, wordWrap: true, wordWrapWidth: 150, lineHeight: 15,
+        },
+      });
+      label.position.set(9, 7);
+      root.addChild(bg, label);
+      this.hudRoot.addChild(root);
+      this.bubbles.push({ root, bg, label, citizenId: null, text: '', life: 0 });
+    }
+  }
+
+  private buildParticles() {
+    for (let i = 0; i < SMOKE_POOL; i++) {
+      const sprite = new Sprite(this.assets.get('fx.smoke'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.worldRoot.addChild(sprite);
+      this.smoke.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
+    for (let i = 0; i < WEATHER_POOL; i++) {
+      const sprite = new Sprite(this.assets.get('fx.rain'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.weatherLayer.addChild(sprite);
+      this.weatherParticles.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
+    for (let i = 0; i < 46; i++) {
+      const sprite = new Sprite(this.assets.get('fx.firefly'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.worldRoot.addChild(sprite);
+      this.motes.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Camera
+   * ---------------------------------------------------------------- */
+
+  private onResize() {
+    const w = this.app.renderer.width;
+    const h = this.app.renderer.height;
+    const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
+    const sceneH = SCENE_BOUNDS.maxY - SCENE_BOUNDS.minY;
+    // Never zoom out past the point where the world stops filling the viewport.
+    this.minZoom = Math.max(w / sceneW, h / sceneH, 0.35);
+    this.ambient.width = w; this.ambient.height = h;
+    this.seasonWash.width = w; this.seasonWash.height = h;
+    this.applyCamera();
+  }
+
+  /** Clamp the camera so the viewport can never show outside the world. */
+  private applyCamera() {
+    const w = this.app.renderer.width;
+    const h = this.app.renderer.height;
+    const zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.camera.zoom));
+    const halfW = w / (2 * zoom);
+    const halfH = h / (2 * zoom);
+    const { minX, maxX, minY, maxY } = SCENE_BOUNDS;
+
+    this.camera.zoom = zoom;
+    this.camera.x = maxX - minX <= halfW * 2 ? (minX + maxX) / 2 : Math.max(minX + halfW, Math.min(maxX - halfW, this.camera.x));
+    this.camera.y = maxY - minY <= halfH * 2 ? (minY + maxY) / 2 : Math.max(minY + halfH, Math.min(maxY - halfH, this.camera.y));
+
+    const px = w / 2 - this.camera.x * zoom;
+    const py = h / 2 - this.camera.y * zoom;
+    for (const root of [this.worldRoot, this.lightsRoot]) {
+      root.position.set(px, py);
+      root.scale.set(zoom);
+    }
+    this.callbacks.onCamera?.(zoom);
+  }
+
+  /** Point the camera at a world position. */
+  centreOn(wx: number, wy: number, zoom?: number) {
+    const pos = worldToScreen(wx, wy, this.map?.heightAt(wx, wy) ?? 0);
+    this.camera.x = pos.x;
+    this.camera.y = pos.y;
+    if (zoom !== undefined) this.camera.zoom = zoom;
+    this.applyCamera();
+  }
+
+  panBy(dx: number, dy: number) {
+    this.camera.x -= dx / this.camera.zoom;
+    this.camera.y -= dy / this.camera.zoom;
+    this.applyCamera();
+  }
+
+  zoomBy(factor: number, anchorX?: number, anchorY?: number) {
+    const w = this.app.renderer.width, h = this.app.renderer.height;
+    const ax = anchorX ?? w / 2, ay = anchorY ?? h / 2;
+    const before = this.screenToScene(ax, ay);
+    this.camera.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.camera.zoom * factor));
+    this.applyCamera();
+    const after = this.screenToScene(ax, ay);
+    this.camera.x += before.x - after.x;
+    this.camera.y += before.y - after.y;
+    this.applyCamera();
+  }
+
+  get zoom() { return this.camera.zoom; }
+  get zoomRange() { return { min: this.minZoom, max: this.maxZoom }; }
+
+  private screenToScene(sx: number, sy: number) {
+    return {
+      x: (sx - this.worldRoot.position.x) / this.camera.zoom,
+      y: (sy - this.worldRoot.position.y) / this.camera.zoom,
+    };
+  }
+
+  /** Scene pixels to screen pixels, for placing HUD elements over the world. */
+  private sceneToScreen(x: number, y: number) {
+    return {
+      x: x * this.camera.zoom + this.worldRoot.position.x,
+      y: y * this.camera.zoom + this.worldRoot.position.y,
+    };
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Input
+   * ---------------------------------------------------------------- */
+
+  private attachInput() {
+    const canvas = this.app.canvas;
+    canvas.addEventListener('pointerdown', (e) => {
+      this.dragging = true;
+      this.dragMoved = 0;
+      this.lastPointer = { x: e.clientX, y: e.clientY };
+      canvas.setPointerCapture(e.pointerId);
+      canvas.style.cursor = 'grabbing';
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!this.dragging) return;
+      const dx = e.clientX - this.lastPointer.x;
+      const dy = e.clientY - this.lastPointer.y;
+      this.lastPointer = { x: e.clientX, y: e.clientY };
+      this.dragMoved += Math.abs(dx) + Math.abs(dy);
+      this.panBy(dx, dy);
+    });
+    const end = (e: PointerEvent) => {
+      this.dragging = false;
+      canvas.style.cursor = 'grab';
+      if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      this.zoomBy(e.deltaY > 0 ? 0.9 : 1.1, e.clientX - rect.left, e.clientY - rect.top);
+    }, { passive: false });
+  }
+
+  private setHover(target: PickTarget) {
+    if (this.dragging) return;
+    this.hovered = target;
+    this.callbacks.onHover?.(target);
+  }
+
+  private tap(target: PickTarget) {
+    // A tap that ended a pan is a camera move, not a selection.
+    if (this.dragMoved > 6) return;
+    this.selected = target;
+    this.callbacks.onSelect?.(target);
+  }
+
+  /** Selection driven from the UI rather than a click on the map. */
+  select(target: PickTarget) {
+    this.selected = target;
+  }
+
+  /** Move the camera to a citizen or building and select it. */
+  focus(target: PickTarget) {
+    if (!target) return;
+    const source = target.kind === 'citizen'
+      ? this.world.citizens.find((c) => c.id === target.id)
+      : this.world.buildings.find((b) => b.id === target.id);
+    if (!source) return;
+    this.selected = target;
+    this.centreOn(source.x, source.y, Math.max(this.camera.zoom, 1.3));
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Frame
+   * ---------------------------------------------------------------- */
+
+  /** Swap in a new world object (after a reseed) without rebuilding the app. */
+  setWorld(world: World) {
+    this.world = world;
+  }
+
+  private update(dt: number) {
+    if (!this.world) return;
+    const clamped = Math.min(dt, 0.1);
+    this.time += clamped;
+
+    this.updateWater();
+    this.updateProps(clamped);
+    this.updateBuildings(clamped);
+    this.updateCitizens(clamped);
+    this.updateRings();
+    this.updateLighting();
+    this.updateSmoke(clamped);
+    this.updateWeather(clamped);
+    this.updateMotes(clamped);
+    this.updateBubbles(clamped);
+
+    this.cullTimer += clamped;
+    if (this.cullTimer > 0.25) { this.cullTimer = 0; this.cullStatic(); }
+  }
+
+  private updateWater() {
+    const frame = Math.floor(this.time * 5) % 4;
+    if (frame === this.waterFrame) return;
+    this.waterFrame = frame;
+    for (const { sprite, kind } of this.waterSprites) {
+      sprite.texture = this.assets.get(kind === 'water' ? `tile.water.${frame}` : `tile.watershore.${frame}`);
+    }
+    for (const sprite of this.waterfallSprites) sprite.texture = this.assets.get(`tile.waterfall.${frame}`);
+    for (const sprite of this.campfires) sprite.texture = this.assets.get(`prop.campfire.${frame % 2}`);
+  }
+  private waterFrame = -1;
+
+  private updateProps(dt: number) {
+    void dt;
+    // Only the canopy responds to wind; trunks, rocks and timber stay put.
+    const wind = this.world.weather === 'Storm' ? 3.2 : this.world.weather === 'Rain' ? 1.6 : 1;
+    for (const entry of this.propSprites) {
+      if (entry.prop.sway < 0.5 || !entry.sprite.visible) continue;
+      entry.sprite.rotation = Math.sin(this.time * 1.3 + entry.phase) * 0.012 * entry.prop.sway * wind;
+    }
+  }
+
+  private updateBuildings(dt: number) {
+    void dt;
+    const wheelFrame = Math.floor(this.time * 6) % 4;
+    const byId = new Map(this.world.citizens.map((c) => [c.id, c]));
+    for (const view of this.buildings.values()) {
+      const occupants = view.building.workers.length;
+      if (occupants > 0) {
+        const first = byId.get(view.building.workers[0]);
+        const icon = view.building.production ? 'work'
+          : first?.activity === 'eating' ? 'eat'
+            : first?.activity === 'resting' ? 'sleep'
+              : view.building.type === 'Market' ? 'trade' : 'social';
+        view.badgeIcon.texture = this.assets.get(`icon.${icon}`);
+        view.badgeText.text = String(occupants);
+        const anchor = this.sceneToScreen(view.base.x, view.base.y - view.base.height * view.base.anchor.y - 12);
+        view.badge.position.set(anchor.x, anchor.y);
+        view.badge.visible = this.camera.zoom > 0.6;
+      } else {
+        view.badge.visible = false;
+      }
+      if (view.wheel) view.wheel.texture = this.assets.get(`overlay.mill.wheel.${wheelFrame}`);
+    }
+  }
+
+  private updateCitizens(dt: number) {
+    for (const citizen of this.world.citizens) {
+      const sprite = this.citizens.get(citizen.id);
+      if (!sprite) continue;
+      let door: { x: number; y: number } | undefined;
+      if (citizen.inside && citizen.targetBuildingId) {
+        door = this.buildings.get(citizen.targetBuildingId)?.door;
+      }
+      const height = this.map.heightAt(sprite.wx, sprite.wy);
+      sprite.update(citizen, dt, height, door);
+      sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
+    }
+  }
+
+  private updateRings() {
+    const place = (ring: Sprite, target: PickTarget) => {
+      if (!target) { ring.visible = false; return; }
+      if (target.kind === 'citizen') {
+        const sprite = this.citizens.get(target.id);
+        if (!sprite) { ring.visible = false; return; }
+        const h = this.map.heightAt(sprite.wx, sprite.wy);
+        const pos = worldToScreen(sprite.wx, sprite.wy, h);
+        ring.position.set(pos.x, pos.y);
+        ring.scale.set(0.55);
+        ring.zIndex = depthOf(sprite.wx, sprite.wy, -0.05);
+      } else {
+        const view = this.buildings.get(target.id);
+        if (!view) { ring.visible = false; return; }
+        const b = view.building;
+        const pos = worldToScreen(b.x, b.y, view.height);
+        ring.position.set(pos.x, pos.y);
+        ring.scale.set(1.5);
+        ring.zIndex = depthOf(b.x, b.y, -0.5);
+      }
+      ring.visible = true;
+    };
+    place(this.selectRing, this.selected);
+    place(this.hoverRing, this.hovered && (!this.selected || this.hovered.id !== this.selected.id) ? this.hovered : null);
+    this.selectRing.alpha = 0.55 + Math.sin(this.time * 3) * 0.25;
+  }
+
+  /** Time-of-day and weather wash, plus everything that lights up after dark. */
+  private updateLighting() {
+    const hour = this.world.hour;
+    let a = AMBIENT[0], b = AMBIENT[AMBIENT.length - 1];
+    for (let i = 0; i < AMBIENT.length - 1; i++) {
+      if (hour >= AMBIENT[i].hour && hour <= AMBIENT[i + 1].hour) { a = AMBIENT[i]; b = AMBIENT[i + 1]; break; }
+    }
+    const t = b.hour === a.hour ? 0 : (hour - a.hour) / (b.hour - a.hour);
+    const lerp = (x: number, y: number) => x + (y - x) * t;
+    const mixChannel = (shift: number) => lerp((a.color >> shift) & 255, (b.color >> shift) & 255);
+    const color = (Math.round(mixChannel(16)) << 16) | (Math.round(mixChannel(8)) << 8) | Math.round(mixChannel(0));
+    const alpha = lerp(a.alpha, b.alpha);
+
+    const weather = WEATHER_TINT[this.world.weather] ?? WEATHER_TINT.Clear;
+    this.ambient.tint = color;
+    this.ambient.alpha = Math.min(0.72, alpha + weather.alpha * 0.6);
+    this.seasonWash.tint = SEASON_TINT[this.world.season] ?? 0xffffff;
+    this.seasonWash.alpha = this.world.season === 'Spring' ? 0 : 0.2;
+
+    // Full-screen passes are the most expensive thing the renderer does, so any
+    // that would contribute nothing this frame is switched off outright.
+    this.ambient.visible = this.ambient.alpha > 0.01;
+    this.seasonWash.visible = this.seasonWash.alpha > 0.01;
+
+    // Lights come up as the ambient wash darkens.
+    const night = Math.max(0, Math.min(1, (alpha - 0.1) / 0.34));
+    this.lightsRoot.visible = night > 0.02;
+    this.weatherLayer.visible = ['Rain', 'Storm', 'Snow'].includes(this.world.weather);
+    for (const view of this.buildings.values()) {
+      view.lit.alpha = night * 0.95;
+      if (view.glow) view.glow.alpha = night * 0.45;
+    }
+    for (const glow of this.lampGlows) glow.alpha = night * 0.6;
+    this.nightAmount = night;
+  }
+  private nightAmount = 0;
+
+  private updateSmoke(dt: number) {
+    // Emit from any chimney whose building is actively producing.
+    for (const view of this.buildings.values()) {
+      if (!view.chimney || !view.building.production) continue;
+      if (Math.random() > dt * 3.2) continue;
+      const particle = this.smoke.find((p) => p.life <= 0);
+      if (!particle) break;
+      particle.sprite.visible = true;
+      particle.sprite.position.set(view.base.x + view.chimney.x, view.base.y + view.chimney.y);
+      particle.sprite.scale.set(0.35);
+      particle.vx = 6 + Math.random() * 8;
+      particle.vy = -16 - Math.random() * 8;
+      particle.max = 2.6 + Math.random();
+      particle.life = particle.max;
+    }
+    for (const p of this.smoke) {
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      const k = 1 - p.life / p.max;
+      p.sprite.position.x += p.vx * dt;
+      p.sprite.position.y += p.vy * dt;
+      p.sprite.scale.set(0.35 + k * 1.1);
+      p.sprite.alpha = Math.max(0, 0.5 * (1 - k));
+      if (p.life <= 0) p.sprite.visible = false;
+    }
+  }
+
+  private updateWeather(dt: number) {
+    const w = this.app.renderer.width;
+    const h = this.app.renderer.height;
+    const weather = this.world.weather;
+    const raining = weather === 'Rain' || weather === 'Storm';
+    const snowing = weather === 'Snow';
+    const target = raining ? (weather === 'Storm' ? WEATHER_POOL : 180) : snowing ? 150 : 0;
+
+    let active = 0;
+    for (const p of this.weatherParticles) {
+      if (p.life > 0) {
+        active++;
+        p.sprite.position.x += p.vx * dt;
+        p.sprite.position.y += p.vy * dt;
+        if (p.sprite.position.y > h + 20 || p.sprite.position.x < -30 || p.sprite.position.x > w + 30) p.life = 0;
+        if (p.life <= 0) p.sprite.visible = false;
+        continue;
+      }
+      if (active >= target) continue;
+      active++;
+      p.sprite.texture = this.assets.get(snowing ? 'fx.snow' : 'fx.rain');
+      p.sprite.visible = true;
+      p.sprite.alpha = snowing ? 0.85 : 0.55;
+      p.sprite.position.set(Math.random() * (w + 200) - 100, -Math.random() * h);
+      if (snowing) {
+        p.vx = -12 + Math.random() * 24;
+        p.vy = 42 + Math.random() * 34;
+        p.sprite.scale.set(0.7 + Math.random() * 0.8);
+      } else {
+        p.vx = weather === 'Storm' ? -180 : -70;
+        p.vy = weather === 'Storm' ? 900 : 620;
+        p.sprite.scale.set(1, 0.8 + Math.random() * 0.7);
+      }
+      p.life = 12;
+    }
+  }
+
+  /** Fireflies after dark in the warm seasons; drifting leaves in autumn. */
+  private updateMotes(dt: number) {
+    const autumn = this.world.season === 'Autumn';
+    const active = autumn || this.nightAmount > 0.35;
+    for (const p of this.motes) {
+      if (p.life > 0) {
+        p.life -= dt;
+        p.sprite.position.x += p.vx * dt;
+        p.sprite.position.y += p.vy * dt + Math.sin(this.time * 2 + p.max) * 6 * dt;
+        const k = p.life / p.max;
+        p.sprite.alpha = Math.sin(Math.min(1, k) * Math.PI) * (autumn ? 0.9 : 0.75);
+        if (p.life <= 0) p.sprite.visible = false;
+        continue;
+      }
+      if (!active || Math.random() > dt * 2) continue;
+      p.sprite.texture = this.assets.get(autumn ? `fx.leaf.${Math.floor(Math.random() * 3)}` : 'fx.firefly');
+      p.sprite.visible = true;
+      const wx = 10 + Math.random() * 80;
+      const wy = 10 + Math.random() * 80;
+      const pos = worldToScreen(wx, wy, this.map.heightAt(wx, wy));
+      p.sprite.position.set(pos.x, pos.y - 20 - Math.random() * 60);
+      p.vx = autumn ? -22 - Math.random() * 26 : -8 + Math.random() * 16;
+      p.vy = autumn ? 12 + Math.random() * 10 : -4 + Math.random() * 8;
+      p.max = 6 + Math.random() * 5;
+      p.life = p.max;
+    }
+  }
+
+  /**
+   * Speech bubbles. A handful of visible, outdoor citizens are given a line at a
+   * time and the set rotates, which keeps the settlement chattering without
+   * turning the screen into a wall of text.
+   */
+  private updateBubbles(dt: number) {
+    this.bubbleTimer -= dt;
+    if (this.bubbleTimer <= 0) {
+      this.bubbleTimer = BUBBLE_ROTATE;
+      this.beat++;
+      this.assignBubbles();
+    }
+    const w = this.app.renderer.width, h = this.app.renderer.height;
+    for (const bubble of this.bubbles) {
+      if (!bubble.citizenId) { bubble.root.visible = false; continue; }
+      const sprite = this.citizens.get(bubble.citizenId);
+      const citizen = this.world.citizens.find((c) => c.id === bubble.citizenId);
+      if (!sprite || !citizen) { bubble.root.visible = false; continue; }
+      const height = this.map.heightAt(sprite.wx, sprite.wy);
+      const scene = worldToScreen(sprite.wx, sprite.wy, height);
+      const pos = this.sceneToScreen(scene.x, scene.y + sprite.headOffset * this.camera.zoom / this.camera.zoom);
+      const x = pos.x - bubble.root.width / 2;
+      const y = pos.y - 34 * this.camera.zoom - bubble.root.height;
+      bubble.root.position.set(Math.round(x), Math.round(y));
+      // Hide rather than clip when the speaker leaves the viewport.
+      bubble.root.visible = x > -40 && x < w + 40 && y > -30 && y < h - 10 && this.camera.zoom > 0.55;
+      bubble.life -= dt;
+    }
+  }
+
+  private assignBubbles() {
+    const candidates = this.world.citizens.filter((c) => !c.inside && c.age >= 10);
+    // Prefer whoever is selected, then citizens nearest the middle of the view.
+    const centre = this.screenToScene(this.app.renderer.width / 2, this.app.renderer.height / 2);
+    const scored = candidates.map((c) => {
+      const sprite = this.citizens.get(c.id);
+      const pos = sprite ? worldToScreen(sprite.wx, sprite.wy) : { x: 0, y: 0 };
+      const d = Math.hypot(pos.x - centre.x, pos.y - centre.y);
+      const priority = this.selected?.kind === 'citizen' && this.selected.id === c.id ? -1e6 : d;
+      return { c, priority };
+    }).sort((a, b) => a.priority - b.priority);
+
+    let index = 0;
+    const spoken = new Set<string>();
+    for (const bubble of this.bubbles) {
+      let assigned = false;
+      while (index < scored.length) {
+        const citizen = scored[index++].c;
+        const line = speechFor(this.world, citizen, this.beat);
+        if (!line) continue;
+        // Two citizens saying the same thing at once reads as a bug, not a crowd.
+        if (spoken.has(line)) continue;
+        spoken.add(line);
+        if (bubble.citizenId !== citizen.id || bubble.text !== line) {
+          bubble.citizenId = citizen.id;
+          bubble.text = line;
+          bubble.label.text = line;
+          const bw = Math.ceil(bubble.label.width) + 18;
+          const bh = Math.ceil(bubble.label.height) + 14;
+          bubble.bg.clear();
+          bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf1f3e4, alpha: 0.95 });
+          bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf1f3e4, alpha: 0.95 });
+        }
+        bubble.life = BUBBLE_ROTATE;
+        bubble.root.visible = true;
+        assigned = true;
+        break;
+      }
+      if (!assigned) { bubble.citizenId = null; bubble.root.visible = false; }
+    }
+  }
+
+  /** Hide anything outside the viewport so offscreen props cost nothing. */
+  private cullStatic() {
+    const pad = 220;
+    const topLeft = this.screenToScene(-pad, -pad);
+    const bottomRight = this.screenToScene(this.app.renderer.width + pad, this.app.renderer.height + pad);
+    const inView = (x: number, y: number) => x > topLeft.x && x < bottomRight.x && y > topLeft.y && y < bottomRight.y;
+
+    for (const entry of this.propSprites) entry.sprite.visible = !entry.cleared && inView(entry.sprite.x, entry.sprite.y);
+    for (const entry of this.waterSprites) entry.sprite.visible = inView(entry.sprite.x + TILE_W / 2, entry.sprite.y + TILE_H / 2);
+    for (const child of this.groundLayer.children) child.visible = inView(child.x + TILE_W / 2, child.y + TILE_H / 2);
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Minimap
+   * ---------------------------------------------------------------- */
+
+  private minimapBase: HTMLCanvasElement | null = null;
+
+  /** Bake the terrain into a small isometric image once. */
+  private buildMinimapBase() {
+    const scale = 4;
+    const w = this.map.grid * scale;
+    const h = this.map.grid * (scale / 2) + scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    const half = w / 2;
+    for (let ty = 0; ty < this.map.grid; ty++) {
+      for (let tx = 0; tx < this.map.grid; tx++) {
+        const kind = this.map.tiles[ty * this.map.grid + tx] as Tile;
+        ctx.fillStyle = MINIMAP_COLORS[kind];
+        const x = half + (tx - ty) * (scale / 2) - scale / 2;
+        const y = (tx + ty) * (scale / 4) - this.map.steps[ty * this.map.grid + tx] * 1.5;
+        ctx.fillRect(x, y, scale, scale / 2 + 1);
+      }
+    }
+    this.minimapBase = canvas;
+  }
+
+  /** Draw the world map plus live citizens, buildings and the viewport frame. */
+  drawMinimap(target: HTMLCanvasElement) {
+    if (!this.map) return;
+    if (!this.minimapBase) this.buildMinimapBase();
+    const ctx = target.getContext('2d');
+    if (!ctx || !this.minimapBase) return;
+    const w = target.width, h = target.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.minimapBase, 0, 0, w, h);
+
+    const project = (wx: number, wy: number) => {
+      const p = worldToScreen(wx, wy);
+      const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
+      return {
+        x: ((p.x - SCENE_BOUNDS.minX) / sceneW) * w,
+        y: (p.y / (GRID * TILE_H)) * h,
+      };
+    };
+
+    ctx.fillStyle = '#e8c169';
+    for (const b of this.world.buildings) {
+      const p = project(b.x, b.y);
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    ctx.fillStyle = '#c9ffab';
+    for (const sprite of this.citizens.values()) {
+      const p = project(sprite.wx, sprite.wy);
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+
+    // Viewport frame.
+    const tl = this.screenToScene(0, 0);
+    const br = this.screenToScene(this.app.renderer.width, this.app.renderer.height);
+    const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
+    const x0 = ((tl.x - SCENE_BOUNDS.minX) / sceneW) * w;
+    const x1 = ((br.x - SCENE_BOUNDS.minX) / sceneW) * w;
+    const y0 = (tl.y / (GRID * TILE_H)) * h;
+    const y1 = (br.y / (GRID * TILE_H)) * h;
+    ctx.strokeStyle = 'rgba(232,240,214,0.85)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y0) + 0.5, Math.round(x1 - x0), Math.round(y1 - y0));
+  }
+
+  /** Move the camera to the point clicked on the minimap. */
+  minimapJump(u: number, v: number) {
+    const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
+    this.camera.x = SCENE_BOUNDS.minX + u * sceneW;
+    this.camera.y = v * (GRID * TILE_H);
+    this.applyCamera();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Build placement
+   * ---------------------------------------------------------------- */
+
+  private ghost: Sprite | null = null;
+  private placement: { type: string; onPlace: (x: number, y: number) => void } | null = null;
+  private placementValid = false;
+
+  /**
+   * Enter placement mode. A translucent ghost of the building follows the
+   * cursor, snapped to the tile grid and tinted by whether the ground will take
+   * it, and clicking commits. Escape or `cancelPlacement()` backs out.
+   */
+  startPlacement(type: string, onPlace: (x: number, y: number) => void) {
+    this.cancelPlacement();
+    const artKey = buildingArtKey(type, 0);
+    const meta = this.assets.buildingMeta.get(artKey);
+    if (!meta) return;
+    const ghost = new Sprite(this.assets.get(`building.${artKey}`));
+    ghost.anchor.set(0.5, meta.anchorY);
+    ghost.alpha = 0.7;
+    ghost.zIndex = 1e6;
+    this.objectLayer.addChild(ghost);
+    this.ghost = ghost;
+    this.placement = { type, onPlace };
+    this.app.canvas.style.cursor = 'copy';
+
+    this.app.canvas.addEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.addEventListener('pointerup', this.onPlacementCommit);
+    window.addEventListener('keydown', this.onPlacementKey);
+  }
+
+  cancelPlacement() {
+    if (!this.placement) return;
+    this.app.canvas.removeEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.removeEventListener('pointerup', this.onPlacementCommit);
+    window.removeEventListener('keydown', this.onPlacementKey);
+    this.ghost?.destroy();
+    this.ghost = null;
+    this.placement = null;
+    this.app.canvas.style.cursor = 'grab';
+  }
+
+  get placing() { return this.placement?.type ?? null; }
+
+  private onPlacementMove = (e: PointerEvent) => {
+    if (!this.ghost) return;
+    const rect = this.app.canvas.getBoundingClientRect();
+    const scene = this.screenToScene(e.clientX - rect.left, e.clientY - rect.top);
+    const world = screenToWorld(scene.x, scene.y);
+    const wx = Math.max(4, Math.min(96, world.x));
+    const wy = Math.max(6, Math.min(94, world.y));
+    this.placementSpot = { x: wx, y: wy };
+    this.placementValid = this.canBuildAt(wx, wy);
+    const height = this.map.heightAt(wx, wy);
+    const pos = worldToScreen(wx, wy, height);
+    this.ghost.position.set(pos.x, pos.y);
+    this.ghost.zIndex = depthOf(wx, wy, 1000);
+    this.ghost.tint = this.placementValid ? 0xa8ff9a : 0xff8a7a;
+  };
+  private placementSpot = { x: 50, y: 50 };
+
+  private onPlacementCommit = () => {
+    if (!this.placement || this.dragMoved > 6) return;
+    if (!this.placementValid) return;
+    const { onPlace } = this.placement;
+    const { x, y } = this.placementSpot;
+    this.cancelPlacement();
+    onPlace(x, y);
+  };
+
+  private onPlacementKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') this.cancelPlacement();
+  };
+
+  /** Ground has to be dry, clear of other buildings and off the roads. */
+  canBuildAt(wx: number, wy: number) {
+    const tile = this.map.tileAt(wx, wy);
+    if (tile === Tile.Water || tile === Tile.WaterShore) return false;
+    if (tile === Tile.Path || tile === Tile.Plaza) return false;
+    return !this.world.buildings.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < 64);
+  }
+
+  /** Tooltip text for the currently hovered thing. */
+  describe(target: PickTarget): { title: string; lines: string[] } | null {
+    if (!target) return null;
+    if (target.kind === 'citizen') {
+      const c = this.world.citizens.find((x) => x.id === target.id);
+      if (!c) return null;
+      const family = this.world.families.find((f) => f.id === c.familyId);
+      return {
+        title: c.name,
+        lines: [`${JOB_LABELS[c.job]} · ${ACTIVITY_LABELS[c.activity]}`, `${family?.name ?? 'Unknown'} family · age ${c.age}`],
+      };
+    }
+    const b = this.world.buildings.find((x) => x.id === target.id);
+    if (!b) return null;
+    return { title: b.type, lines: [b.workers.length ? `${b.workers.length} inside` : 'Quiet right now'] };
+  }
+
+  destroy() {
+    this.disposed = true;
+    for (const sprite of this.citizens.values()) sprite.destroy();
+    this.citizens.clear();
+    this.buildings.clear();
+    if (this.app.renderer) this.app.destroy(true, { children: true });
+  }
+}
+
+export const SCENE_CONSTANTS = { GRID, TILE_W, TILE_H, ELEVATION, UI };
+export type { FederatedPointerEvent };
