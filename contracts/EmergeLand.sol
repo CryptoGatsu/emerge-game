@@ -28,9 +28,15 @@ pragma solidity ^0.8.20;
  *
  * ## Deployment
  *
- * 1. Deploy with the $EMERGE token address.
+ * 1. Deploy with the $EMERGE token address, a burn address, and whether the
+ *    token can burn its own supply (`burnByCall`).
  * 2. Set `NEXT_PUBLIC_EMERGE_REGISTRY` to this contract's address.
  * 3. Players call `approve(registry, amount)` on the token once, then claim.
+ *
+ * For a Pons v2 launch, or any token carrying OpenZeppelin's `ERC20Burnable`,
+ * deploy with `burnByCall = true` and the payment is genuinely destroyed. For a
+ * token without it, pass false and a burn address the token will accept —
+ * **not** the zero address, which OpenZeppelin's `_transfer` reverts on.
  *
  * `setBasePrice`, `setBiomePremium` and `setBurnAddress` let the owner tune
  * pricing and move the burn target. The owner cannot take a plot, cannot move
@@ -81,6 +87,17 @@ contract EmergeLand {
      */
     address public burnAddress;
 
+    /**
+     * Whether payment is destroyed with `burnFrom` rather than sent to
+     * `burnAddress`.
+     *
+     * True for any token with OpenZeppelin's `ERC20Burnable`. Note that most
+     * OpenZeppelin tokens *revert* on a transfer to the zero address, so a
+     * deployment that leaves this false must give `burnAddress` a real one —
+     * `0x…dEaD` — or every claim will fail.
+     */
+    bool public burnByCall;
+
     /** The floor a plot costs, before what the land is worth. */
     uint256 public basePrice;
 
@@ -100,10 +117,11 @@ contract EmergeLand {
         _;
     }
 
-    constructor(address tokenAddress, address burnTo) {
+    constructor(address tokenAddress, address burnTo, bool burnByCall_) {
         owner = msg.sender;
         token = IERC20(tokenAddress);
         burnAddress = burnTo;
+        burnByCall = burnByCall_;
 
         // Matching the game's own numbers at deployment. All adjustable after.
         basePrice = 180;
@@ -166,7 +184,23 @@ contract EmergeLand {
 
         uint256 price = priceOf(seed);
         require(price <= maxPrice, "price moved");
-        require(token.transferFrom(msg.sender, burnAddress, price), "payment failed");
+
+        /*
+         * Destroy the payment, by whichever route the token allows.
+         *
+         * `burnFrom` is the real thing: total supply falls and anybody counting
+         * how much $EMERGE exists sees it. It needs `ERC20Burnable`, which every
+         * Pons v2 launch carries but not every token does — so the transfer to a
+         * dead address stays as the fallback for one that does not.
+         *
+         * Both spend the same allowance the player already granted, so the
+         * choice changes nothing about what they sign.
+         */
+        if (burnByCall) {
+            token.burnFrom(msg.sender, price);
+        } else {
+            require(token.transferFrom(msg.sender, burnAddress, price), "payment failed");
+        }
 
         _owners[seed] = msg.sender;
         _balances[msg.sender] += 1;
@@ -233,6 +267,7 @@ contract EmergeLand {
         biomePremium[index] = value;
     }
     function setBurnAddress(address value) external onlyOwner { burnAddress = value; }
+    function setBurnByCall(bool value) external onlyOwner { burnByCall = value; }
     function transferOwnership(address value) external onlyOwner { owner = value; }
 
     /* ---------------------------------------------------------------- *
@@ -338,6 +373,8 @@ interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
     function decimals() external view returns (uint8);
+    /// OpenZeppelin's `ERC20Burnable`. Spends the caller's allowance, then destroys.
+    function burnFrom(address account, uint256 amount) external;
 }
 
 interface IERC721Receiver {

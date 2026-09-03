@@ -454,6 +454,20 @@ export const vaultLive = (config: ChainConfig = ACTIVE_CHAIN) =>
   tokenLive(config) && /^0x[0-9a-fA-F]{40}$/.test(VAULT_ADDRESS);
 
 /**
+ * True when the token can destroy its own supply.
+ *
+ * Set `NEXT_PUBLIC_TOKEN_BURNABLE=true` for any token carrying OpenZeppelin's
+ * `ERC20Burnable` — which every Pons v2 launch does. Charges then call
+ * `burn(uint256)` and `totalSupply()` actually falls, rather than piling up in
+ * a dead address.
+ *
+ * Off by default, because calling `burn` on a token that does not have it is a
+ * transaction that reverts, and a charge that always fails is worse than one
+ * that burns imperfectly.
+ */
+export const tokenBurnable = () => process.env.NEXT_PUBLIC_TOKEN_BURNABLE === 'true';
+
+/**
  * One JSON-RPC call against the configured node.
  *
  * Reads only — anything that changes state is signed by the player's wallet,
@@ -594,10 +608,52 @@ export async function burnTokens(
   whole: number,
   config: ChainConfig = ACTIVE_CHAIN,
 ): Promise<BurnResult> {
+  /*
+   * A real burn where the token has one.
+   *
+   * `burn(uint256)` destroys the tokens: `totalSupply()` goes down, and anybody
+   * checking how much $EMERGE exists sees the difference. Sending to a dead
+   * address only moves them somewhere nobody holds the key to, which is
+   * unrecoverable but is not the same claim — the supply figure is unchanged
+   * and the tokens still sit in a balance.
+   *
+   * The fallback is for a token without `ERC20Burnable`, where a transfer to
+   * an address nobody controls is the only burn available.
+   */
+  if (tokenBurnable()) {
+    const gone = await burnViaToken(from, whole, config);
+    if (gone.ok) return { ...gone, message: `Burned ${whole.toLocaleString()} ${TOKEN.ticker}.` };
+    return gone;
+  }
   const sent = await transferTokens(from, BURN_ADDRESS, whole, config);
   return sent.ok
     ? { ...sent, message: `Burned ${whole.toLocaleString()} ${TOKEN.ticker}.` }
     : sent;
+}
+
+/** `burn(uint256)`, as `ERC20Burnable` defines it. */
+async function burnViaToken(
+  from: string,
+  whole: number,
+  config: ChainConfig,
+): Promise<BurnResult> {
+  if (!config.tokenAddress) {
+    return { ok: false, txHash: null, message: `No ${TOKEN.ticker} contract is configured.` };
+  }
+  if (!walletAvailable()) {
+    return { ok: false, txHash: null, message: 'No wallet to sign with.' };
+  }
+  const units = BigInt(Math.round(whole)) * 10n ** BigInt(await tokenDecimals(config));
+  try {
+    const txHash = (await window.ethereum!.request({
+      method: 'eth_sendTransaction',
+      params: [{ from, to: config.tokenAddress, data: `0x42966c68${numWord(units)}` }],
+    })) as string;
+    return { ok: true, txHash, message: 'Sent.' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The transaction was rejected.';
+    return { ok: false, txHash: null, message };
+  }
 }
 
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {

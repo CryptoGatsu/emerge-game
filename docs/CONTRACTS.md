@@ -58,7 +58,27 @@ will stop the game working on the day you launch rather than later:
 
 And the one that matters for the registry:
 
-| **Reverts on transfer to `0x0`** | **Breaks every plot claim.** `claim` sends the price straight to the burn address inside the transaction. Use `0x…dEaD` for both `burnTo` and `NEXT_PUBLIC_BURN_ADDRESS` if so. |
+| **Reverts on transfer to `0x0`** | **Breaks every plot claim** if the registry is deployed with `burnByCall = false`. OpenZeppelin's `_transfer` does exactly this. Either deploy with `burnByCall = true` (if the token is burnable) or give `burnTo` a real address like `0x…dEaD`. |
+
+### Pons v2, specifically
+
+`PonsV2LauncherToken` was read at commit `845bd54`. It is a plain
+`ERC20 + ERC20Burnable` with a fixed supply minted to the bonding curve, and
+**no transfer hook of any kind** — no fee, no max wallet, no max transaction,
+no blacklist, no pause, no trading gate, no `decimals` override. The v2 hook
+(`PonsV2MemeHook`) implements only `_beforeInitialize` and `_afterSwap`, so it
+touches pool swaps and never a plain transfer. The factory's `whitelistedLaunchers`
+map governs who may *launch* a token, not who may move one.
+
+Two consequences:
+
+1. **Do not use the zero address as the burn target.** OpenZeppelin's
+   `_transfer` reverts on it, which would break every charge and every claim.
+2. **Use the real burn instead.** The token carries `burn(uint256)` and
+   `burnFrom(address,uint256)`, so payments can be genuinely destroyed rather
+   than parked. Set `NEXT_PUBLIC_TOKEN_BURNABLE=true` and deploy the registry
+   with `burnByCall = true`; `totalSupply()` then actually falls, which is the
+   claim a token project usually wants to be able to make.
 
 > **One thing to check before you deploy.** Many ERC-20 implementations —
 > OpenZeppelin's among them — **revert on a transfer to the zero address**. If

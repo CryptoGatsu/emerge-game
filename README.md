@@ -650,6 +650,7 @@ Server-only, and deliberately without the `NEXT_PUBLIC_` prefix that would put
 them in the browser bundle:
 
 ```
+NEXT_PUBLIC_TOKEN_BURNABLE=                # true for any ERC20Burnable token (Pons v2 is)
 EMERGE_VAULT_PRIVATE_KEY=                  # the vault's key, for automatic withdrawals
 EMERGE_SESSION_SECRET=                      # signs sign-in cookies; derived from the vault key if unset
 EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, vault-wide
