@@ -57,6 +57,11 @@ interface BuildingView {
   door: { x: number; y: number };
   chimney?: { x: number; y: number };
   height: number;
+  /**
+   * Where the sprites were last put. `building` is the live object, so it
+   * cannot be compared against itself once the simulation has moved it.
+   */
+  at: { x: number; y: number };
 }
 
 interface Bubble {
@@ -381,6 +386,50 @@ export class EmergeScene {
   }
 
   /** Create sprites for any building that does not have one yet. */
+  /**
+   * Put a building's sprites where the building is.
+   *
+   * Used when one is first raised and again whenever the player moves it: the
+   * silhouette, the lit copy behind it, the lamp glow, the mill wheel, the
+   * depth it sorts at, the ground height it stands on and the door people walk
+   * to all follow the same two numbers.
+   */
+  private placeBuilding(view: BuildingView, building: Building) {
+    const meta = this.assets.buildingMeta.get(view.artKey);
+    if (!meta) return;
+    const height = this.map.heightAt(building.x, building.y);
+    const pos = worldToScreen(building.x, building.y, height);
+
+    view.height = height;
+    view.at = { x: building.x, y: building.y };
+    view.base.position.set(pos.x, pos.y);
+    view.base.zIndex = depthOf(building.x, building.y, -0.35);
+    view.lit.position.set(pos.x, pos.y);
+    view.glow?.position.set(pos.x, pos.y - meta.height * 0.35);
+    if (view.wheel) {
+      view.wheel.position.set(pos.x - meta.width * 0.36, pos.y - 22);
+      view.wheel.zIndex = depthOf(building.x, building.y, -0.3);
+    }
+
+    const doorWorld = screenToWorld(meta.door[0], meta.door[1]);
+    view.door = { x: building.x + doorWorld.x, y: building.y + doorWorld.y };
+    this.clearGroundUnder(building);
+  }
+
+  /** A building never grows a tree through its roof, wherever it stands. */
+  private clearGroundUnder(building: Building) {
+    for (const entry of this.propSprites) {
+      if (entry.cleared) continue;
+      const dx = entry.prop.wx - building.x;
+      const dy = entry.prop.wy - building.y;
+      if (dx * dx + dy * dy < 30) {
+        entry.cleared = true;
+        entry.sprite.visible = false;
+        entry.sprite.renderable = false;
+      }
+    }
+  }
+
   syncBuildings() {
     // Anything the settlement no longer has: pull its sprites out of the scene.
     //
@@ -401,8 +450,13 @@ export class EmergeScene {
     // stops on its own once the building is out of the list.
 
     this.world.buildings.forEach((building) => {
-      if (this.buildings.has(building.id)) {
-        this.buildings.get(building.id)!.building = building;
+      const seen = this.buildings.get(building.id);
+      if (seen) {
+        seen.building = building;
+        // A building the player has picked up and put down somewhere else.
+        // Without this the simulation moved it, the feed said so, the Gold was
+        // charged — and the thing itself stayed exactly where it was.
+        if (seen.at.x !== building.x || seen.at.y !== building.y) this.placeBuilding(seen, building);
         return;
       }
       const artKey = buildingArtKey(building.type, building.id);
@@ -452,18 +506,12 @@ export class EmergeScene {
       const { badge, icon, text } = this.makeBadge();
       this.hudRoot.addChild(badge);
 
-      // Construction clears the ground it stands on, so a new building never
-      // grows a tree through its roof.
-      for (const entry of this.propSprites) {
-        if (entry.cleared) continue;
-        const dx = entry.prop.wx - building.x;
-        const dy = entry.prop.wy - building.y;
-        if (dx * dx + dy * dy < 30) { entry.cleared = true; entry.sprite.visible = false; entry.sprite.renderable = false; }
-      }
+      this.clearGroundUnder(building);
 
       const doorWorld = screenToWorld(meta.door[0], meta.door[1]);
       this.buildings.set(building.id, {
         building, base, lit, glow, wheel, artKey, height,
+        at: { x: building.x, y: building.y },
         badge, badgeIcon: icon, badgeText: text,
         door: { x: building.x + doorWorld.x, y: building.y + doorWorld.y },
         chimney: meta.chimney ? { x: meta.chimney[0], y: meta.chimney[1] } : undefined,
