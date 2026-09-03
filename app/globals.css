@@ -2990,14 +2990,15 @@ button.fold:hover { color: var(--emerald); }
 @media (min-width: 781px) { .build-tools { grid-template-columns: minmax(0, 320px); } }
 
 /* ---- offers ---- */
-.offer-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(184, 231, 86, 0.14); display: grid; gap: 6px; }
-.offer-row { display: flex; gap: 8px; align-items: stretch; }
+.offer-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(184, 231, 86, 0.14); display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.offer-box > * { min-width: 0; }
+.offer-row { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
 /* The card makes its buttons full-width; the offer button sits beside the
    amount instead, and the amount takes what is left. */
 .offer-row input {
   flex: 1 1 0;
   min-width: 0;
-  width: auto;
+  width: 0;
   padding: 9px 12px;
   border-radius: 9px;
   border: 1px solid var(--panel-edge-soft);
