@@ -162,7 +162,7 @@ export interface EmissionRoom {
 }
 
 /** How much stewardship this address may still be paid today. */
-export async function emissionRoom(address: string): Promise<EmissionRoom> {
+export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING): Promise<EmissionRoom> {
   const day = utcDay();
   const [spent, emitted] = await Promise.all([
     counter(earnedKey(address, day)),
@@ -170,7 +170,7 @@ export async function emissionRoom(address: string): Promise<EmissionRoom> {
   ]);
   return {
     spent,
-    left: Math.max(0, DAILY_EARN_CEILING - spent),
+    left: Math.max(0, ceiling - spent),
     globalLeft: Math.max(0, dailyEmissionBudget() - emitted),
   };
 }
@@ -185,14 +185,14 @@ export async function emissionRoom(address: string): Promise<EmissionRoom> {
  * atomically, and a reservation that turns out to breach either is rolled back
  * before anything is signed.
  */
-export async function reserveEmission(address: string, whole: number): Promise<boolean> {
+export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING): Promise<boolean> {
   const day = utcDay();
   const amount = Math.floor(whole);
   if (!(amount > 0)) return false;
 
   // Expiring, so a day's tally does not become a key that lives for ever.
   const mine = await incrWindow(earnedKey(address, day), amount, 26 * 3600);
-  if (mine > DAILY_EARN_CEILING) {
+  if (mine > ceiling) {
     await incrBy(earnedKey(address, day), -amount);
     return false;
   }

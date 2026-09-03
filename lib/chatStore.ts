@@ -16,6 +16,8 @@ export interface RelayMessage {
   author: string;
   /** True when `author` is a wallet address rather than a chosen name. */
   wallet: boolean;
+  /** True when it was posted without any wallet at all. Shown as a badge. */
+  spectator?: boolean;
   text: string;
   at: number;
 }

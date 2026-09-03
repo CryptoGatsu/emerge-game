@@ -65,6 +65,22 @@ export interface Claim {
   listedAt?: number;
   /** Offers other players have made on it, best first. */
   offers?: Offer[];
+  /** The owner is looking for a hired hand. */
+  hiring?: boolean;
+  /** Whoever holds that job. */
+  hand?: Hand;
+}
+
+/**
+ * A hired hand: a player with no land of their own, paid to attend somebody
+ * else's. The row is the job; there is one per plot and one per wallet.
+ */
+export interface Hand {
+  address: string;
+  name: string;
+  since: number;
+  /** When they last had the plot open, so the owner's attention can count it. */
+  lastSeen: number;
 }
 
 /**
@@ -222,6 +238,80 @@ export async function listClaim(seed: number, owner: string, price: number | nul
   if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
   const { forSale: _forSale, listedAt: _listedAt, ...rest } = existing;
   const row: Claim = price && price > 0 ? { ...rest, forSale: Math.round(price), listedAt: Date.now() } : rest;
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+/* ------------------------------------------------------------------ *
+ * Hired hands
+ * ------------------------------------------------------------------ */
+
+/** Turn hiring on or off. Off dismisses whoever held the job. */
+export async function setHiring(seed: number, owner: string, hiring: boolean): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const { hiring: _hiring, hand: _hand, ...rest } = existing;
+  const row: Claim = hiring ? { ...rest, hiring: true } : rest;
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+/** The plot this wallet works at, if any. */
+export async function jobOf(worker: string): Promise<Claim | null> {
+  const me = worker.toLowerCase();
+  const claims = await allClaims();
+  return claims.find((c) => c.hand?.address === me) ?? null;
+}
+
+export type JobResult = { ok: true; claim: Claim } | { ok: false; reason: string };
+
+/**
+ * Take the job at a plot.
+ *
+ * One hand per plot and one job per wallet, and never a landholder: a player
+ * with a plot has their own attention to give it, and the point of the job
+ * is to let somebody without land into the game. Taking the job you already
+ * hold is not an error.
+ */
+export async function takeJob(seed: number, worker: string, name: string): Promise<JobResult> {
+  const me = worker.toLowerCase();
+  const existing = await claimOf(seed);
+  if (!existing) return { ok: false, reason: 'Nobody holds that plot.' };
+  if (existing.owner.toLowerCase() === me) return { ok: false, reason: 'That is your own plot.' };
+  if (existing.hand && existing.hand.address === me) return { ok: true, claim: existing };
+  if (!existing.hiring) return { ok: false, reason: 'That plot is not hiring.' };
+  if (existing.hand) return { ok: false, reason: `${existing.hand.name || 'Somebody'} already works there.` };
+  const claims = await allClaims();
+  if (claims.some((c) => c.owner.toLowerCase() === me)) {
+    return { ok: false, reason: 'Landholders run their own plots. Hired hands are for players without one.' };
+  }
+  const elsewhere = claims.find((c) => c.hand?.address === me);
+  if (elsewhere) {
+    return { ok: false, reason: `You already work at ${elsewhere.worldName || elsewhere.region}. Quit there first.` };
+  }
+  const now = Date.now();
+  const row: Claim = { ...existing, hand: { address: me, name: name.slice(0, 32), since: now, lastSeen: now } };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return { ok: true, claim: row };
+}
+
+/** Leave the job, or as the owner, let the hand go. */
+export async function quitJob(seed: number, who: string): Promise<Claim | null> {
+  const me = who.toLowerCase();
+  const existing = await claimOf(seed);
+  if (!existing) return null;
+  const owner = existing.owner.toLowerCase() === me;
+  if (!owner && existing.hand?.address !== me) return null;
+  const { hand: _hand, ...row } = existing;
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+/** The hand says they are at work: their presence is what the owner's attention counts. */
+export async function attendJob(seed: number, worker: string): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing?.hand || existing.hand.address !== worker.toLowerCase()) return null;
+  const row: Claim = { ...existing, hand: { ...existing.hand, lastSeen: Date.now() } };
   await hset(CLAIMS, String(seed), JSON.stringify(row));
   return row;
 }
@@ -547,13 +637,20 @@ export async function collectGifts(seed: number): Promise<Gift[]> {
  * ------------------------------------------------------------------ */
 
 /**
- * How long a published snapshot is served for.
+ * How long a published snapshot is kept.
  *
- * Long enough that a visitor to a world whose owner logged off this morning
- * still sees the settlement; short enough that abandoned worlds fall out on
- * their own rather than accumulating for ever.
+ * This used to be a day and a half, on the theory that a visitor only needs
+ * to see a world whose owner was here recently. But the published copy is
+ * also the owner's own backup: it is what a second device, a cleared browser
+ * or a phone that lost its storage continues from. A day and a half meant
+ * that a player who took a long weekend off came back to a world regenerated
+ * from its seed — every building gone, the opening handful of people — and
+ * that is the one thing this game must never do to somebody. So a snapshot
+ * now lives for over a year, the same as the player's own record, and is
+ * refreshed on every publish. Two hundred settlements at their largest come
+ * to well under a hundred megabytes, which the store holds without noticing.
  */
-const WORLD_TTL_SECONDS = 36 * 3600;
+const WORLD_TTL_SECONDS = 400 * 86_400;
 
 const WORLDS_INDEX = serverKey('worlds');
 const worldKey = (seed: number) => serverKey(`world:${seed}`);
@@ -564,10 +661,30 @@ export interface PublishedWorld {
   ownerName: string;
   worldName: string;
   day: number;
+  /** The hour within that day, so two copies of the same day can be ordered. */
+  hour?: number;
   population: number;
   at: number;
   /** The saved world, exactly as the owner's browser keeps it. */
   snapshot: unknown;
+}
+
+/**
+ * Whether a snapshot at `day`/`hour` is behind one already held.
+ *
+ * Later means further along in the settlement's own time, never more recent
+ * on the wall clock: a stale tab or an old phone saving a day-nine world
+ * over a day-forty one is exactly the regression this exists to refuse.
+ * The same day is accepted unless the held copy is more than an hour ahead,
+ * so two devices trading publishes within a day never fight over minutes.
+ */
+export function isBehind(held: PublishedWorld, day: number, hour: number): boolean {
+  if (held.day > day) return true;
+  if (held.day < day) return false;
+  const heldHour = typeof held.hour === 'number'
+    ? held.hour
+    : Number((held.snapshot as { world?: { hour?: unknown } } | null)?.world?.hour) || 0;
+  return heldHour > hour + 1;
 }
 
 /** Put a world up for visitors. */

@@ -112,7 +112,18 @@ function ContractAddress() {
   );
 }
 
-export default function Landing({ onEnter }: { onEnter: () => void }) {
+/**
+ * The front door, with a side door.
+ *
+ * Nothing past this point *costs* anything without a wallet, but until now
+ * nothing past it could be *seen* without one either, and a game that will
+ * not show itself to somebody who has not signed anything yet is asking for
+ * trust it has not earned. So there is a second way in: just watch. A
+ * spectator can walk the world map, visit any settlement and talk in chat,
+ * badged as a spectator so nobody mistakes them for a landholder. Claiming,
+ * building and earning still need an address, and the map says so.
+ */
+export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; onSpectate: () => void }) {
   const { wallet } = useWallet();
   const connected = wallet.status === 'connected' && !!wallet.address;
   useLocale();
@@ -154,6 +165,10 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
                 <div className="gate-wallet"><WalletPicker /></div>
                 <p className="muted small">
                   {t('A plot belongs to an address, and so does your balance and your name. Connect a wallet and the map opens — nothing before that point costs you anything.')}
+                </p>
+                <button className="ghost spectate-button" onClick={onSpectate}>{t('Just watch for now')}</button>
+                <p className="muted small">
+                  {t('Look around without connecting anything: visit any settlement and talk in chat as a spectator. Connect a wallet whenever you want land of your own.')}
                 </p>
               </>
             )}

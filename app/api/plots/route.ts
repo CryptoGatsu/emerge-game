@@ -42,12 +42,14 @@
 
 import { NextResponse } from 'next/server';
 import {
-  allClaims, allFinds, answerOffer, claimOf, dropReservation, holdsReservation, listClaim, placeOffer,
-  priceFor, registryShared, releaseClaim, reservePlot, survey, takeClaim, transferClaim, withdrawOffer,
+  allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, placeOffer,
+  priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
+  withdrawOffer,
   type Claim,
 } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
-import { tokenLive } from '@/lib/chain/emerge';
+import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
+import { HAND_MIN_EMERGE } from '@/lib/chain/vault';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { ownerOnChain, registryConfigured } from '@/lib/server/land';
@@ -104,6 +106,11 @@ export async function POST(request: Request) {
     /** The owner answers a bidder's offer. */
     answer?: 'accept' | 'decline';
     bidder?: string;
+    /** Hired hands: the owner opens or closes the job; a player takes, keeps or leaves it. */
+    hire?: boolean;
+    takeJob?: boolean;
+    quitJob?: boolean;
+    attend?: boolean;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -226,6 +233,58 @@ export async function POST(request: Request) {
       const row = await placeOffer(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME), price);
       if (!row) return NextResponse.json({ error: 'That plot is not somebody else’s to make an offer on.' }, { status: 409 });
       return NextResponse.json({ claim: row });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+  /*
+   * Hired hands.
+   *
+   * The owner opens the job; a player without land takes it. The balance
+   * floor is read off the chain here, at the moment of hiring, and again
+   * whenever the hand is paid — a job is not a licence, it is a standing
+   * check.
+   */
+  if (body.hire !== undefined) {
+    try {
+      const row = await setHiring(seed, owner, body.hire === true);
+      return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+  if (body.takeJob) {
+    if (tokenLive()) {
+      const held = await tokenBalance(owner);
+      if (held === null) {
+        return NextResponse.json({ error: 'Your balance could not be read just now. Try again in a minute.' }, { status: 503 });
+      }
+      if (held < HAND_MIN_EMERGE) {
+        return NextResponse.json({
+          error: `A hired hand holds at least ${HAND_MIN_EMERGE.toLocaleString()} $EMERGE. This wallet holds ${Math.floor(held).toLocaleString()}.`,
+        }, { status: 403 });
+      }
+    }
+    try {
+      const result = await takeJob(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME));
+      if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
+      return NextResponse.json({ claim: result.claim });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+  if (body.quitJob) {
+    try {
+      const row = await quitJob(seed, owner);
+      return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'No such job.' }, { status: 409 });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+  if (body.attend) {
+    try {
+      const row = await attendJob(seed, owner);
+      return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'You do not work there.' }, { status: 409 });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }

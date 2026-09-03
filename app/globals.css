@@ -1936,6 +1936,14 @@ button.fold:hover { color: var(--emerald); }
 .chat-row.host b, .chat-who.host { color: var(--gold); }
 .chat-who.host:hover { color: #f6dda0; }
 .host-star { font-style: normal; margin-left: 3px; font-size: 9px; color: var(--gold); }
+/* Somebody talking without a wallet. Marked, never hidden. */
+.spectator-tag {
+  font-style: normal; margin-left: 5px; padding: 1px 5px; border-radius: 4px;
+  font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.chat-row.spectator b { color: var(--muted); }
+.spectate-button { width: 100%; padding: 11px 18px; font-size: 12.5px; }
 
 /* The alerts switch, beside the name button. */
 .chat-tabs button.bell { font-size: 10.5px; padding: 6px 11px; }
@@ -2980,6 +2988,11 @@ button.fold:hover { color: var(--emerald); }
 .world-count b { color: #e6f5c8; font-size: 15px; margin-right: 4px; }
 .region-pin .sale-tag, .region-pin .settled-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; }
 .region-pin .sale-tag { background: rgba(240, 208, 94, 0.22); color: #f0d05e; }
+.region-pin .hiring-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; background: rgba(184, 231, 86, 0.2); color: var(--emerald); }
+.job-box { margin-top: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(184, 231, 86, 0.22); background: rgba(184, 231, 86, 0.05); display: flex; flex-direction: column; gap: 6px; }
+.job-box .offer-row { display: flex; gap: 8px; }
+.visiting-bar.at-work { border-color: rgba(184, 231, 86, 0.45); }
+.visiting-bar.at-work .eyebrow { color: var(--emerald); }
 .region-pin.settled .pin-dot { box-shadow: 0 0 0 2px rgba(240, 208, 94, 0); }
 .sale-tag-big { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: rgba(240, 208, 94, 0.2); color: #f0d05e; }
 

@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FEED_ICON, WEATHER_ICON, type Focus, type Snapshot } from '@/lib/hud';
 import type { PickTarget } from '@/lib/render/scene';
 import type { PlayerRecord } from '@/lib/world/plots';
-import { RENAME_CITIZEN_EMERGE } from '@/lib/chain/vault';
+import { RENAME_CITIZEN_EMERGE, HAND_SHARE } from '@/lib/chain/vault';
 import { TOKEN, shortAddress } from '@/lib/chain/emerge';
 import { BrandMark } from './Brand';
 import type { PanelKey } from './Panels';
@@ -60,7 +60,7 @@ interface HudProps {
   /** People playing Emerge anywhere, or null when the relay has not said. */
   online: number | null;
   /** Set when this is somebody else's settlement, being looked at. */
-  visiting: { worldName: string; ownerName: string; owner: string; at: number } | null;
+  visiting: { worldName: string; ownerName: string; owner: string; at: number; hand?: boolean } | null;
   /** Stop visiting and go back to the world map. */
   onEndVisit: () => void;
 }
@@ -830,12 +830,14 @@ export function Hud(props: HudProps) {
           every control on screen behaves differently here and a player who
           forgot where they were would read the difference as a bug. */}
       {props.visiting && (
-        <div className="visiting-bar">
-          <span className="eyebrow">{t('VISITING')}</span>
+        <div className={`visiting-bar ${props.visiting.hand ? 'at-work' : ''}`}>
+          <span className="eyebrow">{props.visiting.hand ? t('AT WORK') : t('VISITING')}</span>
           <b>{props.visiting.worldName}</b>
           <em>
             {props.visiting.ownerName?.trim() ? props.visiting.ownerName : shortAddress(props.visiting.owner)}
-            {' · '}{sinceWhen(props.visiting.at)}
+            {' · '}{props.visiting.hand
+              ? t('hired hand · about {n} {ticker}/day', { n: Math.round(view.stewardship.dailyYield * HAND_SHARE).toLocaleString(), ticker: TOKEN.ticker })
+              : sinceWhen(props.visiting.at)}
           </em>
           <button className="ghost" onClick={props.onEndVisit}>{t('Leave')}</button>
         </div>

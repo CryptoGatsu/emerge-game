@@ -40,6 +40,8 @@ export interface ChatMessage {
   author: string;
   /** Whether `author` is a real wallet address. */
   wallet: boolean;
+  /** Posted by somebody watching without a wallet. */
+  spectator?: boolean;
   text: string;
   at: number;
 }

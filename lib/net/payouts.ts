@@ -47,6 +47,8 @@ export interface PayoutHistory {
    * deployment's problem, not the player's, and are worth saying out loud.
    */
   land: 'holds' | 'none' | 'no-registry' | 'unreachable' | null;
+  /** No land, but a job: this wallet is paid as a hired hand. */
+  hand: boolean;
 }
 
 /* ------------------------------------------------------------------ *
@@ -144,7 +146,7 @@ export async function withdrawFromVault(request: WithdrawRequest): Promise<Payou
 /** What a wallet has been paid, and what it may still be paid today. */
 export async function fetchPayouts(address: string): Promise<PayoutHistory> {
   const empty: PayoutHistory = {
-    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null,
+    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null, hand: false,
   };
   try {
     const response = await fetch(`/api/payouts?address=${encodeURIComponent(address)}`, { cache: 'no-store' });
@@ -157,6 +159,7 @@ export async function fetchPayouts(address: string): Promise<PayoutHistory> {
       automatic: json.automatic === true,
       shared: json.shared === true,
       land: json.land ?? null,
+      hand: json.hand === true,
     };
   } catch {
     return empty;

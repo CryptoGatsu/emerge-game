@@ -9,12 +9,22 @@
  * actually built, with none of their people in it. That would look like a visit
  * and be a fiction.
  *
- * Only the address that holds the claim may publish, so a settlement cannot be
- * rewritten by somebody who does not own it.
+ * It is also the owner's backup. The copy here is what a second device, a
+ * cleared browser or a phone that lost its storage continues from, so two
+ * rules protect it. Only the address that holds the claim may publish, so a
+ * settlement cannot be rewritten by somebody who does not own it. And **a
+ * snapshot that is behind the one already held is refused**, whoever sends
+ * it: a tab left open on a desktop while the same player built for a week on
+ * their phone used to publish its stale day-nine world over the real day-forty
+ * one the moment it woke up, and the phone's next open then "continued" from
+ * it. Progress is what must never be lost, so the store only ever moves
+ * forward in the settlement's own time. A client told it is behind reads the
+ * held copy back and continues from that instead.
  */
 
+import { gunzipSync } from 'node:zlib';
 import { NextResponse } from 'next/server';
-import { claimOf, publishWorld, readWorld } from '@/lib/server/registry';
+import { claimOf, isBehind, publishWorld, readWorld } from '@/lib/server/registry';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
@@ -49,13 +59,41 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  let body: {
-    seed?: number; owner?: string; ownerName?: string; worldName?: string;
-    day?: number; population?: number; snapshot?: unknown;
-  };
+interface PublishBody {
+  seed?: number; owner?: string; ownerName?: string; worldName?: string;
+  day?: number; hour?: number; population?: number; snapshot?: unknown;
+}
+
+/**
+ * Read the body, packed or plain.
+ *
+ * A browser putting the page away sends its last snapshot with `keepalive`,
+ * and the browsers cap what a keepalive request may carry at about 64KB — a
+ * settlement a few weeks old is bigger than that, so the save that mattered
+ * most, the one on closing the tab, was the one that silently failed. The
+ * client gzips the snapshot where it can, which brings a large world down to
+ * a tenth of the size, and says so in its own header rather than in
+ * `Content-Encoding` because a proxy along the way may honour that one and
+ * hand over the body already unpacked. Unpacking is tried and, if the body
+ * turns out to be plain after all, it is read as it came.
+ */
+async function readBody(request: Request): Promise<PublishBody> {
+  const packed = request.headers.get('x-emerge-encoding') === 'gzip';
+  if (!packed) return (await request.json()) as PublishBody;
+  const raw = Buffer.from(await request.arrayBuffer());
+  let text: string;
   try {
-    body = (await request.json()) as typeof body;
+    text = gunzipSync(raw).toString('utf8');
+  } catch {
+    text = raw.toString('utf8');
+  }
+  return JSON.parse(text) as PublishBody;
+}
+
+export async function POST(request: Request) {
+  let body: PublishBody;
+  try {
+    body = await readBody(request);
   } catch {
     return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 });
   }
@@ -77,11 +115,34 @@ export async function POST(request: Request) {
   if (!body.snapshot) {
     return NextResponse.json({ error: 'Nothing to publish.' }, { status: 400 });
   }
+  /*
+   * The shape a client can read back.
+   *
+   * A snapshot the reader would reject is worse than none: it would replace
+   * a good copy with one every device then ignores, which is losing the
+   * world by another route.
+   */
+  const snap = body.snapshot as {
+    version?: unknown; seed?: unknown;
+    world?: { citizens?: unknown; buildings?: unknown; day?: unknown; hour?: unknown };
+  };
+  if (
+    typeof snap !== 'object' || snap.seed !== seed
+    || !Array.isArray(snap.world?.citizens) || !Array.isArray(snap.world?.buildings)
+    || !Number.isFinite(Number(snap.world?.day))
+  ) {
+    return NextResponse.json({ error: 'That is not a world this game can read.' }, { status: 400 });
+  }
 
   const encoded = JSON.stringify(body.snapshot);
   if (encoded.length > MAX_SNAPSHOT) {
     return NextResponse.json({ error: 'That world is too large to publish.' }, { status: 413 });
   }
+
+  // Where the settlement is, read from the world itself rather than from
+  // the headline the client put beside it, so the two cannot disagree.
+  const day = Math.max(0, Math.round(Number(snap.world?.day) || 0));
+  const hour = Math.max(0, Number(snap.world?.hour) || 0);
 
   try {
     // The registry decides who may write here, not the caller.
@@ -93,12 +154,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'That world belongs to somebody else.' }, { status: 403 });
     }
 
+    // Never backwards. See the top of the file.
+    const held = await readWorld(seed);
+    if (held && held.owner.toLowerCase() === owner.toLowerCase() && isBehind(held, day, hour)) {
+      return NextResponse.json({
+        error: 'A later copy of this world is already published.',
+        behind: true,
+        day: held.day,
+        hour: held.hour ?? null,
+        at: held.at,
+      }, { status: 409 });
+    }
+
     await publishWorld({
       seed,
       owner: owner.toLowerCase(),
       ownerName: String(body.ownerName ?? claim.ownerName ?? '').slice(0, 32),
       worldName: String(body.worldName ?? claim.worldName ?? '').slice(0, 32),
-      day: Math.max(0, Math.round(Number(body.day) || 0)),
+      day,
+      hour,
       population: Math.max(0, Math.round(Number(body.population) || 0)),
       at: Date.now(),
       snapshot: body.snapshot,

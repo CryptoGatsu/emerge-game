@@ -35,11 +35,11 @@ import {
 import {
   allOnChainPlots, claimOnChain, onChainClaimsLive, plotExplorerUrl, registryPrice,
 } from '@/lib/chain/registry';
-import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
+import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE } from '@/lib/chain/vault';
 import { pay, settleBurn, spend } from '@/lib/chain/spend';
 import {
   buyPlot, fetchClaims, placeOffer, priceFor, reservePlot, surveyPlot, takePlot, withdrawOffer,
-  type Claim, type Find,
+  type Claim, type Find, quitJob, takeJob,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { BrandLine } from './Brand';
@@ -483,8 +483,9 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
               <b>
                 {plot.region}
                 {mine && <i className="yours">{t('yours')}</i>}
-                {theirs && !theirs.forSale && <i className="settled-tag">{t('settled')}</i>}
+                {theirs && !theirs.forSale && !(theirs.hiring && !theirs.hand) && <i className="settled-tag">{t('settled')}</i>}
                 {theirs && !!theirs.forSale && <i className="sale-tag">{t('for sale')}</i>}
+                {theirs && !theirs.forSale && theirs.hiring && !theirs.hand && <i className="hiring-tag">{t('hiring')}</i>}
               </b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}
@@ -607,6 +608,10 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
   const [buying, setBuying] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
   const [offering, setOffering] = useState(false);
+  const [jobBusy, setJobBusy] = useState(false);
+  const me = wallet.address?.toLowerCase() ?? '';
+  /** The plot this wallet works at, if any. */
+  const myJob = useMemo(() => (me ? allClaims.find((c) => c.hand?.address === me) ?? null : null), [allClaims, me]);
 
   /*
    * Who holds what, minus this player's own land.
@@ -948,6 +953,34 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
       : t('Your offer of {price} {ticker} is with {who}. If they accept, the plot is held for you at that price for two days.', { price: price.toLocaleString(), ticker: TOKEN.ticker, who: listing.ownerName || shortAddress(listing.owner) }));
   }, [wallet.address, player.name, setClaims]),
 
+  /** Take the job at somebody's plot, and go straight to work. */
+  takeTheJob = useCallback(async (listing: Claim) => {
+    if (!wallet.address) return;
+    setJobBusy(true);
+    const result = await takeJob(listing.seed, wallet.address, player.name);
+    setJobBusy(false);
+    if (!result.ok || !result.claim) { setNotice(result.reason ?? null); return; }
+    const row = result.claim;
+    setClaims((held) => held.map((c) => (c.seed === row.seed ? row : c)));
+    setNotice(t('You work at {world} now. Keep it open and in view to be paid.', { world: listing.worldName }));
+    setVisiting(true);
+    const refused = await onVisit(listing.seed);
+    setVisiting(false);
+    if (refused) setNotice(refused);
+  }, [wallet.address, player.name, setClaims, onVisit]),
+
+  /** Leave the job. */
+  leaveJob = useCallback(async (listing: Claim) => {
+    if (!wallet.address) return;
+    setJobBusy(true);
+    const result = await quitJob(listing.seed, wallet.address);
+    setJobBusy(false);
+    if (!result.ok || !result.claim) { setNotice(result.reason ?? null); return; }
+    const row = result.claim;
+    setClaims((held) => held.map((c) => (c.seed === row.seed ? row : c)));
+    setNotice(t('You left the job at {world}.', { world: listing.worldName }));
+  }, [wallet.address, setClaims]),
+
   /** Go and look at the settlement somebody else built here. */
   visit = useCallback(async (seed: number) => {
     setVisiting(true);
@@ -1092,6 +1125,37 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
                     {t('Up for sale at {price} {ticker}. The price goes to {who}’s wallet, not to the burn address, and the settlement comes with the land.', { price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })}
                   </p>
                 )}
+                {/* Work: the plot is hiring, or you already work here. Only for
+                    players without land — a landholder has their own to run. */}
+                {(heldByOther.hiring || heldByOther.hand?.address === me) && (
+                  <div className="job-box">
+                    <span className="eyebrow">{t('WORK')}</span>
+                    {heldByOther.hand?.address === me ? (
+                      <>
+                        <p className="muted small">{t('You work here. Open the world and keep it in view to be paid; your shift counts as the owner’s attention.')}</p>
+                        <div className="offer-row">
+                          <button className="claim-button" onClick={() => visit(heldByOther.seed)} disabled={visiting}>{visiting ? t('Travelling…') : t('Go to work')}</button>
+                          <button className="ghost" onClick={() => leaveJob(heldByOther)} disabled={jobBusy}>{t('Quit')}</button>
+                        </div>
+                      </>
+                    ) : heldByOther.hand ? (
+                      <p className="muted small">{t('{who} works here.', { who: heldByOther.hand.name || shortAddress(heldByOther.hand.address) })}</p>
+                    ) : (
+                      <>
+                        <p className="muted small">
+                          {t('{who} is hiring a hand. A hand holds at least {min} {ticker} and no land, attends the plot while its owner is away, and is paid {share} of its stewardship — up to {cap} {ticker} a day — by the vault.', { who: heldByOther.ownerName || shortAddress(heldByOther.owner), min: HAND_MIN_EMERGE.toLocaleString(), ticker: TOKEN.ticker, share: `${Math.round(HAND_SHARE * 100)}%`, cap: HAND_DAILY_CEILING.toLocaleString() })}
+                        </p>
+                        <button
+                          className="ghost"
+                          disabled={jobBusy || !wallet.address || ownedSeeds.size > 0 || player.ledger.balance < HAND_MIN_EMERGE}
+                          onClick={() => takeTheJob(heldByOther)}
+                        >
+                          {jobBusy ? t('Asking…') : !wallet.address ? t('Connect a wallet to work') : ownedSeeds.size > 0 ? t('Landholders run their own plots') : player.ledger.balance < HAND_MIN_EMERGE ? t('Needs {min} {ticker}', { min: HAND_MIN_EMERGE.toLocaleString(), ticker: TOKEN.ticker }) : t('Work here')}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
                 {/* Offers: yours, and the fact of the others'. Any plot can be
                     offered for, listed or not; the owner decides. */}
                 <div className="offer-box">
@@ -1229,6 +1293,15 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
               </p>
             )}
 
+            {myJob && myJob.seed !== selected.seed && (
+              <div className="owned-list">
+                <span className="eyebrow">{t('YOUR JOB')}</span>
+                <button className="owned-row" onClick={() => visit(myJob.seed)} disabled={visiting}>
+                  <b>{myJob.worldName}</b>
+                  <span className="muted small">{t('hired hand · {region}', { region: myJob.region })}</span>
+                </button>
+              </div>
+            )}
             {player.claims.length > 0 && (
               <>
                 <span className="eyebrow">{t('WORLDS YOU OWN')}</span>

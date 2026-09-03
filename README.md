@@ -503,13 +503,46 @@ every forty-five seconds; a visitor reads it back and the world is restored from
 it. Without this a visit could only show a world regenerated from the seed — the
 same land, but not the place the owner built and with none of their people in
 it, which would look like a visit and be a fiction. Only the address holding the
-claim may publish, checked against the registry. Snapshots expire after
-thirty-six hours, so abandoned worlds fall out on their own.
+claim may publish, checked against the registry. Snapshots are kept for over a
+year — the published copy is also the owner's backup, and the day-and-a-half
+expiry this started with is how a player who took a long weekend off came back
+to a settlement regenerated from its seed.
+
+**The store only moves forward.** A snapshot behind the one already held is
+refused, whoever sends it. A tab left open on a desktop while the same player
+built for a week on their phone used to wake up, save its stale day-nine world
+over the phone's, and publish it; the phone's next open then "continued" from
+day nine. Now the server answers `409 behind`, the tab reads the later copy
+back and continues from it with a card saying so, and the local save refuses to
+go backwards by the same rule. Publishes over 24KB are gzipped in the browser,
+because the one on closing the tab goes out with `keepalive` and the browsers
+cap that at about 64KB — a settlement a few weeks old was bigger than that, so
+the save that mattered most was the one that silently failed.
 
 A visit is read-only and enforced in three places: the scene refuses to pick
 anybody up, the action bar drops build, prospect and on-chain, and the local
 save and the yield credit are both skipped. Nothing a visitor does touches the
 world they are looking at or the one they own.
+
+**Hired hands.** A player with no land can still earn. An owner opens a job on
+their plot from the On-Chain panel; a player without a plot who holds at least
+1,000 $EMERGE takes it from the world map and goes to work, which is a visit
+that pays: a tenth of what the settlement's stewardship comes to while they
+have it open and in view, up to 2,500 a day, credited to their own ledger and
+paid by the vault. The owner gets something real for it — while the hand is at
+work the plot counts as attended, so the owner's rate holds while they are
+away. One hand per plot, one job per wallet, never a landholder. The payout
+route treats a hand as a wallet with land only after re-reading the job row and
+the balance floor off the chain, so a wallet that took the job and then emptied
+itself is not paid on the strength of what it used to hold; and the whole
+scheme is bounded by the number of plots times a hand's ceiling, under the
+global daily budget regardless.
+
+**Spectators.** The front door has a side door: *just watch*. A spectator walks
+the world map, visits any settlement and talks in chat without connecting
+anything, badged as a spectator on every message — the badge is set by the
+relay for any message posted without a wallet, so it cannot be taken off.
+Claiming, building and earning still need an address.
 
 **`/api/presence` — who is watching.** A heartbeat with a timeout rather than a
 sign-in, because nobody closes a tab politely: the only definition of "here"

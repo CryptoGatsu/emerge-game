@@ -12,7 +12,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
-  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
@@ -254,7 +254,10 @@ export function WikiZh() {
               <p><b>其他一切都已上线。</b>认领、销毁、你自己 {T} 的存取今天都能用。如果你是冲着收益来的，那是唯一值得等的东西，我们宁愿现在告诉你，而不是在你为此买了地之后。</p>
             </div>
           )}
-        </section>
+                  <h3>没有土地也能赚：雇工</h3>
+          <p>赚钱不一定要有地，只要有一份工。地主可以在自己的地上开放一个职位；没有土地、持有至少 <b>{n(HAND_MIN_EMERGE)} {T}</b> 的玩家从世界地图接下它去上工。上工是一次会付钱的拜访：只要你开着那个聚落并保持在屏幕上，金库就按其管理收益的 <b>{Math.round(HAND_SHARE * 100)}%</b> 付给你，每天最多 {n(HAND_DAILY_CEILING)} {T}——绝不从地主的收益里扣。</p>
+          <p>地主也实实在在得到好处：雇工上工时这块地算作有人照看，地主不在时收益率不会掉。一块地一名雇工，一个钱包一份工，地主不能兼职——地主有自己的地要经营。你的班次从满额开始，像地主的关注一样逐渐下滑，所以整周开着标签页挣到的和地主挂机差不多：很少。</p>
+</section>
 
         <section id="economy">
           <h2>聚落自己的钱</h2>
@@ -447,6 +450,8 @@ export function WikiZh() {
           <p>所有人认领过的每一块地都在同一张共享地图上。你可以拜访别人建的聚落——点标记，或在聊天里点某人的名字——看到他们最后离开时的世界。</p>
           <p>拜访就是拜访：你可以观看、跟着人走，但不能建造、拆除或在那里赚钱。你也看不到他们的金库。访客唯一能做的是<b>往看着顺眼的聚落里放金币</b>，一次最多 {n(MAX_GIFT_GOLD)} 金币，按通常汇率以 {T} 支付。</p>
           <p>聊天有一个全局频道和一个你所在世界的频道。以钱包发出的消息由该钱包签名——所以名字旁有徽章的真的就是那个地址，别人冒充不了。</p>
+          <p><b>不连接任何东西也能先看看。</b>首页有一个<em>先看看再说</em>按钮：观众可以走遍世界地图、拜访任何聚落、在聊天里说话，每条消息都标着"观众"，不会被误认为地主。认领、建造和赚钱仍然需要钱包。</p>
+          <p><b>你的聚落跟着你走。</b>它每十五秒存进浏览器，同时发布到服务器；无论在哪里打开，进度更靠前的那份继续；服务器拒绝任何会让世界倒退的副本——所以旧设备上开着的标签页不会抹掉你在新设备上一周的建设。</p>
         </section>
 
         <section id="honest">

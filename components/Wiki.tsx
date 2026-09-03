@@ -19,7 +19,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
-  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
@@ -381,6 +381,22 @@ export default function Wiki() {
             pay, and {n(DAILY_EARN_CEILING)} a day is a hard ceiling per wallet — so no amount of
             money buys past it. That is deliberate: the cap is what stops the game being a machine
             for turning capital into tokens.
+          </p>
+          <h3>Earning without land: hired hands</h3>
+          <p>
+            You do not need a plot to earn, only a job. An owner can open one on their plot; a
+            player with no land of their own who holds at least <b>{n(HAND_MIN_EMERGE)} {TOKEN.ticker}</b>
+            {' '}takes it from the world map and goes to work. Work is a visit that pays: while you
+            have that settlement open and in view, you are paid <b>{Math.round(HAND_SHARE * 100)}%</b> of
+            what its stewardship comes to, up to {n(HAND_DAILY_CEILING)} {TOKEN.ticker} a day, by the
+            vault — never out of the owner&rsquo;s yield.
+          </p>
+          <p>
+            The owner gets something real for it: while a hand is at work the plot counts as
+            attended, so their rate holds while they are away. One hand per plot, one job per
+            wallet, and never a landholder — a landholder has their own plot to run. Your shift
+            starts at full rate and slides the same way an owner&rsquo;s attention does, so a
+            tab left open all week earns about what it would earn an owner: very little.
           </p>
 
           {!landOnChain && (
@@ -889,6 +905,19 @@ export default function Wiki() {
             Chat has a global channel and one for the world you are standing in. A message posted
             under a wallet is signed by that wallet — so a name with a badge beside it really is
             that address, and cannot be worn by somebody else.
+          </p>
+          <p>
+            <b>You can look before you connect anything.</b> The front door has a <em>just watch</em>
+            {' '}button: a spectator walks the world map, visits any settlement and talks in chat,
+            marked as a spectator on every message so nobody mistakes them for a landholder.
+            Claiming, building and earning still need a wallet.
+          </p>
+          <p>
+            <b>Your settlement follows you.</b> It is saved in your browser every fifteen seconds
+            and published to the server; whichever copy is further along is the one that continues
+            when you open the world anywhere, and the server refuses a copy that would put the
+            world backwards — so a tab left open on an old device cannot undo a week of building
+            on a new one.
           </p>
         </section>
 

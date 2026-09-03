@@ -46,7 +46,8 @@ import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { landCheck } from '@/lib/server/land';
+import { handCheck, landCheck } from '@/lib/server/land';
+import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,14 +69,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ payouts: [], automatic: vaultCanSign(), shared: registryShared() });
   }
   try {
-    const [payouts, principal, room, land] = await Promise.all([
-      payoutsFor(address), principalOf(address), emissionRoom(address), landCheck(address),
+    const [payouts, principal, land] = await Promise.all([
+      payoutsFor(address), principalOf(address), landCheck(address),
     ]);
+    // A wallet with no land may still be a hired hand, with a hand's ceiling.
+    const hand = land === 'none' ? await handCheck(address) : 'none';
+    const room = await emissionRoom(address, hand === 'hand' ? HAND_DAILY_CEILING : DAILY_EARN_CEILING);
     return NextResponse.json({
       payouts, principal, room,
       // Whether stewardship can be collected at all, and if not, why — so the
       // Bank can say so before somebody presses the button.
       land,
+      hand: hand === 'hand',
       automatic: vaultCanSign(),
       shared: registryShared(),
     });
@@ -175,9 +180,15 @@ export async function POST(request: Request) {
    * line the vault is about to work, and a failed attempt costs it the same as
    * a successful one, so the slot is not given back.
    */
+  let ceiling = DAILY_EARN_CEILING;
   if (kind === 'earnings') {
     const land = await landCheck(address);
-    if (land !== 'holds') {
+    // No land, but a job: a hired hand is paid up to a hand's ceiling.
+    const hand = land === 'none' ? await handCheck(address) : 'none';
+    if (hand === 'hand') ceiling = HAND_DAILY_CEILING;
+    else if (hand === 'unreachable') {
+      return NextResponse.json({ error: 'We could not read this wallet\u2019s balance to confirm your job. Nothing was taken — try again in a minute.', land }, { status: 403 });
+    } else if (land !== 'holds') {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.
       const said = land === 'no-registry'
@@ -219,8 +230,8 @@ export async function POST(request: Request) {
     }
     give = async () => { await debitPrincipal(address, -money.gross); };
   } else {
-    if (!(await reserveEmission(address, money.gross))) {
-      const room = await emissionRoom(address);
+    if (!(await reserveEmission(address, money.gross, ceiling))) {
+      const room = await emissionRoom(address, ceiling);
       return NextResponse.json({
         error: room.globalLeft <= 0
           ? 'The vault has paid out everything it will today. Try again tomorrow.'

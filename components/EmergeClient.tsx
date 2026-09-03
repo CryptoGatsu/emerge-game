@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  demolishBuilding, dropCitizen, drawFromTreasury, fightHazard, fundTreasury, grantResource, marketReport, rebuildBuilding, trial,
+  demolishBuilding, dropCitizen, drawFromTreasury, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, trial,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees,
@@ -38,8 +38,8 @@ import {
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
 import {
-  GIFT_POLL, HEARTBEAT_INTERVAL, collectGifts, departWorld, fetchWorld, heartbeat, publishWorld,
-  releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry,
+  ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
+  heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -47,7 +47,7 @@ import { useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
-  EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
+  EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger,
 } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
@@ -132,6 +132,9 @@ const SALE_NOTICE_GOLD = 20;
  * place. What is left is ordinary time and a gentle nudge.
  */
 export const SPEEDS = [1, 2] as const;
+
+/** Where a tab remembers that it walked in as a spectator. */
+const SPECTATOR_KEY = 'emerge.spectator.v1';
 export type Speed = (typeof SPEEDS)[number];
 
 /**
@@ -152,6 +155,11 @@ export interface Visit {
   /** When the owner last published. Shown, because a stale world should say so. */
   at: number;
   save: SavedWorld;
+  /**
+   * This player is the plot's hired hand. The visit then pays: a share of what
+   * the settlement's stewardship comes to while they have it open.
+   */
+  hand?: boolean;
 }
 
 /**
@@ -185,8 +193,27 @@ export default function EmergeClient() {
   // Whether this session has been past the front door. A player who owns a
   // world has, by definition.
   const [entered, setEntered] = useState(false);
+  /*
+   * Somebody looking around without a wallet.
+   *
+   * Remembered for the tab, so a reload does not put the front door back in
+   * front of a spectator who has already walked through it. Nothing else
+   * about them is kept: a spectator owns nothing and earns nothing.
+   */
+  const [spectator, setSpectator] = useState(false);
   const { wallet } = useWallet();
   const address = wallet.address;
+
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(SPECTATOR_KEY) === '1') { setSpectator(true); setEntered(true); }
+    } catch { /* no storage */ }
+  }, []);
+  const spectate = useCallback(() => {
+    try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }
+    setSpectator(true);
+    setEntered(true);
+  }, []);
 
   useEffect(() => {
     const stored = loadClaimedWorld();
@@ -296,6 +323,31 @@ export default function EmergeClient() {
     });
   }, []);
 
+  /**
+   * Credit a hired hand's share.
+   *
+   * A hand is paid a tenth of what the plot they attend accrues, up to a
+   * hand's own ceiling, into the same ledger the vault pays from. There is no
+   * claim to check against: the job is the server's row, and the vault reads
+   * it again before paying anything out.
+   */
+  const handBank = useRef(0);
+  const earnAsHand = useCallback((emerge: number) => {
+    if (!(emerge > 0)) return;
+    // The yield arrives a token at a time, so a tenth of each would round to
+    // nothing for ever. The fraction is banked and paid whole.
+    handBank.current += emerge * HAND_SHARE;
+    const share = Math.floor(handBank.current);
+    if (!(share > 0)) return;
+    handBank.current -= share;
+    setPlayer((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ledger: accrue(prev.ledger, share, HAND_DAILY_CEILING) };
+      savePlayer(next, addressRef.current);
+      return next;
+    });
+  }, []);
+
   const enter = useCallback((world: ClaimedWorld) => {
     saveClaimedWorld(world);
     claimedSeedRef.current = world.seed;
@@ -327,6 +379,12 @@ export default function EmergeClient() {
     if (!worldFromSave(save, seed, world.worldName)) {
       return 'That world could not be read. Its owner may be running an older version.';
     }
+    // Whether this is a visit or a shift: the registry says who works here.
+    let hand = false;
+    if (addressRef.current) {
+      const { claims } = await fetchClaims();
+      hand = claims.find((c) => c.seed === seed)?.hand?.address === addressRef.current.toLowerCase();
+    }
     setVisit({
       seed,
       worldName: world.worldName,
@@ -335,6 +393,7 @@ export default function EmergeClient() {
       ownerName: world.ownerName,
       at: world.at,
       save,
+      hand,
     });
     return null;
   }, []);
@@ -391,7 +450,7 @@ export default function EmergeClient() {
    * to a settlement you own should not put a marketing page in the way — and a
    * connected wallet that has stepped out to the map goes straight there.
    */
-  const wantsLanding = !claimed && !visit && (!address || !entered);
+  const wantsLanding = !claimed && !visit && ((!address && !spectator) || !entered);
 
   return (
     <>
@@ -431,11 +490,11 @@ export default function EmergeClient() {
           onRelease={endVisit}
           onRename={() => { /* not yours to rename */ }}
           onPlayer={updatePlayer}
-          onEarn={() => { /* a visitor earns nothing */ }}
+          onEarn={visit.hand ? earnAsHand : () => { /* a visitor earns nothing */ }}
           onVisit={goVisit}
         />
       )}
-      {wantsLanding && <Landing onEnter={() => setEntered(true)} />}
+      {wantsLanding && <Landing onEnter={() => setEntered(true)} onSpectate={spectate} />}
       {claimed === null && !visit && !wantsLanding && (
         <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} />
       )}
@@ -493,6 +552,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       ? worldFromSave(visit.save, visit.seed, visit.worldName) ?? createWorld(visit.seed, visit.worldName)
       : loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
     if (!visit) makeGood(worldRef.current);
+    // A hand arriving is attention: their shift starts at full rate and
+    // slides the same way an owner's does, so a tab left open all week
+    // earns a hand about what it would earn an owner — very little.
+    if (visit?.hand) noteAttention(worldRef.current);
   }
 
   /* -------------------------------------------------------------- *
@@ -581,7 +644,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         // drained — so it cannot pile up — and then dropped, because watching
         // somebody else's settlement is not stewarding it.
         const earned = collectYield(live);
-        if (earned > 0 && !spectating) onEarnRef.current(earned);
+        if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned);
       }
       setWoodland(sceneRef.current?.woodland() ?? null);
     }, HUD_INTERVAL);
@@ -715,6 +778,65 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, [claimed.seed, wallet.address, hidden]);
 
   /*
+   * A hired hand at work says so, every so often.
+   *
+   * The owner's client reads it back and counts it as attention, which is the
+   * whole of what a hand is for. Only while the page is actually in view —
+   * a shift is watching the place, not leaving a tab open behind others.
+   */
+  useEffect(() => {
+    if (!visit?.hand || !wallet.address) return;
+    const seed = claimed.seed;
+    const who = wallet.address;
+    const clock = () => { if (document.visibilityState === 'visible') void attendJob(seed, who); };
+    clock();
+    const timer = window.setInterval(clock, ATTEND_INTERVAL);
+    return () => window.clearInterval(timer);
+  }, [claimed.seed, wallet.address, visit?.hand]);
+
+  /*
+   * And the owner's world counts a hand who is at work as attention.
+   *
+   * Read every couple of minutes from the registry rather than pushed, so it
+   * works whether or not the owner is online — although only the owner's own
+   * client accrues, so what a hand keeps up is the rate the owner gets when
+   * they next look in, not a yield that ticks while nobody plays.
+   */
+  const handRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (spectating || !wallet.address) return;
+    const seed = claimed.seed;
+    let live = true;
+    const poll = async () => {
+      const { claims } = await fetchClaims();
+      if (!live) return;
+      const row = claims.find((c) => c.seed === seed);
+      const hand = row?.hand ?? null;
+      const world = worldRef.current;
+      if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
+        world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
+      }
+      // A card when somebody takes the job, once.
+      const who = hand?.address ?? null;
+      if (who && handRef.current !== null && handRef.current !== who) {
+        announce({
+          id: `hand-${seed}-${who}`,
+          kind: 'sync',
+          title: t('You have a hired hand'),
+          body: t('{who} took the job at {world}. While they are at work, the place counts as attended.', { who: hand?.name || who.slice(0, 10), world: world?.name ?? '' }),
+          lifetime: 15_000,
+        });
+      }
+      handRef.current = who ?? '';
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 120_000);
+    return () => { live = false; window.clearInterval(timer); };
+    // `announce` is stable for the life of the world.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimed.seed, wallet.address, spectating]);
+
+  /*
    * Keep the relay's idea of this player's name current.
    *
    * Runs on the name and the wallet rather than on a timer, so a rename is
@@ -762,44 +884,113 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, [claimed.seed, spectating]);
 
   /*
-   * Put this settlement up so it can be visited.
+   * Pick up where you left off, on any device — and never go backwards.
+   *
+   * The settlement is saved in this browser and published to the server for
+   * visitors; the published copy is also what every other device continues
+   * from. It is read when the world opens and, if it is further along than
+   * what this browser has, it is the one that continues. Further along, not
+   * more recent: progress is what must never be lost, and a day-one world
+   * saved a minute ago is not progress over a day-twenty-six world saved
+   * yesterday.
+   *
+   * The same read runs again whenever the tab comes back into view and
+   * whenever the server refuses a publish as behind. A tab left open on a
+   * desktop while the same player built for a week on their phone used to
+   * wake up, save its stale copy over the phone's, and publish it; now the
+   * server refuses that, the tab reads the later copy back, and continues
+   * from it with a card saying so.
+   */
+  const syncedRef = useRef(false);
+  const reconcile = useCallback(async () => {
+    if (spectating) return;
+    const owner = (wallet.address ?? claimed.owner ?? '').toLowerCase();
+    const seed = claimed.seed;
+    const { world: published } = await fetchWorld(seed);
+    // Whether or not there was anything to adopt, the question has been
+    // asked: publishing may start.
+    if (seedRef.current === seed) syncedRef.current = true;
+    if (!published || !owner || published.owner.toLowerCase() !== owner) return;
+    const remote = worldFromSave(published.snapshot as SavedWorld, seed, claimed.name);
+    const local = worldRef.current;
+    if (!remote || !local || seedRef.current !== seed) return;
+    const ahead = remote.day > local.day || (remote.day === local.day && remote.hour > local.hour + 0.5);
+    // Said in the console as well as on a card, so a player asking why
+    // their settlement jumped has the answer in front of them.
+    console.info(`Emerge: the published copy of ${remote.name} is on day ${remote.day}; this browser has day ${local.day}.${ahead ? ' Continuing from the published copy.' : ''}`);
+    if (!ahead) return;
+    // A world that was published was opened by a client that made good on
+    // it, whether or not it wrote that down: it is not owed the grant again.
+    markGoodwill(remote);
+    worldRef.current = remote;
+    selectedRef.current = null;
+    setSelected(null);
+    setFollowing(null);
+    sceneRef.current?.reset(remote);
+    setView(snapshot(remote, null));
+    saveWorld(remote);
+    announce({
+      id: `cloud-${seed}-${remote.day}`,
+      kind: 'sync',
+      title: t('Picked up where you left off'),
+      body: t('{name} is on day {day}, as you last left it on another device.', { name: remote.name, day: remote.day }),
+      lifetime: 20_000,
+    });
+    // `announce` is stable for the life of the world.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimed.seed, claimed.name, claimed.owner, wallet.address, spectating]);
+  const reconcileRef = useRef(reconcile);
+  reconcileRef.current = reconcile;
+
+  useEffect(() => {
+    if (spectating) return;
+    syncedRef.current = false;
+    void reconcile();
+    const back = () => { if (document.visibilityState === 'visible') void reconcileRef.current(); };
+    document.addEventListener('visibilitychange', back);
+    return () => { document.removeEventListener('visibilitychange', back); };
+  }, [reconcile, spectating]);
+
+  /*
+   * Put this settlement up so it can be visited, and so it is never lost.
    *
    * Only the owner publishes, and only with a wallet: the relay checks the
    * address against the registry, so an unsigned or borrowed snapshot is
-   * refused there as well as here.
+   * refused there as well as here. Nothing goes up until the published copy
+   * has been read once — a device that opened at day one must not overwrite
+   * day forty in the seconds before it learns about it — and a publish the
+   * relay refuses as behind is answered by reading that later copy back.
    */
   useEffect(() => {
     if (spectating || !wallet.address) return;
     const seed = claimed.seed;
     const owner = wallet.address;
     let live = true;
-    const put = () => {
+    const put = async (keepalive = false) => {
       const world = worldRef.current;
-      if (!live || !world) return;
-      publishWorld({
+      if (!live || !world || !syncedRef.current) return;
+      const result = await publishWorld({
         seed,
         owner,
         ownerName: player.name,
         worldName: world.name,
         day: world.day,
+        hour: world.hour,
         population: world.population,
         snapshot: snapshotOf(world),
-      });
+      }, keepalive);
+      if (live && result.behind) void reconcileRef.current();
     };
     // The first one after a short delay, so a player passing through a world
     // does not push a snapshot for every plot they open.
-    const first = window.setTimeout(put, 6_000);
-    const timer = window.setInterval(put, PUBLISH_INTERVAL);
+    const first = window.setTimeout(() => { void put(); }, 6_000);
+    const timer = window.setInterval(() => { void put(); }, PUBLISH_INTERVAL);
     // And the moment the page is put away. On a phone this is the only save
     // that reliably happens: the interval never gets another turn once the
     // app is in the background.
     const away = () => {
-      const world = worldRef.current;
-      if (!world || document.visibilityState !== 'hidden') return;
-      void publishWorld({
-        seed, owner, ownerName: player.name, worldName: world.name,
-        day: world.day, population: world.population, snapshot: snapshotOf(world),
-      }, true);
+      if (document.visibilityState !== 'hidden') return;
+      void put(true);
     };
     document.addEventListener('visibilitychange', away);
     window.addEventListener('pagehide', away);
@@ -811,58 +1002,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       window.removeEventListener('pagehide', away);
     };
   }, [claimed.seed, wallet.address, player.name, spectating]);
-
-  /*
-   * Pick up where you left off, on any device.
-   *
-   * The settlement is saved in this browser and published to the server for
-   * visitors; until now only the first of those was ever read back by the
-   * owner. So a plot played to day twenty-six on a desktop opened at day one
-   * on a phone, was handed its opening grant again, and — worse — the phone
-   * then published that day-one world over the real one. Now the published
-   * copy is read when the world opens and, if it is further along than what
-   * this browser has, it is the one that continues. Further along, not more
-   * recent: progress is what must never be lost, and a day-one world saved a
-   * minute ago is not progress over a day-twenty-six world saved yesterday.
-   */
-  useEffect(() => {
-    if (spectating || !wallet.address) return;
-    const owner = wallet.address.toLowerCase();
-    const seed = claimed.seed;
-    let live = true;
-    void (async () => {
-      const { world: published } = await fetchWorld(seed);
-      if (!live || !published || published.owner.toLowerCase() !== owner) return;
-      const remote = worldFromSave(published.snapshot as SavedWorld, seed, claimed.name);
-      const local = worldRef.current;
-      if (!remote || !local || seedRef.current !== seed) return;
-      const ahead = remote.day > local.day || (remote.day === local.day && remote.hour > local.hour + 0.5);
-      // Said in the console as well as on a card, so a player asking why
-      // their settlement jumped has the answer in front of them.
-      console.info(`Emerge: the published copy of ${remote.name} is on day ${remote.day}; this browser has day ${local.day}.${ahead ? ' Continuing from the published copy.' : ''}`);
-      if (!ahead) return;
-      // A world that was published was opened by a client that made good on
-      // it, whether or not it wrote that down: it is not owed the grant again.
-      markGoodwill(remote);
-      worldRef.current = remote;
-      selectedRef.current = null;
-      setSelected(null);
-      setFollowing(null);
-      sceneRef.current?.reset(remote);
-      setView(snapshot(remote, null));
-      saveWorld(remote);
-      announce({
-        id: `cloud-${seed}-${remote.day}`,
-        kind: 'sync',
-        title: t('Picked up where you left off'),
-        body: t('{name} is on day {day}, as you last left it on another device.', { name: remote.name, day: remote.day }),
-        lifetime: 20_000,
-      });
-    })();
-    return () => { live = false; };
-    // `announce` is stable for the life of the world; the effect is about the seed and the wallet.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claimed.seed, claimed.name, wallet.address, spectating]);
 
   /**
    * Burn $EMERGE to put Gold in the treasury of the world being visited.
@@ -1071,6 +1210,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    */
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
+    // A window on the running world for the browser tests, in a trial build only.
+    (window as unknown as { __emerge?: { world: () => World | null } }).__emerge = { world: () => worldRef.current };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
     const timer = window.setTimeout(() => {
@@ -1412,7 +1553,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onMoveBuilding={moveBuildingTo}
             watching={watching}
             online={online}
-            visiting={visit ?? null}
+            visiting={visit ? { ...visit, hand: !!visit.hand } : null}
             onEndVisit={onLeave}
           />
           <Notices notices={notices} onDismiss={dismiss} />

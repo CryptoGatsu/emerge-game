@@ -132,6 +132,11 @@ export async function POST(request: Request) {
     channel,
     author,
     wallet: badged,
+    // Anybody talking without a wallet is a spectator, and is shown as one.
+    // Set here rather than by the client so the badge cannot be taken off:
+    // a landholder's word and a passer-by's look different in a room where
+    // land changes hands, and the difference has to be the server's.
+    spectator: body.wallet !== true,
     text,
     at: now,
   };

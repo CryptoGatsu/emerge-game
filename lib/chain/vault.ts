@@ -149,6 +149,23 @@ export const EARNING_PLOT_LIMIT = 4;
  */
 export const DAILY_EARN_CEILING = 25_000 * EARNING_PLOT_LIMIT;
 
+/*
+ * Hired hands: earning without land.
+ *
+ * A player with no plot can take a job attending somebody else's, and is paid
+ * a share of what that settlement's stewardship comes to while they are
+ * actually watching it. The numbers are set so the door is real but narrow:
+ * a wallet must hold at least `HAND_MIN_EMERGE` to be hired at all, so an
+ * identity costs something to make; a hand takes `HAND_SHARE` of the plot's
+ * yield, paid from the vault and never out of the owner's; and the ceiling per
+ * hand per day is a tenth of a landholder's. One job per wallet, one hand per
+ * plot, so the whole scheme cannot emit more than the plots in the game times
+ * a small number — and the global daily budget caps it regardless.
+ */
+export const HAND_MIN_EMERGE = 1_000;
+export const HAND_SHARE = 0.1;
+export const HAND_DAILY_CEILING = Math.round(25_000 * HAND_SHARE);
+
 /** Today, as a plain date key in the player's own timezone. */
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -193,11 +210,11 @@ export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null)
  * Anything past the ceiling is not banked for later — it is simply not minted.
  * The point of a daily ceiling is that a day is a day.
  */
-export function accrue(ledger: VaultLedger, emerge: number): VaultLedger {
+export function accrue(ledger: VaultLedger, emerge: number, ceiling = DAILY_EARN_CEILING): VaultLedger {
   if (!(emerge > 0)) return ledger;
   const today = todayKey();
   const spentToday = ledger.earnedOn === today ? ledger.earnedToday : 0;
-  const room = Math.max(0, DAILY_EARN_CEILING - spentToday);
+  const room = Math.max(0, ceiling - spentToday);
   const minted = Math.min(emerge, room);
   if (minted <= 0) {
     return { ...ledger, earnedOn: today, earnedToday: spentToday };

@@ -31,6 +31,8 @@ import { clientKey } from '../limits';
 const SAVE_VERSION = 1;
 
 const keyFor = (seed: number) => clientKey(`save.${seed}.v${SAVE_VERSION}`);
+/** Where the save stands, kept beside it so a write can be checked without reading 50KB. */
+const markFor = (seed: number) => clientKey(`save.${seed}.v${SAVE_VERSION}.mark`);
 
 export interface SavedWorld {
   version: number;
@@ -62,11 +64,46 @@ const KEEP = [
  * ends of the settlement, is worse than no exchange at all. They start again.
  */
 
+/**
+ * Where the copy in storage stands, or null when there is none.
+ *
+ * Read from the mark written beside the save rather than from the save
+ * itself, which is tens of kilobytes and is written every fifteen seconds.
+ */
+function markOf(seed: number): { day: number; hour: number } | null {
+  try {
+    const raw = window.localStorage.getItem(markFor(seed));
+    if (!raw) return null;
+    const [day, hour] = raw.split(':').map(Number);
+    return Number.isFinite(day) && Number.isFinite(hour) ? { day, hour } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether writing `world` would put the copy in storage backwards.
+ *
+ * Two tabs on the same world each save it, and the one that has been sitting
+ * in the background all afternoon still holds the settlement as it was at
+ * lunchtime. Its timer used to write that over the copy the other tab had
+ * been building all day, so the next open continued from lunchtime. The
+ * store only ever moves forward in the settlement's own time.
+ */
+export function wouldRegress(world: World): boolean {
+  if (typeof window === 'undefined') return false;
+  const held = markOf(world.seed);
+  if (!held) return false;
+  return held.day > world.day || (held.day === world.day && held.hour > world.hour + 0.5);
+}
+
 export function saveWorld(world: World) {
   if (typeof window === 'undefined') return;
+  if (wouldRegress(world)) return;
   const payload = snapshotOf(world);
   try {
     window.localStorage.setItem(keyFor(world.seed), JSON.stringify(payload));
+    window.localStorage.setItem(markFor(world.seed), `${world.day}:${world.hour}`);
   } catch {
     // A full quota or a private window. The world keeps running; it just will
     // not be here next time.
@@ -92,11 +129,18 @@ export function loadWorld(seed: number, name: string): World | null {
   }
   if (!raw) return null;
 
+  let world: World | null = null;
   try {
-    return worldFromSave(JSON.parse(raw) as SavedWorld, seed, name);
+    world = worldFromSave(JSON.parse(raw) as SavedWorld, seed, name);
   } catch {
-    return null;
+    world = null;
   }
+  // A save that cannot be read must not go on guarding its place: the next
+  // write would be refused as a regression against a copy nobody can open.
+  if (!world) {
+    try { window.localStorage.removeItem(markFor(seed)); } catch { /* nothing to do */ }
+  }
+  return world;
 }
 
 /**
@@ -150,6 +194,7 @@ export function clearWorld(seed: number) {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(keyFor(seed));
+    window.localStorage.removeItem(markFor(seed));
   } catch { /* nothing to do */ }
 }
 

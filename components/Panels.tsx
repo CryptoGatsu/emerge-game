@@ -18,7 +18,7 @@ import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
 } from '@/lib/chain/emerge';
 import {
-  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
+  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
@@ -30,7 +30,7 @@ import {
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchNames } from '@/lib/net/names';
-import { answerOffer, fetchClaims, type Claim, type Offer } from '@/lib/net/registry';
+import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
 import { fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
@@ -931,7 +931,7 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
     const shown = clashes ? `${label} · ${shortAddress(m.author)}` : label;
     const who = m.wallet ? m.author : label;
     return (
-      <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''} ${host ? 'host' : ''}`}>
+      <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''} ${host ? 'host' : ''} ${m.spectator ? 'spectator' : ''}`}>
         {theirs && !self ? (
           <button
             className={`chat-who ${host ? 'host' : ''}`}
@@ -943,8 +943,9 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
             <i>{travelling === theirs.seed ? '…' : host ? '★' : '↗'}</i>
           </button>
         ) : (
-          <b className={host ? 'host' : ''} title={who}>
+          <b className={host ? 'host' : ''} title={m.spectator ? t('Watching without a wallet') : who}>
             {shown}{host && <i className="host-star">★</i>}
+            {m.spectator && <i className="spectator-tag">{t('spectator')}</i>}
           </b>
         )}
         <span>{m.text}</span>
@@ -1003,7 +1004,7 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
       title={t('Chat')}
       subtitle={wallet.address
         ? t('Posting as {who}, under {address}.', { who, address: shortAddress(wallet.address) })
-        : t('Posting as {who} — connect a wallet to post under your address.', { who })}
+        : t('Posting as {who}, as a spectator — connect a wallet to post under your address.', { who })}
       onClose={onClose}
       wide
     >
@@ -1551,7 +1552,12 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
             <b>{Math.min(history.room.left, history.room.globalLeft).toLocaleString()} {TOKEN.ticker}</b>
           </div>
         )}
-        {history?.land && history.land !== 'holds' && (
+        {history?.hand && (
+          <p className="muted small">
+            {t('Paid as a hired hand: up to {n} {ticker} a day, while you hold at least {min} {ticker}.', { n: HAND_DAILY_CEILING.toLocaleString(), ticker: TOKEN.ticker, min: HAND_MIN_EMERGE.toLocaleString() })}
+          </p>
+        )}
+        {history?.land && history.land !== 'holds' && !history.hand && (
           <p className="warn">
             {history.land === 'no-registry'
               ? t('Stewardship cannot be collected until {ticker} is live here. Your balance keeps accruing and is safe.', { ticker: TOKEN.ticker })
@@ -1708,6 +1714,16 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
   );
 }
 
+/** "3 minutes ago", for a hand's last shift. */
+function sinceWhen(at: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
+  if (minutes < 2) return t('just now');
+  if (minutes < 60) return t('{n} minutes ago', { n: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return t('{n} hours ago', { n: hours });
+  return t('{n} days ago', { n: Math.round(hours / 24) });
+}
+
 function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
   onRenameWorld: (name: string) => void; onLeave: () => void; onRelease: () => void;
@@ -1734,17 +1750,42 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   const [offers, setOffers] = useState<Offer[]>([]);
   const [answering, setAnswering] = useState<string | null>(null);
   const [offerNote, setOfferNote] = useState<string | null>(null);
+  // The registry's row for this plot, for the hiring card.
+  const [row, setRow] = useState<Claim | null>(null);
+  const [hiringBusy, setHiringBusy] = useState(false);
+  const [hiringNote, setHiringNote] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     const tick = async () => {
       const { claims } = await fetchClaims();
       if (!live) return;
-      setOffers(claims.find((c) => c.seed === claimed.seed)?.offers ?? []);
+      const mine = claims.find((c) => c.seed === claimed.seed) ?? null;
+      setRow(mine);
+      setOffers(mine?.offers ?? []);
     };
     void tick();
     const timer = window.setInterval(() => { void tick(); }, 15_000);
     return () => { live = false; window.clearInterval(timer); };
   }, [claimed.seed]);
+  const hire = async (on: boolean) => {
+    if (!wallet.address) return;
+    setHiringBusy(true);
+    const result = await setHiring(claimed.seed, wallet.address, on);
+    setHiringBusy(false);
+    if (!result.ok || !result.claim) { setHiringNote(result.reason ?? null); return; }
+    setRow(result.claim);
+    setHiringNote(on ? t('The job is open. It shows on the world map for every player without land.') : t('Closed.'));
+  };
+  const dismiss = async () => {
+    if (!wallet.address) return;
+    setHiringBusy(true);
+    const result = await quitJob(claimed.seed, wallet.address);
+    setHiringBusy(false);
+    if (!result.ok || !result.claim) { setHiringNote(result.reason ?? null); return; }
+    setRow(result.claim);
+    setHiringNote(t('Let go. The job stays open for the next person.'));
+  };
+
   const answer = async (bidder: string, accept: boolean) => {
     if (!wallet.address) return;
     setAnswering(bidder);
@@ -1791,6 +1832,32 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
           <button onClick={() => onRenameWorld(draftName)} disabled={!changed || !affordable}>
             {affordable ? t('Rename for {cost} {ticker}', { cost: RENAME_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker }) : t('Not enough {ticker}', { ticker: TOKEN.ticker })}
           </button>
+        </div>
+
+        <div className="connect-card">
+          <span className="eyebrow">{t('HIRED HANDS')}</span>
+          {row?.hand ? (
+            <>
+              <h3>{row.hand.name || shortAddress(row.hand.address)}</h3>
+              <p className="muted small">
+                {Date.now() - row.hand.lastSeen < 15 * 60_000
+                  ? t('At work now. While they have this world open it counts as attended, so your rate holds while you are away.')
+                  : t('Took the job {date}; last at work {ago}. While they have this world open it counts as attended.', { date: new Date(row.hand.since).toLocaleDateString(), ago: sinceWhen(row.hand.lastSeen) })}
+              </p>
+              <button className="ghost" onClick={dismiss} disabled={hiringBusy}>{t('Let them go')}</button>
+            </>
+          ) : (
+            <>
+              <h3>{row?.hiring ? t('Hiring') : t('Not hiring')}</h3>
+              <p className="muted small">
+                {t('A hired hand is a player without land who holds at least {min} {ticker}. They attend this plot while you are away — it counts as your attention — and are paid {share} of its stewardship by the vault, never out of yours.', { min: HAND_MIN_EMERGE.toLocaleString(), ticker: TOKEN.ticker, share: `${Math.round(HAND_SHARE * 100)}%` })}
+              </p>
+              <button onClick={() => hire(!row?.hiring)} disabled={hiringBusy || !wallet.address}>
+                {row?.hiring ? t('Stop hiring') : t('Hire a hand')}
+              </button>
+            </>
+          )}
+          {hiringNote && <p className="muted small">{hiringNote}</p>}
         </div>
 
         <div className="connect-card">

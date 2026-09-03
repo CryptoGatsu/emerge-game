@@ -22,6 +22,10 @@ export interface Claim {
   listedAt?: number;
   /** Offers other players have made, best first. */
   offers?: Offer[];
+  /** The owner is looking for a hired hand. */
+  hiring?: boolean;
+  /** Whoever holds that job. */
+  hand?: { address: string; name: string; since: number; lastSeen: number };
 }
 
 export interface Offer {
@@ -267,6 +271,26 @@ async function offerCall(owner: string, body: Record<string, unknown>): Promise<
 export const placeOffer = (seed: number, bidder: string, bidderName: string, price: number) =>
   offerCall(bidder, { seed, offer: true, price, ownerName: bidderName });
 
+/** As the owner: open the job at this plot, or close it and let the hand go. */
+export const setHiring = (seed: number, owner: string, hiring: boolean) =>
+  offerCall(owner, { seed, hire: hiring });
+
+/** Take the job at somebody's plot. */
+export const takeJob = (seed: number, worker: string, name: string) =>
+  offerCall(worker, { seed, takeJob: true, ownerName: name });
+
+/** Leave the job, or as the owner, dismiss the hand. */
+export const quitJob = (seed: number, who: string) => offerCall(who, { seed, quitJob: true });
+
+/** Say you are at work. The owner's attention counts it. */
+export const attendJob = (seed: number, worker: string) => offerCall(worker, { seed, attend: true });
+
+/** How often a hand at work says so, in milliseconds. */
+export const ATTEND_INTERVAL = 5 * 60_000;
+
+/** How recently a hand must have attended for the owner's world to count it. */
+export const HAND_PRESENT_MS = 15 * 60_000;
+
 /** Take an offer back. */
 export const withdrawOffer = (seed: number, bidder: string) => offerCall(bidder, { seed, withdrawOffer: true });
 
@@ -328,23 +352,75 @@ export async function releasePlot(seed: number, owner: string): Promise<boolean>
  * Worlds
  * ------------------------------------------------------------------ */
 
-/** Put this world up so visitors see the real settlement. */
+export interface PublishResult {
+  ok: boolean;
+  /** The store holds a later copy of this world; read it back and continue from it. */
+  behind?: boolean;
+  /** Where that later copy is, when the store said. */
+  day?: number;
+  hour?: number | null;
+}
+
+/**
+ * How large a snapshot may be before it is worth packing.
+ *
+ * Below this it goes as plain JSON, which is simplest and fits comfortably
+ * within what a `keepalive` request may carry.
+ */
+const PACK_OVER = 24_000;
+
+/**
+ * Gzip a snapshot in the browser, or null where the browser cannot.
+ *
+ * A settlement a few weeks old saves at more than the 64KB a `keepalive`
+ * request is allowed, so the publish on closing the tab — the one that
+ * mattered most — used to fail without a word. Packed, the same world is a
+ * tenth of the size.
+ */
+async function pack(text: string): Promise<Uint8Array | null> {
+  if (typeof CompressionStream === 'undefined') return null;
+  try {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Put this world up so visitors see the real settlement, and so the owner's
+ * other devices have something to continue from.
+ *
+ * Refused by the relay when the copy it holds is further along, and that
+ * answer is handed back rather than swallowed: the caller reads the held copy
+ * and continues from it, which is how a stale tab catches up instead of
+ * quietly losing a week of somebody's building.
+ */
 export async function publishWorld(input: {
   seed: number; owner: string; ownerName: string; worldName: string;
-  day: number; population: number; snapshot: unknown;
-}, keepalive = false): Promise<boolean> {
+  day: number; hour?: number; population: number; snapshot: unknown;
+}, keepalive = false): Promise<PublishResult> {
   try {
+    const text = JSON.stringify(input);
+    let body: BodyInit = text;
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    // Packed only when the size warrants it. On the way out of the page the
+    // packing is a few milliseconds of asynchronous work the page may not
+    // get, so a small world is sent as it is rather than risked.
+    const packed = text.length > PACK_OVER ? await pack(text) : null;
+    if (packed) {
+      body = packed;
+      headers['content-type'] = 'application/octet-stream';
+      headers['x-emerge-encoding'] = 'gzip';
+    }
     // `keepalive` lets the request outlive the page: this is how a phone
     // that is being put in a pocket gets its last few minutes saved.
-    const response = await fetch('/api/worlds', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-      keepalive,
-    });
-    return response.ok;
+    const response = await fetch('/api/worlds', { method: 'POST', headers, body, keepalive });
+    if (response.ok) return { ok: true };
+    const json = (await response.json().catch(() => ({}))) as { behind?: boolean; day?: number; hour?: number | null };
+    return { ok: false, behind: json.behind === true, day: json.day, hour: json.hour };
   } catch {
-    return false;
+    return { ok: false };
   }
 }
 

@@ -30,8 +30,9 @@ import 'server-only';
  */
 
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
-import { ACTIVE_CHAIN, tokenLive } from '../chain/emerge';
-import { allClaims } from './registry';
+import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
+import { HAND_MIN_EMERGE } from '../chain/vault';
+import { allClaims, jobOf } from './registry';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -97,6 +98,29 @@ export async function landCheck(address: string): Promise<LandCheck> {
      * Failing closed here costs an honest player a retry; failing open would
      * mean an RPC outage is an open door.
      */
+    return 'unreachable';
+  }
+}
+
+/**
+ * Whether this wallet may be paid as a hired hand.
+ *
+ * The job row is the server's own word, written only after the same checks
+ * the hiring made — no land, a live session — and the balance floor is read
+ * off the chain at the moment of paying, so a wallet that took the job and
+ * then emptied itself is not paid on the strength of what it used to hold.
+ * Without a live token there is nothing to hold, and the door stays shut
+ * the same way it does for landholders.
+ */
+export async function handCheck(address: string): Promise<'hand' | 'none' | 'unreachable'> {
+  if (!tokenLive()) return 'none';
+  try {
+    const job = await jobOf(address);
+    if (!job) return 'none';
+    const held = await tokenBalance(address);
+    if (held === null) return 'unreachable';
+    return held >= HAND_MIN_EMERGE ? 'hand' : 'none';
+  } catch {
     return 'unreachable';
   }
 }
