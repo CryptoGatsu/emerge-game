@@ -16,8 +16,7 @@
 
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
 import {
-  ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World,
-} from '../simulation';
+  ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
 import { spokenLine } from '../simulation';
 import { speechFor } from '../speech';
 import { AMBIENT, SEASON_TINT, UI, WEATHER_TINT } from './palette';
@@ -386,6 +385,18 @@ export class EmergeScene {
   }
 
   /** Create sprites for any building that does not have one yet. */
+  /** Take a building's sprites out of the scene and forget it. */
+  private dropBuilding(id: string) {
+    const view = this.buildings.get(id);
+    if (!view) return;
+    view.base.destroy();
+    view.lit.destroy();
+    view.glow?.destroy();
+    view.wheel?.destroy();
+    view.badge.destroy({ children: true });
+    this.buildings.delete(id);
+  }
+
   /**
    * Put a building's sprites where the building is.
    *
@@ -437,21 +448,14 @@ export class EmergeScene {
     // from the simulation and stayed on screen forever — people walked through
     // the ghost of it, and the only way to be rid of it was a page reload.
     const standing = new Set(this.world.buildings.map((b) => b.id));
-    for (const [id, view] of this.buildings) {
-      if (standing.has(id)) continue;
-      view.base.destroy();
-      view.lit.destroy();
-      view.glow?.destroy();
-      view.wheel?.destroy();
-      view.badge.destroy({ children: true });
-      this.buildings.delete(id);
-    }
+    for (const [id] of this.buildings) if (!standing.has(id)) this.dropBuilding(id);
     // Smoke comes from a shared pool aimed at whatever chimneys exist, so it
     // stops on its own once the building is out of the list.
 
     this.world.buildings.forEach((building) => {
+      const artKey = buildingArtKey(building.type, building.id, levelOf(building));
       const seen = this.buildings.get(building.id);
-      if (seen) {
+      if (seen && seen.artKey === artKey) {
         seen.building = building;
         // A building the player has picked up and put down somewhere else.
         // Without this the simulation moved it, the feed said so, the Gold was
@@ -459,7 +463,9 @@ export class EmergeScene {
         if (seen.at.x !== building.x || seen.at.y !== building.y) this.placeBuilding(seen, building);
         return;
       }
-      const artKey = buildingArtKey(building.type, building.id);
+      // Improved since it was last drawn: the sprites are the wrong ones now,
+      // so it is taken down and raised again in its new form.
+      if (seen) this.dropBuilding(building.id);
       const meta = this.assets.buildingMeta.get(artKey);
       if (!meta) return;
       const height = this.map.heightAt(building.x, building.y);
@@ -485,7 +491,7 @@ export class EmergeScene {
       this.lightsRoot.addChild(lit);
 
       let glow: Sprite | undefined;
-      if (['Tavern', 'Bakery', 'Blacksmith', 'Market', 'Bank'].includes(building.type)) {
+      if (['Tavern', 'Bakery', 'Blacksmith', 'Market', 'Bank', 'Cafe', 'Lab', 'Studio', 'Clinic'].includes(building.type)) {
         glow = new Sprite(this.assets.get('fx.lampglow'));
         glow.anchor.set(0.5, 0.5);
         glow.position.set(pos.x, pos.y - meta.height * 0.35);

@@ -121,7 +121,8 @@ function softShadow(): Pixels {
 }
 function lampGlow(): Pixels {
   const p = surface(64, 64);
-  glow(p, 32, 32, 32, '#ffd88a', 0.55);
+  glow(p, 32, 32, 32, '#ffcf7a', 0.6);
+  glow(p, 32, 32, 14, '#fff0c8', 0.35);
   return p;
 }
 function splashRing(frame: number): Pixels {
@@ -362,6 +363,8 @@ export function loadAssets(): AssetLibrary {
 /** Stable per-citizen appearance derived from their cosmetic `look` seed. */
 export interface Appearance {
   skin: number; hair: number; shirt: number; pants: number; shoes: number;
+  /** The one bright thing on the coat: collar and belt. */
+  accent: number;
   hairStyle: number; scale: number;
 }
 
@@ -369,7 +372,7 @@ const toInt = (hex: string) => parseInt(hex.slice(1), 16);
 
 export function appearanceFor(look: number, age: number, palettes: {
   skin: readonly string[]; hair: readonly string[]; shirt: readonly string[];
-  pants: readonly string[]; shoes: readonly string[];
+  pants: readonly string[]; shoes: readonly string[]; accent: readonly string[];
 }): Appearance {
   const r = rng(look);
   return {
@@ -378,6 +381,7 @@ export function appearanceFor(look: number, age: number, palettes: {
     shirt: toInt(palettes.shirt[Math.floor(r() * palettes.shirt.length)]),
     pants: toInt(palettes.pants[Math.floor(r() * palettes.pants.length)]),
     shoes: toInt(palettes.shoes[Math.floor(r() * palettes.shoes.length)]),
+    accent: toInt(palettes.accent[Math.floor(r() * palettes.accent.length)]),
     hairStyle: Math.floor(r() * HAIR_STYLES),
     // Sized so a person reads clearly against a building at normal zoom, with
     // children visibly smaller than adults.

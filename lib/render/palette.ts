@@ -1,82 +1,89 @@
 /**
  * The Emerge colour script.
  *
- * A lush, deep-green forest world lit from the upper left, with warm
- * cream/gold accents for anything human-made and luminous green for the UI.
+ * A deep night-forest world: dark, saturated greens on the ground and in the
+ * canopy, buildings of dark stone and timber gone mossy at the foot, warm
+ * gold in every window and luminous green for anything that is a sign, a
+ * screen or a piece of the interface. The daylight hours are still daylight,
+ * but the whole thing sits a stop or two darker than a sunny meadow game
+ * would, so that the lights have something to be bright against.
+ *
  * Every generated sprite pulls from here so the world reads as one painting.
  */
 
 export const GROUND = {
-  grassLight: '#5f9d4a',
-  grass: '#4c8a3d',
-  grassDark: '#3c7132',
-  grassDeep: '#2f5b28',
-  meadow: '#6cae51',
-  moss: '#356b34',
-  forestFloor: '#2c4f27',
-  forestFloorDark: '#22401f',
-  soil: '#5d452c',
-  soilDark: '#46331f',
-  soilTilled: '#6a4e30',
-  sand: '#c2ab72',
-  sandDark: '#9c8757',
-  stone: '#8d8b7d',
-  stoneDark: '#6d6b60',
-  stoneLight: '#a8a596',
-  path: '#a89468',
-  pathDark: '#87764f',
-  pathLight: '#c4b184',
-  plaza: '#9d9682',
-  rock: '#767466',
-  rockDark: '#54533f',
-  rockLight: '#95927f',
-  snow: '#dfe9e4',
+  grassLight: '#4f8f3c',
+  grass: '#3a7030',
+  grassDark: '#2c5826',
+  grassDeep: '#20421f',
+  meadow: '#578f3f',
+  moss: '#2b5a2c',
+  forestFloor: '#213c1e',
+  forestFloorDark: '#172d16',
+  soil: '#4b3823',
+  soilDark: '#372818',
+  soilTilled: '#563f27',
+  sand: '#b3a06a',
+  sandDark: '#8d7c4f',
+  // Paving is cool grey-green cobble now rather than warm gravel: the
+  // reference town is laid in stone, and stone in a forest goes green.
+  stone: '#707a69',
+  stoneDark: '#4f584a',
+  stoneLight: '#8f9986',
+  path: '#5c6754',
+  pathDark: '#444d3f',
+  pathLight: '#788470',
+  plaza: '#5a6553',
+  rock: '#5f665b',
+  rockDark: '#43493f',
+  rockLight: '#7d857a',
+  snow: '#d6e1dc',
   // Biome ground. Desert sand runs warmer and lighter than the river banks,
   // fen mud is green-black, and steppe scrub is bleached grass over dust.
-  dune: '#d8b878',
-  duneDark: '#b3934f',
-  duneLight: '#ecd39a',
-  marsh: '#5d7a4a',
-  marshDark: '#415733',
-  marshWet: '#3d5946',
-  scrub: '#93a558',
-  scrubDark: '#74833f',
-  scrubDry: '#b8ac6d',
+  dune: '#c9aa6c',
+  duneDark: '#a38647',
+  duneLight: '#dfc48c',
+  marsh: '#4c6a3d',
+  marshDark: '#34492a',
+  marshWet: '#31493b',
+  scrub: '#7f914b',
+  scrubDark: '#627236',
+  scrubDry: '#a89c60',
 } as const;
 
 export const WATER = {
-  deep: '#1c4d63',
-  mid: '#26688a',
-  shallow: '#3a90ab',
-  foam: '#c9edf2',
-  highlight: '#6fc0cf',
+  deep: '#0e3644',
+  mid: '#155869',
+  shallow: '#278594',
+  foam: '#bfe9ec',
+  highlight: '#5dc6cd',
 } as const;
 
 export const FOLIAGE = {
-  pineLight: '#4d8f45',
-  pine: '#357034',
-  pineDark: '#23502a',
-  oakLight: '#68a94b',
-  oak: '#4e8c3a',
-  oakDark: '#376328',
-  birchLight: '#84bd5e',
-  birch: '#639a45',
-  birchDark: '#456f30',
-  bush: '#417a35',
-  bushLight: '#5c9a44',
-  trunk: '#5b432c',
-  trunkDark: '#3f2e1e',
-  trunkLight: '#77593a',
+  pineLight: '#3f8a44',
+  pine: '#2a6234',
+  pineDark: '#1a4325',
+  oakLight: '#5aa04a',
+  oak: '#3f7f36',
+  oakDark: '#2a5727',
+  birchLight: '#74b356',
+  birch: '#548f3f',
+  birchDark: '#39652b',
+  bush: '#356b2f',
+  bushLight: '#4f8c3d',
+  trunk: '#4a3524',
+  trunkDark: '#31231a',
+  trunkLight: '#66492f',
   // The three species the new biomes brought with them.
-  palmLight: '#7cb356',
-  palm: '#5c9440',
-  palmDark: '#3d6b2c',
-  mangroveLight: '#4a7d4a',
-  mangrove: '#33613a',
-  mangroveDark: '#204227',
-  acaciaLight: '#9cb45e',
-  acacia: '#7b9647',
-  acaciaDark: '#586d31',
+  palmLight: '#6ea84e',
+  palm: '#4f8838',
+  palmDark: '#336027',
+  mangroveLight: '#427543',
+  mangrove: '#2d5834',
+  mangroveDark: '#1c3c23',
+  acaciaLight: '#8ea854',
+  acacia: '#6f8b3f',
+  acaciaDark: '#4f632b',
 } as const;
 
 export const BLOOM = {
@@ -90,33 +97,50 @@ export const BLOOM = {
 } as const;
 
 export const BUILD = {
-  plasterLight: '#d9cfae',
-  plaster: '#c0b38e',
-  plasterDark: '#9c8f6d',
-  timber: '#6b4a2f',
-  timberDark: '#4c3320',
-  timberLight: '#8a6640',
-  roofRed: '#9a4a37',
-  roofRedDark: '#733527',
-  roofRedLight: '#b6614a',
-  roofGreen: '#3f6b46',
-  roofGreenDark: '#2c4d33',
-  roofGreenLight: '#557f58',
-  roofSlate: '#4c5560',
-  roofSlateDark: '#363d47',
-  roofSlateLight: '#616c78',
-  roofThatch: '#b39355',
-  roofThatchDark: '#8b7040',
-  roofThatchLight: '#ccab68',
-  stoneWall: '#8a8574',
-  stoneWallDark: '#6a6657',
-  stoneWallLight: '#a39d89',
-  glassDark: '#2b3a44',
-  glassLit: '#ffd88a',
-  glassLitCore: '#fff2cc',
-  metal: '#5c6169',
-  metalLight: '#868c96',
+  // "Plaster" is the light wall: a pale, mossy render over stone rather than
+  // cream. It still reads as the light face against the dark timber.
+  plasterLight: '#98a38e',
+  plaster: '#76806c',
+  plasterDark: '#565f4e',
+  timber: '#4f3a27',
+  timberDark: '#35271a',
+  timberLight: '#6c5138',
+  roofRed: '#7a3f31',
+  roofRedDark: '#562b22',
+  roofRedLight: '#955444',
+  roofGreen: '#2f5a3a',
+  roofGreenDark: '#20402a',
+  roofGreenLight: '#3f7048',
+  roofSlate: '#3a4550',
+  roofSlateDark: '#27303a',
+  roofSlateLight: '#4c5966',
+  roofThatch: '#7f7a46',
+  roofThatchDark: '#5c5830',
+  roofThatchLight: '#9a9558',
+  stoneWall: '#66705f',
+  stoneWallDark: '#4a5245',
+  stoneWallLight: '#828c79',
+  glassDark: '#1d2a30',
+  glassLit: '#ffcf7a',
+  glassLitCore: '#fff0c8',
+  metal: '#4f555c',
+  metalLight: '#7a828c',
   gold: '#e0b95c',
+  // Signage. Every shop in the reference wears its name in lit green letters
+  // on a dark board, and that is the single strongest style cue there is.
+  signBoard: '#101a12',
+  signEdge: '#2a3b2c',
+  sign: '#8ff06a',
+  signDim: '#4d9a3d',
+  signGlow: '#b8ff8a',
+  // The lab's glass: cold teal lit from inside.
+  labGlass: '#1e4e52',
+  labGlassLit: '#4fd6c8',
+  labCore: '#9dfff0',
+  // Growing green mould at the foot of every wall in a damp forest town.
+  moss: '#3f7a3a',
+  mossDark: '#2b5a2b',
+  vine: '#4c8f44',
 } as const;
 
 export const UI = {
@@ -127,29 +151,54 @@ export const UI = {
   night: '#050b07',
 } as const;
 
-/** Skin, hair and clothing ranges citizens are generated from. */
+/**
+ * Skin, hair and clothing ranges citizens are generated from.
+ *
+ * Clothes went dark: the reference crowd wears deep blues, greens, plums and
+ * charcoal with one bright accent, and it is the accent that tells people
+ * apart at a glance. Hair got its vivid options — violet, teal, spring green —
+ * alongside the natural ones, because a settlement of AI beings is allowed to
+ * look like one.
+ */
 export const PEOPLE = {
-  skin: ['#f2c9a4', '#e2ab7f', '#c98d63', '#a86f48', '#82563a', '#5f3d29'],
-  hair: ['#2b2119', '#4a3222', '#6f4a26', '#a9702f', '#c9a24a', '#8d3f2c', '#3f4a5a', '#5f8f6a', '#7a5f8f', '#d6d2c4'],
-  shirt: ['#4a7f8f', '#7a4f6a', '#4f7a45', '#8f6a3f', '#5a5f8f', '#8f4f45', '#3f6b6b', '#8f8f4f', '#6a4f8f', '#a86a4f'],
-  pants: ['#3c4450', '#4a3d33', '#33473c', '#4d3f4a', '#2f3a45', '#5a4a38'],
-  shoes: ['#3a2c22', '#2b2b30', '#4a3a2a'],
+  skin: ['#f4cfae', '#e6b48c', '#cf946c', '#ad7550', '#875b3e', '#63402b', '#f0d9c4', '#b8865f'],
+  hair: [
+    '#221a15', '#3e2a1c', '#6b4622', '#a96f2e', '#d5b04e', '#8d3f2c', '#3b4557',
+    '#7b3fb0', '#4fb56a', '#3fa3a8', '#c94f7c', '#e8dcc2', '#5a6d3a', '#d97b3a',
+  ],
+  shirt: [
+    '#2f3a44', '#3b2f4a', '#24413a', '#4a3a2a', '#1f3a4a', '#3d2f2f', '#2a4a2a',
+    '#4a4a2f', '#4a2f5a', '#2a3a5a', '#33333a', '#3a4a3a',
+  ],
+  accent: ['#8ff06a', '#e8c169', '#5fd6c8', '#e88bab', '#f0d05e', '#a986d8', '#f4f4e8', '#ff8a4a'],
+  pants: ['#262c34', '#2e2723', '#20302a', '#2f2731', '#1e262e', '#3a3026'],
+  shoes: ['#241c16', '#1b1b20', '#2e241a'],
 } as const;
 
-/** Ambient light by hour, applied as a full-scene tint. */
+/**
+ * Ambient light by hour, applied as a full-scene tint.
+ *
+ * Night is teal-green rather than blue — a forest at night, lit by what the
+ * town has lit — and it goes deeper than it did, because the windows and
+ * signs are the point of the look and they need dark to glow against.
+ * Midday keeps a faint green cast so the world never reads as a different
+ * game between noon and midnight.
+ */
 export interface AmbientStop { hour: number; color: number; alpha: number }
 export const AMBIENT: AmbientStop[] = [
-  { hour: 0, color: 0x1a2a4d, alpha: 0.56 },
-  { hour: 4, color: 0x1f3050, alpha: 0.52 },
-  { hour: 6, color: 0x51406a, alpha: 0.34 },
-  { hour: 7.5, color: 0xffb96b, alpha: 0.16 },
-  { hour: 10, color: 0xfff3d4, alpha: 0.04 },
-  { hour: 14, color: 0xffffff, alpha: 0.0 },
-  { hour: 17, color: 0xffd9a0, alpha: 0.09 },
-  { hour: 19, color: 0xf58a4b, alpha: 0.22 },
-  { hour: 20.5, color: 0x6a4f7a, alpha: 0.38 },
-  { hour: 22, color: 0x22305a, alpha: 0.5 },
-  { hour: 24, color: 0x1a2a4d, alpha: 0.56 },
+  { hour: 0, color: 0x0b2a26, alpha: 0.62 },
+  { hour: 4, color: 0x0e2d2a, alpha: 0.6 },
+  { hour: 6, color: 0x2f4a5a, alpha: 0.4 },
+  { hour: 7.5, color: 0xd9a86a, alpha: 0.16 },
+  // Midday keeps a cool green wash rather than going to white: the reference
+  // is a forest under a canopy, and full sun on it reads as a different game.
+  { hour: 10, color: 0xb9e3c8, alpha: 0.13 },
+  { hour: 14, color: 0xb4e0c6, alpha: 0.12 },
+  { hour: 17, color: 0xe0cf9a, alpha: 0.14 },
+  { hour: 19, color: 0xd4703c, alpha: 0.24 },
+  { hour: 20.5, color: 0x3b4d5f, alpha: 0.44 },
+  { hour: 22, color: 0x12332e, alpha: 0.58 },
+  { hour: 24, color: 0x0b2a26, alpha: 0.62 },
 ];
 
 /** Weather adds its own wash on top of the time-of-day tint. */

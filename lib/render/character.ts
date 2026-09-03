@@ -2,11 +2,17 @@
  * Citizen character sprites.
  *
  * Characters are built as a set of greyscale part masks — legs, boots, body,
- * hands, head, hair, hat, tool — that the renderer tints per citizen. Shading is
- * baked into the mask as darker greys, so a multiply tint yields a properly
- * shaded pixel character rather than a flat silhouette. One shared mask set
- * therefore dresses an entire population, and a citizen's appearance is just a
- * palette derived from their `look` seed.
+ * trim, hands, head, hair, hat, tool — that the renderer tints per citizen.
+ * Shading is baked into the mask as darker greys, so a multiply tint yields a
+ * properly shaded pixel character rather than a flat silhouette. One shared
+ * mask set therefore dresses an entire population, and a citizen's appearance
+ * is just a palette derived from their `look` seed.
+ *
+ * The proportions are the reference's: a big round head on a short body, so a
+ * person reads as a person from across the whole settlement, with the face
+ * and the hair doing most of the work of telling one from another. Clothes
+ * are dark and carry one bright band of trim — collar and belt — which is the
+ * second thing the eye picks up after the hair.
  *
  * Directions `s`, `n` and `e` are drawn; `w` is `e` mirrored by the renderer.
  * Animation frames are addressed by state, and the renderer advances them on its
@@ -21,9 +27,9 @@ export const CHAR_GROUND = 30;
 
 export type Dir = 's' | 'n' | 'e';
 export type CharState = 'walk' | 'idle' | 'work' | 'sit' | 'sleep';
-export type LayerName = 'outline' | 'legs' | 'boots' | 'body' | 'hands' | 'head' | 'hair' | 'hat' | 'tool';
+export type LayerName = 'outline' | 'legs' | 'boots' | 'body' | 'trim' | 'hands' | 'head' | 'hair' | 'hat' | 'tool';
 
-export const LAYER_ORDER: LayerName[] = ['outline', 'legs', 'boots', 'body', 'hands', 'head', 'hair', 'hat', 'tool'];
+export const LAYER_ORDER: LayerName[] = ['outline', 'legs', 'boots', 'body', 'trim', 'hands', 'head', 'hair', 'hat', 'tool'];
 
 /** Frames per animation state. Walk is a four-step cycle; work is a three-beat swing. */
 export const STATE_FRAMES: Record<CharState, number> = { walk: 4, idle: 2, work: 3, sit: 1, sleep: 1 };
@@ -33,7 +39,7 @@ const HI = '#fbfbfb';
 const BASE = '#dedede';
 const MID = '#b4b4b4';
 const LOW = '#7e7e7e';
-const LINE = '#3c3c3c';
+const LINE = '#2a2a2a';
 
 interface Pose {
   /** Horizontal swing of each leg, in pixels. */
@@ -70,33 +76,39 @@ function poseFor(state: CharState, frame: number): Pose {
       return { ...flat, armLift: lifts[frame % 3], lean: 1, bob: frame % 3 === 1 ? 1 : 0 };
     }
     case 'sit':
-      return { ...flat, crouch: 5, leg: [3, 3], legLift: [-3, -3] };
+      return { ...flat, crouch: 4, leg: [3, 3], legLift: [-3, -3] };
     case 'sleep':
-      return { ...flat, crouch: 8, leg: [4, 4], legLift: [-5, -5], lean: 2, armLift: [2, 2] };
+      return { ...flat, crouch: 7, leg: [4, 4], legLift: [-4, -4], lean: 2, armLift: [2, 2] };
   }
 }
 
-/** Body metrics per direction. `e` is a narrower profile view. */
+/**
+ * Body metrics per direction. `e` is a narrower profile view.
+ *
+ * Roughly two and a half heads tall: the head is a third of the figure, the
+ * torso is short and the legs are shorter still. That is what makes a crowd
+ * read as characters rather than as stick figures at map scale.
+ */
 function metrics(dir: Dir) {
   const front = dir !== 'e';
   return {
     torsoX: front ? 8 : 9,
-    torsoW: front ? 8 : 7,
-    torsoTop: 13,
-    torsoH: 8,
-    headX: front ? 8 : 9,
-    headW: front ? 8 : 7,
-    headTop: 4,
-    headH: 9,
-    legW: front ? 3 : 3,
-    legLX: front ? 9 : 10,
+    torsoW: front ? 8 : 6,
+    torsoTop: 14,
+    torsoH: 7,
+    headX: front ? 7 : 8,
+    headW: front ? 10 : 9,
+    headTop: 3,
+    headH: 10,
+    legW: 3,
+    legLX: front ? 8 : 9,
     legRX: front ? 13 : 11,
     legTop: 21,
-    legH: 6,
+    legH: 5,
     armLX: front ? 6 : 8,
     armRX: front ? 16 : 13,
-    armTop: 14,
-    armH: 6,
+    armTop: 15,
+    armH: 5,
     front,
   };
 }
@@ -141,9 +153,9 @@ function drawBody(p: Pixels, dir: Dir, pose: Pose) {
   rect(p, x, top, 1, m.torsoH, MID);
   rect(p, x + m.torsoW - 1, top, 1, m.torsoH, LOW);
   rect(p, x + 1, top, m.torsoW - 2, 1, HI);
-  // Collar and hem read as clothing rather than a block.
+  // Hem, and a fold down the middle so a coat is a coat rather than a block.
   rect(p, x, top + m.torsoH - 1, m.torsoW, 1, LOW);
-  if (m.front) rect(p, x + Math.floor(m.torsoW / 2) - 1, top + 1, 2, m.torsoH - 2, MID);
+  if (m.front) rect(p, x + Math.floor(m.torsoW / 2), top + 2, 1, m.torsoH - 3, MID);
 
   // Sleeves.
   const arms: [number, number, number][] = [
@@ -160,6 +172,22 @@ function drawBody(p: Pixels, dir: Dir, pose: Pose) {
       rect(p, ax, ay, 1, 4, MID);
     }
   }
+}
+
+/**
+ * The one bright thing on a dark coat: a collar and a belt, tinted with the
+ * citizen's accent colour. Drawn as a separate mask so the tint is its own.
+ */
+function drawTrim(p: Pixels, dir: Dir, pose: Pose) {
+  const m = metrics(dir);
+  const top = m.torsoTop + pose.bob + pose.crouch;
+  const x = m.torsoX + (dir === 'e' ? pose.lean : 0);
+  // Collar: a band across the shoulders, notched in the middle on the front.
+  rect(p, x, top, m.torsoW, 1, HI);
+  if (m.front) rect(p, x + Math.floor(m.torsoW / 2) - 1, top + 1, 2, 1, BASE);
+  // Belt.
+  rect(p, x, top + m.torsoH - 3, m.torsoW, 1, BASE);
+  if (m.front) rect(p, x + Math.floor(m.torsoW / 2) - 1, top + m.torsoH - 3, 2, 1, HI);
 }
 
 function drawHands(p: Pixels, dir: Dir, pose: Pose) {
@@ -179,22 +207,32 @@ function drawHead(p: Pixels, dir: Dir, pose: Pose) {
   const m = metrics(dir);
   const top = m.headTop + pose.bob + pose.crouch + (pose.lean > 1 ? 1 : 0);
   const x = m.headX + (dir === 'e' ? pose.lean : 0);
-  rect(p, x, top, m.headW, m.headH, BASE);
-  rect(p, x, top, 1, m.headH, MID);
-  rect(p, x + m.headW - 1, top, 1, m.headH, LOW);
+  // A rounded block: the corners are knocked off so the head reads as a head.
+  rect(p, x + 1, top, m.headW - 2, m.headH, BASE);
+  rect(p, x, top + 1, m.headW, m.headH - 2, BASE);
+  rect(p, x, top + 1, 1, m.headH - 2, MID);
+  rect(p, x + m.headW - 1, top + 1, 1, m.headH - 2, LOW);
   rect(p, x + 1, top + m.headH - 1, m.headW - 2, 1, MID);
+  rect(p, x + 2, top, m.headW - 4, 1, HI);
   // Neck.
   rect(p, x + Math.floor(m.headW / 2) - 1, top + m.headH, 2, 1, LOW);
 
   if (dir === 's') {
-    rect(p, x + 2, top + 5, 1, 2, LINE);
-    rect(p, x + m.headW - 3, top + 5, 1, 2, LINE);
-    rect(p, x + 3, top + 8, 2, 1, MID);
+    // Big eyes, set wide, with a brow line over each; a small mouth under.
+    rect(p, x + 2, top + 5, 2, 2, LINE);
+    rect(p, x + m.headW - 4, top + 5, 2, 2, LINE);
+    rect(p, x + 3, top + 5, 1, 1, MID);
+    rect(p, x + m.headW - 3, top + 5, 1, 1, MID);
+    rect(p, x + Math.floor(m.headW / 2) - 1, top + 8, 2, 1, MID);
+    // Cheeks.
+    rect(p, x + 1, top + 7, 1, 1, HI);
+    rect(p, x + m.headW - 2, top + 7, 1, 1, HI);
   } else if (dir === 'e') {
     // Profile: nose bump and a single eye.
-    rect(p, x + m.headW, top + 4, 1, 2, BASE);
-    rect(p, x + m.headW - 3, top + 4, 1, 2, LINE);
-    rect(p, x + m.headW - 4, top + 7, 2, 1, MID);
+    rect(p, x + m.headW, top + 5, 1, 2, BASE);
+    rect(p, x + m.headW - 3, top + 5, 2, 2, LINE);
+    rect(p, x + m.headW - 2, top + 5, 1, 1, MID);
+    rect(p, x + m.headW - 4, top + 8, 2, 1, MID);
   }
 }
 
@@ -202,29 +240,60 @@ function drawHair(p: Pixels, dir: Dir, pose: Pose, style: number) {
   const m = metrics(dir);
   const top = m.headTop + pose.bob + pose.crouch + (pose.lean > 1 ? 1 : 0);
   const x = m.headX + (dir === 'e' ? pose.lean : 0);
-  // Cap over the crown, always present.
-  rect(p, x - 1, top - 1, m.headW + 2, 4, BASE);
-  rect(p, x - 1, top - 1, m.headW + 2, 1, HI);
-  rect(p, x - 1, top + 2, 1, 3, MID);
+  const kind = style % HAIR_STYLES;
+
+  // Cap over the crown, always present and generous: hair is a third of the
+  // silhouette at this scale.
+  rect(p, x - 1, top - 2, m.headW + 2, 5, BASE);
+  rect(p, x, top - 3, m.headW, 1, BASE);
+  rect(p, x, top - 2, m.headW, 1, HI);
+  rect(p, x - 1, top + 3, 1, 2, MID);
   rect(p, x + m.headW, top + 2, 1, 3, MID);
 
   if (dir === 'n') {
     // Back of the head is all hair.
-    rect(p, x - 1, top - 1, m.headW + 2, m.headH, BASE);
-    rect(p, x - 1, top - 1, m.headW + 2, 1, HI);
+    rect(p, x - 1, top - 2, m.headW + 2, m.headH + 1, BASE);
+    rect(p, x, top - 3, m.headW, 1, BASE);
+    rect(p, x, top - 2, m.headW, 1, HI);
     rect(p, x + m.headW, top, 1, m.headH - 1, LOW);
   }
-  if (style % 3 === 0) {
-    // Long: falls past the shoulders.
-    const len = dir === 'n' ? 8 : 5;
-    rect(p, x - 1, top + 2, 2, len, BASE);
-    rect(p, x + m.headW - 1, top + 2, 2, len, MID);
-  } else if (style % 3 === 1) {
-    // Fringe.
-    if (dir !== 'n') rect(p, x, top + 2, m.headW - 2, 1, MID);
-  } else {
-    // Tied back.
-    if (dir !== 's') rect(p, x + (dir === 'n' ? m.headW - 1 : -2), top + 3, 2, 5, MID);
+
+  switch (kind) {
+    case 0: {
+      // Long: falls past the shoulders on both sides.
+      const len = dir === 'n' ? 9 : 7;
+      rect(p, x - 1, top + 2, 2, len, BASE);
+      rect(p, x + m.headW - 1, top + 2, 2, len, MID);
+      rect(p, x - 1, top + 2 + len - 1, 2, 1, LOW);
+      break;
+    }
+    case 1:
+      // Fringe: a straight line of hair over the brow.
+      if (dir !== 'n') {
+        rect(p, x, top + 3, m.headW - 1, 1, MID);
+        rect(p, x + 1, top + 4, 2, 1, MID);
+      }
+      break;
+    case 2:
+      // Tied back: a tail behind.
+      if (dir !== 's') rect(p, x + (dir === 'n' ? m.headW - 1 : -2), top + 3, 2, 6, MID);
+      if (dir === 'n') rect(p, x + m.headW - 1, top + 8, 2, 2, LOW);
+      break;
+    case 3:
+      // Spiky: tufts standing up off the crown.
+      for (const dx of [0, 3, 6]) {
+        rect(p, x + dx, top - 5, 2, 3, BASE);
+        rect(p, x + dx, top - 5, 1, 1, HI);
+      }
+      if (dir !== 'n') rect(p, x + m.headW - 3, top - 4, 2, 2, BASE);
+      break;
+    default:
+      // Bob: rounded, flaring out at the jaw.
+      rect(p, x - 2, top + 2, 2, 6, BASE);
+      rect(p, x + m.headW, top + 2, 2, 6, MID);
+      rect(p, x - 2, top + 7, 3, 1, LOW);
+      rect(p, x + m.headW - 1, top + 7, 3, 1, LOW);
+      break;
   }
 }
 
@@ -233,23 +302,24 @@ function drawHat(p: Pixels, dir: Dir, pose: Pose, kind: 'straw' | 'helmet' | 'ca
   const top = m.headTop + pose.bob + pose.crouch + (pose.lean > 1 ? 1 : 0);
   const x = m.headX + (dir === 'e' ? pose.lean : 0);
   if (kind === 'straw') {
-    rect(p, x - 4, top + 1, m.headW + 8, 2, BASE);
-    rect(p, x - 4, top + 2, m.headW + 8, 1, LOW);
-    rect(p, x, top - 3, m.headW, 4, BASE);
-    rect(p, x + 1, top - 3, m.headW - 2, 1, HI);
+    rect(p, x - 4, top, m.headW + 8, 2, BASE);
+    rect(p, x - 4, top + 1, m.headW + 8, 1, LOW);
+    rect(p, x, top - 4, m.headW, 5, BASE);
+    rect(p, x + 1, top - 4, m.headW - 2, 1, HI);
   } else if (kind === 'helmet') {
-    rect(p, x - 1, top - 2, m.headW + 2, 5, BASE);
-    rect(p, x - 1, top - 2, m.headW + 2, 1, HI);
+    rect(p, x - 1, top - 3, m.headW + 2, 6, BASE);
+    rect(p, x, top - 4, m.headW, 1, BASE);
+    rect(p, x, top - 3, m.headW, 1, HI);
     rect(p, x - 2, top + 2, m.headW + 4, 1, LOW);
-    if (dir !== 'n') rect(p, x + Math.floor(m.headW / 2) - 1, top - 1, 2, 2, HI);
+    if (dir !== 'n') rect(p, x + Math.floor(m.headW / 2) - 1, top - 2, 2, 2, HI);
   } else if (kind === 'cap') {
-    rect(p, x - 1, top - 2, m.headW + 2, 4, BASE);
-    rect(p, x - 1, top - 2, m.headW + 2, 1, HI);
-    if (dir !== 'n') rect(p, x + m.headW - 1, top + 1, 3, 1, MID);
+    rect(p, x - 1, top - 3, m.headW + 2, 5, BASE);
+    rect(p, x, top - 3, m.headW, 1, HI);
+    if (dir !== 'n') rect(p, x + m.headW - 1, top + 1, 4, 1, MID);
   } else {
-    rect(p, x - 2, top - 2, m.headW + 4, 8, BASE);
-    rect(p, x - 2, top - 2, m.headW + 4, 1, HI);
-    if (dir !== 'n') rect(p, x + 1, top + 3, m.headW - 2, 4, LINE);
+    rect(p, x - 2, top - 3, m.headW + 4, 9, BASE);
+    rect(p, x - 1, top - 3, m.headW + 2, 1, HI);
+    if (dir !== 'n') rect(p, x + 1, top + 3, m.headW - 2, 5, LINE);
   }
 }
 
@@ -265,17 +335,17 @@ function drawTool(p: Pixels, dir: Dir, pose: Pose, state: CharState) {
 }
 
 /** Layers that make up the body, independent of hair and headwear. */
-export const BODY_LAYERS: LayerName[] = ['outline', 'legs', 'boots', 'body', 'hands', 'head', 'tool'];
+export const BODY_LAYERS: LayerName[] = ['outline', 'legs', 'boots', 'body', 'trim', 'hands', 'head', 'tool'];
 
 /** Mask grey used for the dark edge baked into hair and hats. */
-const EDGE = '#2e2e2e';
+const EDGE = '#242424';
 
 /**
  * Body parts for one animation frame.
  *
  * Hair and hats are generated separately (`hairFrame`, `hatFrame`) so the mask
  * set stays small: 3 directions x 11 frames covers every citizen, and silhouette
- * variety comes from mixing in one of three hair styles and five hats.
+ * variety comes from mixing in one of five hair styles and five hats.
  */
 export function bodyFrame(dir: Dir, state: CharState, frame: number): Record<LayerName, Pixels> {
   const layers = Object.fromEntries(BODY_LAYERS.map((n) => [n, surface(CHAR_W, CHAR_H)])) as Record<LayerName, Pixels>;
@@ -284,6 +354,7 @@ export function bodyFrame(dir: Dir, state: CharState, frame: number): Record<Lay
   drawLegs(layers.legs, dir, pose);
   drawBoots(layers.boots, dir, pose);
   drawBody(layers.body, dir, pose);
+  drawTrim(layers.trim, dir, pose);
   drawHands(layers.hands, dir, pose);
   drawHead(layers.head, dir, pose);
   drawTool(layers.tool, dir, pose, state);
@@ -334,7 +405,7 @@ export function characterFrameKeys(): { dir: Dir; state: CharState; frame: numbe
 }
 
 /** Silhouette variants. Combining hair style and hat keeps a crowd from cloning. */
-export const HAIR_STYLES = 3;
+export const HAIR_STYLES = 5;
 export const HATS = ['none', 'straw', 'helmet', 'cap', 'hood'] as const;
 export type HatKind = (typeof HATS)[number];
 

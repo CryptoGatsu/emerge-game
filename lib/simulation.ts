@@ -720,7 +720,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
       spread = 2.0;
       c.roughSleeper = false;
     } else {
-      const shelter = findBuilding(world, 'Tavern') ?? findBuilding(world, 'Market');
+      const shelter = gatheringPlace(world) ?? findBuilding(world, 'Market');
       target = shelter;
       spread = 4.0;
       c.roughSleeper = !shelter || phase === 'sleeping';
@@ -749,7 +749,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
       target = venue;
       spread = 4.0;
     } else {
-      const options = [findBuilding(world, 'Tavern'), findBuilding(world, 'Market'), undefined];
+      const options = [gatheringPlace(world), findBuilding(world, 'Market'), undefined];
       target = options[c.wanderIdx % options.length];
       spread = 3.0;
     }
@@ -892,8 +892,11 @@ export interface Obstacle { x: number; y: number; r: number; id: string }
 
 /** Kept a little tighter than the drawn building so people hug the walls. */
 function footprintRadius(b: Building) {
-  return b.type === 'Market' || b.type === 'Town Hall' ? 4.2 : b.type === 'House' ? 2.6 : 3.2;
+  return FOOTPRINTS[b.type] ?? 3.2;
 }
+const FOOTPRINTS: Record<string, number> = {
+  Market: 4.2, 'Town Hall': 4.2, House: 2.6, School: 3.8, Library: 3.6, Lab: 3.7, Cafe: 3.5,
+};
 
 function buildObstacles(world: World): Obstacle[] {
   return world.buildings.map((b) => ({ x: b.x, y: b.y, r: footprintRadius(b), id: b.id }));
@@ -2240,6 +2243,12 @@ function buildAmenities(buildings: Building[], layout: WorldLayout, water: Water
     add('campfire', tavern.x - 2, tavern.y + 6.5, 4);
   }
 
+  const cafe = at('Cafe');
+  if (cafe) {
+    add('bench', cafe.x - 5.5, cafe.y + 4, 2);
+    add('bench', cafe.x + 5.5, cafe.y + 4, 2);
+  }
+
   const market = at('Market');
   if (market) {
     add('campfire', market.x + 4, market.y + 8.5, 4);
@@ -2357,7 +2366,7 @@ export function createWorld(seed = 481516, name?: string): World {
 /** Each day gets its own social calendar, seeded so replays match. */
 function scheduleGatherings(world: World) {
   const rand = mulberry32(world.seed + world.day * 977);
-  const tavern = findBuilding(world, 'Tavern');
+  const tavern = gatheringPlace(world);
   const market = findBuilding(world, 'Market');
   const square = tavern ?? market;
   const next: Gathering[] = [];
@@ -2435,8 +2444,14 @@ function meetingBusiness(world: World): { text: string; want: string | null } {
   if (trade && world.treasury > 2200) {
     return { want: trade, text: `to open a ${trade.toLowerCase()}, which this land will support` };
   }
-  if (!findBuilding(world, 'Tavern')) {
+  if (!gatheringPlace(world)) {
     return { want: 'Tavern', text: 'to build somewhere proper to gather' };
+  }
+  if (!findBuilding(world, 'School') && world.citizens.length >= 14) {
+    return { want: 'School', text: 'to open a school, so the young learn their trades sooner' };
+  }
+  if (!findBuilding(world, 'Clinic') && world.citizens.length >= 20) {
+    return { want: 'Clinic', text: 'to open a clinic before the next hard winter' };
   }
   return { want: null, text: 'that things are well enough, and to put the surplus by' };
 }
@@ -3163,6 +3178,50 @@ export function vigourOf(c: Citizen): number {
   return Math.round(clamp(body * prime * 100, 0, 100));
 }
 
+/* ------------------------------------------------------------------ *
+ * Civic buildings
+ *
+ * None of these employs anybody or makes anything. Each changes a rate the
+ * whole settlement runs at, and all of them cost upkeep, so raising one is a
+ * bet that the rate is worth the Gold. Every effect is a plain number here so
+ * the wiki can quote it.
+ * ------------------------------------------------------------------ */
+
+/** True when the settlement has a working building of this kind. */
+export const hasCivic = (world: World, type: string) =>
+  world.buildings.some((b) => b.type === type && b.active);
+
+/** School and library: how much faster a day at the bench teaches. */
+export const SCHOOL_LEARNING = 0.35;
+export const LIBRARY_LEARNING = 0.15;
+export function learningRate(world: World): number {
+  return 1 + (hasCivic(world, 'School') ? SCHOOL_LEARNING : 0) + (hasCivic(world, 'Library') ? LIBRARY_LEARNING : 0);
+}
+
+/** Lab: better methods, applied to every trade's output. */
+export const LAB_METHODS = 0.1;
+export const methodBonus = (world: World) => 1 + (hasCivic(world, 'Lab') ? LAB_METHODS : 0);
+
+/** Cafe, studio, library: what they put back into people, every day. */
+export const CAFE_SOCIAL = 1.6;
+export const STUDIO_PURPOSE = 1.5;
+export const LIBRARY_PURPOSE = 0.6;
+
+/** Clinic: how much of the daily risk of death it takes away. */
+export const CLINIC_SURVIVAL = 0.45;
+
+/** Lab and clinic: what they add to readiness for the hazards they can see coming. */
+export const LAB_WARNING = 0.12;
+export const CLINIC_CARE = 0.15;
+
+/**
+ * Where the settlement gathers when it has nowhere built for it: the tavern
+ * first, the cafe when there is no tavern.
+ */
+export function gatheringPlace(world: World): Building | undefined {
+  return findBuilding(world, 'Tavern') ?? findBuilding(world, 'Cafe');
+}
+
 /** Everybody a settlement could reasonably send to the arena, best first. */
 export function fightersOf(world: World): Citizen[] {
   return world.citizens
@@ -3309,7 +3368,7 @@ function produce(world: World) {
       ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
       : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises;
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world);
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -3354,10 +3413,14 @@ export function readiness(world: World): Record<HazardKind, number> {
   // Measured against the size of the thing being defended, not as a flat
   // count: one well was enough for a hamlet of eight and read as complete
   // readiness for a town of thirty-one, which meant nothing could ever burn.
+  // A lab sees fire, blight and wolves coming; a clinic makes a blight a
+  // sickness the town gets over rather than one it does not.
+  const warned = hasCivic(world, 'Lab') ? LAB_WARNING : 0;
+  const cared = hasCivic(world, 'Clinic') ? CLINIC_CARE : 0;
   return {
-    fire: clamp(wells / (1 + buildings / 8), 0, 1),
-    blight: clamp(food / (mouths * 9) * 0.7 + stores * 0.3, 0, 1),
-    wolves: clamp(fires / (1 + mouths / 14), 0, 1),
+    fire: clamp(wells / (1 + buildings / 8) + warned, 0, 1),
+    blight: clamp(food / (mouths * 9) * 0.7 + stores * 0.3 + warned + cared, 0, 1),
+    wolves: clamp(fires / (1 + mouths / 14) + warned, 0, 1),
     flood: clamp(backFromBank, 0, 1),
   };
 }
@@ -3667,6 +3730,9 @@ function lifeAndDeath(world: World) {
     if (c.warmth <= 6) risk += 0.14;
     else if (c.warmth < 22) risk += 0.04;
     if (c.roughSleeper) risk += 0.02;
+    // A clinic does not stop anybody growing old. It stops a bad week
+    // being the end of them.
+    if (hasCivic(world, 'Clinic')) risk *= 1 - CLINIC_SURVIVAL;
 
     if (rand() < risk) dead.push(c);
   }
@@ -3935,7 +4001,13 @@ function completeBridge(world: World, works: BridgeWorks) {
 const SELF_BUILD_COST: Record<string, number> = { House: 100, Woodcutter: 125, Farm: 150 };
 const TRADE_BUILD_COST: Record<string, number> = {
   Quarry: 175, Mine: 250, Mill: 250, Bakery: 300, Carpenter: 275, Blacksmith: 400, Tailor: 325,
+  Storage: 120, Tavern: 350, Bank: 450,
+  // The civic buildings. None employs anybody; each changes how the town lives.
+  Cafe: 300, School: 380, Library: 360, Studio: 340, Clinic: 420, Lab: 520,
 };
+
+/** What a building costs to raise, by type. Everything the panel shows comes from here. */
+export const BUILD_COSTS: Record<string, number> = { ...SELF_BUILD_COST, ...TRADE_BUILD_COST };
 
 /**
  * What a building is made of, on top of what it costs.
@@ -3965,6 +4037,12 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Tailor: { wood: 14, stone: 6 },
   Tavern: { wood: 24, stone: 10 },
   Bank: { wood: 18, stone: 26 },
+  Cafe: { wood: 18, stone: 8 },
+  School: { wood: 22, stone: 14 },
+  Library: { wood: 20, stone: 16 },
+  Studio: { wood: 20, stone: 8 },
+  Clinic: { wood: 12, stone: 24 },
+  Lab: { wood: 14, stone: 30 },
 };
 
 /** What this kind of building takes to raise. Anything unlisted is a modest shed. */
@@ -4471,7 +4549,11 @@ export function upkeepOf(b: Building) {
 }
 
 export function maintenanceCost(type: string) {
-  return ({ Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6, Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10 } as Record<string, number>)[type] ?? 2;
+  return ({
+    Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
+    Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
+    Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9,
+  } as Record<string, number>)[type] ?? 2;
 }
 
 /**
@@ -4688,8 +4770,10 @@ function daily(world: World) {
     if (c.job !== 'unemployed') {
       if (!c.skills) c.skills = {};
       const job = c.job as WorkingJob;
-      c.skills[job] = (c.skills[job] ?? 0) + (ratio > 0.5 ? 1 : 0.4);
-      const before = skillLevel((c.skills[job] ?? 0) - (ratio > 0.5 ? 1 : 0.4));
+      // A school or a library makes the same day teach more.
+      const gain = (ratio > 0.5 ? 1 : 0.4) * learningRate(world);
+      c.skills[job] = (c.skills[job] ?? 0) + gain;
+      const before = skillLevel((c.skills[job] ?? 0) - gain);
       const after = skillLevel(c.skills[job] ?? 0);
       if (after > before && after >= 3) {
         pushFeed(world, 'work', `${c.name} is now a ${SKILL_TITLES[after].toLowerCase()} ${JOB_LABELS[job].toLowerCase()}.`);
@@ -4697,6 +4781,12 @@ function daily(world: World) {
     }
     c.hunger = Math.max(0, c.hunger - 7); c.rest = Math.max(0, c.rest - 5);
     c.social = Math.max(0, c.social - 2); c.clothing = Math.max(0, c.clothing - 2.5);
+    // What the town's civic buildings put back. Small, daily, and for
+    // everybody: a cafe is an evening out, a studio is something to make,
+    // a library is somewhere to sit with a thought.
+    if (hasCivic(world, 'Cafe')) c.social = Math.min(100, c.social + CAFE_SOCIAL);
+    if (hasCivic(world, 'Studio')) c.purpose = Math.min(100, c.purpose + STUDIO_PURPOSE);
+    if (hasCivic(world, 'Library')) c.purpose = Math.min(100, c.purpose + LIBRARY_PURPOSE);
     // Unpaid work erodes a sense of purpose; paid work slowly builds it — and
     // what the work is worth is felt on top of whether it was paid at all.
     // This is the half of the wage lever that stewardship is actually scored
@@ -4718,9 +4808,9 @@ function daily(world: World) {
 
   const homeless = world.citizens.filter((c) => c.age >= 16 && !homeOf(world, c));
   if (homeless.length) {
-    const shelter = findBuilding(world, 'Tavern');
+    const shelter = gatheringPlace(world);
     pushFeed(world, 'social', shelter
-      ? `${homeless.length} ${homeless.length === 1 ? 'person has' : 'people have'} no home and slept at the tavern.`
+      ? `${homeless.length} ${homeless.length === 1 ? 'person has' : 'people have'} no home and slept at the ${shelter.type.toLowerCase()}.`
       : `${homeless.length} ${homeless.length === 1 ? 'person' : 'people'} slept outside. The settlement needs houses.`);
   }
 

@@ -891,8 +891,13 @@ button {
   display: grid;
   place-items: center;
   padding: 40px;
-  background: rgba(3, 9, 6, 0.6);
-  backdrop-filter: blur(3px);
+  /*
+   * No backdrop blur. A blur over the whole viewport is recomputed every frame
+   * the world redraws behind it, which on a desktop-sized canvas is what made
+   * opening the chat feel like wading. A slightly deeper wash does the same job
+   * of quieting the world for nothing.
+   */
+  background: rgba(3, 9, 6, 0.72);
 }
 
 .overlay-panel {

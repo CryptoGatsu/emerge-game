@@ -17,13 +17,13 @@ import { appearanceFor, type Appearance, type AssetLibrary } from './assets';
 import { BODY_LAYERS, CHAR_GROUND, CHAR_H, STATE_FRAMES, hatForJob, type CharState, type Dir, type HatKind, type LayerName } from './character';
 import { ELEVATION, worldToScreen } from '../world/iso';
 
-const OUTLINE_TINT = 0x1c2a1a;
+const OUTLINE_TINT = 0x0c130d;
 const TOOL_TINT = 0x9aa0a8;
 const HAT_TINTS: Record<Exclude<HatKind, 'none'>, number> = {
-  straw: 0xd8bb6a,
-  helmet: 0x8d94a0,
-  cap: 0xe6e2d4,
-  hood: 0x4a4438,
+  straw: 0xc9ad5e,
+  helmet: 0x7d8490,
+  cap: 0x3a4a3a,
+  hood: 0x2e2a36,
 };
 
 /** How far a citizen has to travel for one full four-frame walk cycle. */
@@ -118,6 +118,7 @@ export class CitizenSprite {
       case 'legs': return this.appearance.pants;
       case 'boots': return this.appearance.shoes;
       case 'body': return this.appearance.shirt;
+      case 'trim': return this.appearance.accent;
       case 'hands':
       case 'head': return this.appearance.skin;
       case 'tool': return TOOL_TINT;

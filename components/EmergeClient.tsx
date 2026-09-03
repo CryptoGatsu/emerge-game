@@ -627,6 +627,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (hidden) app.stop(); else app.start();
   }, [hidden]);
 
+  // A panel over the world is what the player is looking at. The world still
+  // runs and still shows through, but drawing it sixty times a second behind
+  // a chat window is what the chat window was paying for in lag: a dozen
+  // frames a second is plenty for a dimmed backdrop.
+  useEffect(() => {
+    const app = sceneRef.current?.app;
+    if (!app?.ticker) return;
+    app.ticker.maxFPS = panel ? 12 : 0;
+    return () => { if (app.ticker) app.ticker.maxFPS = 0; };
+  }, [panel, ready]);
+
   /* -------------------------------------------------------------- *
    * Who else is here, and putting this world up for them
    * -------------------------------------------------------------- */

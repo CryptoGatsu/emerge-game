@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
-  WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost, wageEffort, worldMarketState,
+  BUILD_COSTS, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost, wageEffort, worldMarketState,
 } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import {
@@ -76,21 +76,38 @@ interface PanelsProps {
   onToggleNotices: () => void;
 }
 
-/** Buildable structures. Upkeep is read from the simulation so it never drifts. */
+/** Clock strings per message id. A message's time never changes, so neither does this. */
+const TIMES = new Map<string, string>();
+function timeOf(id: string, at: number): string {
+  const held = TIMES.get(id);
+  if (held) return held;
+  const text = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (TIMES.size > 2000) TIMES.clear();
+  TIMES.set(id, text);
+  return text;
+}
+
+/** Buildable structures. Cost and upkeep are read from the simulation so they never drift. */
 const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] = [
-  { type: 'House', cost: 100, icon: '⌂', blurb: 'Homes for a growing settlement.' },
-  { type: 'Farm', cost: 150, icon: '✣', blurb: 'Wheat and vegetables from the fields.' },
-  { type: 'Woodcutter', cost: 125, icon: '♣', blurb: 'Timber from the surrounding forest.' },
-  { type: 'Quarry', cost: 175, icon: '◇', blurb: 'Cut stone from the highland.' },
-  { type: 'Mine', cost: 250, icon: '◆', blurb: 'Iron ore from deep in the ridge.' },
-  { type: 'Mill', cost: 250, icon: '◫', blurb: 'Turns wheat into flour.' },
-  { type: 'Bakery', cost: 300, icon: '◈', blurb: 'Turns flour into bread.' },
-  { type: 'Carpenter', cost: 275, icon: '▣', blurb: 'Turns wood into furniture.' },
-  { type: 'Blacksmith', cost: 400, icon: '⚒', blurb: 'Turns ore into tools.' },
-  { type: 'Tailor', cost: 325, icon: '✦', blurb: 'Turns wool into clothing.' },
-  { type: 'Storage', cost: 120, icon: '▤', blurb: 'Somewhere to keep the surplus.' },
-  { type: 'Tavern', cost: 350, icon: '♨', blurb: 'Where the settlement gathers.' },
-  { type: 'Bank', cost: 450, icon: '◈', blurb: 'A counting house for the treasury.' },
+  { type: 'House', cost: BUILD_COSTS['House'], icon: '⌂', blurb: 'Homes for a growing settlement.' },
+  { type: 'Farm', cost: BUILD_COSTS['Farm'], icon: '✣', blurb: 'Wheat and vegetables from the fields.' },
+  { type: 'Woodcutter', cost: BUILD_COSTS['Woodcutter'], icon: '♣', blurb: 'Timber from the surrounding forest.' },
+  { type: 'Quarry', cost: BUILD_COSTS['Quarry'], icon: '◇', blurb: 'Cut stone from the highland.' },
+  { type: 'Mine', cost: BUILD_COSTS['Mine'], icon: '◆', blurb: 'Iron ore from deep in the ridge.' },
+  { type: 'Mill', cost: BUILD_COSTS['Mill'], icon: '◫', blurb: 'Turns wheat into flour.' },
+  { type: 'Bakery', cost: BUILD_COSTS['Bakery'], icon: '◈', blurb: 'Turns flour into bread.' },
+  { type: 'Carpenter', cost: BUILD_COSTS['Carpenter'], icon: '▣', blurb: 'Turns wood into furniture.' },
+  { type: 'Blacksmith', cost: BUILD_COSTS['Blacksmith'], icon: '⚒', blurb: 'Turns ore into tools.' },
+  { type: 'Tailor', cost: BUILD_COSTS['Tailor'], icon: '✦', blurb: 'Turns wool into clothing.' },
+  { type: 'Storage', cost: BUILD_COSTS['Storage'], icon: '▤', blurb: 'Somewhere to keep the surplus.' },
+  { type: 'Tavern', cost: BUILD_COSTS['Tavern'], icon: '♨', blurb: 'Where the settlement gathers.' },
+  { type: 'Cafe', cost: BUILD_COSTS['Cafe'], icon: '☕', blurb: 'Tables on the terrace. People come out of themselves here.' },
+  { type: 'School', cost: BUILD_COSTS['School'], icon: '◬', blurb: 'Everyone learns their trade faster, children most of all.' },
+  { type: 'Library', cost: BUILD_COSTS['Library'], icon: '▥', blurb: 'Quiet and purpose. A little learning for everybody.' },
+  { type: 'Studio', cost: BUILD_COSTS['Studio'], icon: '✎', blurb: 'Somewhere to make things. Purpose, and showcases.' },
+  { type: 'Lab', cost: BUILD_COSTS['Lab'], icon: '⚗', blurb: 'Better methods for every trade, and warning of trouble.' },
+  { type: 'Clinic', cost: BUILD_COSTS['Clinic'], icon: '✚', blurb: 'People survive what would have killed them.' },
+  { type: 'Bank', cost: BUILD_COSTS['Bank'], icon: '◈', blurb: 'A counting house for the treasury.' },
 ];
 
 function Shell({ title, subtitle, onClose, children, wide }: {
@@ -352,6 +369,14 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             stone out of the yard — so what you can raise depends on what the settlement has cut and
             quarried. Buildings placed off the road network get a lane cut through to them, and one
             placed across water will have a bridge started toward it.
+          </p>
+          <p>
+            Beyond the trades there are the places a town is built around. A <b>Cafe</b> gets
+            people out among each other; a <b>School</b> and a <b>Library</b> make everyone
+            better at their trade sooner; a <b>Studio</b> gives them somewhere to make things and
+            a reason to; a <b>Lab</b> lifts every trade&rsquo;s output and sees trouble coming; a{' '}
+            <b>Clinic</b> is the difference between a hard winter and a funeral. None of them
+            employs anybody, and all of them cost upkeep.
           </p>
           <p>
             A building&rsquo;s card also offers <b>Move</b> and <b>Improve</b>. Moving arms the
@@ -776,7 +801,11 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
     return () => { live = false; window.clearInterval(timer); };
   }, [channel]);
 
-  const messages = state ? channelOf(state, channel) : [];
+  // The parent re-renders this panel on every HUD tick, several times a
+  // second. Everything below that depends only on the messages is memoised
+  // against them, so a tick costs a comparison rather than a rebuild of the
+  // whole log.
+  const messages = useMemo(() => (state ? channelOf(state, channel) : []), [state, channel]);
 
   /**
    * Names worn by more than one address in what is on screen.
@@ -800,6 +829,58 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
     // `nameFor` reads both maps, so the set is rebuilt when either changes.
   }, [messages, namesBy, worldsBy]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length, kind]);
+
+  /*
+   * The rendered log.
+   *
+   * Formatting a timestamp goes through the locale machinery, and doing it a
+   * hundred and twenty times on every tick of the world clock was most of what
+   * the chat cost to have open. The rows are built once per change to what is
+   * in them, and the time strings are kept per message for good.
+   */
+  const rows = useMemo(() => messages.map((m) => {
+    const theirs = worldOf(m.author);
+    const self = m.author === player.name
+      || (!!wallet.address && m.author.toLowerCase() === wallet.address.toLowerCase());
+    // Your own name is read from your own record, so a rename shows in
+    // the conversation the instant you make it rather than after the
+    // relay's next round trip.
+    const label = m.wallet
+      ? (self ? player.name : nameFor(m.author)) || shortAddress(m.author)
+      : m.author;
+    // The address is the identity; the name is what somebody chose to
+    // call themselves. Where two people are wearing the same name, the
+    // address goes back on screen for both, because in a room where land
+    // changes hands a name on its own is not something to trust.
+    const clashes = m.wallet && contested.has(label.toLowerCase());
+    const host = isHost(m.author);
+    const shown = clashes ? `${label} · ${shortAddress(m.author)}` : label;
+    const who = m.wallet ? m.author : label;
+    return (
+      <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''} ${host ? 'host' : ''}`}>
+        {theirs && !self ? (
+          <button
+            className={`chat-who ${host ? 'host' : ''}`}
+            title={host ? `${shown} owns ${view.name} · ${who}` : `Visit ${theirs.worldName} · ${who}`}
+            disabled={travelling !== null}
+            onClick={() => travelTo(theirs)}
+          >
+            {shown}
+            <i>{travelling === theirs.seed ? '…' : host ? '★' : '↗'}</i>
+          </button>
+        ) : (
+          <b className={host ? 'host' : ''} title={who}>
+            {shown}{host && <i className="host-star">★</i>}
+          </b>
+        )}
+        <span>{m.text}</span>
+        <em>{timeOf(m.id, m.at)}</em>
+      </div>
+    );
+    // The helpers read `namesBy` and `worldsBy`; the rows are rebuilt when
+    // either changes, or when who is travelling or what you are called does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [messages, namesBy, worldsBy, contested, player.name, wallet.address, travelling, claimed.seed, view.name]);
 
   if (!state) return null;
 
@@ -899,46 +980,7 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
               : `Nothing said about ${view.name} yet.`}
           </p>
         )}
-        {messages.map((m) => {
-          const theirs = worldOf(m.author);
-          const self = m.author === player.name
-            || (!!wallet.address && m.author.toLowerCase() === wallet.address.toLowerCase());
-          // Your own name is read from your own record, so a rename shows in
-          // the conversation the instant you make it rather than after the
-          // relay's next round trip.
-          const label = m.wallet
-            ? (self ? player.name : nameFor(m.author)) || shortAddress(m.author)
-            : m.author;
-          // The address is the identity; the name is what somebody chose to
-          // call themselves. Where two people are wearing the same name, the
-          // address goes back on screen for both, because in a room where land
-          // changes hands a name on its own is not something to trust.
-          const clashes = m.wallet && contested.has(label.toLowerCase());
-          const host = isHost(m.author);
-          const shown = clashes ? `${label} · ${shortAddress(m.author)}` : label;
-          const who = m.wallet ? m.author : label;
-          return (
-            <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''} ${host ? 'host' : ''}`}>
-              {theirs && !self ? (
-                <button
-                  className={`chat-who ${host ? 'host' : ''}`}
-                  title={host ? `${shown} owns ${view.name} · ${who}` : `Visit ${theirs.worldName} · ${who}`}
-                  disabled={travelling !== null}
-                  onClick={() => travelTo(theirs)}
-                >
-                  {shown}
-                  <i>{travelling === theirs.seed ? '…' : host ? '★' : '↗'}</i>
-                </button>
-              ) : (
-                <b className={host ? 'host' : ''} title={who}>
-                  {shown}{host && <i className="host-star">★</i>}
-                </b>
-              )}
-              <span>{m.text}</span>
-              <em>{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</em>
-            </div>
-          );
-        })}
+        {rows}
         <div ref={endRef} />
       </div>
 

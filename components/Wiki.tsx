@@ -23,7 +23,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_MATERIALS, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  BUILD_COSTS, BUILD_MATERIALS, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -127,6 +127,12 @@ const CIVIC_BUILDINGS = [
   ['Tavern', 'Where the settlement gathers. Meetups and feasts happen here, and they are what turns neighbours into friends.'],
   ['Bank', 'A counting house. Costs nothing to keep.'],
   ['Town Hall', 'Where the settlement holds a meeting and resolves on something.'],
+  ['Cafe', 'Tables on the terrace. Everybody\u2019s company improves a little every day, and gatherings can be held here where there is no tavern.'],
+  ['School', 'Everyone learns their trade about a third faster. The single best thing you can do for a young settlement\u2019s output.'],
+  ['Library', 'A little learning and a little purpose for everybody, every day.'],
+  ['Studio', 'Somewhere to make things. Purpose grows here, which is what keeps people at their trades.'],
+  ['Lab', 'Better methods: every trade gets a tenth more out of the same day. It also sees fire, blight and wolves coming, which is worth a well or two.'],
+  ['Clinic', 'People survive what would have killed them. Deaths from age and hardship fall by nearly half.'],
 ] as const;
 
 /** What a plot's status figures mean, and what actually moves them. */
@@ -144,13 +150,6 @@ const STATUS = [
   ['Working / outdoors', 'How many people are at their trade right now, and how many are outside. Both move through the day: nobody works at night.',
     'If the working figure is low in daylight, a trade is missing a building or the treasury cannot pay.'],
 ] as const;
-
-/** What each building costs in Gold, as the Build panel charges it. */
-const BUILD_COSTS: Record<string, number> = {
-  House: 100, Farm: 150, Woodcutter: 125, Quarry: 175, Mine: 250, Mill: 250,
-  Bakery: 300, Carpenter: 275, Blacksmith: 400, Tailor: 325, Storage: 120,
-  Tavern: 350, Bank: 450,
-};
 
 /**
  * What brings each kind of trouble.
@@ -594,11 +593,15 @@ export default function Wiki() {
 
           <h3>Everything else</h3>
           <table className="wiki-table">
-            <thead><tr><th>Building</th><th>Upkeep</th><th>What it is for</th></tr></thead>
+            <thead><tr><th>Building</th><th>To raise</th><th>Upkeep</th><th>What it is for</th></tr></thead>
             <tbody>
               {CIVIC_BUILDINGS.map(([type, what]) => (
                 <tr key={type}>
                   <td>{type}</td>
+                  <td className="num">
+                    {(BUILD_COSTS[type] ?? 250).toLocaleString()}g
+                    <em className="matter"> · {(BUILD_MATERIALS[type] ?? { wood: 10 }).wood}w {(BUILD_MATERIALS[type] ?? { stone: 4 }).stone}s</em>
+                  </td>
                   <td className="num">{maintenanceCost(type)}g</td>
                   <td className="muted">{what}</td>
                 </tr>
@@ -619,7 +622,9 @@ export default function Wiki() {
             of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, in Gold and in
             timber and stone both — so the top level is a decision, not a formality. Each level adds
             about <b>{Math.round(OUTPUT_PER_LEVEL * 100)}% to what the building produces</b> and{' '}
-            <b>{Math.round(UPKEEP_PER_LEVEL * 100)}% to its upkeep</b>. It does not hold more workers. An improved workshop
+            <b>{Math.round(UPKEEP_PER_LEVEL * 100)}% to its upkeep</b>. It does not hold more workers — and
+            it shows: lanterns and a banner at the second level, a glass annex, a taller frame and
+            gold along the eaves at the third. An improved workshop
             earns its keep if it is staffed and supplied; an improved one standing idle is simply a
             larger bill every day.
           </p>
