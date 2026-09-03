@@ -1,0 +1,419 @@
+'use client';
+
+/**
+ * The guide.
+ *
+ * Everything a player might want to know before spending anything, on one
+ * page, with every number imported from the code that enforces it rather than
+ * typed out here. A wiki that drifts from the game is worse than no wiki: it
+ * is a promise the software does not keep.
+ *
+ * The tone is the same one the panels use. Say what is true, including the
+ * parts that are inconvenient — which right now means being direct about
+ * stewardship not paying out until the land contract exists, rather than
+ * describing an income nobody can collect.
+ */
+
+import Link from 'next/link';
+import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
+import { onChainClaimsLive } from '@/lib/chain/registry';
+import {
+  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
+} from '@/lib/chain/vault';
+import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
+import { STEWARDSHIP_DAILY_CAP } from '@/lib/simulation';
+import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
+import { BrandLine } from './Brand';
+
+const n = (value: number) => value.toLocaleString();
+const pct = (value: number) => `${Math.round(value * 100)}%`;
+
+/** Land prices, straight from the same function the game charges with. */
+const PLOT_PRICES = [...BIOME_KINDS_BY_INDEX]
+  .map((kind) => ({ kind, price: (BASE_PRICE + BIOME_PREMIUM[kind]) * PRICE_SCALE }))
+  .sort((a, b) => a.price - b.price);
+
+const CHARGES = [
+  { what: 'Claim a plot', cost: `${n(PLOT_PRICES[0].price)} – ${n(PLOT_PRICES[PLOT_PRICES.length - 1].price)}`, note: 'by biome' },
+  { what: 'Survey new land', cost: n(PROSPECT_COST_EMERGE), note: 'finds a seed nobody has had' },
+  { what: 'Rename your world', cost: n(RENAME_COST_EMERGE), note: '' },
+  { what: 'Rename a being', cost: n(RENAME_CITIZEN_EMERGE), note: 'free with a naming right from a dig' },
+  { what: 'Rename yourself', cost: n(RENAME_PLAYER_EMERGE), note: 'the first change is free' },
+  { what: 'Send a digging party', cost: n(DIG_COST_EMERGE), note: '' },
+];
+
+/**
+ * What a plot actually pays, worked through.
+ *
+ * `dailyYield = STEWARDSHIP_DAILY_CAP × score × attention`, which is the exact
+ * line the simulation runs, so these rows are the real function rather than an
+ * illustration of it.
+ */
+const yieldFor = (score: number, attention: number) =>
+  Math.round(STEWARDSHIP_DAILY_CAP * score * attention);
+
+const EXAMPLES = [
+  { how: 'Run well, looked after daily', score: 0.95, attention: 0.9 },
+  { how: 'Run decently, checked most days', score: 0.8, attention: 0.7 },
+  { how: 'Left alone for two days', score: 0.8, attention: 0.08 },
+  { how: 'Struggling and neglected', score: 0.4, attention: 0.08 },
+];
+
+const SECTIONS = [
+  ['start', 'Getting started'],
+  ['land', 'Land and ownership'],
+  ['costs', 'What things cost'],
+  ['earning', 'Earning'],
+  ['vault', 'Deposits and withdrawals'],
+  ['world', 'The world itself'],
+  ['together', 'Other players'],
+  ['honest', 'What is settled, and what is not'],
+] as const;
+
+export default function Wiki() {
+  const landOnChain = onChainClaimsLive();
+  const live = tokenLive();
+
+  return (
+    <main className="wiki">
+      <div className="wiki-inner">
+        <header className="wiki-head">
+          <Link href="/" className="wiki-home"><BrandLine size={40} /></Link>
+          <h1>How Emerge works</h1>
+          <p className="wiki-lede">
+            A living world of autonomous beings that you own land in and shape, but do not command.
+            This is the whole of it: what you can do, what everything costs, how the money moves,
+            and — the part most pages like this leave out — which of it settles on chain today and
+            which does not.
+          </p>
+          <nav className="wiki-nav">
+            {SECTIONS.map(([id, label]) => (
+              <a key={id} href={`#${id}`}>{label}</a>
+            ))}
+          </nav>
+        </header>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="start">
+          <h2>Getting started</h2>
+          <ol className="wiki-steps">
+            <li>
+              <b>Connect a wallet.</b> MetaMask or Trust Wallet, on {ACTIVE_CHAIN.label}
+              {ACTIVE_CHAIN.chainId ? ` (chain ${ACTIVE_CHAIN.chainId})` : ''}. If you have more
+              than one wallet installed, pick the one you mean — the game will ask rather than
+              guess.
+            </li>
+            <li>
+              <b>Sign in.</b> One free signature on a plain sentence, good for a day. It is not a
+              transaction and moves nothing; it proves the wallet is yours so nobody else can spend,
+              claim or speak as you.
+            </li>
+            <li>
+              <b>Claim a plot.</b> Pick land on the world map. You pay in {TOKEN.ticker}, it is
+              burned, and the plot is yours.
+            </li>
+            <li>
+              <b>Then just watch for a while.</b> Nothing needs doing immediately. The settlement
+              runs whether or not you are there.
+            </li>
+          </ol>
+          <p className="wiki-note">
+            Everything you own is keyed to your wallet address, not to your browser. Connect the
+            same wallet on a different device and your worlds are there.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="land">
+          <h2>Land and ownership</h2>
+          <p>
+            A plot is a seed. The same number that generates its rivers, hills and woodland is the
+            number that identifies it, so no two plots are the same land and the ground you see
+            before you buy is the ground you get.
+          </p>
+          <p>
+            <b>One owner per plot, always.</b> A claim is written once and cannot be overwritten;
+            if two people go for the same land in the same instant, exactly one gets it and the
+            other is refused before paying. Your land is held against your wallet address, so it
+            survives clearing your browser, changing device, or coming back months later.
+          </p>
+          <p>
+            <b>Nothing is recorded until it is paid for.</b> The registry reads your burn off the
+            chain before it writes a title — right wallet, right amount, settled, not already spent
+            on something else. There is no way to get land without paying for it, and no way to pay
+            without getting it.
+          </p>
+          {!landOnChain && (
+            <div className="wiki-callout">
+              <b>Land is held in our registry, not as a token in your wallet — yet.</b>
+              <p>
+                The land contract is not deployed. Ownership is enforced for every player and tied
+                to your address, but it is a record we keep rather than an on-chain title you hold
+                independently of us. When the contract goes live, a plot becomes an ERC-721 token
+                whose id is its seed, and claims move across. Said plainly here because the
+                difference is real and you should know which one you have.
+              </p>
+            </div>
+          )}
+          <h3>What a plot costs</h3>
+          <p>Priced by what the land supports, from the seed alone:</p>
+          <table className="wiki-table">
+            <thead><tr><th>Biome</th><th>Price</th></tr></thead>
+            <tbody>
+              {PLOT_PRICES.map(({ kind, price }) => (
+                <tr key={kind}>
+                  <td style={{ textTransform: 'capitalize' }}>{kind}</td>
+                  <td className="num">{n(price)} {TOKEN.ticker}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            You may hold as many plots as you like. Only the first {EARNING_PLOT_LIMIT} you claimed
+            earn — see below.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="costs">
+          <h2>What things cost</h2>
+          <p>
+            <b>Every charge is burned.</b> Not sent to us, not collected by anybody, not held in a
+            treasury — destroyed, so the supply falls each time. There is no address the project
+            takes a cut into, because there is no cut.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Action</th><th>Cost</th><th /></tr></thead>
+            <tbody>
+              {CHARGES.map((row) => (
+                <tr key={row.what}>
+                  <td>{row.what}</td>
+                  <td className="num">{row.cost}</td>
+                  <td className="muted">{row.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            Building, demolishing, moving people around and everything else inside your settlement
+            costs Gold, not {TOKEN.ticker}. Gold is the settlement&rsquo;s own money and never
+            leaves it.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="earning">
+          <h2>Earning</h2>
+          <p>
+            You are not paid for holding land. You are paid for running it well, and the rate is
+            worked out fresh every day from the state of your settlement.
+          </p>
+          <div className="wiki-formula">
+            <code>daily yield = {n(STEWARDSHIP_DAILY_CAP)} × quality × attention</code>
+            <span>per plot, per real day</span>
+          </div>
+          <p>
+            <b>Quality</b> is how the place is actually doing — housed (25%), fed (25%), employed
+            (20%), content (20%) and safe (10%). <b>Attention</b> is how recently you did anything
+            about it: full if you have just acted, sliding down over about a day and a half of
+            silence to a floor of {pct(0.08)}. A world nobody touches earns a fraction of one that
+            is being run.
+          </p>
+          <table className="wiki-table">
+            <thead>
+              <tr><th>How it is going</th><th>One plot</th><th>{EARNING_PLOT_LIMIT} plots</th></tr>
+            </thead>
+            <tbody>
+              {EXAMPLES.map((row) => (
+                <tr key={row.how}>
+                  <td>{row.how}</td>
+                  <td className="num">{n(yieldFor(row.score, row.attention))}</td>
+                  <td className="num">{n(yieldFor(row.score, row.attention) * EARNING_PLOT_LIMIT)}</td>
+                </tr>
+              ))}
+              <tr className="wiki-total">
+                <td>Absolute ceiling</td>
+                <td className="num">{n(STEWARDSHIP_DAILY_CAP)}</td>
+                <td className="num">{n(DAILY_EARN_CEILING)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            All figures are {TOKEN.ticker} per real day. Only your first {EARNING_PLOT_LIMIT} plots
+            pay, and {n(DAILY_EARN_CEILING)} a day is a hard ceiling per wallet — so no amount of
+            money buys past it. That is deliberate: the cap is what stops the game being a machine
+            for turning capital into tokens.
+          </p>
+
+          {!landOnChain && (
+            <div className="wiki-callout warn">
+              <b>Stewardship does not pay out yet.</b>
+              <p>
+                Your world accrues yield and the Bank shows it, but collecting it to your wallet is
+                switched off until the land contract is deployed. Paying stewardship needs a way to
+                prove a wallet genuinely holds land — otherwise anyone could spin up addresses and
+                collect the daily ceiling on each, having spent nothing. Until that check exists,
+                the door stays shut rather than open and exploitable.
+              </p>
+              <p>
+                <b>Everything else is live.</b> Claiming, burning, deposits and withdrawals of your
+                own {TOKEN.ticker} all work today. If you are here for the yield, that is the one
+                thing worth waiting for, and we would rather tell you now than after you bought
+                land for it.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="vault">
+          <h2>Deposits and withdrawals</h2>
+          <p>
+            Gold funds your settlement; {TOKEN.ticker} is the token behind it. You can move your own
+            money both ways.
+          </p>
+          <table className="wiki-table">
+            <tbody>
+              <tr><td>Rate</td><td className="num">{n(EMERGE_PER_GOLD)} {TOKEN.ticker} = 1 Gold</td></tr>
+              <tr><td>Deposit fee</td><td className="num">none</td></tr>
+              <tr><td>Withdrawal</td><td className="num">{pct(WITHDRAW_BURN_RATE)} held back and burned</td></tr>
+              <tr><td>Gift to another world</td><td className="num">up to {n(MAX_GIFT_GOLD)} Gold at a time</td></tr>
+            </tbody>
+          </table>
+          <p>
+            <b>Deposits are the one thing not burned</b>, and for an obvious reason: it is your own
+            money and the withdrawal door has to be able to give it back. Deposits go to the vault
+            and are credited only after the chain confirms they arrived — from your wallet,
+            specifically, so nobody can claim credit for a deposit you made.
+          </p>
+          <p>
+            <b>Withdrawals are automatic.</b> Press withdraw and the vault signs a transfer to your
+            wallet there and then; the Bank hands you the transaction so you can check it yourself.
+            Nobody approves it and nobody can decide not to. What you can take out is what the chain
+            says you put in — so it is the same figure on every device, and no one can withdraw more
+            than they deposited.
+          </p>
+          <p className="wiki-note">
+            Gold your settlement earns on its own is not withdrawable. That is the town&rsquo;s
+            money — what it pays its people and buys its grain with — and letting it out of the
+            world was the thing that broke the economy the first time.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="world">
+          <h2>The world itself</h2>
+          <p>
+            Every being on your plot has their own hunger, energy, trade, friendships and grudges.
+            They wake, work, argue, fall in love, raise children and bury their dead whether or not
+            you are watching. <b>You cannot tell anyone what to do.</b> You can build them a
+            workshop and watch somebody decide it is theirs.
+          </p>
+          <p>
+            What you actually control is the place: fund the treasury, raise houses and workshops,
+            pull down what is not working, cut roads and bridges to land nobody can reach. A camp of
+            eight becomes a town of thirty because of decisions you made, or it does not.
+          </p>
+          <p>
+            Seasons turn, weather lands, food runs short in a bad winter, and a settlement with no
+            farm in a desert will struggle exactly as much as you would expect. Nine biomes, each
+            supporting different trades — which is why they are priced differently.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="together">
+          <h2>Other players</h2>
+          <p>
+            Every plot anybody has claimed sits on one shared map. You can visit the settlements
+            other people have built — tap a marker, or tap somebody&rsquo;s name in chat — and see
+            their world as they last left it.
+          </p>
+          <p>
+            A visit is a visit: you can watch and follow people around, but you cannot build, pull
+            anything down, or earn there. You cannot see their treasury either. The one thing a
+            visitor may do is <b>put Gold into a settlement they like the look of</b>, up to
+            {' '}{n(MAX_GIFT_GOLD)} Gold at a time, paid for in {TOKEN.ticker} at the usual rate.
+          </p>
+          <p>
+            Chat has a global channel and one for the world you are standing in. A message posted
+            under a wallet is signed by that wallet — so a name with a badge beside it really is
+            that address, and cannot be worn by somebody else.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="honest">
+          <h2>What is settled, and what is not</h2>
+          <p>
+            The useful question about any game like this is which parts the chain enforces and which
+            parts are a company&rsquo;s word. Here is the whole answer.
+          </p>
+          <table className="wiki-table status">
+            <tbody>
+              <tr>
+                <td>{TOKEN.ticker} balances</td>
+                <td className={live ? 'yes' : 'no'}>{live ? 'On chain' : 'Local development build'}</td>
+                <td className="muted">read from your wallet</td>
+              </tr>
+              <tr>
+                <td>Charges and burns</td>
+                <td className={live ? 'yes' : 'no'}>{live ? 'On chain' : 'Local'}</td>
+                <td className="muted">signed by you, supply falls</td>
+              </tr>
+              <tr>
+                <td>Deposits</td>
+                <td className={live ? 'yes' : 'no'}>{live ? 'On chain' : 'Local'}</td>
+                <td className="muted">verified before crediting</td>
+              </tr>
+              <tr>
+                <td>Withdrawals</td>
+                <td className={live ? 'yes' : 'no'}>{live ? 'On chain, automatic' : 'Local'}</td>
+                <td className="muted">the vault signs, you get the hash</td>
+              </tr>
+              <tr>
+                <td>Land ownership</td>
+                <td className={landOnChain ? 'yes' : 'partial'}>
+                  {landOnChain ? 'On chain (ERC-721)' : 'Our registry'}
+                </td>
+                <td className="muted">
+                  {landOnChain ? 'a token in your wallet' : 'enforced, tied to your address, not yet a token'}
+                </td>
+              </tr>
+              <tr>
+                <td>Stewardship payouts</td>
+                <td className={landOnChain ? 'yes' : 'no'}>
+                  {landOnChain ? 'On chain' : 'Not yet'}
+                </td>
+                <td className="muted">
+                  {landOnChain ? 'paid from the vault' : 'waiting on the land contract'}
+                </td>
+              </tr>
+              <tr>
+                <td>The simulation</td>
+                <td className="partial">Off chain</td>
+                <td className="muted">it runs in your browser, as it must to be responsive</td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            Two things worth knowing plainly. Gold and everything inside a settlement is game state,
+            not money — the only door out of the game is withdrawing what you deposited. And the
+            land record lives in a database we run: no other player can take your plot, but it is
+            our word rather than the chain&rsquo;s until the contract ships.
+          </p>
+        </section>
+
+        <footer className="wiki-foot">
+          <Link href="/" className="wiki-back">Back to the game</Link>
+          <p className="muted small">
+            Every figure on this page is read from the code that enforces it, so it cannot drift
+            from what the game actually does.
+          </p>
+        </footer>
+      </div>
+    </main>
+  );
+}

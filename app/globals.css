@@ -2230,3 +2230,237 @@ button.fold:hover { color: var(--emerald); }
   /* The books carry sentences rather than figures, so they do stack. */
   .books { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------------- *
+ * The guide
+ *
+ * A long reading page, which nothing else in this interface is. The
+ * game is panels floating over a world; this is prose, and it is
+ * styled as prose — one column, generous line height, a measure that
+ * stops at 72 characters however wide the screen gets.
+ *
+ * It sits on the landing page's ground rather than the game's glass,
+ * because it is the same kind of page: something you read before you
+ * play, not something you read while playing.
+ * ---------------------------------------------------------------- */
+
+.wiki {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 820px 460px at 50% 0%, rgba(1, 26, 17, 0.8), transparent 70%),
+    radial-gradient(ellipse at 96% 108%, rgba(7, 81, 65, 0.18), transparent 58%),
+    var(--night);
+}
+.wiki-inner { max-width: 800px; margin: 0 auto; padding: 5vh 28px 72px; }
+
+.wiki-head { padding-bottom: 26px; border-bottom: 1px solid var(--panel-edge-soft); }
+.wiki-home { display: inline-block; text-decoration: none; color: inherit; }
+.wiki-head h1 {
+  margin: 26px 0 0;
+  font-size: clamp(27px, 4.4vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+  font-weight: 600;
+  color: var(--cream);
+}
+.wiki-lede {
+  margin: 14px 0 0;
+  max-width: 66ch;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #b6ccab;
+}
+
+/* The contents. Anchors rather than a sidebar: on a phone a sidebar is
+   either in the way or hidden, and this is one column either way. */
+.wiki-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 24px;
+}
+.wiki-nav a {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(1, 26, 17, 0.5);
+  font-size: 11.5px;
+  letter-spacing: 0.3px;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.wiki-nav a:hover { border-color: var(--emerald); color: var(--emerald); }
+
+/* `scroll-margin-top` so a jump from the contents does not park the
+   heading against the very top edge of the viewport. */
+.wiki section { padding-top: 38px; scroll-margin-top: 18px; }
+.wiki h2 {
+  margin: 0 0 14px;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+  color: var(--emerald);
+}
+.wiki h3 {
+  margin: 30px 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--cream);
+}
+.wiki p {
+  margin: 0 0 14px;
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--text);
+}
+.wiki p b, .wiki li b { color: var(--cream); font-weight: 650; }
+.wiki a { color: var(--emerald); }
+
+.wiki-steps {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  max-width: 72ch;
+}
+.wiki-steps li {
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+}
+.wiki-steps li::marker { color: var(--emerald-dim); font-weight: 700; }
+
+.wiki-note {
+  margin: 16px 0 0;
+  padding-left: 14px;
+  border-left: 2px solid var(--panel-edge-soft);
+  font-size: 13px !important;
+  line-height: 1.75 !important;
+  color: var(--muted) !important;
+}
+
+/* A block that says something the reader would be annoyed to find out
+   later. Bordered so it cannot be skimmed past. */
+.wiki-callout {
+  margin: 20px 0;
+  padding: 18px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge);
+  background: rgba(1, 26, 17, 0.55);
+}
+.wiki-callout > b {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13.5px;
+  color: var(--emerald);
+}
+.wiki-callout p { margin: 0 0 10px; font-size: 13.5px; color: #a9c19d; }
+.wiki-callout p:last-child { margin-bottom: 0; }
+.wiki-callout.warn { border-color: rgba(225, 210, 78, 0.42); background: rgba(28, 24, 4, 0.5); }
+.wiki-callout.warn > b { color: var(--gold); }
+
+.wiki-table {
+  width: 100%;
+  margin: 4px 0 6px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.wiki-table th {
+  padding: 8px 12px 8px 0;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--emerald-dim);
+  border-bottom: 1px solid var(--panel-edge-soft);
+}
+.wiki-table td {
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid rgba(184, 231, 86, 0.08);
+  color: var(--text);
+  line-height: 1.6;
+}
+.wiki-table tr:last-child td { border-bottom: none; }
+.wiki-table .num {
+  font-variant-numeric: tabular-nums;
+  color: var(--cream);
+  white-space: nowrap;
+}
+.wiki-table td.muted { font-size: 12px; }
+.wiki-total td {
+  border-top: 1px solid var(--panel-edge-soft);
+  padding-top: 11px;
+  color: var(--gold);
+}
+.wiki-total .num { color: var(--gold); }
+.wiki-table.status .yes { color: var(--emerald); }
+.wiki-table.status .no { color: #d98b6a; }
+.wiki-table.status .partial { color: var(--gold); }
+
+.wiki-formula {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  margin: 16px 0 18px;
+  padding: 15px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.32);
+}
+.wiki-formula code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13.5px;
+  color: var(--emerald);
+}
+.wiki-formula span { font-size: 11.5px; letter-spacing: 0.3px; color: var(--muted); }
+
+.wiki-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 52px;
+  padding-top: 26px;
+  border-top: 1px solid var(--panel-edge-soft);
+}
+.wiki-back {
+  align-self: flex-start;
+  padding: 11px 20px;
+  border-radius: 11px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #06180c;
+  text-decoration: none;
+  background: linear-gradient(160deg, var(--emerald), #6f9c3a);
+}
+.wiki-back:hover { filter: brightness(1.08); }
+.wiki-foot p { margin: 0; max-width: 76ch; }
+
+@media (max-width: 720px) {
+  .wiki-inner { padding: 3vh 16px 52px; }
+  .wiki section { padding-top: 30px; }
+  .wiki h2 { font-size: 19px; }
+  /* Tables are the one thing here that cannot narrow indefinitely, so
+     they scroll inside themselves rather than widening the page. */
+  .wiki-table { display: block; overflow-x: auto; white-space: nowrap; }
+  .wiki-table td.muted { white-space: normal; min-width: 15ch; }
+}
+
+/* The way into the guide from the front door. Understated: the button
+   above it is the thing to press, this is for whoever wants to read
+   first. */
+.gate-guide {
+  margin-top: 2px;
+  font-size: 12.5px;
+  letter-spacing: 0.3px;
+  color: var(--emerald);
+  text-decoration: none;
+}
+.gate-guide:hover { text-decoration: underline; }

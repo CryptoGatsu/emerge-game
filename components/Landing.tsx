@@ -168,6 +168,9 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
                 </p>
               </>
             )}
+            <a className="gate-guide" href="/wiki">
+              Read the guide first &rarr;
+            </a>
           </div>
         </section>
 
@@ -184,6 +187,8 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
 
         <footer className="landing-foot">
           <div className="foot-links">
+            <a href="/wiki">Guide</a>
+            <span aria-hidden>·</span>
             <a href={X_URL} target="_blank" rel="noreferrer noopener">@emergerh</a>
             <span aria-hidden>·</span>
             <span>{SITE_DOMAIN}</span>
