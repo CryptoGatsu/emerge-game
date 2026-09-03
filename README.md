@@ -245,6 +245,29 @@ Result across all nine biomes, over four simulated days each: time standing on o
 water 0.00%, time inside a wall 0.15%-0.32%, direction reversals 0.71%-3.10%, time
 stopped 42%-49%.
 
+**Walking round things.** Between junctions a citizen walks a straight line,
+and until now dealt with whatever was in the way by being pushed out of it.
+That slides along a wall met at an angle and fails against anything a straight
+line cannot slide past: two footprints that touch, a building dropped across
+a lane, an inlet with a bank on both sides. The push and the pull cancel and
+the citizen stands there. Measured at the client's own tick size — a
+four-hundredth of an hour, not the quarter-hour a headless test tends to use,
+which hid it completely — a fifth of all walking time on one grassland plot
+was spent standing still, and one carpenter spent seventeen hours in the seam
+between a library and the market.
+
+So `lib/world/nav.ts` keeps a walkability grid over the plot, one cell to the
+world unit: water off the decks, and every footprint with a shoulder's margin.
+Before each leg is walked it is checked against the grid; a leg that crosses
+something gets an A* route found round it to the destination, pulled tight so
+people walk the few straight lines a person would. Two footprints that touch
+are one obstacle to the grid, so the route goes round both. A player can no
+longer make such a seam: placing or moving a building refuses a spot that
+leaves less than a person's width to its neighbours, and says so. Result on
+eight plots over three days at the client tick: no citizen stood still for
+more than an hour and a half while trying to walk, from a rate of one walking
+sample in fifteen. The grid costs a tenth of a millisecond a tick.
+
 ### How busy a settlement looks
 
 A village of twenty-eight read as a crowd of far more, and the reason was not the

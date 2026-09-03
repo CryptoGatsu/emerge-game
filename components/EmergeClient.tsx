@@ -998,6 +998,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       if (building) {
         scene.syncBuildings();
         setSelected({ kind: 'building', id: building.id });
+      } else {
+        // Refused — the feed says why. Too close to a neighbour, or on the water.
+        soundRef.current?.tick('deny');
       }
       setView(snapshot(world, selectedRef.current));
     });

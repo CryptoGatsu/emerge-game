@@ -17,6 +17,7 @@ import {
 } from './world/goods';
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
 import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
+import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
 import { buildWater, type WaterField } from './world/water';
 
 export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 'river';
@@ -180,6 +181,13 @@ export interface Citizen {
    * oscillate at the water's edge for the rest of the day.
    */
   bestAway: number;
+  /**
+   * Points to walk to in turn, found round whatever a straight leg of the
+   * route would have run into. Empty or absent when the way is clear.
+   */
+  detour?: [number, number][];
+  /** Game hours before a route round an obstacle is looked for again, after one could not be found. */
+  navWait?: number;
   /** True when they have no bed and are sleeping out in the open. */
   roughSleeper: boolean;
   /** Cosmetic seed the renderer turns into a stable appearance. Never read by logic. */
@@ -884,6 +892,8 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     from++;
   }
   c.path = full.slice(from);
+  c.detour = undefined;
+  c.navWait = 0;
   c.bestAway = Infinity;
   // How long they stay put once they get there. Long enough at work that the
   // working day is spent working, and staggered across the population so the
@@ -894,7 +904,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   if (phase === 'socialising' || phase === 'wandering') c.wanderIdx = (c.wanderIdx + 1) % world.layout.wanderSpots.length;
 }
 
-function hasArrived(c: Citizen) { return c.path.length === 0 && Math.hypot(c.destX - c.x, c.destY - c.y) < 0.35; }
+function hasArrived(c: Citizen) { return c.path.length === 0 && !c.detour?.length && Math.hypot(c.destX - c.x, c.destY - c.y) < 0.35; }
 
 export interface Obstacle { x: number; y: number; r: number; id: string }
 
@@ -929,6 +939,8 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
   // A fixed side per citizen, so nobody dithers left and right along a wall.
   const side = c.hash % 2 === 0 ? 1 : -1;
   let pushX = 0, pushY = 0, hits = 0;
+  // The two footprints they are deepest inside, for the seam case below.
+  let first: Obstacle | null = null, second: Obstacle | null = null, firstDepth = 0, secondDepth = 0;
 
   for (const o of obstacles) {
     if (o.id === c.destId) continue;
@@ -948,6 +960,23 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
     const depth = o.r - d;
     pushX += nx * depth - ny * side * 0.2;
     pushY += ny * depth + nx * side * 0.2;
+    if (depth > firstDepth) { second = first; secondDepth = firstDepth; first = o; firstDepth = depth; }
+    else if (depth > secondDepth) { second = o; secondDepth = depth; }
+  }
+
+  // The seam. Two footprints that touch push in opposite directions, and the
+  // sum is nothing: the citizen stands in the crack between them for as long
+  // as it takes somebody to notice — seventeen hours, for one carpenter. The
+  // way out of a seam is along it, whichever end is nearer where they are
+  // going.
+  if (hits >= 2 && first && second && Math.hypot(pushX, pushY) < 0.6 * firstDepth) {
+    const ax = second.x - first.x, ay = second.y - first.y;
+    const len = Math.hypot(ax, ay) || 1;
+    let sx = -ay / len, sy = ax / len;
+    if (sx * (tx - c.x) + sy * (ty - c.y) < 0) { sx = -sx; sy = -sy; }
+    const reach = firstDepth + 0.35;
+    pushX = sx * reach;
+    pushY = sy * reach;
   }
 
   if (hits) {
@@ -1032,12 +1061,16 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
   let lastTargetX = c.destX, lastTargetY = c.destY;
 
   while (budget > 0 && guard++ < 24) {
-    const final = c.path.length === 0;
-    const tx = final ? c.destX : layout.nodes[c.path[0]][0];
-    const ty = final ? c.destY : layout.nodes[c.path[0]][1];
+    // A detour round an obstacle comes before the road, and the road before
+    // the last walk to the door.
+    const detour = c.detour?.length ? c.detour[0] : null;
+    const final = !detour && c.path.length === 0;
+    const tx = detour ? detour[0] : final ? c.destX : layout.nodes[c.path[0]][0];
+    const ty = detour ? detour[1] : final ? c.destY : layout.nodes[c.path[0]][1];
     lastTargetX = tx; lastTargetY = ty;
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
-    if (d < 0.0001) { if (final) break; c.path.shift(); continue; }
+    const reached = () => { if (detour) c.detour!.shift(); else c.path.shift(); };
+    if (d < 0.0001) { if (final) break; reached(); continue; }
 
     // Slow down near a wall, the way anyone does rounding a corner. This is
     // what makes negotiating a building read as care rather than as a bounce:
@@ -1111,7 +1144,7 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
     c.y = ny;
     c.moving = true;
     budget -= step;
-    if (step >= d && !final) c.path.shift(); else if (step >= d) break;
+    if (step >= d) { if (final) break; reached(); }
   }
 
   resolveOverlap(c, obstacles, lastTargetX, lastTargetY, water, onBridge(layout, c.x, c.y), hours);
@@ -1150,9 +1183,53 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
   return blocked;
 }
 
+/** The walkability grid for a world, rebuilt only when what it depends on has changed. */
+const navCache = new WeakMap<World, NavGrid>();
+function navOf(world: World, obstacles: Obstacle[], water: WaterField): NavGrid {
+  const key = navKey(obstacles, world.layout);
+  const held = navCache.get(world);
+  if (held && held.key === key) return held;
+  const built = buildNavGrid(water, world.layout, obstacles, key);
+  navCache.set(world, built);
+  return built;
+}
+
+/**
+ * Look before walking.
+ *
+ * If the next straight leg — to the next junction, or to the door — would
+ * cross a wall or the water, find a way round now and walk that instead of
+ * discovering the wall by being pushed out of it. The route is to the
+ * destination itself rather than to the junction: a road leg that is blocked
+ * is usually blocked by something built across the road, and the rest of that
+ * road is no longer the way.
+ */
+function lookAhead(world: World, c: Citizen, nav: NavGrid, obstacles: Obstacle[], water: WaterField, hours: number) {
+  if (c.detour?.length || hasArrived(c)) return;
+  if ((c.navWait ?? 0) > 0) { c.navWait = (c.navWait ?? 0) - hours; return; }
+  const node = c.path.length ? world.layout.nodes[c.path[0]] : null;
+  const tx = node ? node[0] : c.destX, ty = node ? node[1] : c.destY;
+  const allow = c.destId ? obstacles.findIndex((o) => o.id === c.destId) : -1;
+  // The grid is coarse and the water is not: a leg the grid calls clear can
+  // still cross a channel's margin, so the fine test has the last word.
+  if (lineClear(nav, c.x, c.y, tx, ty, allow) && dryLine(water, world.layout, c.x, c.y, tx, ty)) return;
+  const route = findDetour(nav, c.x, c.y, c.destX, c.destY, allow);
+  if (route) {
+    c.detour = route;
+    c.path = [];
+    c.bestAway = Infinity;
+  } else {
+    // No way through at all. Try again in a while rather than every frame:
+    // the search is bounded but not free, and nothing about the map will
+    // have changed in the next tenth of an hour.
+    c.navWait = 0.4;
+  }
+}
+
 function moveCitizens(world: World, hours: number) {
   const obstacles = buildObstacles(world);
   const water = waterOf(world);
+  const nav = navOf(world, obstacles, water);
   for (const c of world.citizens) {
     // Held by the player, or swimming for the bank: both are handled elsewhere
     // and every rule below is about walking on land.
@@ -1186,8 +1263,16 @@ function moveCitizens(world: World, hours: number) {
     // `landAt` is -1 in the water, and the water is not the rescue's business:
     // stepping in is already refused and being in it is already resolved. Only
     // someone standing on the wrong piece of dry land needs carrying home.
+    //
+    // And only once walking has actually failed. The landmass map is coarse,
+    // and a sliver of bank at a channel's edge can be its own "island" while
+    // the walking rules happily let people stand on it: one child spent a
+    // morning being carried a hand's width toward the mainland by this and
+    // stepping back off it, on every frame, with the stall clock never
+    // running because the rescue skipped it. Half an hour of no progress is
+    // the test that somebody is truly cut off.
     const standingOn = water.landAt(c.x, c.y);
-    if (standingOn >= 0 && standingOn !== water.mainland && !world.connectedIslands.includes(standingOn)) {
+    if (standingOn >= 0 && standingOn !== water.mainland && !world.connectedIslands.includes(standingOn) && c.stalled > 0.5) {
       const back = water.toMainland(c.x, c.y);
       if (back.d > 0) {
         const stride = Math.min(back.d + 0.6, 14 * hours + 0.35);
@@ -1195,6 +1280,7 @@ function moveCitizens(world: World, hours: number) {
         c.y = clamp(c.y + back.y * stride, 4, 96);
         c.moving = true;
         c.activity = 'walking';
+        c.stalled += hours;
         continue;
       }
     }
@@ -1225,6 +1311,7 @@ function moveCitizens(world: World, hours: number) {
       }
     }
 
+    lookAhead(world, c, nav, obstacles, water, hours);
     const blocked = stepCitizen(c, hours, obstacles, world.layout, water);
     // Water stopped them dead. Sliding along the bank cannot solve this — the
     // way round is the road, and the road graph knows where the bridges are —
@@ -1267,6 +1354,8 @@ function moveCitizens(world: World, hours: number) {
         c.stalled = 0;
         c.bestAway = Infinity;
         c.path = [];
+        c.detour = undefined;
+        c.detour = undefined;
         let best: [number, number] | null = null;
         let bestD = Infinity;
         for (const spot of world.layout.wanderSpots) {
@@ -1285,6 +1374,12 @@ function moveCitizens(world: World, hours: number) {
         }
       } else if (c.stalled > 0.75 && c.stalled - hours <= 0.75) {
         assignDestination(world, c, phase);
+        // Judged from here, not from nothing: a fresh destination used to
+        // reset the closest-yet distance, which counted as progress on the
+        // next frame and started the stall clock over. The two-and-a-half
+        // hour escape below never fired; people stood in a seam all night
+        // being handed new places to go every forty-five minutes.
+        c.bestAway = Math.hypot(c.destX - c.x, c.destY - c.y);
       }
     }
 
@@ -5159,6 +5254,7 @@ export function pickUpCitizen(world: World, id: string) {
   c.carried = true;
   c.swimming = false;
   c.path = [];
+  c.detour = undefined;
   c.inside = false;
   c.moving = false;
   c.activity = 'idle';
@@ -5228,6 +5324,7 @@ export function dropCitizen(world: World, id: string, x: number, y: number) {
     pushFeed(world, 'social', `${c.name} went into the water and is swimming for the bank.`);
   } else {
     c.path = [];
+    c.detour = undefined;
     c.dwell = 0;
     assignDestination(world, c, phaseFor(c, world.hour));
   }
@@ -5257,6 +5354,7 @@ function swimmers(world: World, hours: number) {
       c.swimming = false;
       c.warmth = Math.max(0, c.warmth - 12);
       c.path = [];
+      c.detour = undefined;
       c.dwell = 0;
       assignDestination(world, c, phaseFor(c, world.hour));
       pushFeed(world, 'social', `${c.name} made it back to dry land.`);
@@ -5283,8 +5381,37 @@ export function tick(world: World, hours = 1): World {
 }
 
 /** Player-driven construction. Returns the new building, or null if unaffordable. */
+/** The gap left between two footprints so that a person can walk between them. */
+const WALK_GAP = 1.2;
+
+/**
+ * Why a building cannot stand at a spot, or null when it can.
+ *
+ * Two footprints that touch leave a seam nobody can pass, and until now nothing
+ * stopped a player making one: a library dropped against the market pinned
+ * half the settlement in the crack between them. The water is refused for the
+ * same reason it always was — so the player is told no rather than having the
+ * choice quietly moved.
+ */
+export function placementProblem(world: World, type: string, x: number, y: number, ignoreId?: string): string | null {
+  const px = clamp(x, 6, 94), py = clamp(y, 8, 92);
+  if (waterOf(world).blocks(px, py)) return 'Nothing can stand on the water.';
+  const r = FOOTPRINTS[type] ?? 3.2;
+  for (const b of world.buildings) {
+    if (b.id === ignoreId) continue;
+    const gap = Math.hypot(b.x - px, b.y - py) - r - footprintRadius(b);
+    if (gap < WALK_GAP) return `Too close to the ${b.type.toLowerCase()}. Leave room to walk between.`;
+  }
+  return null;
+}
+
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {
   if (world.treasury < cost) return null;
+  const problem = placementProblem(world, type, x, y);
+  if (problem) {
+    pushFeed(world, 'build', `The ${type.toLowerCase()} was not built: ${problem.toLowerCase()}`);
+    return null;
+  }
   // A building is Gold and materials both. The panel already greys out what the
   // yard cannot cover, so reaching here without them means the stores moved
   // between the click and the placement.
@@ -5408,7 +5535,7 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   world.buildings = world.buildings.filter((b) => b.id !== id);
   // Anyone who was heading there needs somewhere else to be, now.
   for (const c of world.citizens) {
-    if (c.destId === id) { c.destId = undefined; c.path = []; c.dwell = 0; }
+    if (c.destId === id) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; }
     if (c.targetBuildingId === id) c.targetBuildingId = undefined;
   }
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
@@ -5502,9 +5629,8 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
   if (world.treasury < cost) {
     return { ok: false, message: `Moving the ${building.type.toLowerCase()} costs ${cost} Gold.` };
   }
-  if (waterOf(world).blocks(x, y)) {
-    return { ok: false, message: 'Nothing can stand on the water.' };
-  }
+  const problem = placementProblem(world, building.type, x, y, id);
+  if (problem) return { ok: false, message: problem };
   const to = { x: clamp(x, 6, 94), y: clamp(y, 8, 92) };
   if (Math.hypot(to.x - building.x, to.y - building.y) < 2) {
     return { ok: false, message: 'That is where it already is.' };
@@ -5521,6 +5647,7 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
       c.destId = undefined;
       c.targetBuildingId = undefined;
       c.path = [];
+      c.detour = undefined;
       c.dwell = 0;
     }
   }

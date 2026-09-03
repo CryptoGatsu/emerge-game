@@ -614,7 +614,9 @@ export default function Wiki() {
             up and arms the placing cursor: tap the ground and it goes there, for{' '}
             <b>{Math.round(MOVE_SHARE * 100)}% of what it cost to raise</b>. Roads are cut to the
             new spot and anybody who was walking to the old one is given somewhere else to be.
-            Nothing is lost by moving except the Gold.
+            Nothing is lost by moving except the Gold. One rule for placing anything, moved or new:
+            it must leave <b>room to walk between it and its neighbours</b>. Two buildings that
+            touch make a seam nobody can pass, and the cursor will refuse the spot and say so.
           </p>
           <p>
             <b>Improve</b> spends Gold and materials to take a building up a level, to a maximum of{' '}
