@@ -260,6 +260,15 @@ export default function Wiki() {
             on something else. There is no way to get land without paying for it, and no way to pay
             without getting it.
           </p>
+          <p>
+            <b>Resale is player to player.</b> A plot you put up for sale shows on everybody&rsquo;s
+            map with its price. The buyer pays your wallet directly in {TOKEN.ticker} — a plain
+            transfer, nothing burned, nothing taken by the game — and the registry moves the plot to
+            them once it has read that transfer off the chain, from their wallet, to yours, for at
+            least what you asked. The settlement goes with the land. The world holds room for about
+            two hundred plots across twelve charts, and the map says how many are claimed and how
+            many are left.
+          </p>
           {!landOnChain && (
             <div className="wiki-callout">
               <b>Land is held in our registry, not as a token in your wallet — yet.</b>
@@ -560,6 +569,14 @@ export default function Wiki() {
             Everything costs Gold <em>and</em> materials out of the yard, so what you can raise
             depends on what your woodcutters have felled and your quarry has cut. Every building
             also costs Gold every day to keep standing, for as long as it stands.
+          </p>
+          <p>
+            <b>The settlement builds for itself.</b> When the treasury holds twice a building&rsquo;s
+            price and a fortnight of wages and upkeep besides, and the yard has the timber and
+            stone, it raises what it is short of without being asked: a roof for anybody sleeping
+            rough first, then a farm or a woodcutter when the stores are thin, then whatever the
+            plot helper would tell you next — a store, a cafe, a school, a clinic, a lab, a trade
+            the land supports. One building a day at most, and the feed says what it built and why.
           </p>
 
           <h3>The trades</h3>

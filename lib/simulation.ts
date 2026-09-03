@@ -4379,15 +4379,34 @@ function settlementBuilds(world: World) {
 
   // What the settlement would choose on its own, reading its own shortages.
   let ownChoice: string | null = null;
+  // The need behind the choice, when it came off the helper's list, so the
+  // feed can say why the town built what it built.
+  let needSaid: string | null = null;
   if (homeless > 0 || crowded) ownChoice = 'House';
   else if (world.resources.wood < 22 && !world.buildings.some((b) => b.type === 'Woodcutter')) ownChoice = 'Woodcutter';
   else if (world.resources.wheat + world.resources.bread < world.citizens.length * 2.5) ownChoice = 'Farm';
-  else if (world.treasury > 4000) {
-    // A settlement with money it does not need takes up a trade its land
-    // supports and it has not opened yet. Otherwise the gold simply piles up:
-    // a grassland reached thirty-five thousand and never spent a coin of it.
-    ownChoice = biomeProfile(world.biome).trades
-      .find((type) => !world.buildings.some((b) => b.type === type)) ?? null;
+  else {
+    /*
+     * With the roof, the hearth and the larder seen to, the settlement reads
+     * its own needs the way the plot helper does — the store with nothing to
+     * keep a surplus in, the town with nowhere to meet, the trade with nobody
+     * to learn it faster, the winter with no clinic — and raises the first of
+     * them it can pay for. The list is the same one the player is shown, so
+     * what the town builds on its own is what it would have asked for.
+     */
+    const seen = adviseBuild(world).find((a) => a.kind === 'build' && a.type
+      && world.treasury >= (BUILD_COSTS[a.type] ?? TRADE_BUILD_COST[a.type] ?? 250) * 2
+      && materialsInStore(world, a.type));
+    if (seen?.type) {
+      ownChoice = seen.type;
+      needSaid = seen.why;
+    } else if (world.treasury > 4000) {
+      // A settlement with money it does not need takes up a trade its land
+      // supports and it has not opened yet. Otherwise the gold simply piles up:
+      // a grassland reached thirty-five thousand and never spent a coin of it.
+      ownChoice = biomeProfile(world.biome).trades
+        .find((type) => !world.buildings.some((b) => b.type === type)) ?? null;
+    }
   }
 
   // What the last town meeting resolved on outranks that, for as long as the
@@ -4442,7 +4461,10 @@ function settlementBuilds(world: World) {
     ? `The settlement built a ${want.toLowerCase()}, as the meeting resolved.`
     : want === 'House'
       ? 'The settlement raised another house.'
-      : `The settlement built a ${want.toLowerCase()}.`);
+      : needSaid && want === ownChoice
+        ? `The settlement built a ${want.toLowerCase()} for itself, seeing the need.`
+        : `The settlement built a ${want.toLowerCase()}.`);
+  if (needSaid && want === ownChoice && !bySay) pushFeed(world, 'build', needSaid);
 }
 
 /**

@@ -24,9 +24,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { defaultWorldName } from '@/lib/simulation';
 import {
   CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, chartRoom, claimOf, drawPlotPreview,
-  drawRegionMap, inspectPlot, islandsFor, marketPlots,
+  drawRegionMap, inspectPlot, islandsFor, marketPlots, withoutClaim,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
+import { worldCapacity } from '@/lib/world/charts';
 import {
   ACTIVE_CHAIN, TOKEN, claimPlot, plotOwner, registryLive, shortAddress, tokenLive,
   type PlotOwnership,
@@ -35,9 +36,9 @@ import {
   allOnChainPlots, claimOnChain, onChainClaimsLive, plotExplorerUrl, registryPrice,
 } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
-import { settleBurn, spend } from '@/lib/chain/spend';
+import { pay, settleBurn, spend } from '@/lib/chain/spend';
 import {
-  fetchClaims, reservePlot, surveyPlot, takePlot, type Claim, type Find,
+  buyPlot, fetchClaims, reservePlot, surveyPlot, takePlot, type Claim, type Find,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { BrandLine } from './Brand';
@@ -481,7 +482,8 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
               <b>
                 {plot.region}
                 {mine && <i className="yours">{t('yours')}</i>}
-                {theirs && <i className="settled-tag">{t('settled')}</i>}
+                {theirs && !theirs.forSale && <i className="settled-tag">{t('settled')}</i>}
+                {theirs && !!theirs.forSale && <i className="sale-tag">{t('for sale')}</i>}
               </b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}
@@ -601,6 +603,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
     [player.claims, mineBySeed],
   );
   const [visiting, setVisiting] = useState(false);
+  const [buying, setBuying] = useState(false);
 
   /*
    * Who holds what, minus this player's own land.
@@ -619,6 +622,23 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
   }, [allClaims, wallet.address]);
 
   const heldByOther = selected ? takenByOthers.get(selected.seed) ?? null : null;
+
+  /*
+   * A plot sold from under this browser's record.
+   *
+   * The registry is the title. When it says somebody else now holds a seed
+   * this record still lists — the plot was bought while this tab was closed —
+   * the record lets go of it, so the seller is not shown a world that is no
+   * longer theirs and the world map does not call it "yours".
+   */
+  useEffect(() => {
+    if (!registryShared || !wallet.address || !allClaims.length) return;
+    const gone = player.claims.filter((c) => takenByOthers.has(c.seed)).map((c) => c.seed);
+    if (!gone.length) return;
+    let next = player;
+    for (const seed of gone) next = withoutClaim(next, seed);
+    onPlayer(next);
+  }, [allClaims, registryShared, takenByOthers, player, onPlayer, wallet.address]);
 
   /*
    * The world this player owns here, if any.
@@ -855,8 +875,59 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
     });
   }, [name, selected, price, wallet.address, onEnter, onPlayer, player, takenByOthers, mineBySeed, setClaims]);
 
+  /**
+   * Buy a plot its owner has put up for sale.
+   *
+   * The price goes to the seller's wallet — a transfer, not a burn — and the
+   * registry moves the title once it has seen the payment land. The
+   * settlement comes with the land: the buyer walks into the town as the
+   * seller left it.
+   */
+  const buy = useCallback(async (listing: Claim) => {
+    if (!wallet.address) {
+      setNotice(t('Connect a wallet first. A plot belongs to an address, and so does everything you earn on it.'));
+      return;
+    }
+    const askPrice = listing.forSale ?? 0;
+    if (player.ledger.balance < askPrice) {
+      setNotice(t('{region} costs {price} {ticker}.', { region: listing.region, price: askPrice.toLocaleString(), ticker: TOKEN.ticker }));
+      return;
+    }
+    setBuying(true);
+    setNotice(configured
+      ? t('Paying {who} directly. Sign the transfer to their wallet.', { who: listing.ownerName || shortAddress(listing.owner) })
+      : t('Paying {who}…', { who: listing.ownerName || shortAddress(listing.owner) }));
+    const paid = await pay(player.ledger, askPrice, wallet.address, listing.owner);
+    if (!paid.ok) { setBuying(false); setNotice(paid.refused); return; }
+    onPlayer({ ...player, ledger: paid.ledger });
+    setNotice(t('Payment sent. Waiting for the chain to settle it…'));
+    const moved = await whileSettling(() => buyPlot({
+      seed: listing.seed,
+      owner: wallet.address!,
+      ownerName: player.name,
+      transferTx: paid.txHash ?? undefined,
+    }));
+    setBuying(false);
+    if (!moved.ok) {
+      setNotice(paid.txHash
+        ? `${moved.reason} ${t('Your payment {tx}… went through — keep it, and tell us if the land never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+        : moved.reason);
+      return;
+    }
+    setClaims((held) => held.map((c) => (c.seed === listing.seed ? moved.claim : c)));
+    onEnter({
+      seed: listing.seed,
+      name: moved.claim.worldName,
+      region: moved.claim.region,
+      price: moved.price,
+      claimedAt: Date.now(),
+      owner: wallet.address,
+      txHash: paid.txHash,
+    });
+  }, [wallet.address, player, onPlayer, onEnter, setClaims, configured]),
+
   /** Go and look at the settlement somebody else built here. */
-  const visit = useCallback(async (seed: number) => {
+  visit = useCallback(async (seed: number) => {
     setVisiting(true);
     setNotice(null);
     const refused = await onVisit(seed);
@@ -864,9 +935,13 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
     if (refused) setNotice(refused);
   }, [onVisit]);
 
-  const unlist = useCallback((seed: number) => {
-    onPlayer({ ...player, listings: player.listings.filter((l) => l.seed !== seed) });
-  }, [player, onPlayer]);
+  /** What this player has up for sale, as the registry has it. */
+  const myListings = useMemo(
+    () => allClaims.filter((c) => c.forSale && wallet.address && c.owner.toLowerCase() === wallet.address.toLowerCase()),
+    [allClaims, wallet.address],
+  );
+  const worldTotal = worldCapacity();
+  const claimedTotal = allClaims.length;
 
 
   return (
@@ -913,6 +988,13 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
           </div>
           <button className="ghost" onClick={() => sail(1)} aria-label={t('Next chart')}>›</button>
         </nav>
+        {/* The whole world, not this chart: how much land is spoken for and how
+            much is still to be had, which is the number that says whether
+            there is any hurry. */}
+        <div className="world-count">
+          <span><b>{claimedTotal.toLocaleString()}</b> {t('of {total} plots claimed', { total: worldTotal.toLocaleString() })}</span>
+          <span><b>{Math.max(0, worldTotal - claimedTotal).toLocaleString()}</b> {t('left to claim')}</span>
+        </div>
 
         <div className="land-body">
           <RegionMap
@@ -945,14 +1027,15 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             <button className="sheet-close" onClick={() => setSheetOpen(false)} aria-label={t('Back to the map')}>×</button>
             {/* The registry decides, not this browser's memory. A stale local
                 claim on land somebody else now holds must read as theirs. */}
-            <span className="eyebrow">{heldByOther ? t('SETTLED') : mine ? t('YOUR WORLD') : t('CLAIM')}</span>
+            <span className="eyebrow">{heldByOther ? (heldByOther.forSale ? t('FOR SALE') : t('SETTLED')) : mine ? t('YOUR WORLD') : t('CLAIM')}</span>
             <h2>{heldByOther ? heldByOther.worldName : mine ? mine.name : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{tn(selected.biomeLabel)}</span>
               <span>{selected.island}</span>
               <span>{t('{n} beings', { n: selected.population })}</span>
               {mine && !heldByOther && <span className="owned-tag">{t('Yours')}</span>}
-              {heldByOther && <span className="settled-tag-big">{t('Taken')}</span>}
+              {heldByOther && !heldByOther.forSale && <span className="settled-tag-big">{t('Taken')}</span>}
+              {heldByOther && !!heldByOther.forSale && <span className="sale-tag-big">{t('For sale')}</span>}
             </div>
             {mine && !heldByOther && (
               <p className="muted small">
@@ -970,6 +1053,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
                 <button className="ghost" onClick={() => visit(heldByOther.seed)} disabled={visiting}>
                   {visiting ? t('Travelling…') : t('Visit {world}', { world: heldByOther.worldName })}
                 </button>
+                {!!heldByOther.forSale && (
+                  <p className="muted small">
+                    {t('Up for sale at {price} {ticker}. The price goes to {who}’s wallet, not to the burn address, and the settlement comes with the land.', { price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })}
+                  </p>
+                )}
               </div>
             )}
             {registry?.onChain && registry.owner && !mine && !heldByOther && (
@@ -1014,8 +1102,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             )}
 
             <div className="claim-price">
-              <span>{mine ? t('PAID') : t('PRICE')}</span>
-              <b>{(mine ? mine.price : price).toLocaleString()}</b>
+              <span>{mine ? t('PAID') : heldByOther?.forSale ? t('ASKING') : t('PRICE')}</span>
+              <b>{(mine ? mine.price : heldByOther?.forSale ? heldByOther.forSale : price).toLocaleString()}</b>
               <em>{TOKEN.ticker}</em>
             </div>
 
@@ -1023,15 +1111,18 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
 
             <button
               className="claim-button"
-              onClick={() => (heldByOther ? visit(heldByOther.seed) : claim())}
+              onClick={() => (heldByOther ? (heldByOther.forSale ? buy(heldByOther) : visit(heldByOther.seed)) : claim())}
               disabled={
-                claiming || visiting
+                claiming || visiting || buying
                 || (!mine && !heldByOther && !wallet.address)
                 || (!mine && !heldByOther && player.ledger.balance < price)
+                || (!!heldByOther?.forSale && (!wallet.address || player.ledger.balance < heldByOther.forSale))
               }
             >
               {claiming
                 ? t('Claiming…')
+                : heldByOther?.forSale
+                  ? (buying ? t('Buying…') : !wallet.address ? t('Connect a wallet to buy') : player.ledger.balance < heldByOther.forSale ? t('Not enough {ticker}', { ticker: TOKEN.ticker }) : t('Buy {region} · {price} {ticker}', { region: heldByOther.region, price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker }))
                 : heldByOther
                   ? (visiting ? t('Travelling…') : t('Visit {world}', { world: heldByOther.worldName }))
                   : mine
@@ -1068,22 +1159,21 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
               </>
             )}
 
-            {player.listings.length > 0 && (
+            {myListings.length > 0 && (
               <>
                 <span className="eyebrow">{t('YOUR LISTINGS')}</span>
                 <div className="listing-list">
-                  {player.listings.map((listing) => (
+                  {myListings.map((listing) => (
                     <div key={listing.seed} className="listing-row">
                       <span>{listing.region}</span>
-                      <b>{listing.price.toLocaleString()} {TOKEN.ticker}</b>
-                      <button className="ghost" onClick={() => unlist(listing.seed)}>{t('Withdraw')}</button>
+                      <b>{(listing.forSale ?? 0).toLocaleString()} {TOKEN.ticker}</b>
                     </div>
                   ))}
                 </div>
                 <p className="muted small">
                   {onChainClaimsLive()
                     ? t('A plot is an ordinary ERC-721 token, so it sells anywhere that handles them — wallet to wallet, or on any marketplace on {chain}. A listing here is a note to yourself until this game carries a marketplace of its own.', { chain: ACTIVE_CHAIN.label })
-                    : t('Resale between players needs the plot registry on {chain}. Until it is deployed a listing is recorded in this browser and no one else can see it.', { chain: ACTIVE_CHAIN.label })}
+                    : t('Everybody sees these on the map. A buyer pays your wallet directly in {ticker} — nothing is burned — and the plot and its settlement move to them. Take a listing down from the On-Chain panel inside the world.', { ticker: TOKEN.ticker })}
                 </p>
               </>
             )}

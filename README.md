@@ -370,6 +370,22 @@ contract is deployed, `claimPlot()` in `lib/chain/emerge.ts` is where the $EMERG
 transfer and on-chain registration go, and the chain's answer replaces the relay's
 without anything above this line changing.
 
+## Room for two hundred settlements
+
+Twelve charts of seventeen berths — 204 plots in all — and the world map says
+how many are claimed and how many are left, across every chart rather than the
+one on screen. Plots are resold player to player: a listing shows on
+everybody's map, the buyer pays the seller's wallet directly in $EMERGE, nothing
+is burned, and the registry moves the plot and its settlement once it has read
+the transfer off the chain ([`docs/CONTRACTS.md`](docs/CONTRACTS.md) has the
+route).
+
+The settlement also builds for itself. With a comfortable surplus in the
+treasury — twice the price and a fortnight of running costs — and the materials
+in the yard, it raises what it is short of without being asked, reading the
+same needs list the plot helper shows the player, one building a day at most,
+and says in the feed what it built and why.
+
 ## The vault
 
 Gold is the world's currency; $EMERGE is the token behind it.

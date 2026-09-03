@@ -39,7 +39,7 @@ import {
 } from '@/lib/world/plots';
 import {
   GIFT_POLL, HEARTBEAT_INTERVAL, collectGifts, departWorld, fetchWorld, heartbeat, publishWorld,
-  releasePlot, sendGift, visitorId,
+  releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -1218,14 +1218,24 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     refresh();
   }, [onPlayer, player, refresh]);
 
-  /** Put this plot up for resale, or take it back off the market. */
+  /**
+   * Put this plot up for resale, or take it back off the market.
+   *
+   * The registry carries the listing, so every player sees it on the map and
+   * a buyer can pay this wallet for it; the local record mirrors what the
+   * registry accepted, and nothing when it refused.
+   */
   const listPlot = useCallback((price: number | null) => {
-    const listings = player.listings.filter((l) => l.seed !== claimed.seed);
-    if (price !== null && price > 0) {
-      listings.push({ seed: claimed.seed, region: claimed.region, price: Math.round(price), listedAt: Date.now() });
-    }
-    onPlayer({ ...player, listings });
-  }, [claimed.region, claimed.seed, onPlayer, player]);
+    if (!wallet.address) return;
+    void (async () => {
+      const asked = price !== null && price > 0 ? Math.round(price) : null;
+      const result = await listPlotOnRegistry(claimed.seed, wallet.address!, asked);
+      if (!result.ok) return;
+      const listings = player.listings.filter((l) => l.seed !== claimed.seed);
+      if (asked) listings.push({ seed: claimed.seed, region: claimed.region, price: asked, listedAt: Date.now() });
+      onPlayer({ ...player, listings });
+    })();
+  }, [claimed.region, claimed.seed, onPlayer, player, wallet.address]);
 
   const zoom = useCallback((factor: number) => sceneRef.current?.zoomBy(factor), []);
   const resetView = useCallback(() => sceneRef.current?.centreOn(50, 49, 1.05), []);

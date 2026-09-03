@@ -386,6 +386,13 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             placed across water will have a bridge started toward it.
           </p>
           <p>
+            <b>The settlement builds for itself too.</b> With the treasury holding a comfortable
+            surplus — twice a building&rsquo;s price, and a fortnight of wages and upkeep besides —
+            it raises what it needs without being asked: a roof for the homeless first, then a
+            farm or a woodcutter when the stores are thin, then whatever the plot helper would
+            have told you next. The feed says what it built and why.
+          </p>
+          <p>
             Beyond the trades there are the places a town is built around. A <b>Cafe</b> gets
             people out among each other; a <b>School</b> and a <b>Library</b> make everyone
             better at their trade sooner; a <b>Studio</b> gives them somewhere to make things and
@@ -552,9 +559,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         <section>
           <h4>Land</h4>
           <p>
-            The world map is a chart of islands, and there are six charts to sail between. Each
-            holds fifteen to seventeen plots and no more: when a chart is fully surveyed, prospecting
-            there is refused and you have to go elsewhere. Surveying costs
+            The world map is a chart of islands, and there are twelve charts to sail between —
+            room for about two hundred plots in all, and the map says how many are claimed and how
+            many are left. Each chart holds seventeen plots and no more: when a chart is fully
+            surveyed, prospecting there is refused and you have to go elsewhere. Surveying costs
             {' '}{PROSPECT_COST_EMERGE.toLocaleString()} {TOKEN.ticker} and turns up a brand-new seed, so no
             two prospected plots are the same land.
           </p>
@@ -570,6 +578,13 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             {' '}Leaving a world does not release it — your plots are marked on the chart and you can
             walk back into any of them. Giving one up is a separate, deliberate action
             {onChainClaimsLive() ? ' that burns the token and puts the seed back on the market.' : '.'}
+          </p>
+          <p>
+            <b>Selling is between players.</b> Put a plot up for sale from the On-Chain panel and it
+            shows on everybody&rsquo;s map with its price. A buyer pays <em>your wallet</em> directly
+            in {TOKEN.ticker} — a transfer, not a burn — and the registry moves the plot to them
+            once the chain has settled it. The settlement goes with the land: they walk into your
+            town as you left it.
           </p>
         </section>
 
@@ -1688,7 +1703,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
             <>
               <h3>{t('Listed at {price} {ticker}', { price: listing.price.toLocaleString(), ticker: TOKEN.ticker })}</h3>
               <p className="muted small">
-                {t('Waiting for a buyer. Resale between players needs the plot registry on {chain}; until it is deployed the listing is local to this browser.', { chain: ACTIVE_CHAIN.label })}
+                {t('On the map for every player. A buyer pays your wallet directly in {ticker} — a transfer, not a burn — and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker })}
               </p>
               <button onClick={() => onList(null)}>{t('Withdraw listing')}</button>
             </>
@@ -1701,6 +1716,9 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
               <button onClick={() => onList(Number(askPrice) || 0)} disabled={!(Number(askPrice) > 0)}>
                 {t('List for sale')}
               </button>
+              <p className="muted small">
+                {t('A sale is between you and the buyer: they pay your wallet the asking price in {ticker}, nothing is burned, and they walk into this settlement as you left it.', { ticker: TOKEN.ticker })}
+              </p>
             </>
           )}
           {/* Leaving is not selling. It used to be: stepping out of a world

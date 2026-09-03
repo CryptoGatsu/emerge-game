@@ -5,6 +5,9 @@
  * `POST /api/plots` — take a plot, or be told who already has it.
  * `POST /api/plots` with `survey` — pay to find new land.
  * `POST /api/plots` with `release` — give a plot up.
+ * `POST /api/plots` with `list` — put a plot up for sale, or take it down.
+ * `POST /api/plots` with `buy` — buy a listed plot from its owner, wallet to
+ * wallet. The price goes to the seller and nothing is burned.
  *
  * This is what stops two players owning the same land. Everything a client
  * sends is treated as hostile: the address is pattern-matched against what an
@@ -39,10 +42,10 @@
 
 import { NextResponse } from 'next/server';
 import {
-  allClaims, allFinds, dropReservation, holdsReservation, registryShared, releaseClaim,
-  reservePlot, survey, takeClaim, type Claim,
+  allClaims, allFinds, claimOf, dropReservation, holdsReservation, listClaim, registryShared,
+  releaseClaim, reservePlot, survey, takeClaim, transferClaim, type Claim,
 } from '@/lib/server/registry';
-import { spendBurn, verifyBurn } from '@/lib/server/burns';
+import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenLive } from '@/lib/chain/emerge';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
@@ -89,6 +92,11 @@ export async function POST(request: Request) {
     reserve?: boolean;
     /** The transaction that burned the price. Checked against the chain. */
     burnTx?: string;
+    /** Put the plot up for sale at `price`, or with null take it down. */
+    list?: boolean;
+    /** Buy a listed plot; `transferTx` paid the seller. */
+    buy?: boolean;
+    transferTx?: string;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -188,6 +196,71 @@ export async function POST(request: Request) {
   const seed = Number(body.seed);
   if (!Number.isInteger(seed) || seed <= 0 || seed > 1e12) {
     return NextResponse.json({ error: 'Unknown plot.' }, { status: 400 });
+  }
+
+  if (body.list) {
+    const price = body.price === null || body.price === undefined ? null : Number(body.price);
+    if (price !== null && (!Number.isFinite(price) || price <= 0 || price > 1e12)) {
+      return NextResponse.json({ error: 'Name a price in whole tokens.' }, { status: 400 });
+    }
+    if (registryConfigured()) {
+      return NextResponse.json({
+        error: 'A plot on the land contract is an ERC-721 token: sell it wallet to wallet, or on any marketplace.',
+      }, { status: 409 });
+    }
+    try {
+      const row = await listClaim(seed, owner, price === null ? null : Math.round(price));
+      if (!row) return NextResponse.json({ error: 'That plot is not yours to list.' }, { status: 409 });
+      return NextResponse.json({ claim: row });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
+  /*
+   * Buying a plot from another player.
+   *
+   * The money goes to the seller, not to the burn address: this is a sale
+   * between two people, and the registry's only part in it is to check that
+   * the seller was paid what they asked — from this wallet, on chain, settled,
+   * and not a payment already used for something else — and then to move the
+   * title. `owner` here is the buyer.
+   */
+  if (body.buy) {
+    if (registryConfigured()) {
+      return NextResponse.json({
+        error: 'A plot on the land contract changes hands as a token, not through the registry.',
+      }, { status: 409 });
+    }
+    let listed: Claim | null;
+    try {
+      listed = await claimOf(seed);
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+    if (!listed || !listed.forSale) {
+      return NextResponse.json({ error: 'That plot is not for sale.' }, { status: 409 });
+    }
+    if (listed.owner.toLowerCase() === owner.toLowerCase()) {
+      return NextResponse.json({ error: 'That plot is already yours.' }, { status: 409 });
+    }
+    if (tokenLive()) {
+      const transferTx = String(body.transferTx ?? '');
+      const paid = await verifyTransfer(transferTx, owner, listed.owner, listed.forSale);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(transferTx, `resale:${seed}`))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
+    try {
+      const moved = await transferClaim(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME));
+      if (!moved.ok) return NextResponse.json({ error: moved.reason }, { status: 409 });
+      return NextResponse.json({ claim: moved.claim, price: moved.price, seller: moved.seller });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
   }
 
   if (body.release) {

@@ -60,6 +60,9 @@ export interface Claim {
   ownerName: string;
   price: number;
   at: number;
+  /** The asking price, in whole tokens, while the owner has it up for sale. */
+  forSale?: number;
+  listedAt?: number;
 }
 
 const CLAIMS = serverKey('claims');
@@ -182,6 +185,80 @@ export async function holdsReservation(seed: number, owner: string): Promise<boo
 
 /** Let a plot go, once it is claimed or abandoned. */
 export const dropReservation = (seed: number) => releaseLock(reserveKey(seed));
+
+/**
+ * Put a plot up for sale, or take it back off the market.
+ *
+ * The listing lives on the claim row itself, so every reader of the map sees
+ * it without a second lookup, and it goes away with the row when the plot
+ * changes hands.
+ */
+export async function listClaim(seed: number, owner: string, price: number | null): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const { forSale: _forSale, listedAt: _listedAt, ...rest } = existing;
+  const row: Claim = price && price > 0 ? { ...rest, forSale: Math.round(price), listedAt: Date.now() } : rest;
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+export type TransferResult =
+  | { ok: true; claim: Claim; price: number; seller: string }
+  | { ok: false; reason: string };
+
+/**
+ * Move a plot from its seller to its buyer.
+ *
+ * Only a plot that is actually up for sale, and only at the price it was
+ * listed at: the price the buyer paid is checked against this row by the
+ * caller, so a seller cannot be paid less than they asked by a client that
+ * quotes its own number. The settlement goes with the land — the published
+ * world is re-stamped with the new owner, so the buyer walks into the town as
+ * it stands rather than a fresh one grown from the seed — and the seller's
+ * own record lets go of it, so they are not shown a plot they no longer hold.
+ */
+export async function transferClaim(seed: number, buyer: string, buyerName: string): Promise<TransferResult> {
+  const existing = await claimOf(seed);
+  if (!existing) return { ok: false, reason: 'Nobody holds that plot.' };
+  if (!existing.forSale || existing.forSale <= 0) return { ok: false, reason: 'That plot is not for sale.' };
+  if (existing.owner.toLowerCase() === buyer.toLowerCase()) return { ok: false, reason: 'That plot is already yours.' };
+  const seller = existing.owner.toLowerCase();
+  const row: Claim = {
+    seed,
+    region: existing.region,
+    worldName: existing.worldName,
+    owner: buyer.toLowerCase(),
+    ownerName: buyerName,
+    price: existing.forSale,
+    at: Date.now(),
+  };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+
+  // The settlement changes hands with the land.
+  const world = await readWorld(seed);
+  if (world) {
+    await publishWorld({ ...world, owner: row.owner, ownerName: buyerName }).catch(() => {});
+  }
+
+  // The seller's record stops carrying it.
+  try {
+    const record = await readPlayerRecord(seller) as {
+      claims?: { seed: number }[]; listings?: { seed: number }[];
+    } | null;
+    if (record && (Array.isArray(record.claims) || Array.isArray(record.listings))) {
+      await savePlayerRecord(seller, {
+        ...record,
+        claims: (record.claims ?? []).filter((c) => c.seed !== seed),
+        listings: (record.listings ?? []).filter((l) => l.seed !== seed),
+        savedAt: Date.now(),
+      });
+    }
+  } catch {
+    // The map and the registry row are the title; the record catches up on
+    // the seller's next visit either way.
+  }
+  return { ok: true, claim: row, price: existing.forSale, seller };
+}
 
 /** Give a plot up, if it is yours to give up. */
 export async function releaseClaim(seed: number, owner: string): Promise<boolean> {

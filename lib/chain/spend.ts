@@ -17,7 +17,7 @@
  * seven edits.
  */
 
-import { burnTokens, tokenBalance, tokenLive } from './emerge';
+import { burnTokens, tokenBalance, tokenLive, transferTokens } from './emerge';
 import { charge, type VaultLedger } from './vault';
 
 export interface SpendResult {
@@ -83,6 +83,49 @@ export async function spend(
     ledger: await settleBurn(ledger, cost, address),
     refused: null,
     txHash: burn.txHash,
+  };
+}
+
+/**
+ * Pay another player, wallet to wallet.
+ *
+ * The one movement of $EMERGE in the game that is neither burned nor vaulted:
+ * a plot bought from its owner is paid for to that owner. With a token
+ * deployed the buyer signs a plain transfer to the seller's address; without
+ * one the buyer's local ledger is debited and nothing else moves, which the
+ * panel says.
+ */
+export async function pay(
+  ledger: VaultLedger,
+  cost: number,
+  from: string | null,
+  to: string,
+): Promise<SpendResult> {
+  if (!(cost > 0)) return { ok: true, ledger, refused: null, txHash: null };
+  if (!tokenLive()) {
+    if (ledger.balance < cost) {
+      return {
+        ok: false, ledger, txHash: null,
+        refused: `That costs ${cost.toLocaleString()} and you hold ${Math.floor(ledger.balance).toLocaleString()}.`,
+      };
+    }
+    return { ok: true, ledger: { ...ledger, balance: ledger.balance - cost }, refused: null, txHash: null };
+  }
+  if (!from) return { ok: false, ledger, refused: 'Connect a wallet to pay.', txHash: null };
+  if (ledger.balance < cost) {
+    return {
+      ok: false, ledger, txHash: null,
+      refused: `That costs ${cost.toLocaleString()} and your wallet holds ${Math.floor(ledger.balance).toLocaleString()}.`,
+    };
+  }
+  const sent = await transferTokens(from, to, cost);
+  if (!sent.ok) return { ok: false, ledger, refused: sent.message, txHash: null };
+  const fresh = await tokenBalance(from);
+  return {
+    ok: true,
+    ledger: { ...ledger, balance: fresh ?? Math.max(0, ledger.balance - cost) },
+    refused: null,
+    txHash: sent.txHash,
   };
 }
 

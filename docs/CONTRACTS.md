@@ -370,6 +370,25 @@ be taken by another player, and it can be lost if the store is lost. So:
 - Deploy `EmergeLand` when you can. Claims migrate by having each holder claim
   their seed on chain, and the relay then defers to `ownerOf` automatically.
 
+## Selling a plot to another player
+
+Resale is between the two players; the game takes nothing and burns nothing.
+The seller lists the plot from the On-Chain panel (`POST /api/plots` with
+`list` and a price, in whole tokens), and the listing rides on the claim row so
+every map shows it. The buyer pays the seller's wallet directly — a plain
+ERC-20 `transfer` signed by the buyer — and then `POST /api/plots` with `buy`
+and the transaction hash. The server reads that transaction the same way it
+reads a burn (`verifyTransfer` in `lib/server/burns.ts`): it must have
+succeeded, be settled `EMERGE_DEPOSIT_CONFIRMATIONS` deep, come from the
+buyer, and its `Transfer` logs to the seller's address must add up to at least
+the asking price. The hash is then spent, so one payment cannot buy two plots.
+Only then does the claim row change hands, the published settlement is
+re-stamped with the new owner so the buyer walks into the town as the seller
+left it, and the seller's saved record drops the plot.
+
+Where the land contract is deployed this route refuses: a plot is then an
+ERC-721 token and changes hands as one, wallet to wallet or on any marketplace.
+
 ## Reading the registry without the game
 
 The point of putting land on chain is that you do not have to ask us anything.

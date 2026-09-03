@@ -17,6 +17,9 @@ export interface Claim {
   ownerName: string;
   price: number;
   at: number;
+  /** The asking price while the owner has it up for sale. */
+  forSale?: number;
+  listedAt?: number;
 }
 
 export interface Find {
@@ -196,6 +199,57 @@ export async function takePlot(input: {
       };
     }
     return { ok: true, claim: json.claim };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+/** Put a plot up for sale at a price, or take it down with null. */
+export async function listPlot(seed: number, owner: string, price: number | null): Promise<{ ok: boolean; reason?: string; claim?: Claim }> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, list: true, price }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; error?: string };
+    if (!response.ok || !json.claim) return { ok: false, reason: json.error ?? 'The registry refused the listing.' };
+    return { ok: true, claim: json.claim };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+export type BuyResult =
+  | { ok: true; claim: Claim; price: number; seller: string }
+  | { ok: false; reason: string; settling?: boolean };
+
+/**
+ * Buy a listed plot from its owner. `transferTx` is the payment to the seller;
+ * the registry checks it before moving the title.
+ */
+export async function buyPlot(input: {
+  seed: number; owner: string; ownerName: string; transferTx?: string;
+}): Promise<BuyResult> {
+  try {
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...input, buy: true }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; price?: number; seller?: string; error?: string; retry?: boolean };
+    if (!response.ok || !json.claim) {
+      return { ok: false, reason: json.error ?? 'The registry refused the sale.', settling: json.retry === true };
+    }
+    return { ok: true, claim: json.claim, price: json.price ?? 0, seller: json.seller ?? '' };
   } catch {
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }

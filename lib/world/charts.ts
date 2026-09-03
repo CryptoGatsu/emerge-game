@@ -72,6 +72,18 @@ const ISLAND_NAMES = [
   'Larkspit', 'Undermere',
   'Hollowsound', 'Craigmar', 'Petrel Isle', 'Bleak Ness', 'Fastnet', 'Longhaven',
   'Turnstone', 'Cairnmuir',
+  'Gannet Holm', 'Ravensbeck', 'Sorrel Isle', 'Blackstaff', 'Wending Rock', 'Harrowmere',
+  'Gullcry', 'Dunmore',
+  'Ashlar', 'Tarnwater', 'Kelpie Skerry', 'Northbarrow', 'Fenwick Holm', 'Sallow Ness',
+  'Orrin', 'Grimsby Rock',
+  'Heronmere', 'Stillcove', 'Brackenholm', 'Mirrorsound', 'Tallowhead', 'Crakemoor',
+  'Wyvern Rock', 'Lindisfell',
+  'Cormorant Isle', 'Slatehaven', 'Pinfold', 'Eastern Skerry', 'Marram Holm', 'Duskwater',
+  'Selkie Rock', 'Haverfold',
+  'Whinstone', 'Loamsound', 'Redmere', 'Tern Isle', 'Skarrow', 'Bellhaven',
+  'Oxbow Rock', 'Wintermarch',
+  'Ashridge', 'Coppermere', 'Saltcove', 'Feathercairn', 'Umberholm', 'Greylag Isle',
+  'Kestrel Skerry', 'Endhaven',
 ];
 
 /** The first chart, kept as a name because the world map opens on it. */
@@ -101,10 +113,18 @@ export const HOME_CHART_RESERVED = 9;
  *
  * Not unlimited, because "somewhere else to look" stops meaning anything when
  * there is always somewhere else: with enough charts the world map becomes a
- * slot machine rather than a map. Six is enough that running one dry is a
- * decision about where to go next.
+ * slot machine rather than a map. Twelve charts of seventeen berths is room for
+ * about two hundred settlements, which is the size of world the game is
+ * sized for.
  */
-export const CHART_COUNT = 6;
+export const CHART_COUNT = 12;
+
+/** How many plots the whole world has room for, across every chart. */
+export function worldCapacity() {
+  let total = 0;
+  for (let chart = 0; chart < CHART_COUNT; chart++) total += chartCapacity(chart);
+  return total;
+}
 
 /** A chart's name, as the world map prints it. */
 export function chartName(chart: number) {
@@ -114,16 +134,16 @@ export function chartName(chart: number) {
 /**
  * The islands of one chart.
  *
- * Mirrored from the home chart along one or both axes and thinned to between
- * five and eight islands, with fresh names and fresh coastline noise, so no two
- * charts read as the same water.
+ * Mirrored from the home chart along one or both axes, with fresh names and
+ * fresh coastline noise, so no two charts read as the same water. Every chart
+ * keeps all eight islands: the thinning that used to vary them cost the world
+ * a fifth of its land, and the mirror and the noise are variety enough.
  */
 export function islandsFor(chart: number): Island[] {
   if (chart === HOME_CHART_INDEX) return HOME_CHART;
   const flipX = (chart & 1) === 1;
   const flipY = (chart & 2) === 2;
-  const keep = 8 - (chart % 3);
-  return HOME_CHART.slice(0, keep).map((island, i) => ({
+  return HOME_CHART.map((island, i) => ({
     ...island,
     name: ISLAND_NAMES[((chart - 1) * 8 + i) % ISLAND_NAMES.length],
     x: flipX ? 1 - island.x : island.x,

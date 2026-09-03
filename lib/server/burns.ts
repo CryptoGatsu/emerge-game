@@ -67,6 +67,37 @@ export async function verifyBurn(
   payer: string,
   atLeastWhole: number,
 ): Promise<BurnCheck> {
+  return verifyPayment(txHash, payer, atLeastWhole, null);
+}
+
+/**
+ * Confirm a payment from one wallet to another — a plot bought from its
+ * owner, wallet to wallet. Nothing is burned: the tokens land in the seller's
+ * wallet, and this checks that they did, from the buyer, and enough of them.
+ */
+export async function verifyTransfer(
+  txHash: string,
+  payer: string,
+  recipient: string,
+  atLeastWhole: number,
+): Promise<BurnCheck> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+    return { ok: false, reason: 'That is not a wallet address.', retry: false };
+  }
+  return verifyPayment(txHash, payer, atLeastWhole, recipient);
+}
+
+/**
+ * The check behind both: the transaction exists, succeeded, is settled, came
+ * from the payer, and its `Transfer` logs to the target — the burn addresses
+ * when `recipient` is null, one named wallet otherwise — add up to the price.
+ */
+async function verifyPayment(
+  txHash: string,
+  payer: string,
+  atLeastWhole: number,
+  recipient: string | null,
+): Promise<BurnCheck> {
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
     return { ok: false, reason: 'That is not a transaction hash.', retry: false };
   }
@@ -124,7 +155,7 @@ export async function verifyBurn(
     const to = log.topics[2];
     if (!to) continue;
     const target = `0x${to.slice(-40)}`;
-    if (!same(target, ZERO) && !same(target, BURN_ADDRESS)) continue;
+    if (recipient ? !same(target, recipient) : (!same(target, ZERO) && !same(target, BURN_ADDRESS))) continue;
     try {
       burned += BigInt(log.data);
     } catch {
@@ -133,7 +164,13 @@ export async function verifyBurn(
   }
 
   if (burned === 0n) {
-    return { ok: false, reason: `That transaction did not burn any ${TOKEN.ticker}.`, retry: false };
+    return {
+      ok: false,
+      reason: recipient
+        ? `That transaction did not send any ${TOKEN.ticker} to the seller.`
+        : `That transaction did not burn any ${TOKEN.ticker}.`,
+      retry: false,
+    };
   }
 
   try {
