@@ -2618,3 +2618,46 @@ button.fold:hover { color: var(--emerald); }
 .guide-wiki span { font-size: 12px; line-height: 1.6; color: var(--muted); }
 
 .foot-version { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---- The wage lever ----
+ *
+ * A slider, because this is a dial with a cost at both ends rather than a
+ * number to type: under the rate saves money and loses more, over it costs
+ * money and buys contentment. The consequences sit under it, worked out
+ * from the same functions the simulation runs.
+ */
+.wages {
+  margin: 4px 0 22px;
+  padding: 15px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.26);
+}
+.wage-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.wage-head b { font-size: 22px; color: var(--cream); font-variant-numeric: tabular-nums; }
+.wage-slider {
+  width: 100%;
+  margin: 12px 0 4px;
+  accent-color: var(--emerald);
+  cursor: pointer;
+}
+.wage-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+.wage-effect {
+  display: flex;
+  gap: 22px;
+  margin: 14px 0 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-edge-soft);
+}
+.wage-effect div { display: flex; flex-direction: column; gap: 3px; }
+.wage-effect span { font-size: 9.5px; letter-spacing: 1.5px; color: var(--muted); }
+.wage-effect b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.wage-effect b.up { color: var(--emerald); }
+.wage-effect b.down { color: #d98b6a; }
+.wages p { margin: 0; line-height: 1.6; }

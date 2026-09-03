@@ -310,6 +310,14 @@ export interface World {
   /** Everything the settlement's showcases have produced, newest first. */
   artworks: Artwork[];
   unlockedAreas: string[];
+  /**
+   * What the settlement pays, as a multiple of each trade's standing wage.
+   *
+   * The one lever a player has over how hard people work. 1 is the going rate;
+   * below it the town saves money and gets less done, above it the town spends
+   * money and gets a happier, more productive settlement for it.
+   */
+  wageRate: number;
   /** Accumulates game hours so the market trades on the clock, not per frame. */
   marketClock: number;
   /**
@@ -2209,6 +2217,7 @@ export function createWorld(seed = 481516, name?: string): World {
     feed: [], gatherings: [], bonds: {}, projects: [], conversations: [], hazards: [],
     resolution: null, artworks: [],
     unlockedAreas: ['Settlement'],
+    wageRate: WAGE_STANDARD,
     marketClock: 0, flow: { produced: {}, consumed: {} },
     flowYesterday: { produced: {}, consumed: {} },
     ledger: emptyLedger(), ledgerYesterday: emptyLedger(),
@@ -2491,6 +2500,67 @@ function householdTrade(world: World) {
       }
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Wages
+ *
+ * A settlement pays its people every morning, and until now the rate was
+ * fixed. This is the player's hand on it.
+ *
+ * The two directions are deliberately not mirror images, because a lever that
+ * is worth pulling one way and neutral the other is not a decision.
+ *
+ * **Paying less is a worse deal than it looks.** Effort falls faster than the
+ * wage bill does — halve the pay and you lose more than half the output — so
+ * underpaying is what you do to survive a bad winter, not a way to run a town.
+ *
+ * **Paying more barely moves the work at all.** That is deliberate, and it was
+ * measured rather than guessed: with a generous production bonus, the extra
+ * goods sold more than repaid the extra wages — because wages come back to the
+ * treasury through the stalls — and generosity became free money. Eight
+ * settlements over a hundred and fifty days each said so. What paying well
+ * buys is a contented settlement, which is what stewardship is scored on, and
+ * it is paid for in Gold that does not all come home.
+ * ------------------------------------------------------------------ */
+
+/** The least a settlement may pay, as a multiple of the standing wage. */
+export const WAGE_MIN = 0.5;
+/** The most it may pay. */
+export const WAGE_MAX = 1.6;
+/** The going rate. */
+export const WAGE_STANDARD = 1;
+
+/** Keep a wage rate inside its bounds, and never let a bad number through. */
+export const cleanWageRate = (rate: number) =>
+  Number.isFinite(rate) ? clamp(Math.round(rate * 100) / 100, WAGE_MIN, WAGE_MAX) : WAGE_STANDARD;
+
+/**
+ * How much work a wage buys, as a multiple of ordinary output.
+ *
+ * Steeper below the going rate than above it — see above. The floor is
+ * deliberately not zero: people short of money still turn up, they just do
+ * less, and a settlement that has stopped producing entirely is a bug rather
+ * than a hard week.
+ */
+export function wageEffort(rate: number): number {
+  const w = cleanWageRate(rate);
+  return w < WAGE_STANDARD
+    ? Math.max(0.5, 1 - (WAGE_STANDARD - w) * 0.55)
+    : 1 + (w - WAGE_STANDARD) * 0.12;
+}
+
+/** What a settlement pays. Refused outside the bounds rather than clamped silently. */
+export function setWageRate(world: World, rate: number): boolean {
+  const next = cleanWageRate(rate);
+  if (next === world.wageRate) return false;
+  const raised = next > world.wageRate;
+  world.wageRate = next;
+  noteAttention(world);
+  pushFeed(world, 'work', raised
+    ? `Wages were raised to ${Math.round(next * 100)}% of the going rate.`
+    : `Wages were cut to ${Math.round(next * 100)}% of the going rate.`);
+  return true;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2863,8 +2933,9 @@ function produce(world: World) {
       world.resources[r as Resource] -= used;
       note(world, 'consumed', r as Resource, used);
     }
+    const effort = wageEffort(world.wageRate);
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted;
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort;
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -4090,8 +4161,27 @@ export function stewardshipScore(world: World) {
   const housed = adults.filter((c) => homeOf(world, c)).length / adults.length;
   const employed = adults.filter((c) => c.job !== 'unemployed').length / adults.length;
   const content = world.citizens.reduce((s, c) => s + c.happiness, 0) / (world.citizens.length * 100);
-  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
-  const fed = clamp(food / (world.citizens.length * 6), 0, 1);
+  /*
+   * How fed the people are — not how full the granary is.
+   *
+   * This used to be stores divided by mouths, which reads a barn rather than a
+   * settlement, and the two come apart in exactly the case that matters: a
+   * town whose people have no money cannot buy food, so the food sits in the
+   * store and the score called them well fed while they starved. With a wage
+   * lever in the player's hand that stopped being a curiosity and became a
+   * strategy — cut wages to the floor, let everybody go hungry, and score
+   * *better* for it.
+   *
+   * So it asks the people, and only the people. The granary is not ignored —
+   * it is counted where it belongs, in how ready the settlement is for a bad
+   * winter, which is already part of `safe`. Counting it here as well both
+   * double-counted it and quietly punished growth: stores divided by mouths
+   * falls every time somebody is born, so a settlement of thirty-five well-fed
+   * people scored worse than one of twenty-four hungry ones.
+   */
+  const fed = world.citizens.length
+    ? clamp(world.citizens.reduce((s, c) => s + c.hunger, 0) / (world.citizens.length * 100), 0, 1)
+    : 1;
   // An unanswered hazard is the clearest sign nobody is minding the place.
   const ready = readiness(world);
   const safe = world.hazards.length
@@ -4184,7 +4274,10 @@ function daily(world: World) {
   fillEmptyTrades(world, tally);
 
   // Payroll is paid from the treasury, pro rata when it cannot cover the bill.
-  const payroll = workers.reduce((s, c) => s + jobs[c.job as WorkingJob].wage, 0);
+  // What the settlement has chosen to pay multiplies every wage in it, so a
+  // generous town's bill is a generous town's bill and it has to be met.
+  const rate = cleanWageRate(world.wageRate);
+  const payroll = workers.reduce((s, c) => s + jobs[c.job as WorkingJob].wage * rate, 0);
   const affordable = Math.max(0, world.treasury - upkeep);
   const ratio = payroll > 0 ? Math.min(1, affordable / payroll) : 1;
   if (ratio < 0.999 && workers.length) {
@@ -4194,12 +4287,16 @@ function daily(world: World) {
   }
   for (const c of world.citizens) {
     if (c.age < 16) continue;
-    c.wage = jobs[c.job as WorkingJob].wage * ratio;
+    c.wage = jobs[c.job as WorkingJob].wage * rate * ratio;
     c.wallet += c.wage;
     c.hunger = Math.max(0, c.hunger - 7); c.rest = Math.max(0, c.rest - 5);
     c.social = Math.max(0, c.social - 2); c.clothing = Math.max(0, c.clothing - 2.5);
-    // Unpaid work erodes a sense of purpose; paid work slowly builds it.
-    c.purpose = clamp(c.purpose + (ratio > 0.5 ? 0.5 : -1.5), 0, 100);
+    // Unpaid work erodes a sense of purpose; paid work slowly builds it — and
+    // what the work is worth is felt on top of whether it was paid at all.
+    // This is the half of the wage lever that stewardship is actually scored
+    // on: a well-paid settlement is a contented one.
+    const paid = ratio > 0.5 ? 0.5 : -1.5;
+    c.purpose = clamp(c.purpose + paid + (rate - WAGE_STANDARD) * 3, 0, 100);
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep);

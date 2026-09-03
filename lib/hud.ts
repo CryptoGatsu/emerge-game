@@ -8,11 +8,12 @@
  */
 
 import {
-  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, LEDGER_LABELS, PHASE_LABELS,
+  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, PHASE_LABELS,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
-  type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource, type World,
+  type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
+  type WorkingJob, type World,
 } from './simulation';
 import { statusLine } from './speech';
 
@@ -63,6 +64,10 @@ export interface Snapshot {
   /** How many are sat on a bench or at a fire right now. */
   seated: number;
   treasury: number;
+  /** What the settlement pays, as a multiple of the going rate. */
+  wageRate: number;
+  /** Today's wage bill at that rate, in Gold. */
+  payroll: number;
   happiness: number;
   energy: number;
   food: number;
@@ -237,6 +242,10 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     deaths: world.deaths,
     seated: people.filter((c) => c.seated).length,
     treasury: world.treasury,
+    wageRate: world.wageRate,
+    payroll: Math.round(world.citizens
+      .filter((c) => c.age >= 16 && c.job !== 'unemployed')
+      .reduce((sum, c) => sum + JOBS[c.job as WorkingJob].wage, 0) * world.wageRate),
     happiness: Math.round(avg((c) => c.happiness)),
     energy: Math.round(avg((c) => c.rest)),
     food: Math.round(world.resources.bread + world.resources.wheat + world.resources.vegetables),

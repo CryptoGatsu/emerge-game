@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
-  pickUpCitizen, renameCitizen, renameWorld, setWorldPrices,
+  pickUpCitizen, renameCitizen, renameWorld, setWageRate, setWorldPrices,
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -938,6 +938,20 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return { prize, story };
   }, [onPlayer, player, refresh, wallet.address]);
 
+  /**
+   * Set what the settlement pays.
+   *
+   * Straight through to the simulation and then a refresh, because the whole
+   * point is that a player moves the slider and watches the figures under it
+   * change. Nothing is persisted separately: the rate lives on the world and
+   * the world is saved on its own schedule.
+   */
+  const setWages = useCallback((rate: number) => {
+    const world = worldRef.current;
+    if (!world) return;
+    if (setWageRate(world, rate)) refresh();
+  }, [refresh]);
+
   /** Move Gold in or out of the treasury and persist the vault ledger. */
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
     const world = worldRef.current;
@@ -1037,6 +1051,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onLeave={onLeave}
             onRelease={onRelease}
             onVault={vault}
+            onWages={setWages}
             onList={listPlot}
             onPlayer={onPlayer}
             onDig={dig}

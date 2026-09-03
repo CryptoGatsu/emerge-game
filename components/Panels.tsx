@@ -9,7 +9,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
-import { buildMaterials, maintenanceCost, worldMarketState } from '@/lib/simulation';
+import {
+  WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost, wageEffort, worldMarketState,
+} from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
@@ -50,6 +52,8 @@ interface PanelsProps {
   onRelease: () => void;
   /** Move Gold in or out of the treasury and record it against the player. */
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  /** What the settlement pays its people, as a multiple of the going rate. */
+  onWages: (rate: number) => void;
   /** List this plot for resale at a price, or pass null to withdraw it. */
   onList: (price: number | null) => void;
   /** Record a change to the player themselves — their name, their name tokens. */
@@ -325,6 +329,19 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             The market buys what the settlement cannot make and sells what it has too much of, at
             prices that move with real scarcity. The Market panel shows every price, its trend, and
             what actually moved yesterday.
+          </p>
+        </section>
+
+        <section>
+          <h4>Wages</h4>
+          <p>
+            The Bank sets what the settlement pays, from half the going rate to
+            {' '}{Math.round(WAGE_MAX * 100)}% of it. It is a dial with a cost at both ends.
+            <b> Underpaying is not thrift.</b> People do less, lose heart, and the town produces
+            and sells less — over a long run it ends up with fewer people <em>and</em> less Gold
+            than paying properly would have. <b>Overpaying does not pay for itself either</b>: the
+            wage bill rises far faster than the work does. What it buys is a contented, growing
+            settlement, and it is paid for out of the treasury.
           </p>
         </section>
 
@@ -1118,10 +1135,70 @@ function GiftPanel({ player, visit, onClose, onGift }: {
   );
 }
 
-function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
+/**
+ * What the settlement pays its people.
+ *
+ * A slider rather than a number box, because the interesting thing about this
+ * decision is that it is a dial with a cost at both ends, and a slider says
+ * that where a field does not. Every figure under it is the real consequence
+ * worked out from the same functions the simulation runs, so a player can see
+ * what they are buying before they buy it.
+ */
+function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number) => void }) {
+  const rate = view.wageRate;
+  const effort = wageEffort(rate);
+  const bill = Math.round(view.payroll);
+  const pct = (value: number) => `${Math.round(value * 100)}%`;
+
+  return (
+    <div className="wages">
+      <div className="wage-head">
+        <b>{pct(rate)}</b>
+        <span className="muted small">of the going rate · {bill.toLocaleString()} Gold a day</span>
+      </div>
+      <input
+        className="wage-slider"
+        type="range"
+        min={WAGE_MIN * 100}
+        max={WAGE_MAX * 100}
+        step={5}
+        value={Math.round(rate * 100)}
+        onChange={(e) => onWages(Number(e.target.value) / 100)}
+        aria-label="Wages, as a share of the going rate"
+      />
+      <div className="wage-scale">
+        <span>{pct(WAGE_MIN)}</span>
+        <span>{pct(WAGE_STANDARD)}</span>
+        <span>{pct(WAGE_MAX)}</span>
+      </div>
+      <div className="wage-effect">
+        <div>
+          <span>WORK DONE</span>
+          <b className={effort >= 1 ? 'up' : 'down'}>{pct(effort)}</b>
+        </div>
+        <div>
+          <span>MOOD</span>
+          <b className={rate >= WAGE_STANDARD ? 'up' : 'down'}>
+            {rate === WAGE_STANDARD ? 'steady' : rate > WAGE_STANDARD ? 'lifting' : 'sinking'}
+          </b>
+        </div>
+      </div>
+      <p className="muted small">
+        {rate < WAGE_STANDARD
+          ? 'Paying under the rate does not even leave you richer. People do less and lose heart, the settlement produces and sells less, and a hundred and fifty days of it ends with a smaller town and an emptier treasury than paying properly would have.'
+          : rate > WAGE_STANDARD
+            ? 'Paying over the rate does not pay for itself: a wage bill rises far faster than the work does. What it buys is a contented, growing settlement, and it is paid for in Gold that does not all come home.'
+            : 'The going rate. People work as expected and their sense of purpose holds steady.'}
+      </p>
+    </div>
+  );
+}
+
+function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
   onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  onWages: (rate: number) => void;
 }) {
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
@@ -1217,6 +1294,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
         <div><span>FAMILIES</span><b>{view.familyCount}</b></div>
         <div><span>BUILDINGS ON UPKEEP</span><b>{view.upkeep}</b></div>
       </div>
+
+      <h4>Wages</h4>
+      <WageControl view={view} onWages={onWages} />
 
       <h4>The day's books</h4>
       <p className="muted small">
@@ -1601,7 +1681,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -1624,7 +1704,12 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenam
       .sort((a, b) => a.claimedAt - b.claimedAt)
       .slice(0, EARNING_PLOT_LIMIT)
       .some((c) => c.seed === claimed.seed);
-    return <BankPanel view={view} claimed={claimed} player={player} earning={earning} onClose={onClose} onVault={onVault} />;
+    return (
+      <BankPanel
+        view={view} claimed={claimed} player={player} earning={earning}
+        onClose={onClose} onVault={onVault} onWages={onWages}
+      />
+    );
   }
 
   // Everything that changes the settlement is the owner's alone.

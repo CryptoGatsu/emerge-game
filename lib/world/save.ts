@@ -51,7 +51,7 @@ const KEEP = [
   'deaths', 'births', 'amenities', 'bridgeWorks', 'connectedIslands',
   'families', 'citizens', 'buildings', 'resources', 'market',
   'feed', 'gatherings', 'bonds', 'projects', 'hazards', 'resolution',
-  'artworks', 'unlockedAreas', 'marketClock', 'flow', 'flowYesterday', 'ledger',
+  'artworks', 'unlockedAreas', 'wageRate', 'marketClock', 'flow', 'flowYesterday', 'ledger',
   'ledgerYesterday', 'stewardship', 'counter',
 ] as const;
 

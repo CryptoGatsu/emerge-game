@@ -22,7 +22,10 @@ import {
   RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
-import { JOBS, LEDGER_LABELS, STEWARDSHIP_DAILY_CAP, maintenanceCost } from '@/lib/simulation';
+import {
+  JOBS, LEDGER_LABELS, STEWARDSHIP_DAILY_CAP, WAGE_MAX, WAGE_MIN, WAGE_STANDARD,
+  maintenanceCost, wageEffort,
+} from '@/lib/simulation';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { BrandLine } from './Brand';
@@ -368,6 +371,36 @@ export default function Wiki() {
             If the treasury cannot cover the payroll, everybody is paid a share of what there is
             and the feed says so. Nobody is sacked for it, but people get poorer, and poorer people
             buy less, which is how a settlement talks itself into a slump.
+          </p>
+
+          <h3>What you pay them</h3>
+          <p>
+            You set the wage, from {pct(WAGE_MIN)} of the going rate to {pct(WAGE_MAX)}, in the
+            Bank. It is a dial with a cost at both ends and no free setting.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>You pay</th><th>Work done</th><th>What happens</th></tr></thead>
+            <tbody>
+              {[WAGE_MIN, 0.75, WAGE_STANDARD, 1.3, WAGE_MAX].map((rate) => (
+                <tr key={rate}>
+                  <td className="num">{pct(rate)}</td>
+                  <td className="num">{pct(wageEffort(rate))}</td>
+                  <td className="muted">
+                    {rate < WAGE_STANDARD
+                      ? 'People do less and lose heart. Over a long run the town ends up smaller and poorer than if you had paid properly.'
+                      : rate > WAGE_STANDARD
+                        ? 'A happier, growing settlement, paid for out of the treasury. It does not pay for itself in goods.'
+                        : 'People work as expected and their purpose holds steady.'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            Those numbers are not a guess — the curve was set by running eight settlements for a
+            hundred and fifty days at each setting. An earlier version gave generous pay a large
+            production bonus, and the extra goods sold more than repaid the extra wages, which made
+            generosity free. It is not free now.
           </p>
 
           <h3>Why the world market matters to your books</h3>
