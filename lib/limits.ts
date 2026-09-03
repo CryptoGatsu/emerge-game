@@ -20,6 +20,16 @@
  * called by accident or by somebody else, and because the old generation is
  * still sitting there if a reset turns out to have been a mistake.
  *
+ * **Do not raise this once players have paid for land.** With no land contract
+ * deployed, the claim rows in the shared store are the only record of who owns
+ * what — there is no chain to fall back on. Raising the epoch abandons every
+ * one of them, which after launch means taking land people paid real $EMERGE
+ * for. The keys of the previous generation still exist and could be read back
+ * by hand, but nothing in the game would do it for you.
+ *
+ * The same goes for the store itself: back up Upstash, and treat losing it as
+ * losing the deeds rather than losing a cache.
+ *
  * 1 — the first testing round.
  * 2 — cleared before the move to mainnet, so no plot claimed with development
  *     tokens carries over into a world where the token is real.

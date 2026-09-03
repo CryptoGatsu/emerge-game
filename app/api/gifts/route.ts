@@ -15,16 +15,23 @@
  * see the burn — so a client that lied about paying could otherwise mint Gold
  * into any world for nothing, as often as it liked.
  *
- * Three things bound that. The per-gift cap, the per-wallet daily cap below,
- * and the fact that Gold has no exit: the only door out of the game is a
- * withdrawal of principal, which is bounded by deposits the chain has
- * confirmed. So a forged gift can unbalance a settlement and cannot take a
- * token out of the vault. Said plainly because the difference matters.
+ * So the burn is checked, exactly as a land claim's is: a real transaction from
+ * this wallet, settled, worth at least the Gold being sent at the usual rate,
+ * and not already spent on something else. Without that a client could mint
+ * Gold into any world for nothing, as often as it liked.
+ *
+ * Even before that check existed the damage was bounded — Gold has no exit,
+ * since the only door out of the game is a withdrawal of principal and that is
+ * limited by deposits the chain has confirmed — but "cannot drain the vault" is
+ * a much weaker promise than "cannot be conjured", and the second one is cheap.
  */
 
 import { NextResponse } from 'next/server';
 import { MAX_GIFT_GOLD, claimOf, collectGifts, leaveGift, type Gift } from '@/lib/server/registry';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
+import { spendBurn, verifyBurn } from '@/lib/server/burns';
+import { EMERGE_PER_GOLD } from '@/lib/chain/vault';
+import { tokenLive } from '@/lib/chain/emerge';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
 
@@ -45,7 +52,11 @@ const clean = (value: string, limit: number) =>
     .slice(0, limit);
 
 export async function POST(request: Request) {
-  let body: { seed?: number; gold?: number; from?: string; fromName?: string; collect?: boolean };
+  let body: {
+    seed?: number; gold?: number; from?: string; fromName?: string; collect?: boolean;
+    /** The transaction that burned the Gold's worth in $EMERGE. */
+    burnTx?: string;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -97,6 +108,18 @@ export async function POST(request: Request) {
     return NextResponse.json({
       error: `That is ${MAX_GIFT_GOLD_PER_DAY.toLocaleString()} Gold given today. Be generous again tomorrow.`,
     }, { status: 429 });
+  }
+
+  // Paid for, at the same rate a deposit buys Gold.
+  if (tokenLive()) {
+    const burnTx = String(body.burnTx ?? '');
+    const paid = await verifyBurn(burnTx, from, gold * EMERGE_PER_GOLD);
+    if (!paid.ok) {
+      return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+    }
+    if (!(await spendBurn(burnTx, `gift:${seed}`))) {
+      return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+    }
   }
 
   try {

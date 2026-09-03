@@ -15,6 +15,7 @@
 
 import { NextResponse } from 'next/server';
 import { claimOf, publishWorld, readWorld } from '@/lib/server/registry';
+import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +64,12 @@ export async function POST(request: Request) {
   const owner = String(body.owner ?? '');
   if (!Number.isInteger(seed) || seed <= 0) {
     return NextResponse.json({ error: 'Unknown world.' }, { status: 400 });
+  }
+  if (sessionsAvailable() && !holdsAddress(request, owner)) {
+    // The snapshot is what every visitor to this world sees, so publishing one
+    // is speaking as its owner. Without this, anybody could replace somebody
+    // else's settlement with whatever they liked.
+    return NextResponse.json({ error: 'Sign in with this wallet first.', needsSession: true }, { status: 401 });
   }
   if (!ADDRESS.test(owner)) {
     return NextResponse.json({ error: 'Only a wallet can publish a world.' }, { status: 400 });

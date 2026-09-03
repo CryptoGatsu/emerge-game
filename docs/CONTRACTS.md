@@ -332,6 +332,32 @@ clicking something, and it is deliberately narrow: it sends `transfer(to,
 amount)` on the configured $EMERGE contract and nothing else. It cannot mint,
 approve, call an arbitrary contract, or send the chain's native token.
 
+## Launching without the land contract
+
+The game runs with only the token deployed. Claiming, burning, deposits and
+automatic withdrawals all work; the difference is where ownership lives.
+
+**The claim rows in the shared store become the deed.** There is no chain to
+appeal to, so the route that writes them has to guarantee what
+`EmergeLand.claim` used to guarantee in one transaction:
+
+| The contract's guarantee | How it is reconstructed |
+| --- | --- |
+| Payment and title in one atomic step | A plot is **reserved** for its buyer before they are asked to pay, then the title is written only against a **burn read off the chain** — right payer, right amount, settled, not already spent. |
+| `require(_owners[seed] == address(0))` | The row is written with `HSETNX`, so of any number of simultaneous claims exactly one wins. Verified: 1 winner of 50 concurrent writers. |
+| The price the contract charges | `priceOfSeed` on the server, never the price in the request. |
+| Ownership survives the client | Claims are keyed by wallet address, and the world map reads them back by address — so a player on a new device walks into their own world instead of being sold it twice. |
+
+**What it does not reconstruct**, and should be said plainly: the deed is a row
+in a database you control rather than a token in the holder's wallet. It cannot
+be taken by another player, and it can be lost if the store is lost. So:
+
+- **Back up Upstash.** Losing it is losing the deeds, not losing a cache.
+- **Never raise `DATA_EPOCH` after launch.** It abandons every claim, which
+  once people have paid means taking land they bought.
+- Deploy `EmergeLand` when you can. Claims migrate by having each holder claim
+  their seed on chain, and the relay then defers to `ownerOf` automatically.
+
 ## Reading the registry without the game
 
 The point of putting land on chain is that you do not have to ask us anything.

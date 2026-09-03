@@ -668,16 +668,29 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const cost = gold * EMERGE_PER_GOLD;
     const paid = await spend(player.ledger, cost, wallet.address);
     if (!paid.ok) return paid.refused;
-    const result = await sendGift({
-      seed: visit.seed,
-      gold,
-      from: wallet.address,
-      fromName: player.name,
-    });
-    // Only charged once the registry has the gift: a refusal must not cost the
-    // sender anything.
-    if (!result.ok) return result.reason;
+    // The tokens are already gone; keep the receipt so the server can check it.
     onPlayer({ ...player, ledger: paid.ledger });
+
+    /*
+     * The registry verifies the burn against the chain, and the first ask
+     * usually lands before the node has it, so keep asking while it settles.
+     */
+    let result = await sendGift({
+      seed: visit.seed, gold, from: wallet.address, fromName: player.name,
+      burnTx: paid.txHash ?? undefined,
+    });
+    for (let i = 1; i < 8 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await sendGift({
+        seed: visit.seed, gold, from: wallet.address, fromName: player.name,
+        burnTx: paid.txHash ?? undefined,
+      });
+    }
+    if (!result.ok) {
+      return paid.txHash
+        ? `${result.reason} Your payment ${paid.txHash.slice(0, 10)}… went through — keep it, and tell us if the Gold never lands.`
+        : result.reason;
+    }
     return null;
   }, [visit, wallet.address, player, onPlayer]);
 

@@ -12,12 +12,25 @@
  * control characters, the seed must be a plain positive integer, and the
  * timestamp is set here rather than accepted from the caller.
  *
- * **Once a land contract exists, the relay may only agree with it.** Writing a
- * claim row costs nothing, so without that rule one script could post a claim
- * for every seed on every chart and make the whole map read as taken — land
- * nobody paid for, blocking players who would have. A claim is now checked
- * against `ownerOf` before it is written, and a claim the chain does not back
- * is refused.
+ * **With no land contract deployed, this route is the title.** That raises the
+ * bar on it considerably, because the contract used to guarantee two things
+ * this had been leaving to the client.
+ *
+ * *That a claim was paid for.* `claim` took the price and minted in one
+ * transaction. Here the burn and the row are separate, so the row is not
+ * written until the burn has been read off the chain: right payer, right
+ * amount, settled, and not already spent on something else. Before this, a
+ * player could take a plot and then dismiss the wallet prompt, and nothing
+ * rolled the claim back.
+ *
+ * *That only one person gets it.* The contract's `require` was atomic. Here
+ * the write is a set-if-absent, and a plot is reserved for its buyer before
+ * they are asked to pay — so nobody burns tokens for land somebody else is
+ * about to take.
+ *
+ * **Where a land contract does exist, the relay may only agree with it.** A
+ * claim is checked against `ownerOf` before it is written, and one the chain
+ * does not back is refused.
  *
  * Surveying and claiming both also want a wallet the caller has proved is
  * theirs, and are rate limited per wallet: land is finite, and exhausting it is
@@ -26,8 +39,13 @@
 
 import { NextResponse } from 'next/server';
 import {
-  allClaims, allFinds, registryShared, releaseClaim, survey, takeClaim, type Claim,
+  allClaims, allFinds, dropReservation, holdsReservation, registryShared, releaseClaim,
+  reservePlot, survey, takeClaim, type Claim,
 } from '@/lib/server/registry';
+import { spendBurn, verifyBurn } from '@/lib/server/burns';
+import { tokenLive } from '@/lib/chain/emerge';
+import { priceOfSeed } from '@/lib/world/price';
+import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { ownerOnChain, registryConfigured } from '@/lib/server/land';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { incrWindow } from '@/lib/server/kv';
@@ -67,6 +85,10 @@ export async function POST(request: Request) {
     seed?: number; region?: string; worldName?: string; owner?: string;
     ownerName?: string; price?: number; release?: boolean;
     survey?: boolean; chart?: number; capacity?: number;
+    /** Hold a plot while its buyer pays, before any money moves. */
+    reserve?: boolean;
+    /** The transaction that burned the price. Checked against the chain. */
+    burnTx?: string;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -92,6 +114,26 @@ export async function POST(request: Request) {
   }
 
   /*
+   * Holding a plot while its buyer pays.
+   *
+   * Answered before any money moves. A player who is refused here has burned
+   * nothing, which is the entire point of doing it in this order.
+   */
+  if (body.reserve) {
+    const seed = Number(body.seed);
+    if (!Number.isInteger(seed) || seed <= 0 || seed > 1e12) {
+      return NextResponse.json({ error: 'Unknown plot.' }, { status: 400 });
+    }
+    try {
+      const held = await reservePlot(seed, owner);
+      if (!held.ok) return NextResponse.json({ error: held.reason }, { status: 409 });
+      return NextResponse.json({ reserved: true, seconds: held.seconds });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
+  /*
    * Surveying new land.
    *
    * The slot and the seed are both chosen here. A client picking its own could
@@ -112,6 +154,23 @@ export async function POST(request: Request) {
         error: `That is ${MAX_SURVEYS_PER_HOUR} surveys in an hour. The land will still be there later.`,
       }, { status: 429 });
     }
+    /*
+     * Surveying is charged too, and the charge is checked the same way.
+     *
+     * Without this a script with a wallet could survey every chart in the game
+     * to exhaustion for nothing, and land is finite.
+     */
+    if (tokenLive()) {
+      const burnTx = String(body.burnTx ?? '');
+      const paid = await verifyBurn(burnTx, owner, PROSPECT_COST_EMERGE);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(burnTx, `survey:${chart}`))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
+
     try {
       const result = await survey(
         chart,
@@ -134,6 +193,7 @@ export async function POST(request: Request) {
   if (body.release) {
     try {
       const released = await releaseClaim(seed, owner);
+      if (released) await dropReservation(seed).catch(() => {});
       return NextResponse.json({ released });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -165,13 +225,45 @@ export async function POST(request: Request) {
     }
   }
 
+  /*
+   * Proof of payment, where there is no contract to take it.
+   *
+   * The price is computed here from the seed — never read from the request —
+   * and the burn has to be a real transaction from this wallet, settled, worth
+   * at least that much, and not already spent. Without this the row is free to
+   * write, and a player could take a plot and then simply dismiss the wallet
+   * prompt.
+   *
+   * Skipped where a land contract exists, because there the claim *is* the
+   * payment and the `ownerOf` check above already proves it happened.
+   */
+  if (!registryConfigured() && tokenLive()) {
+    if (!(await holdsReservation(seed, owner))) {
+      return NextResponse.json({
+        error: 'That plot is not held for you. Open it again to start over.',
+      }, { status: 409 });
+    }
+    const burnTx = String(body.burnTx ?? '');
+    const due = priceOfSeed(seed);
+    const paid = await verifyBurn(burnTx, owner, due);
+    if (!paid.ok) {
+      return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+    }
+    // Claim the payment before the plot, so one burn cannot buy two.
+    if (!(await spendBurn(burnTx, `plot:${seed}`))) {
+      return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+    }
+  }
+
   const claim: Claim = {
     seed,
     region: clean(String(body.region ?? 'Unnamed'), MAX_NAME),
     worldName: clean(String(body.worldName ?? 'Emerge'), MAX_NAME),
     owner,
     ownerName: clean(String(body.ownerName ?? ''), MAX_NAME),
-    price: Math.max(0, Math.round(Number(body.price) || 0)),
+    // Ours, from the seed. A client that could set this could write its own
+    // history of what land cost.
+    price: priceOfSeed(seed),
     // Ours, not the caller's: a client that could set this could claim to have
     // held a plot since before the person who actually did.
     at: Date.now(),
@@ -179,6 +271,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await takeClaim(claim);
+    if (result.ok) await dropReservation(seed).catch(() => {});
     if (!result.ok) {
       return NextResponse.json({
         error: `${result.taken.region} already belongs to somebody else.`,

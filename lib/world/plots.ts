@@ -8,6 +8,7 @@
  */
 
 import { createWorld } from '../simulation';
+import { priceOfSeed } from './price';
 import { biomeFor, type BiomeKind } from './biomes';
 import { clientKey } from '../limits';
 import { HOME_CHART_INDEX, chartCapacity, islandOf, islandsFor, type Island } from './charts';
@@ -124,7 +125,9 @@ export function inspectPlot(seed: number, slot: number, chart = HOME_CHART_INDEX
   // come out at four or five hundred $EMERGE — less than a hundredth of what
   // surveying a new plot costs — which made claiming land the cheapest thing
   // in the game by three orders of magnitude.
-  const price = (180 + BIOME_PREMIUM[profile.kind] + world.population * 4 + trades.length * 12) * PRICE_SCALE;
+  // Seed-only, so the server can enforce the same number without generating a
+  // world — and so it already matches what the land contract would charge.
+  const price = priceOfSeed(seed);
   return {
     id: `plot-${seed.toString(36)}`,
     seed,
@@ -132,7 +135,7 @@ export function inspectPlot(seed: number, slot: number, chart = HOME_CHART_INDEX
     // keeps its name wherever it ends up and two plots of the same biome only
     // collide by chance rather than every sixth time.
     region: REGION_NAMES[profile.kind][Math.abs(seed) % REGION_NAMES[profile.kind].length],
-    price: Math.round(price / 5_000) * 5_000,
+    price,
     biome: profile.kind,
     biomeLabel: profile.label,
     population: world.population,

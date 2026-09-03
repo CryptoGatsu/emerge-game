@@ -78,9 +78,40 @@ export async function fetchClaims(): Promise<ClaimsResult> {
   }
 }
 
+export type ReserveResult =
+  | { ok: true; seconds: number }
+  | { ok: false; reason: string };
+
+/**
+ * Hold a plot before paying for it.
+ *
+ * Asked first, always. A player refused here has burned nothing — which is the
+ * whole reason the two steps are in this order.
+ */
+export async function reservePlot(seed: number, owner: string): Promise<ReserveResult> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, reserve: true }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { reserved?: boolean; seconds?: number; error?: string };
+    if (!response.ok || !json.reserved) {
+      return { ok: false, reason: json.error ?? 'That plot could not be held.' };
+    }
+    return { ok: true, seconds: json.seconds ?? 240 };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
 export type SurveyResult =
   | { ok: true; find: Find }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; settling?: boolean };
 
 /**
  * Pay to find new land.
@@ -90,7 +121,7 @@ export type SurveyResult =
  * two settlements on the same berth.
  */
 export async function surveyPlot(input: {
-  chart: number; capacity: number; owner: string; ownerName: string;
+  chart: number; capacity: number; owner: string; ownerName: string; burnTx?: string;
 }): Promise<SurveyResult> {
   try {
     const response = await withSession(
@@ -102,9 +133,13 @@ export async function surveyPlot(input: {
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { find?: Find; error?: string };
+    const json = (await response.json()) as { find?: Find; error?: string; retry?: boolean };
     if (!response.ok || !json.find) {
-      return { ok: false, reason: json.error ?? 'The registry refused the survey.' };
+      return {
+        ok: false,
+        reason: json.error ?? 'The registry refused the survey.',
+        settling: json.retry === true,
+      };
     }
     return { ok: true, find: json.find };
   } catch {
@@ -114,7 +149,11 @@ export async function surveyPlot(input: {
 
 export type TakeResult =
   | { ok: true; claim: Claim }
-  | { ok: false; reason: string; taken?: Claim };
+  | {
+      ok: false; reason: string; taken?: Claim;
+      /** The payment is real but the chain has not settled it yet. Worth waiting. */
+      settling?: boolean;
+    };
 
 /**
  * Take a plot.
@@ -124,7 +163,8 @@ export type TakeResult =
  * exactly the behaviour that let two players own the same land.
  */
 export async function takePlot(input: {
-  seed: number; region: string; worldName: string; owner: string; ownerName: string; price: number;
+  seed: number; region: string; worldName: string; owner: string; ownerName: string;
+  price: number; burnTx?: string;
 }): Promise<TakeResult> {
   try {
     const response = await withSession(
@@ -136,9 +176,16 @@ export async function takePlot(input: {
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { claim?: Claim; error?: string; taken?: Claim };
+    const json = (await response.json()) as {
+      claim?: Claim; error?: string; taken?: Claim; retry?: boolean;
+    };
     if (!response.ok || !json.claim) {
-      return { ok: false, reason: json.error ?? 'The registry refused the claim.', taken: json.taken };
+      return {
+        ok: false,
+        reason: json.error ?? 'The registry refused the claim.',
+        taken: json.taken,
+        settling: json.retry === true,
+      };
     }
     return { ok: true, claim: json.claim };
   } catch {
@@ -203,8 +250,8 @@ export async function fetchWorld(seed: number): Promise<{ world: PublishedWorld 
 
 /** Leave Gold for the owner of a world you are visiting. */
 export async function sendGift(input: {
-  seed: number; gold: number; from: string; fromName: string;
-}): Promise<{ ok: true; to: string } | { ok: false; reason: string }> {
+  seed: number; gold: number; from: string; fromName: string; burnTx?: string;
+}): Promise<{ ok: true; to: string } | { ok: false; reason: string; settling?: boolean }> {
   try {
     const response = await withSession(
       input.from,
@@ -215,9 +262,11 @@ export async function sendGift(input: {
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { gift?: Gift; to?: string; error?: string };
+    const json = (await response.json()) as {
+      gift?: Gift; to?: string; error?: string; retry?: boolean;
+    };
     if (!response.ok || !json.gift) {
-      return { ok: false, reason: json.error ?? 'The gift did not go.' };
+      return { ok: false, reason: json.error ?? 'The gift did not go.', settling: json.retry === true };
     }
     return { ok: true, to: json.to ?? 'them' };
   } catch {

@@ -34,7 +34,10 @@
  */
 
 import { MAX_GIFT_GOLD, serverKey } from '../limits';
-import { clear, getValue, hdel, hget, hgetall, hset, push, range, setValue, shared } from './kv';
+import {
+  clear, getValue, hdel, hget, hgetall, hset, hsetnx, push, range, releaseLock, setValue, shared,
+  takeLock,
+} from './kv';
 
 export { MAX_GIFT_GOLD };
 
@@ -93,25 +96,91 @@ export type ClaimResult =
 /**
  * Take a plot, if nobody has it.
  *
- * The read and the write are not atomic, which on a busy registry would be a
- * race. Two people claiming the same seed inside the same few milliseconds is
- * not a load this game will see before the contract exists, and the failure
- * mode — the later writer wins and the earlier one is told they own it — is
- * repaired the moment the real registry lands. Said plainly here rather than
- * left for a reader to discover.
+ * **This is the whole of land ownership.** With no registry contract deployed
+ * there is no chain to appeal to: this row is the title, so it is written with
+ * a set-if-absent and never with a read followed by a write. Two players
+ * claiming the same seed in the same millisecond both used to pass the read and
+ * the later write won, leaving the earlier player told they owned something
+ * they did not. `HSETNX` answers true to exactly one of them.
  *
- * A claim by the address that already holds the plot is not a conflict: it is
- * the same player walking back into their own world.
+ * A claim by the address that already holds the plot is not a conflict — it is
+ * the same player walking back into their own world — but it does not overwrite
+ * the row either. The date and the price on a title are the ones it was taken
+ * at, and an owner re-entering should not be able to rewrite them.
  */
 export async function takeClaim(claim: Claim): Promise<ClaimResult> {
-  const existing = await claimOf(claim.seed);
-  if (existing && existing.owner.toLowerCase() !== claim.owner.toLowerCase()) {
-    return { ok: false, taken: existing };
-  }
   const row: Claim = { ...claim, owner: claim.owner.toLowerCase() };
-  await hset(CLAIMS, String(claim.seed), JSON.stringify(row));
-  return { ok: true, claim: row };
+  const mine = await hsetnx(CLAIMS, String(claim.seed), JSON.stringify(row));
+  if (mine) return { ok: true, claim: row };
+
+  // Somebody already holds it. Theirs, unless it is this player walking back in.
+  const existing = await claimOf(claim.seed);
+  if (!existing) {
+    // The row vanished between the write and the read — the only way that
+    // happens is a release landing in the gap, so let them try again rather
+    // than reporting an owner that is not there.
+    return { ok: false, taken: { ...row, owner: '' } };
+  }
+  if (existing.owner.toLowerCase() === row.owner.toLowerCase()) {
+    return { ok: true, claim: existing };
+  }
+  return { ok: false, taken: existing };
 }
+
+/* ------------------------------------------------------------------ *
+ * Reservations
+ * ------------------------------------------------------------------ */
+
+/**
+ * How long a plot is held while its buyer pays for it.
+ *
+ * Paying is a wallet prompt and a few blocks of confirmation, so a plot has to
+ * be off the market for as long as that takes or two people can burn tokens for
+ * the same land and only one can have it. Long enough for a slow confirmation,
+ * short enough that an abandoned checkout frees the plot again while somebody
+ * is still looking at it.
+ */
+const RESERVE_SECONDS = 240;
+
+const reserveKey = (seed: number) => serverKey(`hold:${seed}`);
+
+export type ReserveResult =
+  | { ok: true; seconds: number }
+  | { ok: false; reason: string };
+
+/**
+ * Hold a plot for one wallet while they pay.
+ *
+ * Taken before any money moves, so the answer to "can I have this?" arrives
+ * before the answer to "will you pay for it?" — which is the order that means
+ * nobody burns tokens for land they cannot get.
+ */
+export async function reservePlot(seed: number, owner: string): Promise<ReserveResult> {
+  const existing = await claimOf(seed);
+  if (existing && existing.owner.toLowerCase() !== owner.toLowerCase()) {
+    return { ok: false, reason: 'Somebody else already holds that plot.' };
+  }
+  const key = reserveKey(seed);
+  const got = await takeLock(key, RESERVE_SECONDS);
+  if (got) {
+    await setValue(key, owner.toLowerCase(), RESERVE_SECONDS);
+    return { ok: true, seconds: RESERVE_SECONDS };
+  }
+  const heldBy = await getValue(key);
+  if (heldBy && heldBy.toLowerCase() === owner.toLowerCase()) {
+    return { ok: true, seconds: RESERVE_SECONDS };
+  }
+  return { ok: false, reason: 'Somebody is buying that plot right now. Try again in a few minutes.' };
+}
+
+/** Whether this wallet is the one holding a plot open. */
+export async function holdsReservation(seed: number, owner: string): Promise<boolean> {
+  const heldBy = await getValue(reserveKey(seed));
+  return !!heldBy && heldBy.toLowerCase() === owner.toLowerCase();
+}
+
+/** Let a plot go, once it is claimed or abandoned. */
+export const dropReservation = (seed: number) => releaseLock(reserveKey(seed));
 
 /** Give a plot up, if it is yours to give up. */
 export async function releaseClaim(seed: number, owner: string): Promise<boolean> {
