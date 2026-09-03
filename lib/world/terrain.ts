@@ -16,6 +16,7 @@ import { GRID, worldToTile } from './iso';
 import { biomeProfile, type BiomeProfile } from './biomes';
 import { onDeck, type WorldLayout } from './layout';
 import { fbm, heightField } from './relief';
+import { woodedAt } from './cover';
 import { hash2, nearestOn, valueNoise, type Polyline, type WaterField } from './water';
 
 export enum Tile {
@@ -241,20 +242,19 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
       } else if (fbm(seed + 700, wx * 0.06, wy * 0.06, 3) > profile.rockThreshold) {
         tile = Tile.Rock;
       } else {
-        const forest = fbm(seed + 1300, wx * 0.045, wy * 0.045, 4);
         const bloom = fbm(seed + 2600, wx * 0.09, wy * 0.09, 3);
         // Keep the settlement core open; push woodland out to the edges. The
         // core is wherever this world's square ended up, not the map's middle —
         // and the reach is capped, because a town near one corner would
         // otherwise read every far tile as remote and grow a forest over the
-        // entire map.
-        const fromCore = Math.min(Math.hypot(wx - core.x, wy - core.y), 34) / 60;
+        // entire map. The rule lives in `cover.ts` so the simulation can ask it.
+        const wooded = woodedAt(seed, profile, core, wx, wy);
         // Ground cover the biome brings with it: dune, fen or scrub claims the
         // open ground before grass gets a look in.
         const cover = profile.groundCover > 0
           && fbm(seed + 3300, wx * 0.05, wy * 0.05, 3) < profile.groundCover
           ? profile.ground : 'grass';
-        tile = forest + fromCore * 0.28 + profile.forest > 0.62 ? Tile.Forest
+        tile = wooded ? Tile.Forest
           : cover === 'dune' ? Tile.Dune
             : cover === 'marsh' ? Tile.Marsh
               : cover === 'scrub' ? Tile.Scrub

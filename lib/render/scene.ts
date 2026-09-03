@@ -94,10 +94,15 @@ interface TreeEntry {
   wy: number;
   texture: Texture;
   scale: number;
-  state: 'standing' | 'falling' | 'stump' | 'sapling';
+  state: 'standing' | 'falling' | 'stump' | 'sapling' | 'cleared';
   /** Seconds of fall animation left, or game days until the next growth stage. */
   timer: number;
 }
+
+/** Ground a sapling can take root in: the natural covers, never a path, a field or the square. */
+const ROOTABLE = new Set<Tile>([Tile.Grass, Tile.Flowers, Tile.Meadow, Tile.Forest, Tile.Scrub, Tile.Dune, Tile.Marsh]);
+/** The most saplings that spring up on their own in a day. */
+const SAPLINGS_PER_DAY = 3;
 
 /** An animal on the ground, drawn. */
 interface WildSprite {
@@ -290,6 +295,7 @@ export class EmergeScene {
 
     this.buildTerrain();
     this.buildProps();
+    this.measureWood();
     this.buildRings();
     this.syncBuildings();
     this.syncCitizens();
@@ -433,7 +439,8 @@ export class EmergeScene {
       if (prop.sway >= 0.5) this.swaying.push(entry);
 
       if (prop.sway >= 0.4) this.foliage.push({ sprite, baseTint: sprite.tint as number });
-      if (prop.name.startsWith('prop.tree.') && prop.name !== 'prop.tree.dead') {
+      // A dead tree is still timber: the desert's dry trunks fell like any other.
+      if (prop.name.startsWith('prop.tree.')) {
         const tree: TreeEntry = {
           sprite, wx: prop.wx, wy: prop.wy, texture: sprite.texture,
           scale: size, state: 'standing', timer: 0,
@@ -473,6 +480,16 @@ export class EmergeScene {
   }
 
   private lampGlows: Sprite[] = [];
+  /**
+   * How many trees the land grows when nothing stands on it.
+   *
+   * The wood regrows toward this. Ground built over cannot grow a tree, so
+   * the trees lost to a new house come back elsewhere on open ground, a few
+   * a day, and a plot that keeps building does not slowly lose its wood.
+   */
+  private treeCapacity = 0;
+  /** Saplings the wood put out on its own: not props, so cleared by hand when the ground is rebuilt. */
+  private planted: Sprite[] = [];
   private wildlife = new Map<string, WildSprite>();
   private casting = new Map<string, Casting>();
   private trees: TreeEntry[] = [];
@@ -546,6 +563,17 @@ export class EmergeScene {
         entry.cleared = true;
         entry.sprite.visible = false;
         entry.sprite.renderable = false;
+      }
+    }
+    // The trees under it are gone, not merely hidden: they no longer count
+    // as woodland, cannot be felled from under a floor, and their place in
+    // the wood is taken by saplings elsewhere.
+    for (const tree of this.trees) {
+      if (tree.state === 'cleared') continue;
+      if ((tree.wx - building.x) ** 2 + (tree.wy - building.y) ** 2 < 30) {
+        tree.state = 'cleared';
+        tree.sprite.visible = false;
+        tree.sprite.renderable = false;
       }
     }
   }
@@ -1097,6 +1125,7 @@ export class EmergeScene {
     this.casting.clear();
     this.buildings.clear();
     this.propSprites = [];
+    this.planted = [];
     this.swaying = [];
     this.trees = [];
     this.foliage = [];
@@ -1121,12 +1150,19 @@ export class EmergeScene {
 
     this.buildTerrain();
     this.buildProps();
+    this.measureWood();
     this.buildRings();
     this.syncBuildings();
     this.syncCitizens();
     this.buildBubbles();
     this.buildParticles();
     this.centreOn(50, 49, 1.05);
+  }
+
+  /** What the land would grow with nothing built on it: the count the wood regrows toward. */
+  private measureWood() {
+    const bare = generateWorldMap({ ...this.world, buildings: [] });
+    this.treeCapacity = bare.props.filter((p) => p.name.startsWith('prop.tree.')).length;
   }
 
   /**
@@ -1153,9 +1189,11 @@ export class EmergeScene {
     // and their glows live in the lights layer, so each is destroyed by hand
     // rather than by emptying a container.
     for (const entry of this.propSprites) entry.sprite.destroy();
+    for (const sprite of this.planted) sprite.destroy();
     for (const glow of this.lampGlows) glow.destroy();
     for (const puff of this.smoke) puff.sprite.destroy();
     this.propSprites = [];
+    this.planted = [];
     this.swaying = [];
     this.trees = [];
     this.foliage = [];
@@ -1746,6 +1784,7 @@ export class EmergeScene {
       if (newDay) {
         this.fellTrees(this.world.flow.produced.wood ?? 0);
         this.growTrees();
+        this.plantSaplings();
       }
     }
 
@@ -1792,7 +1831,10 @@ export class EmergeScene {
 
   private growTrees() {
     for (const tree of this.trees) {
-      if (tree.state === 'standing' || tree.state === 'falling') continue;
+      // Ground built over stays built over: a cleared tree never grows back
+      // in place. Left in this loop it came back as a standing tree under
+      // the floor the next morning, invisible but counted.
+      if (tree.state === 'standing' || tree.state === 'falling' || tree.state === 'cleared') continue;
       tree.timer -= 1;
       if (tree.timer > 0) continue;
       if (tree.state === 'stump') {
@@ -1805,6 +1847,56 @@ export class EmergeScene {
         tree.sprite.texture = tree.texture;
         tree.sprite.scale.set(tree.scale);
       }
+    }
+  }
+
+  /**
+   * The wood comes back on its own.
+   *
+   * Whenever the plot holds fewer trees than the land would grow — because a
+   * house now stands where some were, or a clearing was made — a few
+   * saplings a day take root on open ground near the standing wood: never on
+   * a path, a field or the square, never within a stride of a wall or the
+   * water, and always beside trees that are already there, so the wood
+   * spreads at its edge rather than dotting the meadow.
+   */
+  private plantSaplings() {
+    if (!this.treeCapacity) return;
+    const live = this.trees.filter((t) => t.state !== 'cleared');
+    const deficit = this.treeCapacity - live.length;
+    if (deficit <= 0) return;
+    const parents = live.filter((t) => t.state === 'standing');
+    if (!parents.length) return;
+    const water = waterOf(this.world);
+    let seed = (this.world.seed ^ (this.world.day * 2654435761)) >>> 0;
+    const rand = () => { seed = (seed + 0x6d2b79f5) >>> 0; let t = Math.imul(seed ^ (seed >>> 15), seed | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    let planted = 0;
+    for (let tries = 0; tries < 160 && planted < Math.min(SAPLINGS_PER_DAY, deficit); tries++) {
+      const parent = parents[Math.floor(rand() * parents.length)];
+      const ang = rand() * Math.PI * 2, r = 2 + rand() * 3.5;
+      const wx = parent.wx + Math.cos(ang) * r, wy = parent.wy + Math.sin(ang) * r;
+      if (wx < 3 || wx > 97 || wy < 3 || wy > 97) continue;
+      if (!ROOTABLE.has(this.map.tileAt(wx, wy))) continue;
+      if (water.blocks(wx, wy) || water.distanceToWater(wx, wy) < 2) continue;
+      if (this.world.buildings.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < 42)) continue;
+      const plaza = this.world.layout.plaza;
+      if ((plaza.x - wx) ** 2 + (plaza.y - wy) ** 2 < (plaza.r + 3) ** 2) continue;
+      // Trees in a wood stand about half a unit apart; a stricter gap found nowhere to plant at all.
+      if (live.some((t) => (t.wx - wx) ** 2 + (t.wy - wy) ** 2 < 0.64)) continue;
+      const sprite = new Sprite(this.assets.get('prop.sapling'));
+      sprite.anchor.set(0.5, 1);
+      const pos = worldToScreen(wx, wy, this.map.heightAt(wx, wy));
+      sprite.position.set(pos.x, pos.y);
+      sprite.zIndex = depthOf(wx, wy);
+      sprite.scale.set(parent.scale * 0.8);
+      this.objectLayer.addChild(sprite);
+      this.planted.push(sprite);
+      const tree: TreeEntry = { sprite, wx, wy, texture: parent.texture, scale: parent.scale, state: 'sapling', timer: 5 + Math.floor(rand() * 4) };
+      this.trees.push(tree);
+      live.push(tree);
+      this.foliage.push({ sprite, baseTint: 0xffffff });
+      sprite.tint = FOLIAGE_SEASON[this.world.season] ?? 0xffffff;
+      planted++;
     }
   }
 
@@ -1879,13 +1971,15 @@ export class EmergeScene {
    * shrinking and recovering as the woodcutters work it.
    */
   woodland() {
-    let standing = 0, stumps = 0, saplings = 0;
+    let standing = 0, stumps = 0, saplings = 0, total = 0;
     for (const tree of this.trees) {
+      if (tree.state === 'cleared') continue;
+      total++;
       if (tree.state === 'standing') standing++;
       else if (tree.state === 'sapling') saplings++;
       else stumps++;
     }
-    return { standing, stumps, saplings, total: this.trees.length };
+    return { standing, stumps, saplings, total };
   }
 
   /** Follow a citizen, or pass null to stop. */

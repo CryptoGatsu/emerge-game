@@ -19,6 +19,7 @@ import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
 import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
 import { buildWater, type WaterField } from './world/water';
+import { woodedAt } from './world/cover';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -3926,15 +3927,28 @@ function wildGround(world: World, water: WaterField, kind: AnimalKind, x: number
   return true;
 }
 
-/** Put one more animal on the land, somewhere out of the way. */
+/** True where an animal would be under the canopy, out of sight. */
+function underCanopy(world: World, x: number, y: number): boolean {
+  return woodedAt(world.seed, biomeProfile(world.biome), world.layout.plaza, x, y);
+}
+
+/**
+ * Put one more animal on the land, somewhere out of the way.
+ *
+ * Open ground first: a herd that spawned under a deep wood's canopy was
+ * invisible, to the player watching and to the hunter alike, and a hunt
+ * nobody can see is a number in a feed. The first forty tries want a spot
+ * the trees do not cover; only then does the wood itself do.
+ */
 function spawnAnimal(world: World, rand: () => number): Animal | null {
   const water = waterOf(world);
   const kinds = WILDLIFE[world.biome];
   const kind = kinds[Math.floor(rand() * kinds.length)];
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 80; i++) {
     const x = 8 + rand() * 84, y = 10 + rand() * 80;
     if (!wildGround(world, water, kind, x, y, 9)) continue;
     if (Math.hypot(x - world.layout.plaza.x, y - world.layout.plaza.y) < 16) continue;
+    if (i < 40 && underCanopy(world, x, y)) continue;
     const a: Animal = {
       id: `a${world.counter++}`, kind, x, y, homeX: x, homeY: y, destX: x, destY: y,
       state: 'grazing', timer: 0.3 + rand() * 1.2, facing: rand() < 0.5 ? 1 : -1,
@@ -4008,10 +4022,12 @@ function moveWildlife(world: World, hours: number) {
       a.timer -= hours;
       if (a.timer > 0) continue;
       const rand = animalRand(world, a);
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 8; i++) {
         const ang = rand() * Math.PI * 2, r = 2 + rand() * 5;
         const tx = a.homeX + Math.cos(ang) * r, ty = a.homeY + Math.sin(ang) * r;
         if (!wildGround(world, water, a.kind, tx, ty, 3)) continue;
+        // Browse the edge rather than wander into the deep wood.
+        if (i < 5 && underCanopy(world, tx, ty)) continue;
         a.destX = tx; a.destY = ty; a.state = 'moving';
         break;
       }
@@ -5285,14 +5301,28 @@ function migration(world: World, rand: () => number) {
    */
   const desperate = world.citizens.length <= LAST_RESORT_POPULATION;
 
+  /*
+   * The prosperity tests slow arrivals rather than stop them.
+   *
+   * They used to be hard gates, and a plot with plenty of houses and plenty of
+   * buildings sat at eight people for eighty days because the upkeep on all
+   * those buildings kept the treasury under four days of payroll: nobody
+   * could ever come, and nothing told the player why. A thin treasury or a
+   * glum town now draws a third as many people, and the feed says so once
+   * every few days, which is the difference between a plot that has stalled
+   * and a plot that is telling you what it needs.
+   */
+  let welcome = 1;
+  let held: string | null = null;
   if (!desperate) {
-    // A settlement that can pay them.
     const payroll = world.citizens.filter((c) => c.age >= 16 && c.job !== 'unemployed')
       .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
-    if (world.treasury < payroll * 4 + 120) return;
-    // Word travels on how the place is doing, so a miserable town attracts nobody.
     const content = world.citizens.reduce((s, c) => s + c.happiness, 0) / Math.max(1, world.citizens.length);
-    if (content < 55) return;
+    if (world.treasury < payroll * 4 + 120) { welcome *= 0.35; held = 'the treasury cannot promise a wage'; }
+    if (content < 55) { welcome *= 0.4; held = held ? `${held}, and the town is unhappy` : 'the town is unhappy'; }
+    if (held && world.day % 4 === 0) {
+      pushFeed(world, 'social', `Few people are moving to ${world.name}: word is ${held}.`);
+    }
   }
 
   /*
@@ -5311,7 +5341,7 @@ function migration(world: World, rand: () => number) {
   const improved = world.buildings.reduce((sum, b) => sum + (levelOf(b) - 1), 0);
   const draw = desperate
     ? 0.22
-    : 0.16 + Math.min(0.3, world.buildings.length * 0.02) + renown * 0.5 + civic * 0.06 + Math.min(0.24, improved * 0.04);
+    : (0.16 + Math.min(0.3, world.buildings.length * 0.02) + renown * 0.5 + civic * 0.06 + Math.min(0.24, improved * 0.04)) * welcome;
   let coming = Math.min(MAX_ARRIVALS_PER_DAY, Math.floor(draw) + (rand() < draw - Math.floor(draw) ? 1 : 0));
   let arrived = 0;
   while (coming-- > 0 && roomFor() && fedFor()) {
