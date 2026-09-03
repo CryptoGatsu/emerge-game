@@ -20,7 +20,7 @@
  * chain's, and nothing above this line changes.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
   CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, chartRoom, claimOf, drawPlotPreview,
@@ -182,6 +182,15 @@ function PlotPreview({ seed }: { seed: number }) {
  * the markers are real buttons laid over it, so they can be tabbed to, focused
  * and read by a screen reader instead of being pixels with a hit test.
  */
+/** How much clear air two markers keep between them, in pixels. */
+const MARKER_GAP = 5;
+
+/** How far a marker may be moved off its plot to make room, as a share of the map's height. */
+const MAX_MARKER_NUDGE = 0.09;
+
+/** Below this map width, in pixels, there is no room to lay names out at all. */
+const LABELS_NEED_WIDTH = 560;
+
 function RegionMap({ plots, selected, chart, owned, taken, onSelect }: {
   plots: Plot[];
   selected: Plot | null;
@@ -193,14 +202,231 @@ function RegionMap({ plots, selected, chart, owned, taken, onSelect }: {
   onSelect: (plot: Plot) => void;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const pinsRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * On a narrow map, markers are dots.
+   *
+   * Not a preference — arithmetic. A marker carrying a name is about 140px
+   * wide and 24px tall; a phone's map is 390px across and 247px down. Seventeen
+   * of them need more height stacked in a single column than the map has, so
+   * there is no arrangement in which every name is readable, and pushing them
+   * around only decides which ones get buried. Below the width where labels can
+   * be laid out, the map shows the land and the dots, keeps the name on the one
+   * being looked at and on the player's own, and the card underneath says
+   * everything else the moment a dot is tapped.
+   */
+  const [compact, setCompact] = useState(false);
   useEffect(() => {
     if (ref.current) drawRegionMap(ref.current, plots, chart);
   }, [plots, chart]);
 
+  /*
+   * Unpick the markers that landed on top of each other.
+   *
+   * The plots are placed on a spiral out from each island's middle, which
+   * spreads the *points* well enough — but a marker is not a point. It is a dot
+   * with a name beside it, a sixth of the map wide, and on a chart carrying its
+   * full seventeen plots two of them regularly came to rest with one label
+   * sitting over another: the settlement underneath could be neither read nor
+   * tapped.
+   *
+   * No amount of tuning the spiral fixes that, because the width of a marker
+   * depends on the length of a name nobody chose in advance. So the labels are
+   * measured as the browser actually laid them out, and any pair that overlaps
+   * is pushed apart vertically until it does not. Vertically because that is
+   * how a map separates labels — and because a marker's whole job is to sit on
+   * its island, so the movement is capped well inside one.
+   */
+  useLayoutEffect(() => {
+    const container = pinsRef.current;
+    if (!container) return;
+    let frame = 0;
+
+    const settle = () => {
+      // Enough room for two labels side by side, or there is no point drawing
+      // any of them.
+      const wide = container.getBoundingClientRect().width >= LABELS_NEED_WIDTH;
+      setCompact((was) => (was === !wide ? was : !wide));
+
+      const nodes = Array.from(container.querySelectorAll<HTMLElement>('.region-pin'));
+      if (!nodes.length) return;
+
+      // Measure where they *want* to be, not where the last pass put them —
+      // and with the transition off while doing it. A marker's transform is
+      // animated for the hover, so resetting the offset and measuring straight
+      // away measured it a third of the way through a 150ms slide: the
+      // separation was computed from positions nothing was ever at, and pairs
+      // that were flat on top of each other were left there.
+      container.classList.add('settling');
+      for (const node of nodes) {
+        node.style.setProperty('--nudge', '0px');
+        node.style.setProperty('--slide', '0px');
+      }
+      const box = container.getBoundingClientRect();
+      if (!box.height) { container.classList.remove('settling'); return; }
+
+      const measure = (node: HTMLElement, fixed: boolean) => {
+        const r = node.getBoundingClientRect();
+        return {
+          node,
+          fixed,
+          left: r.left - box.left,
+          right: r.right - box.left,
+          mid: r.top - box.top + r.height / 2,
+          height: r.height,
+          dy: 0,
+        };
+      };
+
+      // The island names are part of the picture and do not move. A marker
+      // pushed onto one is no more readable than a marker pushed onto another
+      // marker, so they take part in the separation as things to keep clear of.
+      const labels = Array.from(container.querySelectorAll<HTMLElement>('.island-name'));
+      for (const node of labels) node.style.setProperty('--shift', '0px');
+
+      const items = [
+        ...nodes.map((node) => measure(node, false)),
+        ...labels.map((node) => measure(node, true)),
+      ];
+
+      /*
+       * Sideways first, and only as far as the edge demands.
+       *
+       * A marker is centred on its plot, so half a long name hangs either side
+       * of it — and a plot near the coast of an eastern island had that half
+       * hanging over the edge of the map, where it is clipped. Flipping the
+       * label to the inside, which the marker already does, moves the text
+       * but not the box.
+       *
+       * Done before the vertical pass rather than after, so the separation
+       * below is worked out from where the labels finally are. Sliding them
+       * afterwards would have been solving the puzzle and then moving the
+       * pieces.
+       */
+      for (const item of items) {
+        const over = item.right > box.width - 2 ? item.right - (box.width - 2)
+          : item.left < 2 ? item.left - 2 : 0;
+        if (!over) continue;
+        item.node.style.setProperty(item.fixed ? '--shift' : '--slide', `${(-over).toFixed(2)}px`);
+        item.left -= over;
+        item.right -= over;
+      }
+
+      // How far a marker may be moved, as a share of the map rather than a
+      // fixed number of pixels: thirty pixels is a nudge on a desktop map and
+      // half an island on a phone.
+      const room = Math.max(16, Math.min(64, box.height * MAX_MARKER_NUDGE));
+
+      /*
+       * Keep a marker on its land and inside the map.
+       *
+       * Applied on every pass, not only at the end. Clamping once at the end
+       * meant a marker pushed down into the bottom edge simply stayed on top of
+       * whatever it had been pushed away from — the solver never learned it had
+       * nowhere to go, so the thing it was avoiding never gave way instead.
+       */
+      const hold = (item: { mid: number; height: number; dy: number }) => {
+        const capped = Math.max(-room, Math.min(room, item.dy));
+        const top = item.mid + capped - item.height / 2;
+        const bottom = top + item.height;
+        return top < 2 ? capped + (2 - top)
+          : bottom > box.height - 2 ? capped - (bottom - (box.height - 2))
+            : capped;
+      };
+
+      /*
+       * How much clear air a pair needs.
+       *
+       * Less on a narrow map, where the markers are dots: two dots a hair apart
+       * still read as two places, where two labels a hair apart read as one
+       * unreadable smear. Giving the solver that slack is what lets it satisfy
+       * everything on a map with seventeen plots and no room.
+       */
+      const gapNeeded = (againstFixed: boolean) =>
+        (compact ? MARKER_GAP - 2 : MARKER_GAP) - (againstFixed ? 2 : 0);
+
+      // Relaxation rather than a single sweep: separating one pair can push a
+      // marker into a third, and a settlement is entitled to be legible even on
+      // a crowded island.
+      for (let pass = 0; pass < 40; pass += 1) {
+        let moved = false;
+        for (let i = 0; i < items.length; i += 1) {
+          for (let j = i + 1; j < items.length; j += 1) {
+            const a = items[i];
+            const b = items[j];
+            // Labels side by side are not in each other's way.
+            if (a.right <= b.left || b.right <= a.left) continue;
+            const clear = (a.height + b.height) / 2 + gapNeeded(a.fixed || b.fixed);
+            const between = (a.mid + a.dy) - (b.mid + b.dy);
+            if (Math.abs(between) >= clear) continue;
+            if (a.fixed && b.fixed) continue;
+
+            if (a.fixed || b.fixed) {
+              /*
+               * One of them is an island's name, which is not going anywhere.
+               *
+               * The marker is placed clear of it outright rather than shoved
+               * a little at a time, and — this is the part that matters — it is
+               * placed on whichever side it can actually reach. Always pushing
+               * it the "natural" way put markers under the southern islands
+               * into the bottom edge of the map, where they were held, still
+               * sitting on the name they were meant to be avoiding.
+               */
+              const mover = a.fixed ? b : a;
+              const wall = a.fixed ? a : b;
+              const above = hold({ ...mover, dy: wall.mid - clear - mover.mid });
+              const below = hold({ ...mover, dy: wall.mid + clear - mover.mid });
+              const clearance = (dy: number) => Math.abs(mover.mid + dy - wall.mid);
+              mover.dy = clearance(above) >= clearance(below) ? above : below;
+              moved = true;
+              continue;
+            }
+
+            const aFirst = between <= 0;
+            const push = (clear - Math.abs(between)) / 2;
+            a.dy += aFirst ? -push : push;
+            b.dy += aFirst ? push : -push;
+            moved = true;
+          }
+        }
+        for (const item of items) {
+          if (!item.fixed) item.dy = hold(item);
+        }
+        if (!moved) break;
+      }
+
+      for (const item of items) {
+        if (item.fixed) continue;
+        item.node.style.setProperty('--nudge', `${item.dy.toFixed(2)}px`);
+      }
+      container.classList.remove('settling');
+    };
+
+    // After a frame, so the measurement is of the laid-out page rather than of
+    // markers the browser has not sized yet.
+    frame = requestAnimationFrame(settle);
+    // The map is fluid, and a label that clears its neighbour at one width sits
+    // on top of it at another.
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(settle);
+    });
+    observer.observe(container);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [plots, chart, selected, owned, taken, compact]);
+
   return (
     <div className="region">
+      {/* The markers are laid over the map and nothing else. They used to be
+          laid over the whole box, legend included, so a plot on a southern
+          island was drawn on top of the line that says how many plots there
+          are — which is what made it look cut off. */}
+      <div className="region-plate">
       <canvas ref={ref} width={900} height={570} className="region-canvas" aria-hidden />
-      <div className="region-pins">
+      <div className={`region-pins ${compact ? 'compact' : ''}`} ref={pinsRef}>
         {/* Every island is named, surveyed or not: an empty coast the player
             can see is what makes prospecting somewhere to go. */}
         {islandsFor(chart).map((island) => (
@@ -240,6 +466,7 @@ function RegionMap({ plots, selected, chart, owned, taken, onSelect }: {
           </button>
           );
         })}
+      </div>
       </div>
       <div className="region-legend">
         <span>

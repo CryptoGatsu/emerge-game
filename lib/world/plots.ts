@@ -11,7 +11,9 @@ import { createWorld } from '../simulation';
 import { priceOfSeed } from './price';
 import { biomeFor, type BiomeKind } from './biomes';
 import { clientKey } from '../limits';
-import { HOME_CHART_INDEX, chartCapacity, islandOf, islandsFor, type Island } from './charts';
+import {
+  HOME_CHART_INDEX, HOME_CHART_RESERVED, chartCapacity, islandOf, islandsFor, type Island,
+} from './charts';
 import { normaliseLedger, type VaultLedger } from '../chain/vault';
 import { GRID, TILE_H, TILE_W, tileToScreen } from './iso';
 import { fbm } from './relief';
@@ -89,8 +91,8 @@ const BIOME_PREMIUM: Record<BiomeKind, number> = {
  * was meant to fix. Fewer per island, more islands.
  */
 export {
-  CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, islandOf, islandsFor,
-  type Island,
+  CHART_COUNT, HOME_CHART_INDEX, HOME_CHART_RESERVED, chartCapacity, chartName, islandOf,
+  islandsFor, type Island,
 } from './charts';
 
 /**
@@ -100,7 +102,20 @@ export {
  */
 function regionSite(slot: number, chart: number): [number, number] {
   const spot = islandOf(slot, chart);
-  if (!spot) return [0.5, 0.5];
+  // A slot past the last island has no coast to stand on. It should not happen
+  // — the relay now hands out only as many berths as the islands hold — but
+  // land already surveyed under the old rule still has to be drawn, and every
+  // one of them returning the middle of the map is what stacked a dozen
+  // markers on one point with only the top one readable. Spread them instead,
+  // on the same spiral, so each can at least be seen and tapped.
+  if (!spot) {
+    const angle = slot * 2.399963229728653;
+    const out = 0.18 + Math.sqrt((slot % 24) / 24) * 0.3;
+    return [
+      Math.max(0.06, Math.min(0.94, 0.5 + Math.cos(angle) * out)),
+      Math.max(0.08, Math.min(0.9, 0.5 + Math.sin(angle) * out * 0.8)),
+    ];
+  }
   const { island } = spot;
   if (spot.slot === 0) return [island.x, island.y];
   const angle = spot.slot * 2.399963229728653;
@@ -158,6 +173,19 @@ export function inspectPlot(seed: number, slot: number, chart = HOME_CHART_INDEX
  * on the map.
  */
 export const PLOT_SEEDS = [1050, 1120, 1000, 1020, 1220, 1060, 1030, 1080, 1040];
+
+/*
+ * These nine stand in the home chart's first nine berths, and the relay has to
+ * leave those berths alone when it hands out surveyed land. It reads the count
+ * from `charts.ts`, which cannot see this list — so the two are tied together
+ * here rather than left to be noticed later by somebody wondering why two
+ * settlements are drawn on the same rock.
+ */
+if (PLOT_SEEDS.length !== HOME_CHART_RESERVED) {
+  throw new Error(
+    `The home chart reserves ${HOME_CHART_RESERVED} berths but the catalogue holds ${PLOT_SEEDS.length}.`,
+  );
+}
 
 export function catalogue(): Plot[] {
   return PLOT_SEEDS.map((seed, i) => inspectPlot(seed, i, HOME_CHART_INDEX));

@@ -34,6 +34,7 @@
  */
 
 import { MAX_GIFT_GOLD, serverKey } from '../limits';
+import { HOME_CHART_INDEX, HOME_CHART_RESERVED, chartCapacity } from '../world/charts';
 import {
   clear, getValue, hdel, hget, hgetall, hset, hsetnx, push, range, releaseLock, setValue, shared,
   takeLock,
@@ -235,9 +236,14 @@ export type SurveyResult =
  * never met could both survey "the third berth on Kestrel Reach" and end up
  * with two settlements at the same point on the map.
  *
- * `capacity` comes from the caller because the island geometry is the client's
- * to know, but it is clamped: a client claiming a chart holds a thousand plots
- * gets the same answer as one telling the truth about a full chart.
+ * How much room a chart has is **not** the caller's to say. It used to be
+ * clamped at sixty-four rather than at what the islands actually hold, and a
+ * client that said "this chart has room for sixty-four" got sixty-four berths
+ * on a chart with seventeen. Every slot past the last island has nowhere to
+ * stand, so the map put all of them at the exact centre — a heap of markers
+ * with only the top one readable, and the settlements underneath unreachable.
+ * The geometry is in `lib/world/charts.ts` precisely so this side can read it,
+ * so this side reads it.
  */
 export async function survey(
   chart: number,
@@ -245,10 +251,19 @@ export async function survey(
   finder: string,
   finderName: string,
 ): Promise<SurveyResult> {
-  const room = Math.max(0, Math.min(64, Math.floor(capacity)));
+  // The caller's figure is still honoured as a *lower* bound, so an older
+  // client that knows about fewer islands than this build does cannot be handed
+  // land it has no way to draw.
+  const asked = Math.max(0, Math.min(64, Math.floor(capacity)));
+  const room = Math.min(asked, chartCapacity(chart));
   const taken = new Set((await allFinds()).filter((f) => f.chart === chart).map((f) => f.slot));
+  // The home chart opens with nine plots already standing in its first nine
+  // berths. They are not in the finds hash — nobody surveyed them — so without
+  // this the first survey is handed slot zero and the new settlement is drawn
+  // on top of one that has been there since the game opened.
+  const first = chart === HOME_CHART_INDEX ? HOME_CHART_RESERVED : 0;
   let slot = -1;
-  for (let i = 0; i < room; i++) {
+  for (let i = first; i < room; i++) {
     if (!taken.has(i)) { slot = i; break; }
   }
   if (slot < 0) return { ok: false, reason: 'Every island on this chart has been surveyed.' };

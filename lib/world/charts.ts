@@ -78,6 +78,25 @@ const ISLAND_NAMES = [
 export const HOME_CHART_INDEX = 0;
 
 /**
+ * How many berths on the home chart are already spoken for.
+ *
+ * The world map opens with nine plots on it, and they stand in the first nine
+ * slots of chart zero. Anything surveyed there has to start after them.
+ *
+ * It lives here, in the module with no dependencies, because the relay is the
+ * side that hands out slots and it had no way to know this. It gave the first
+ * survey on the home chart slot zero — the slot the first opening plot is
+ * standing in — so the new settlement was drawn at exactly the same point as an
+ * existing one, one marker's label flat on top of another's, and the plot
+ * underneath could be neither read nor tapped. Every survey after it did the
+ * same, nine deep.
+ *
+ * `lib/world/plots.ts` asserts its catalogue is this long, so the two cannot
+ * drift apart quietly.
+ */
+export const HOME_CHART_RESERVED = 9;
+
+/**
  * How many charts a player can sail between.
  *
  * Not unlimited, because "somewhere else to look" stops meaning anything when

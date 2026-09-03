@@ -205,10 +205,19 @@ button {
      world should look drawn rather than photographed. */
   image-rendering: pixelated;
 }
+/* The map itself, with the markers over it. Separate from the box so the
+   legend below is not somewhere a marker can be drawn. */
+.region-plate { position: relative; }
 .region-pins { position: absolute; inset: 0; }
 .region-pin {
   position: absolute;
-  transform: translate(-50%, -50%);
+  /* `--nudge` and `--slide` are set by the map's own layout pass: the first
+     pushes markers whose labels landed on top of one another far enough apart
+     to be read, the second pulls a marker back inside the map when its label
+     would otherwise hang over the edge and be clipped. Folded into the
+     transform rather than added to `top`/`left`, so they survive the hover
+     scale and cost no layout. */
+  transform: translate(calc(-50% + var(--slide, 0px)), calc(-50% + var(--nudge, 0px)));
   display: flex;
   align-items: center;
   gap: 7px;
@@ -224,7 +233,11 @@ button {
 }
 .region-pin.flip { flex-direction: row-reverse; padding: 5px 7px 5px 11px; }
 .region-pin.flip .pin-label { text-align: right; }
-.region-pin:hover { border-color: var(--panel-edge); transform: translate(-50%, -50%) scale(1.04); }
+.region-pin:hover {
+  border-color: var(--panel-edge);
+  transform: translate(calc(-50% + var(--slide, 0px)), calc(-50% + var(--nudge, 0px))) scale(1.04);
+  z-index: 3;
+}
 .region-pin.selected {
   border-color: var(--emerald);
   background: rgba(14, 40, 22, 0.9);
@@ -245,7 +258,9 @@ button {
 
 .island-name {
   position: absolute;
-  transform: translate(-50%, -50%);
+  /* `--shift` is set by the map's layout pass, which slides a name back inside
+     the map when it would otherwise run off the edge. */
+  transform: translate(calc(-50% + var(--shift, 0px)), -50%);
   font-size: 10px;
   letter-spacing: 3px;
   text-transform: uppercase;
@@ -259,11 +274,19 @@ button {
    the southern islands do, and the two read as one another's labels. */
 .region-legend {
   display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  margin-top: 16px;
+  /* Padded rather than flush. The map is a rounded box with `overflow: hidden`,
+     so a line running the full width of it had its first and last characters
+     clipped by the corners — "17 plots surveyed" arrived on screen as
+     "7 plots surveyed", which is not a rendering artefact so much as a wrong
+     number. */
+  padding: 0 16px 14px;
+  margin-top: 14px;
   font-size: 10.5px; letter-spacing: 0.8px;
+  line-height: 1.5;
   color: rgba(216, 232, 208, 0.6);
   pointer-events: none;
 }
+.region-legend span { min-width: 0; }
 
 .plot-canvas {
   display: block;
@@ -370,7 +393,7 @@ button {
 @media (max-width: 720px) {
   .land-inner { padding: 20px 14px 28px; }
   .land-intro { font-size: 13px; }
-  .region-legend { font-size: 9.5px; }
+  .region-legend { font-size: 9.5px; padding: 0 12px 11px; gap: 6px; }
   .island-name { font-size: 8px; letter-spacing: 1.6px; }
   .pin-label em { display: none; }
   .region-pin { padding: 4px 9px 4px 6px; }
@@ -2481,3 +2504,25 @@ button.fold:hover { color: var(--emerald); }
 .market-source b { color: var(--gold); }
 .market-source.live { border-color: var(--panel-edge); }
 .market-source.live b { color: var(--emerald); }
+
+/* While the map is working out where its markers can sit without covering one
+   another, they must not be sliding: a transform mid-transition measures as a
+   position the marker is not at, and the separation comes out wrong. */
+.region-pins.settling .region-pin { transition: none; }
+
+/* ---- A narrow map ----
+ *
+ * Seventeen markers each carrying a name need more height stacked in one
+ * column than a phone's map has, so on a narrow screen the names come off and
+ * the markers are the dots they mark the land with. The one being looked at
+ * keeps its name, and so does the player's own land, because those are the two
+ * a player is looking for. Everything else is one tap away in the card below.
+ */
+.region-pins.compact .region-pin { padding: 5px; gap: 0; }
+.region-pins.compact .pin-label { display: none; }
+.region-pins.compact .region-pin.selected,
+.region-pins.compact .region-pin.owned { padding: 5px 9px 5px 6px; gap: 6px; }
+.region-pins.compact .region-pin.selected .pin-label,
+.region-pins.compact .region-pin.owned .pin-label { display: flex; }
+.region-pins.compact .region-pin.selected { z-index: 4; }
+.region-pins.compact .pin-dot { width: 10px; height: 10px; }
