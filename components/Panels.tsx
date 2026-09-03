@@ -36,7 +36,7 @@ import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet } from './WalletPicker';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | null;
 
 interface PanelsProps {
   panel: PanelKey;

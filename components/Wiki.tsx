@@ -77,6 +77,7 @@ const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
   ['households', 'Wages coming back. People buy clothing, furniture and tools from the stalls with money they were paid.'],
   ['food', 'Meals. Everybody eats, and everybody pays for it out of their own purse.'],
   ['vault', 'What you put in yourself, and Gold other players gift your settlement.'],
+  ['arena', 'Bets that came in at the colosseum.'],
 ];
 
 /*
@@ -92,6 +93,7 @@ const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['building', 'What you raise, in Gold and in materials out of the yard.'],
   ['works', 'Bridges to land nobody can walk to, and the roads that follow.'],
   ['vault', 'The other half of the vault door: Gold leaving the treasury when you take a deposit back out.'],
+  ['arena', 'Bets that went out at the colosseum. Over time this is the larger of the two arena lines, by design.'],
 ];
 
 /** What each trade is paid a day, straight from the recipes the game runs. */

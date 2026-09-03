@@ -186,6 +186,16 @@ export interface Citizen {
   look: number;
 
   /**
+   * How much work they have done at each trade, in days.
+   *
+   * Kept per trade rather than as one number, so somebody who farmed for a
+   * year, spent a winter at the forge and went back to the fields is still a
+   * good farmer. It only ever rises: a skill is not forgotten because it was
+   * not used this month.
+   */
+  skills: Partial<Record<WorkingJob, number>>;
+
+  /**
    * Game days lived since this citizen appeared. `age` is derived from it, so
    * the world does not have to remember birthdays.
    */
@@ -407,7 +417,7 @@ export interface Stewardship {
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
   | 'wages' | 'upkeep' | 'imports' | 'building' | 'works'
-  | 'exports' | 'households' | 'food' | 'vault';
+  | 'exports' | 'households' | 'food' | 'vault' | 'arena';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
@@ -419,6 +429,7 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
   households: 'Household spending',
   food: 'Food sales',
   vault: 'Vault',
+  arena: 'The arena',
 };
 
 export interface DayLedger {
@@ -2199,8 +2210,14 @@ export function createWorld(seed = 481516, name?: string): World {
       phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
       stalled: 0, bestAway: Infinity, roughSleeper: false,
       look: Math.floor(rand() * 0xffffff),
+      // Founders arrive with a little of their trade behind them: a camp of
+      // twelve total novices is a camp that cannot feed itself.
+      skills: {},
       livedDays: 0, lifespan: lifespanFor(rand()), warmth: 82 + rand() * 18, seated: false, chilled: true, sheltering: false,
     };
+    if (citizen.job !== 'unemployed') {
+      citizen.skills[citizen.job as WorkingJob] = 4 + Math.floor(rand() * 12);
+    }
     citizens.push(citizen);
     family.members.push(citizen.id);
   }
@@ -2550,6 +2567,70 @@ function householdTrade(world: World) {
       }
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Skill
+ *
+ * People get better at what they keep doing. A farmer of two hundred days is
+ * not a farmer of two, and a settlement that lets its trades settle rather
+ * than shuffling everybody every fortnight should have something to show for
+ * it.
+ *
+ * Measured in days of work, not in an abstract score, because that is what it
+ * is: turn up, do the work, get better at it. The curve is deliberately slow
+ * and it flattens — the difference between a novice and a journeyman is most
+ * of the gain, and the last levels are a long grind for a little, which is how
+ * getting good at something actually goes.
+ * ------------------------------------------------------------------ */
+
+/** The highest anybody gets. */
+export const MAX_SKILL_LEVEL = 10;
+
+/** How many days of work the first level takes. Later ones take the square. */
+const SKILL_PACE = 2.5;
+
+/** What each level adds to output. Ten levels is a third again as much work. */
+const SKILL_STEP = 0.035;
+
+/** What a trade calls somebody, by how long they have done it. */
+export const SKILL_TITLES = [
+  'Newcomer', 'Apprentice', 'Improver', 'Journeyman', 'Hand',
+  'Craftsman', 'Practised', 'Seasoned', 'Expert', 'Master', 'Grandmaster',
+];
+
+/** Days of work at a trade, turned into a level from 0 to `MAX_SKILL_LEVEL`. */
+export function skillLevel(days: number): number {
+  if (!(days > 0)) return 0;
+  return Math.min(MAX_SKILL_LEVEL, Math.floor(Math.sqrt(days / SKILL_PACE)));
+}
+
+/** How many more days until the next level, or null at the top. */
+export function daysToNextLevel(days: number): number | null {
+  const level = skillLevel(days);
+  if (level >= MAX_SKILL_LEVEL) return null;
+  return Math.max(0, Math.ceil(((level + 1) ** 2) * SKILL_PACE - days));
+}
+
+/** What one person has done at one trade, in days. */
+export const skillDays = (c: Citizen, job: WorkingJob) => c.skills?.[job] ?? 0;
+
+/** What one person is worth at their trade, as a multiple of a novice. */
+export function skillOutput(c: Citizen): number {
+  if (c.job === 'unemployed') return 1;
+  return 1 + skillLevel(skillDays(c, c.job)) * SKILL_STEP;
+}
+
+/**
+ * The whole settlement's ability at a trade, as a multiple.
+ *
+ * Averaged over the people actually doing it, so one master among four
+ * novices lifts the trade a little rather than a lot.
+ */
+export function tradeSkill(world: World, job: WorkingJob): number {
+  const hands = world.citizens.filter((c) => c.job === job && c.age >= 16);
+  if (!hands.length) return 1;
+  return hands.reduce((sum, c) => sum + skillOutput(c), 0) / hands.length;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2948,6 +3029,56 @@ export function takeSales(world: World): { gold: number; units: number; best: Re
   return held;
 }
 
+/* ------------------------------------------------------------------ *
+ * The arena
+ * ------------------------------------------------------------------ */
+
+/**
+ * Take a stake out of the treasury for a bout.
+ *
+ * Refuses rather than overdrawing, and books it where the player can see it:
+ * the Bank's daily books show exactly what the arena has cost, which is the
+ * only honest way to run a thing people bet on.
+ */
+export function stakeOnBout(world: World, gold: number, on: string): boolean {
+  const amount = Math.floor(gold);
+  if (!(amount > 0) || world.treasury < amount) return false;
+  noteAttention(world);
+  spend(world, 'arena', amount);
+  pushFeed(world, 'world', `${amount.toLocaleString()} Gold went on ${on} at the colosseum.`);
+  return true;
+}
+
+/** Pay a winning bet back into the treasury. */
+export function settleBout(world: World, gold: number, note: string): void {
+  const amount = Math.floor(gold);
+  if (!(amount > 0)) return;
+  earn(world, 'arena', amount);
+  pushFeed(world, 'world', note);
+}
+
+/**
+ * How fit somebody is for a fight, 0 to 100.
+ *
+ * Not a hidden combat stat — it is the person as the settlement made them.
+ * Somebody rested, fed, warm and in good clothes is somebody who can go a few
+ * rounds; somebody who has been sleeping rough on an empty stomach is not.
+ * Which means the way to a good fighter is to run a good settlement, and the
+ * arena is one more thing stewardship is worth.
+ */
+export function vigourOf(c: Citizen): number {
+  const prime = c.age < 16 ? 0.3 : c.age > 55 ? 0.62 : c.age > 42 ? 0.85 : 1;
+  const body = (c.rest * 0.3 + c.hunger * 0.3 + c.warmth * 0.25 + c.clothing * 0.15) / 100;
+  return Math.round(clamp(body * prime * 100, 0, 100));
+}
+
+/** Everybody a settlement could reasonably send to the arena, best first. */
+export function fightersOf(world: World): Citizen[] {
+  return world.citizens
+    .filter((c) => c.age >= 16 && !c.carried)
+    .sort((a, b) => vigourOf(b) - vigourOf(a));
+}
+
 /** Run whole hours of trade out of the accumulator. */
 function runMarket(world: World, hours: number) {
   world.marketClock += hours;
@@ -3073,8 +3204,11 @@ function produce(world: World) {
       note(world, 'consumed', r as Resource, used);
     }
     const effort = wageEffort(world.wageRate);
+    // What the people doing it are actually worth. Averaged over the hands at
+    // the trade, so one master among four novices lifts it a little.
+    const craft = tradeSkill(world, wj);
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort;
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft;
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -4032,6 +4166,7 @@ function births(world: World, rand: () => number) {
       phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
       stalled: 0, bestAway: Infinity, roughSleeper: false,
       look: Math.floor(rand() * 0xffffff),
+      skills: {},
       livedDays: 0, lifespan: lifespanFor(rand()), warmth: 88, seated: false, chilled: true, sheltering: false,
     };
     world.citizens.push(child);
@@ -4149,6 +4284,9 @@ function migration(world: World, rand: () => number) {
     phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
     stalled: 0, bestAway: Infinity, roughSleeper: false,
     look: Math.floor(rand() * 0xffffff),
+    // Somebody who walked here has done something with their life; they just
+    // have not done it here.
+    skills: {},
     livedDays: 0, lifespan: lifespanFor(rand()), warmth: 80, seated: false, chilled: true, sheltering: false,
   };
   world.families.push(family);
@@ -4199,6 +4337,9 @@ export function addSettler(world: World, name?: string): Citizen {
     phase: 'wandering', activity: 'idle', facing: 's', moving: false, inside: false,
     stalled: 0, bestAway: Infinity, roughSleeper: false,
     look: Math.floor(rand() * 0xffffff),
+    // Somebody who walked here has done something with their life; they just
+    // have not done it here.
+    skills: {},
     livedDays: 0, lifespan: lifespanFor(rand()), warmth: 80, seated: false, chilled: true, sheltering: false,
   };
   world.families.push(family);
@@ -4428,6 +4569,19 @@ function daily(world: World) {
     if (c.age < 16) continue;
     c.wage = jobs[c.job as WorkingJob].wage * rate * ratio;
     c.wallet += c.wage;
+    // A day at the trade is a day's learning — less of one when the settlement
+    // could not pay for it, because half a day spent wondering whether you
+    // will be paid is not a day at the bench.
+    if (c.job !== 'unemployed') {
+      if (!c.skills) c.skills = {};
+      const job = c.job as WorkingJob;
+      c.skills[job] = (c.skills[job] ?? 0) + (ratio > 0.5 ? 1 : 0.4);
+      const before = skillLevel((c.skills[job] ?? 0) - (ratio > 0.5 ? 1 : 0.4));
+      const after = skillLevel(c.skills[job] ?? 0);
+      if (after > before && after >= 3) {
+        pushFeed(world, 'work', `${c.name} is now a ${SKILL_TITLES[after].toLowerCase()} ${JOB_LABELS[job].toLowerCase()}.`);
+      }
+    }
     c.hunger = Math.max(0, c.hunger - 7); c.rest = Math.max(0, c.rest - 5);
     c.social = Math.max(0, c.social - 2); c.clothing = Math.max(0, c.clothing - 2.5);
     // Unpaid work erodes a sense of purpose; paid work slowly builds it — and

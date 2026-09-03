@@ -9,6 +9,7 @@
 
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, PHASE_LABELS,
+  SKILL_TITLES, daysToNextLevel, skillDays, skillLevel, skillOutput,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
@@ -21,6 +22,10 @@ export interface FocusCitizen {
   kind: 'citizen';
   id: string; name: string; handle: string; age: number;
   job: string; activity: string; phase: string; status: string;
+  /** How good they are at their trade, or null for anybody without one. */
+  skill: {
+    level: number; title: string; days: number; toNext: number | null; output: number;
+  } | null;
   family: string; home: string | null;
   mood: number; energy: number; purpose: number; hunger: number; social: number;
   wallet: number; wage: number;
@@ -170,6 +175,18 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       kind: 'citizen',
       id: c.id, name: c.name, handle: c.handle, age: Math.floor(c.age),
       job: JOB_LABELS[c.job], activity: ACTIVITY_LABELS[c.activity], phase: PHASE_LABELS[c.phase],
+      // What they are worth at their trade, and how far off the next step is.
+      skill: c.job === 'unemployed' ? null : (() => {
+        const days = skillDays(c, c.job as WorkingJob);
+        const level = skillLevel(days);
+        return {
+          level,
+          title: SKILL_TITLES[level],
+          days: Math.floor(days),
+          toNext: daysToNextLevel(days),
+          output: skillOutput(c),
+        };
+      })(),
       // "Socialising" tells the player nothing when the person is in the middle
       // of an actual conversation with somebody they can name.
       status: (() => {

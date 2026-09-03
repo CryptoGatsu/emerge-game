@@ -2724,3 +2724,143 @@ button.fold:hover { color: var(--emerald); }
   .island-facts { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); margin: 0 12px 12px; }
   .island-fact { padding: 8px 10px; }
 }
+
+/* What somebody is worth at their trade. Ten pips, because a bar reads as a
+   thing that empties and this only ever fills. */
+.being-skill { display: flex; flex-direction: column; gap: 4px; margin-top: 7px; }
+.skill-title { font-size: 11px; letter-spacing: 0.5px; color: var(--emerald); }
+.skill-pips { display: flex; gap: 3px; }
+.skill-pips i {
+  width: 9px; height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.skill-pips i.on { background: var(--emerald); }
+.being-skill em { font-style: normal; font-size: 10.5px; color: var(--muted); }
+
+/* ---------------------------------------------------------------- *
+ * The colosseum
+ *
+ * Red corner and blue corner, a clock, and the arena's sealed promise
+ * under it. Everything here is shared — the same bout, the same
+ * fighters, the same result — so it is laid out to be watched rather
+ * than operated.
+ * ---------------------------------------------------------------- */
+
+.arena-clock {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 10px 14px; margin-bottom: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.3);
+  font-size: 12px; letter-spacing: 0.4px; color: var(--muted);
+}
+.arena-clock b { font-size: 13.5px; color: var(--cream); }
+.arena-clock.betting b { color: var(--emerald); }
+.arena-clock.fighting b { color: var(--gold); }
+
+.arena-ring { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: stretch; }
+.corner {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(1, 22, 15, 0.6);
+  transition: border-color 0.2s ease, opacity 0.3s ease;
+}
+.corner.red { border-left: 3px solid #d9694f; }
+.corner.blue { border-left: 3px solid #5aa8d0; }
+.corner.won { border-color: var(--emerald); background: rgba(12, 40, 22, 0.75); }
+.corner.lost { opacity: 0.55; }
+.corner-side { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+.corner b { font-size: 16px; color: var(--cream); }
+.corner-from { font-size: 11.5px; color: var(--muted); }
+.corner-health {
+  height: 6px; border-radius: 3px; margin: 4px 0 2px;
+  background: rgba(255, 255, 255, 0.08); overflow: hidden;
+}
+.corner-health i { display: block; height: 100%; background: var(--emerald); transition: width 0.4s ease; }
+.corner.red .corner-health i { background: #d9694f; }
+.corner.blue .corner-health i { background: #5aa8d0; }
+.corner-stats { display: flex; gap: 10px; font-size: 10.5px; color: var(--muted); }
+.corner-odds { font-style: normal; font-size: 15px; color: var(--gold); font-variant-numeric: tabular-nums; }
+
+.arena-versus {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-width: 70px;
+}
+.arena-versus > span { font-size: 12px; letter-spacing: 2px; color: var(--muted); }
+.arena-bet { font-style: normal; font-size: 10px; text-align: center; color: var(--gold); line-height: 1.4; }
+
+.arena-bet-row { display: flex; gap: 10px; align-items: flex-end; margin: 14px 0 4px; flex-wrap: wrap; }
+.arena-bet-row label { display: flex; flex-direction: column; gap: 4px; }
+.arena-bet-row span { font-size: 9.5px; letter-spacing: 1.5px; color: var(--muted); }
+.arena-bet-row input {
+  width: 110px; padding: 9px 11px;
+  border-radius: 9px; border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.4); color: var(--cream); font: inherit;
+}
+.arena-bet-row .bet {
+  flex: 1; min-width: 150px; padding: 11px 14px;
+  border-radius: 10px; font-size: 12.5px; font-weight: 650;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(1, 26, 17, 0.6); color: var(--cream);
+}
+.arena-bet-row .bet.red:hover { border-color: #d9694f; }
+.arena-bet-row .bet.blue:hover { border-color: #5aa8d0; }
+.arena-bet-row .bet:disabled { opacity: 0.4; cursor: default; }
+
+.arena-blows {
+  margin: 14px 0 4px; padding: 12px 14px;
+  border-radius: 11px; border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.3);
+  max-height: 190px; overflow-y: auto;
+}
+.arena-blows p { margin: 0 0 6px; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+.arena-blows p.red b { color: #e08a72; }
+.arena-blows p.blue b { color: #86c4e4; }
+.arena-result { margin-top: 10px !important; font-size: 14px !important; color: var(--emerald) !important; }
+
+.arena-proof {
+  display: flex; flex-direction: column; gap: 6px;
+  margin: 14px 0 18px; padding: 12px 14px;
+  border-radius: 11px; border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.24);
+}
+.arena-proof code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; color: var(--muted); word-break: break-all;
+}
+.arena-proof p { margin: 0; }
+
+.arena-bench { display: flex; gap: 9px; flex-wrap: wrap; margin: 8px 0 18px; }
+.bench-card {
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  padding: 10px 13px; min-width: 132px;
+  border-radius: 10px; border: 1px solid var(--panel-edge-soft);
+  background: rgba(1, 26, 17, 0.55); text-align: left;
+}
+.bench-card:hover:not(:disabled) { border-color: var(--emerald); }
+.bench-card:disabled { opacity: 0.5; cursor: default; }
+.bench-card b { font-size: 13px; color: var(--cream); }
+.bench-card span { font-size: 10.5px; color: var(--muted); }
+.bench-card em { font-style: normal; font-size: 10px; letter-spacing: 1.2px; color: var(--emerald); }
+
+.arena-history p { margin: 0 0 5px; font-size: 12px; line-height: 1.5; }
+.arena-history b { color: var(--emerald); }
+.arena-empty { padding: 18px; border-radius: 11px; border: 1px solid var(--panel-edge-soft); background: rgba(0,0,0,0.25); }
+.arena-empty b { display: block; margin-bottom: 6px; color: var(--gold); }
+.arena-empty p { margin: 0; }
+.arena-notice {
+  margin: 14px 0 6px; padding: 10px 13px;
+  border-radius: 10px; border: 1px solid var(--panel-edge);
+  background: rgba(1, 26, 17, 0.6);
+  font-size: 12.5px; color: var(--cream);
+}
+.arena-rules { margin-top: 16px !important; line-height: 1.65 !important; }
+
+@media (max-width: 720px) {
+  .arena-ring { grid-template-columns: 1fr; }
+  .arena-versus { flex-direction: row; gap: 12px; min-width: 0; }
+  .arena-bet-row .bet { min-width: 0; }
+}

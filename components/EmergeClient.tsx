@@ -24,7 +24,7 @@ import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
   RESOURCE_LABELS, pickUpCitizen, renameCitizen, renameWorld, setWageRate, setWorldPrices,
-  takeSales,
+  settleBout, stakeOnBout, takeSales,
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -53,6 +53,7 @@ import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/re
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
+import Arena from './Arena';
 import PlotSelect from './PlotSelect';
 import Landing from './Landing';
 import { Hud } from './Hud';
@@ -1034,6 +1035,29 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (setWageRate(world, rate)) refresh();
   }, [refresh]);
 
+  /**
+   * Take a stake for a bout, or pay one back.
+   *
+   * One door in both directions, so the panel cannot pay itself without going
+   * through the treasury: a negative amount is a win coming home, a positive
+   * one is a stake going out. Both are booked under the arena, where the Bank
+   * shows them.
+   */
+  const stakeAtArena = useCallback((gold: number, on: string) => {
+    const world = worldRef.current;
+    // Never on a visit: the treasury in front of a visitor is not theirs, and
+    // betting out of it would be spending somebody else's Gold.
+    if (!world || spectating) return false;
+    if (gold < 0) {
+      settleBout(world, -gold, `${(-gold).toLocaleString()} Gold came back from the colosseum.`);
+      refresh();
+      return true;
+    }
+    const took = stakeOnBout(world, gold, on);
+    if (took) refresh();
+    return took;
+  }, [refresh, spectating]);
+
   /** Move Gold in or out of the treasury and persist the vault ledger. */
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
     const world = worldRef.current;
@@ -1122,6 +1146,18 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onEndVisit={onLeave}
           />
           <Notices notices={notices} onDismiss={dismiss} />
+          {panel === 'arena' && (
+            <Arena
+              world={spectating ? null : worldRef.current}
+              seed={claimed.seed}
+              worldName={claimed.name}
+              playerName={player.name}
+              address={wallet.address}
+              treasury={view.treasury}
+              onStake={stakeAtArena}
+              onClose={() => setPanel(null)}
+            />
+          )}
           <Panels
             panel={panel}
             view={view}

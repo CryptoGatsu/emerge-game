@@ -226,6 +226,22 @@ function BeingCard({ focus, following, player, readOnly, onClear, onFocus, onTog
           </h2>
           <div className="being-handle">{focus.handle}</div>
           <p className="muted">{focus.job} · age {focus.age} · {focus.family} family</p>
+          {/* What they are worth at the work, which is the difference between
+              a settlement of strangers and one that has been running a while. */}
+          {focus.skill && (
+            <div className="being-skill" title={`${focus.skill.days} days at the trade`}>
+              <span className="skill-title">{focus.skill.title}</span>
+              <span className="skill-pips" aria-label={`Level ${focus.skill.level} of 10`}>
+                {Array.from({ length: 10 }, (_, i) => (
+                  <i key={i} className={i < focus.skill!.level ? 'on' : ''} />
+                ))}
+              </span>
+              <em>
+                {focus.skill.output > 1 ? `+${Math.round((focus.skill.output - 1) * 100)}% output` : 'learning the work'}
+                {focus.skill.toNext !== null && ` · ${focus.skill.toNext}d to next`}
+              </em>
+            </div>
+          )}
         </div>
       </div>
       {renaming && (
@@ -546,6 +562,7 @@ const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; shor
   { key: 'build', icon: '⚒', label: 'BUILD', short: 'BUILD', blurb: 'Places and resources' },
   { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
   { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
+  { key: 'arena', icon: '⚔', label: 'ARENA', short: 'ARENA', blurb: 'Duels and betting' },
   { key: 'gacha', icon: '⛏', label: 'PROSPECT', short: 'DIG', blurb: 'Send a party out' },
   { key: 'connect', icon: '◈', label: 'ON-CHAIN', short: 'CHAIN', blurb: 'Plot, wallet and vault' },
 ];
@@ -571,7 +588,11 @@ export function Hud(props: HudProps) {
    */
   const actions = props.visiting
     ? [
-      ...ACTIONS.filter((a) => a.key === 'guide' || a.key === 'market' || a.key === 'chat'),
+      // The colosseum is on the list while visiting because it is an island
+      // nobody owns: standing in somebody else's settlement is no reason to be
+      // shut out of a public place. Everything else here still belongs to the
+      // owner alone.
+      ...ACTIONS.filter((a) => a.key === 'guide' || a.key === 'market' || a.key === 'chat' || a.key === 'arena'),
       VISITOR_GIFT,
     ]
     : ACTIONS;
