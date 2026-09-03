@@ -39,6 +39,7 @@ import {
   releasePlot, sendGift, visitorId,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
+import { publishName } from '@/lib/net/names';
 import { useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import {
@@ -629,6 +630,18 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       leaving();
     };
   }, [claimed.seed, wallet.address, hidden]);
+
+  /*
+   * Keep the relay's idea of this player's name current.
+   *
+   * Runs on the name and the wallet rather than on a timer, so a rename is
+   * published the moment it happens and nothing is sent the rest of the time.
+   * It is what lets chat show a person rather than an address — and what makes
+   * a name a player paid to change actually appear.
+   */
+  useEffect(() => {
+    void publishName(wallet.address ?? null, player.name);
+  }, [wallet.address, player.name]);
 
   /*
    * Trade on the world's prices rather than our own.

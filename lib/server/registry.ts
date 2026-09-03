@@ -282,6 +282,54 @@ export async function survey(
 }
 
 /* ------------------------------------------------------------------ *
+ * Names
+ *
+ * What a wallet is called, kept once per address rather than copied onto
+ * every row that mentions it.
+ *
+ * A claim carries the name its owner had on the day they bought the land, and
+ * that is right for a record of a purchase — but it is wrong for "who is
+ * talking", which is what chat needs. Somebody who changed their name went on
+ * appearing under the old one for as long as the claim stood, and somebody who
+ * had connected a wallet appeared as a hexadecimal address forever, because
+ * that is what chat had to go on.
+ *
+ * Held here, keyed by the address the session proved, so it cannot be sent in
+ * a message body and therefore cannot be aimed at somebody else's identity.
+ * ------------------------------------------------------------------ */
+
+const NAMES = serverKey('names');
+
+/** The longest a display name may be. Matches what the interface will show. */
+export const MAX_DISPLAY_NAME = 24;
+
+/** Set what an address is called. The caller must already have proved it. */
+export async function setDisplayName(address: string, name: string): Promise<void> {
+  const clean = name.replace(/\s+/g, ' ').trim().slice(0, MAX_DISPLAY_NAME);
+  const key = address.toLowerCase();
+  if (!clean) {
+    await hdel(NAMES, key);
+    return;
+  }
+  await hset(NAMES, key, JSON.stringify({ name: clean, at: Date.now() }));
+}
+
+/** Every name the relay knows, by lower-cased address. */
+export async function displayNames(): Promise<Record<string, string>> {
+  const rows = await hgetall(NAMES);
+  const out: Record<string, string> = {};
+  for (const [address, raw] of Object.entries(rows)) {
+    try {
+      const parsed = JSON.parse(raw) as { name?: string };
+      if (typeof parsed.name === 'string' && parsed.name) out[address] = parsed.name;
+    } catch {
+      // A row we cannot read is a row we do not show.
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
  * Gifts
  * ------------------------------------------------------------------ */
 

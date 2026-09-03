@@ -7,7 +7,7 @@
  * running behind them, which is the whole point of the thing.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import { buildMaterials, maintenanceCost, worldMarketState } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
@@ -26,6 +26,7 @@ import {
   type ChannelKind, type ChatState,
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
+import { fetchNames } from '@/lib/net/names';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
 import { fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
@@ -660,11 +661,22 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
    * that somebody's mill finally got staffed, and you can go and look at it.
    */
   const [worldsBy, setWorldsBy] = useState<Map<string, Claim>>(new Map());
+  /*
+   * What each wallet is called.
+   *
+   * Chat carries a proven address and nothing else — deliberately, because a
+   * name in a message body is a name that can be aimed at somebody. The name
+   * is looked up here instead, from the relay's own record of what each
+   * address calls itself, so a player who renames themselves is renamed in
+   * every conversation at once rather than going on as an address forever.
+   */
+  const [namesBy, setNamesBy] = useState<Record<string, string>>({});
   useEffect(() => {
     let live = true;
     const tick = async () => {
-      const { claims } = await fetchClaims();
+      const [{ claims }, names] = await Promise.all([fetchClaims(), fetchNames()]);
       if (!live) return;
+      setNamesBy(names);
       const byOwner = new Map<string, Claim>();
       for (const claim of claims) {
         const key = claim.owner.toLowerCase();
@@ -687,6 +699,19 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
 
   const worldOf = (author: string) =>
     worldsBy.get(author.toLowerCase()) ?? worldsBy.get(author) ?? null;
+
+  /**
+   * What to call an address.
+   *
+   * The relay's record first, then the name on whatever land they hold, then
+   * nothing — and a caller that gets nothing falls back to the address, which
+   * is always true even when it is not friendly.
+   */
+  const nameFor = (address: string) => {
+    const key = address.toLowerCase();
+    return (namesBy[key] ?? worldsBy.get(key)?.ownerName ?? '').trim();
+  };
+
 
   /*
    * Whoever holds the world this chat belongs to.
@@ -728,6 +753,28 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
   }, [channel]);
 
   const messages = state ? channelOf(state, channel) : [];
+
+  /**
+   * Names worn by more than one address in what is on screen.
+   *
+   * Anybody may call themselves anything, so two people can be "Gatsu" at
+   * once — and around a token that is not a curiosity, it is how somebody gets
+   * talked into sending money to the wrong wallet. Rather than forbid it,
+   * every message under a contested name carries its address as well, so the
+   * two are visibly different people.
+   */
+  const contested = useMemo(() => {
+    const byName = new Map<string, Set<string>>();
+    for (const m of messages) {
+      if (!m.wallet) continue;
+      const label = (nameFor(m.author) || shortAddress(m.author)).toLowerCase();
+      const holders = byName.get(label) ?? new Set<string>();
+      holders.add(m.author.toLowerCase());
+      byName.set(label, holders);
+    }
+    return new Set([...byName].filter(([, holders]) => holders.size > 1).map(([label]) => label));
+    // `nameFor` reads both maps, so the set is rebuilt when either changes.
+  }, [messages, namesBy, worldsBy]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length, kind]);
 
   if (!state) return null;
@@ -762,12 +809,22 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
     })();
   };
 
-  const who = wallet.address ? shortAddress(wallet.address) : player.name;
+  /*
+   * Who you are posting as.
+   *
+   * Your name, not your address. This line said "Posting as 0x1111…1111" for
+   * anybody with a wallet connected, which is both unfriendly and — for a
+   * player who had just paid to change their name — plainly wrong. The address
+   * is still what the badge proves and is still one hover away.
+   */
+  const who = player.name;
 
   return (
     <Shell
       title="Chat"
-      subtitle={`Posting as ${who}${wallet.address ? '' : ' — connect a wallet to post under your address'}.`}
+      subtitle={wallet.address
+        ? `Posting as ${who}, under ${shortAddress(wallet.address)}.`
+        : `Posting as ${who} — connect a wallet to post under your address.`}
       onClose={onClose}
       wide
     >
@@ -820,24 +877,38 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
         )}
         {messages.map((m) => {
           const theirs = worldOf(m.author);
-          const label = m.wallet ? shortAddress(m.author) : m.author;
           const self = m.author === player.name
             || (!!wallet.address && m.author.toLowerCase() === wallet.address.toLowerCase());
+          // Your own name is read from your own record, so a rename shows in
+          // the conversation the instant you make it rather than after the
+          // relay's next round trip.
+          const label = m.wallet
+            ? (self ? player.name : nameFor(m.author)) || shortAddress(m.author)
+            : m.author;
+          // The address is the identity; the name is what somebody chose to
+          // call themselves. Where two people are wearing the same name, the
+          // address goes back on screen for both, because in a room where land
+          // changes hands a name on its own is not something to trust.
+          const clashes = m.wallet && contested.has(label.toLowerCase());
           const host = isHost(m.author);
+          const shown = clashes ? `${label} · ${shortAddress(m.author)}` : label;
+          const who = m.wallet ? m.author : label;
           return (
             <div key={m.id} className={`chat-row ${m.wallet ? 'wallet' : ''} ${host ? 'host' : ''}`}>
               {theirs && !self ? (
                 <button
                   className={`chat-who ${host ? 'host' : ''}`}
-                  title={host ? `${label} owns ${view.name}` : `Visit ${theirs.worldName}`}
+                  title={host ? `${shown} owns ${view.name} · ${who}` : `Visit ${theirs.worldName} · ${who}`}
                   disabled={travelling !== null}
                   onClick={() => travelTo(theirs)}
                 >
-                  {label}
+                  {shown}
                   <i>{travelling === theirs.seed ? '…' : host ? '★' : '↗'}</i>
                 </button>
               ) : (
-                <b className={host ? 'host' : ''}>{label}{host && <i className="host-star">★</i>}</b>
+                <b className={host ? 'host' : ''} title={who}>
+                  {shown}{host && <i className="host-star">★</i>}
+                </b>
               )}
               <span>{m.text}</span>
               <em>{new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</em>
