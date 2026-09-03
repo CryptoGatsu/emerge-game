@@ -420,6 +420,25 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
     };
   }, [plots, chart, selected, owned, taken, compact]);
 
+  /**
+   * What each island holds, gathered from the plots standing on it.
+   *
+   * Read from the plots rather than from the island, because an island has no
+   * character of its own — its plots do. Two on the same rock can be a fen and
+   * a highland, and the trades they support are the union of the two.
+   */
+  const islandFacts = useMemo(() => islandsFor(chart).map((island) => {
+    const here = plots.filter((p) => p.island === island.name);
+    return {
+      name: island.name,
+      capacity: island.capacity,
+      plots: here,
+      biomes: [...new Set(here.map((p) => p.biomeLabel))],
+      trades: [...new Set(here.flatMap((p) => p.trades))].sort(),
+      free: here.filter((p) => !owned.has(p.seed) && !taken.has(p.seed)).length,
+    };
+  }), [plots, chart, owned, taken]);
+
   return (
     <div className="region">
       {/* The markers are laid over the map and nothing else. They used to be
@@ -482,6 +501,40 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
         </span>
         <span>{plots.length ? 'Tap a marker to inspect the land' : 'Nothing here has been surveyed yet'}</span>
       </div>
+
+      {/*
+        What each island is made of.
+        *
+        * The markers say where the land is and the card on the right says what
+        * one plot is like, but neither answers the question somebody choosing
+        * land actually has: what is this island *for*? Two plots on the same
+        * rock can be a fen and a highland, and which trades they support is the
+        * real reason to prefer one island over another.
+        */}
+      {islandFacts.some((f) => f.plots.length > 0) && (
+        <div className="island-facts">
+          {islandFacts.map((fact) => (
+            <div key={fact.name} className={`island-fact ${fact.plots.length ? '' : 'empty'}`}>
+              <b>{fact.name}</b>
+              {fact.plots.length === 0 ? (
+                <span className="muted">Unsurveyed — {fact.capacity} berth{fact.capacity === 1 ? '' : 's'}</span>
+              ) : (
+                <>
+                  <span className="island-land">{fact.biomes.join(' · ')}</span>
+                  <span className="island-trades">
+                    {fact.trades.length ? fact.trades.join(', ') : 'Nothing the land favours'}
+                  </span>
+                  <em>
+                    {fact.free
+                      ? `${fact.free} of ${fact.plots.length} free`
+                      : `all ${fact.plots.length} taken`}
+                  </em>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

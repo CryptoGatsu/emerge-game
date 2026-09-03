@@ -159,6 +159,15 @@ export class EmergeScene {
   private citizens = new Map<string, CitizenSprite>();
   private buildings = new Map<string, BuildingView>();
   private propSprites: { sprite: Sprite; prop: PropInstance; phase: number; cleared?: boolean }[] = [];
+  /**
+   * The subset of props whose canopy moves in the wind.
+   *
+   * Kept separately because the wind loop ran over every prop on the map every
+   * frame — rocks, stumps, cut timber and fences included — to find the ones
+   * that sway. On a wooded plot that is well over a thousand objects walked
+   * sixty times a second to move a few hundred of them.
+   */
+  private swaying: { sprite: Sprite; prop: PropInstance; phase: number; cleared?: boolean }[] = [];
   private waterSprites: { sprite: Sprite; kind: 'water' | 'shore' }[] = [];
   private waterfallSprites: Sprite[] = [];
   private campfires: Sprite[] = [];
@@ -177,6 +186,8 @@ export class EmergeScene {
   private bubbleTimer = 0;
   private beat = 0;
   private cullTimer = 0;
+  /** The view the last cull was computed for, so an unmoved camera is not re-culled. */
+  private culledFor = '';
 
   private selected: PickTarget = null;
   private hovered: PickTarget = null;
@@ -324,7 +335,10 @@ export class EmergeScene {
       const size = prop.scale ?? 1;
       sprite.scale.set(prop.flip ? -size : size, size);
       this.objectLayer.addChild(sprite);
-      this.propSprites.push({ sprite, prop, phase: (prop.wx * 7.3 + prop.wy * 3.1) % (Math.PI * 2) });
+      const entry = { sprite, prop, phase: (prop.wx * 7.3 + prop.wy * 3.1) % (Math.PI * 2) };
+      this.propSprites.push(entry);
+      // The wind loop walks this list rather than all of them.
+      if (prop.sway >= 0.5) this.swaying.push(entry);
 
       if (prop.sway >= 0.4) this.foliage.push({ sprite, baseTint: sprite.tint as number });
       if (prop.name.startsWith('prop.tree.') && prop.name !== 'prop.tree.dead') {
@@ -893,6 +907,7 @@ export class EmergeScene {
     this.citizens.clear();
     this.buildings.clear();
     this.propSprites = [];
+    this.swaying = [];
     this.trees = [];
     this.foliage = [];
     this.waterSprites = [];
@@ -951,6 +966,7 @@ export class EmergeScene {
     for (const glow of this.lampGlows) glow.destroy();
     for (const puff of this.smoke) puff.sprite.destroy();
     this.propSprites = [];
+    this.swaying = [];
     this.trees = [];
     this.foliage = [];
     this.waterSprites = [];
@@ -1012,23 +1028,43 @@ export class EmergeScene {
   }
   private waterFrame = -1;
 
+  /**
+   * The wind in the trees.
+   *
+   * On its own clock rather than every frame. The sway is a slow drift of
+   * about a degree — at sixty updates a second the difference between one
+   * frame and the next is far below a pixel, and every one of them writes a
+   * rotation that makes the renderer recompute that sprite's transform. At
+   * twenty a second it looks identical and costs a third as much.
+   *
+   * Skipped entirely when the camera is far enough out that the movement is
+   * sub-pixel anyway.
+   */
   private updateProps(dt: number) {
-    void dt;
+    this.swayTimer += dt;
+    if (this.swayTimer < 0.05) return;
+    this.swayTimer = 0;
+    if (this.camera.zoom < 0.62) return;
     // Only the canopy responds to wind; trunks, rocks and timber stay put.
     const wind = this.world.weather === 'Storm' ? 3.2 : this.world.weather === 'Rain' ? 1.6 : 1;
-    for (const entry of this.propSprites) {
-      if (entry.prop.sway < 0.5 || !entry.sprite.visible) continue;
+    for (const entry of this.swaying) {
+      if (!entry.sprite.visible) continue;
       entry.sprite.rotation = Math.sin(this.time * 1.3 + entry.phase) * 0.012 * entry.prop.sway * wind;
     }
   }
+  private swayTimer = 0;
 
   private updateBuildings(dt: number) {
     void dt;
     const wheelFrame = Math.floor(this.time * 6) % 4;
-    const byId = new Map(this.world.citizens.map((c) => [c.id, c]));
+    // Built on demand, and only once, rather than every frame whether or not a
+    // single building is occupied: this allocated a map of every citizen in the
+    // settlement sixty times a second to answer at most a dozen lookups.
+    let byId: Map<string, Citizen> | null = null;
     for (const view of this.buildings.values()) {
       const occupants = view.building.workers.length;
       if (occupants > 0) {
+        if (!byId) byId = new Map(this.world.citizens.map((c) => [c.id, c]));
         const first = byId.get(view.building.workers[0]);
         const icon = view.building.production ? 'work'
           : first?.activity === 'eating' ? 'eat'
@@ -1356,7 +1392,19 @@ export class EmergeScene {
   }
 
   /** Hide anything outside the viewport so offscreen props cost nothing. */
+  /**
+   * Hide what is off screen.
+   *
+   * Walks every ground tile, every water tile and every prop — on a large plot
+   * that is well over ten thousand objects — so it runs four times a second
+   * rather than every frame, and now only when the view has actually moved.
+   * A player watching a settlement without touching the camera was paying for
+   * this forty times a minute to arrive at the same answer.
+   */
   private cullStatic() {
+    const view = `${Math.round(this.camera.x)}:${Math.round(this.camera.y)}:${this.camera.zoom.toFixed(3)}:${this.app.renderer.width}x${this.app.renderer.height}`;
+    if (view === this.culledFor) return;
+    this.culledFor = view;
     const pad = 220;
     const topLeft = this.screenToScene(-pad, -pad);
     const bottomRight = this.screenToScene(this.app.renderer.width + pad, this.app.renderer.height + pad);
@@ -1725,6 +1773,7 @@ export class EmergeScene {
     this.citizens.clear();
     this.buildings.clear();
     this.propSprites = [];
+    this.swaying = [];
     this.trees = [];
     this.foliage = [];
     this.waterSprites = [];
