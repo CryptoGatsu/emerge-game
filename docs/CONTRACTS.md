@@ -386,6 +386,15 @@ Only then does the claim row change hands, the published settlement is
 re-stamped with the new owner so the buyer walks into the town as the seller
 left it, and the seller's saved record drops the plot.
 
+Offers ride on the same row: `POST /api/plots` with `offer` and a price puts
+a bid on somebody's plot (replacing the bidder's earlier one; at most eight
+per plot, the lowest dropped), `withdrawOffer` takes it back, and the owner
+answers with `answer: 'accept' | 'decline'` and the bidder's address.
+Accepting stamps the offer with a 48-hour hold; while it holds, `buy` from
+that bidder is priced at the offer rather than the public asking price, and
+the transfer is checked against that amount. Nothing is escrowed: an offer is
+a price, not a deposit.
+
 Where the land contract is deployed this route refuses: a plot is then an
 ERC-721 token and changes hands as one, wallet to wallet or on any marketplace.
 

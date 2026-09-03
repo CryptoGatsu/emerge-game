@@ -63,7 +63,31 @@ export interface Claim {
   /** The asking price, in whole tokens, while the owner has it up for sale. */
   forSale?: number;
   listedAt?: number;
+  /** Offers other players have made on it, best first. */
+  offers?: Offer[];
 }
+
+/**
+ * An offer on somebody's plot.
+ *
+ * Not binding and not escrowed: nobody's tokens are held. An offer is a price
+ * the bidder says they will pay; the owner accepting it reserves the plot for
+ * that bidder at that price for a while, and the bidder then pays the owner
+ * wallet to wallet exactly as they would for a listed plot.
+ */
+export interface Offer {
+  buyer: string;
+  buyerName: string;
+  price: number;
+  at: number;
+  /** Set when the owner accepted it: the bidder may buy at this price until then. */
+  acceptedUntil?: number;
+}
+
+/** How long an accepted offer holds the plot for its bidder. */
+const OFFER_HOLD_MS = 48 * 3600_000;
+/** The most offers one plot carries; the lowest goes when a better one arrives. */
+const MAX_OFFERS = 8;
 
 const CLAIMS = serverKey('claims');
 
@@ -202,6 +226,65 @@ export async function listClaim(seed: number, owner: string, price: number | nul
   return row;
 }
 
+/** Whether an accepted offer is still good. */
+const offerLive = (offer: Offer, now = Date.now()) => !!offer.acceptedUntil && offer.acceptedUntil > now;
+
+/** Put an offer on a plot, replacing the bidder's earlier one. */
+export async function placeOffer(seed: number, buyer: string, buyerName: string, price: number): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() === buyer.toLowerCase()) return null;
+  const mine = buyer.toLowerCase();
+  const offers = (existing.offers ?? []).filter((o) => o.buyer !== mine);
+  offers.push({ buyer: mine, buyerName, price: Math.round(price), at: Date.now() });
+  offers.sort((a, b) => b.price - a.price);
+  const row: Claim = { ...existing, offers: offers.slice(0, MAX_OFFERS) };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+/** Take an offer back. */
+export async function withdrawOffer(seed: number, buyer: string): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing) return null;
+  const mine = buyer.toLowerCase();
+  const row: Claim = { ...existing, offers: (existing.offers ?? []).filter((o) => o.buyer !== mine) };
+  if (!row.offers?.length) delete row.offers;
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+/**
+ * The owner answers an offer.
+ *
+ * Accepting holds the plot for that bidder at that price for two days —
+ * long enough to come back and pay, short enough that a bidder who walks
+ * away does not tie the plot up. Only one offer is accepted at a time.
+ */
+export async function answerOffer(seed: number, owner: string, buyer: string, accept: boolean): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const who = buyer.toLowerCase();
+  const offers = (existing.offers ?? []).map((o) => {
+    const { acceptedUntil: _until, ...rest } = o;
+    return o.buyer === who && accept ? { ...rest, acceptedUntil: Date.now() + OFFER_HOLD_MS } : rest;
+  }).filter((o) => accept || o.buyer !== who);
+  const row: Claim = { ...existing, offers };
+  if (!row.offers?.length) delete row.offers;
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
+/**
+ * What this bidder may buy the plot for: their accepted offer while it
+ * holds, otherwise the public asking price, otherwise nothing.
+ */
+export function priceFor(claim: Claim, buyer: string): number | null {
+  const mine = buyer.toLowerCase();
+  const accepted = (claim.offers ?? []).find((o) => o.buyer === mine && offerLive(o));
+  if (accepted) return accepted.price;
+  return claim.forSale && claim.forSale > 0 ? claim.forSale : null;
+}
+
 export type TransferResult =
   | { ok: true; claim: Claim; price: number; seller: string }
   | { ok: false; reason: string };
@@ -220,8 +303,9 @@ export type TransferResult =
 export async function transferClaim(seed: number, buyer: string, buyerName: string): Promise<TransferResult> {
   const existing = await claimOf(seed);
   if (!existing) return { ok: false, reason: 'Nobody holds that plot.' };
-  if (!existing.forSale || existing.forSale <= 0) return { ok: false, reason: 'That plot is not for sale.' };
   if (existing.owner.toLowerCase() === buyer.toLowerCase()) return { ok: false, reason: 'That plot is already yours.' };
+  const due = priceFor(existing, buyer);
+  if (due === null) return { ok: false, reason: 'That plot is not for sale.' };
   const seller = existing.owner.toLowerCase();
   const row: Claim = {
     seed,
@@ -229,7 +313,7 @@ export async function transferClaim(seed: number, buyer: string, buyerName: stri
     worldName: existing.worldName,
     owner: buyer.toLowerCase(),
     ownerName: buyerName,
-    price: existing.forSale,
+    price: due,
     at: Date.now(),
   };
   await hset(CLAIMS, String(seed), JSON.stringify(row));
@@ -257,7 +341,7 @@ export async function transferClaim(seed: number, buyer: string, buyerName: stri
     // The map and the registry row are the title; the record catches up on
     // the seller's next visit either way.
   }
-  return { ok: true, claim: row, price: existing.forSale, seller };
+  return { ok: true, claim: row, price: due, seller };
 }
 
 /** Give a plot up, if it is yours to give up. */

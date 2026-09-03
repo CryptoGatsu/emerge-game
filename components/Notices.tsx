@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
 import { channelOf, loadChat, poll, worldChannel, type ChatState } from '@/lib/chat';
-import { shortAddress } from '@/lib/chain/emerge';
+import { TOKEN, shortAddress } from '@/lib/chain/emerge';
 import { t } from '@/lib/i18n';
 
 export interface Notice {
@@ -157,25 +157,77 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
     return () => { live = false; window.clearInterval(timer); };
   }, [seed, push]);
 
-  /* ---- claims ---- */
+  /* ---- claims, and offers on them ---- */
   useEffect(() => {
     let seen = new Set<number>();
+    // Who held each plot at the last look, so a change of hands is noticed.
+    const ownerOf = new Map<number, string>();
+    // Offers already known, so only a new one — or one newly accepted — is news.
+    let offersSeen = new Set<string>();
     let primed = false;
     let live = true;
+
+    const offerKey = (seed: number, o: { buyer: string; price: number; acceptedUntil?: number }) =>
+      `${seed}:${o.buyer}:${o.price}:${o.acceptedUntil ? 'held' : 'open'}`;
 
     const tick = async () => {
       const { claims } = await fetchClaims();
       if (!live) return;
       if (!primed) {
-        for (const c of claims) seen.add(c.seed);
+        for (const c of claims) {
+          seen.add(c.seed);
+          ownerOf.set(c.seed, c.owner.toLowerCase());
+          for (const o of c.offers ?? []) offersSeen.add(offerKey(c.seed, o));
+        }
         primed = true;
         return;
       }
+      const who = mineRef.current;
+      const me = who.address?.toLowerCase() ?? null;
       for (const c of claims) {
+        // A plot that changed hands is news to everybody: the sale went
+        // wallet to wallet, and the map now has a new name on it.
+        const before = ownerOf.get(c.seed);
+        const now = c.owner.toLowerCase();
+        if (before && before !== now) {
+          push({
+            id: `sold-${c.seed}-${c.at}`,
+            kind: 'claim',
+            title: t('Land changed hands'),
+            body: now === me
+              ? t('{region} is yours. {price} {ticker} went to its last owner.', { region: c.region, price: c.price.toLocaleString(), ticker: TOKEN.ticker })
+              : t('{who} bought {region} ({world}) for {price} {ticker}, paid to its last owner.', { who: nameOf(c), region: c.region, world: c.worldName, price: c.price.toLocaleString(), ticker: TOKEN.ticker }),
+            lifetime: 20_000,
+          });
+        }
+        ownerOf.set(c.seed, now);
+        // Offers: one card when somebody bids on your plot, one when an owner
+        // accepts yours. Both are things worth walking to the map for.
+        for (const o of c.offers ?? []) {
+          const key = offerKey(c.seed, o);
+          if (offersSeen.has(key)) continue;
+          offersSeen.add(key);
+          if (me && c.owner.toLowerCase() === me && !o.acceptedUntil) {
+            push({
+              id: `offer-${key}`,
+              kind: 'claim',
+              title: t('An offer on {region}', { region: c.region }),
+              body: t('{who} offers {price} {ticker} for {world}. Answer it from the On-Chain panel.', { who: o.buyerName || shortAddress(o.buyer), price: o.price.toLocaleString(), ticker: TOKEN.ticker, world: c.worldName }),
+              lifetime: 20_000,
+            });
+          } else if (me && o.buyer === me && o.acceptedUntil) {
+            push({
+              id: `accepted-${key}`,
+              kind: 'claim',
+              title: t('Your offer was accepted'),
+              body: t('{region} is held for you at {price} {ticker} for two days. Pay from the world map to take it.', { region: c.region, price: o.price.toLocaleString(), ticker: TOKEN.ticker }),
+              lifetime: 30_000,
+            });
+          }
+        }
         if (seen.has(c.seed)) continue;
         seen.add(c.seed);
-        const who = mineRef.current;
-        if (who.address && c.owner.toLowerCase() === who.address.toLowerCase()) continue;
+        if (me && c.owner.toLowerCase() === me) continue;
         push({
           id: `claim-${c.seed}-${c.at}`,
           kind: 'claim',
@@ -183,6 +235,7 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
           body: t('{who} settled {region} and called it {world}.', { who: nameOf(c), region: c.region, world: c.worldName }),
         });
       }
+      if (offersSeen.size > 600) offersSeen = new Set([...offersSeen].slice(-300));
     };
 
     tick();

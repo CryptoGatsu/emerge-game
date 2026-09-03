@@ -25,7 +25,7 @@ import {
   demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
-  type World,
+  type World, clearTrees,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
@@ -987,6 +987,29 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return () => window.clearInterval(id);
   }, [ready]);
 
+  /**
+   * Clear trees off the plot.
+   *
+   * The cursor becomes a ring; a tap fells every standing tree inside it that
+   * the treasury can pay for, the timber goes to the yard, and the ground
+   * stays cleared for the days it takes the wood to grow back.
+   */
+  const beginClear = useCallback(() => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    setPanel(null);
+    setPlacing('Clear trees');
+    scene.startClearing((x, y, standing) => {
+      setPlacing(null);
+      const result = clearTrees(world, x, y, standing);
+      if (result.felled === 0) soundRef.current?.tick('deny');
+      else soundRef.current?.cue('hammer');
+      setView(snapshot(world, selectedRef.current));
+      return result.felled;
+    });
+  }, []);
+
   const beginBuild = useCallback((type: string, cost: number) => {
     const world = worldRef.current;
     const scene = sceneRef.current;
@@ -1329,6 +1352,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             player={player}
             onClose={() => setPanel(null)}
             onBuild={beginBuild}
+            onClearTrees={beginClear}
             onRenameWorld={renameWorldFor}
             onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}

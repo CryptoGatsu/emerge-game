@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
-  BUILD_COSTS, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost, wageEffort, worldMarketState,
+  BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
+  wageEffort, worldMarketState,
 } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import {
@@ -29,7 +30,7 @@ import {
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchNames } from '@/lib/net/names';
-import { fetchClaims, type Claim } from '@/lib/net/registry';
+import { answerOffer, fetchClaims, type Claim, type Offer } from '@/lib/net/registry';
 import { fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
@@ -47,6 +48,8 @@ interface PanelsProps {
   player: PlayerRecord;
   onClose: () => void;
   onBuild: (type: string, cost: number) => void;
+  /** Arm the clearing cursor. */
+  onClearTrees: () => void;
   onRenameWorld: (name: string) => void;
   onRenameCitizen: (id: string, name: string) => void;
   onLeave: () => void;
@@ -386,6 +389,12 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             placed across water will have a bridge started toward it.
           </p>
           <p>
+            <b>Clearing the wood.</b> The Build panel also carries a tool: tap the ground with it and
+            every tree within reach comes down, for {CLEAR_TREE_GOLD} Gold a tree, with {CLEAR_TREE_WOOD} timber
+            each going to the yard. The wood grows back over the following days, so clear where you mean
+            to build.
+          </p>
+          <p>
             <b>The settlement builds for itself too.</b> With the treasury holding a comfortable
             surplus — twice a building&rsquo;s price, and a fortnight of wages and upkeep besides —
             it raises what it needs without being asked: a roof for the homeless first, then a
@@ -584,7 +593,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             shows on everybody&rsquo;s map with its price. A buyer pays <em>your wallet</em> directly
             in {TOKEN.ticker} — a transfer, not a burn — and the registry moves the plot to them
             once the chain has settled it. The settlement goes with the land: they walk into your
-            town as you left it.
+            town as you left it. Anybody can also <b>make an offer</b> on a plot, listed or not;
+            the owner accepts or declines it from the On-Chain panel, and an accepted offer holds
+            the plot for that bidder at that price for two days. Nothing is escrowed: the bidder
+            pays when they take it.
           </p>
         </section>
 
@@ -1592,7 +1604,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
   );
 }
 
-function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void }) {
+function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
+  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void;
+}) {
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
   const stone = stock('stone');
@@ -1616,6 +1630,22 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
         <span>{t('IN THE YARD')}</span>
         <b>{t('{n} wood', { n: Math.floor(wood) })}</b>
         <b>{t('{n} stone', { n: Math.floor(stone) })}</b>
+      </div>
+      {/* Not a building: a tool. Clearing is how the player makes room in a
+          wood, and it pays a little timber back for the trouble. */}
+      <div className="build-tools">
+        <div className="build-card tool">
+          <div className="build-icon">🪓</div>
+          <h3>{t('Clear trees')}</h3>
+          <p>{t('Fell every tree within reach of where you tap. The timber goes to the yard, and the wood grows back over the following days.')}</p>
+          <div className="build-cost">
+            <b>{t('{n} Gold a tree', { n: CLEAR_TREE_GOLD })}</b>
+            <small>{t('+{n} timber each', { n: CLEAR_TREE_WOOD })}</small>
+          </div>
+          <button disabled={view.treasury < CLEAR_TREE_GOLD} onClick={onClearTrees}>
+            {view.treasury < CLEAR_TREE_GOLD ? t('Not enough Gold') : t('Clear')}
+          </button>
+        </div>
       </div>
       <div className="build-grid">
         {BUILDABLE.map((option) => {
@@ -1660,6 +1690,41 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   const changed = draftName.trim().length > 0 && draftName.trim() !== view.name;
   const listing = player.listings.find((l) => l.seed === claimed.seed);
   useLocale();
+  const { wallet } = useWallet();
+
+  /*
+   * Offers other players have made on this plot, from the registry.
+   *
+   * Read every quarter minute while the panel is open, so an offer made while
+   * the owner is looking turns up without a reload. Accepting one holds the
+   * plot for that bidder at that price for two days; nothing else changes
+   * until they pay.
+   */
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [answering, setAnswering] = useState<string | null>(null);
+  const [offerNote, setOfferNote] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      const { claims } = await fetchClaims();
+      if (!live) return;
+      setOffers(claims.find((c) => c.seed === claimed.seed)?.offers ?? []);
+    };
+    void tick();
+    const timer = window.setInterval(() => { void tick(); }, 15_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [claimed.seed]);
+  const answer = async (bidder: string, accept: boolean) => {
+    if (!wallet.address) return;
+    setAnswering(bidder);
+    const result = await answerOffer(claimed.seed, wallet.address, bidder, accept);
+    setAnswering(null);
+    if (!result.ok || !result.claim) { setOfferNote(result.reason ?? null); return; }
+    setOffers(result.claim.offers ?? []);
+    setOfferNote(accept
+      ? t('Accepted. The plot is held for them at that price for two days; the {ticker} lands in your wallet when they pay.', { ticker: TOKEN.ticker })
+      : t('Declined.'));
+  };
 
   return (
     <Shell
@@ -1721,6 +1786,30 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
               </p>
             </>
           )}
+          {offers.length > 0 && (
+            <div className="offers">
+              <span className="eyebrow">{t('OFFERS ON THIS PLOT')}</span>
+              {offers.map((o) => {
+                const held = !!o.acceptedUntil && o.acceptedUntil > Date.now();
+                return (
+                  <div key={o.buyer} className={`offer-line ${held ? 'held' : ''}`}>
+                    <span>
+                      <b>{o.price.toLocaleString()} {TOKEN.ticker}</b>
+                      {' '}<em className="muted">{o.buyerName || shortAddress(o.buyer)}</em>
+                      {held && <i>{t('accepted — awaiting their payment')}</i>}
+                    </span>
+                    {!held && (
+                      <span className="offer-actions">
+                        <button disabled={answering !== null} onClick={() => answer(o.buyer, true)}>{t('Accept')}</button>
+                        <button className="ghost" disabled={answering !== null} onClick={() => answer(o.buyer, false)}>{t('Decline')}</button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {offerNote && <p className="muted small">{offerNote}</p>}
+            </div>
+          )}
           {/* Leaving is not selling. It used to be: stepping out of a world
               deleted the claim, so a player who wanted a look at the map had to
               buy their own land back. */}
@@ -1758,7 +1847,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenameWorld, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onClearTrees, onRenameWorld, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -1802,7 +1891,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onRenam
     );
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
-  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} />;
+  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} />;
   if (panel === 'connect') {
     return (
       <ConnectPanel

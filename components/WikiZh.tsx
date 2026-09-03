@@ -16,7 +16,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -185,6 +185,7 @@ export function WikiZh() {
           <p><b>每块地永远只有一个主人。</b>认领只写一次，不能覆盖；两个人在同一瞬间抢同一块地，恰好一人得到，另一人在付款前被拒绝。你的土地记在钱包地址名下，所以清掉浏览器、换设备、几个月后回来，它都还在。</p>
           <p><b>付清之前什么都不记录。</b>登记处在写下地契之前会从链上读你的销毁——钱包对、金额对、已确认、没有花在别的事上。没有办法不付钱拿到地，也没有办法付了钱拿不到。</p>
           <p><b>转售是玩家对玩家。</b>你挂牌出售的地块会带着价格出现在所有人的地图上。买家直接用 {T} 付到你的钱包——普通转账，不销毁，游戏不抽成——登记处从链上读到这笔从对方钱包到你钱包、不少于你要价的转账后，把地块转给对方。聚落随土地一起交接。整个世界在十二张海图上有大约两百块地的容量，地图上会显示已认领多少、还剩多少。</p>
+          <p><b>报价。</b>任何地块都可以出价，不论有没有挂牌：在它的卡片上写下价格，主人会在链上面板看到，并收到一张卡片提示。接受后地块以该价格为出价者保留两天；对方付到你的钱包即可拿下，和挂牌交易完全一样。没有托管——报价是一个价格，不是押金——所以出价者走开不会让任何人损失什么，保留期过了就作废。</p>
           {!landOnChain && (
             <div className="wiki-callout">
               <b>土地保存在我们的登记处，还不是你钱包里的代币。</b>
@@ -369,6 +370,8 @@ export function WikiZh() {
               ))}
             </tbody>
           </table>
+          <h3>清理树木</h3>
+          <p>建造面板里有一件针对林地的工具：用它点一下地面，触及范围内每棵立着的树都会被伐倒，<b>每棵 {CLEAR_TREE_GOLD} 金币</b>，<b>每棵 {CLEAR_TREE_WOOD} 木料</b>进堆场。清理过的地面在重新加载后仍然是清理过的，并像伐木工的工作一样在接下来的几天里长回来，所以请在打算建造的地方清理，而不是为了风景。</p>
           <h3>搬迁与升级</h3>
           <p>建筑卡上除了它的行当还有两个按钮。<b>搬迁</b>把它拎起来并激活放置光标：点地面它就过去，费用是<b>建造价的 {Math.round(MOVE_SHARE * 100)}%</b>。路会修到新地点，正走向旧地点的人会被安排去别处。搬迁除了金币什么都不损失。放置任何东西——不管是搬的还是新的——只有一条规则：它必须<b>与邻居之间留出可以走人的空隙</b>。两栋挨在一起的建筑会形成谁也过不去的缝，光标会拒绝这个位置并说明原因。</p>
           <p><b>升级</b>花金币和材料让建筑升一级，最高 <b>{MAX_BUILDING_LEVEL}</b> 级。第一步花原价的 {Math.round(UPGRADE_STEPS[0] * 100)}%，第二步 {Math.round(UPGRADE_STEPS[1] * 100)}%，金币和木料石头都要——所以顶级是一个决定，不是走过场。每一级<b>约多产 {Math.round(OUTPUT_PER_LEVEL * 100)}%</b>，<b>维护费多 {Math.round(UPKEEP_PER_LEVEL * 100)}%</b>。它不会容纳更多工人——但看得出来：二级有灯笼和旗帜，三级有玻璃附楼、更高的框架和沿檐的金饰。升级过的作坊有人有料就值回票价；闲置的升级建筑只是每天更大的一张账单。</p>

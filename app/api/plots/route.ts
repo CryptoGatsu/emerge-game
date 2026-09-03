@@ -42,8 +42,9 @@
 
 import { NextResponse } from 'next/server';
 import {
-  allClaims, allFinds, claimOf, dropReservation, holdsReservation, listClaim, registryShared,
-  releaseClaim, reservePlot, survey, takeClaim, transferClaim, type Claim,
+  allClaims, allFinds, answerOffer, claimOf, dropReservation, holdsReservation, listClaim, placeOffer,
+  priceFor, registryShared, releaseClaim, reservePlot, survey, takeClaim, transferClaim, withdrawOffer,
+  type Claim,
 } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenLive } from '@/lib/chain/emerge';
@@ -97,6 +98,12 @@ export async function POST(request: Request) {
     /** Buy a listed plot; `transferTx` paid the seller. */
     buy?: boolean;
     transferTx?: string;
+    /** Offer `price` for somebody else's plot, or take the offer back. */
+    offer?: boolean;
+    withdrawOffer?: boolean;
+    /** The owner answers a bidder's offer. */
+    answer?: 'accept' | 'decline';
+    bidder?: string;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -198,6 +205,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unknown plot.' }, { status: 400 });
   }
 
+  /*
+   * Offers. Nothing is held: an offer is a price somebody says they will
+   * pay, and an accepted one reserves the plot for them at that price for a
+   * while. The payment happens the same way as any sale, wallet to wallet.
+   */
+  if (body.offer || body.withdrawOffer) {
+    if (registryConfigured()) {
+      return NextResponse.json({ error: 'A plot on the land contract changes hands as a token.' }, { status: 409 });
+    }
+    try {
+      if (body.withdrawOffer) {
+        const row = await withdrawOffer(seed, owner);
+        return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'Nobody holds that plot.' }, { status: 409 });
+      }
+      const price = Number(body.price);
+      if (!Number.isFinite(price) || price <= 0 || price > 1e12) {
+        return NextResponse.json({ error: 'Name a price in whole tokens.' }, { status: 400 });
+      }
+      const row = await placeOffer(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME), price);
+      if (!row) return NextResponse.json({ error: 'That plot is not somebody else’s to make an offer on.' }, { status: 409 });
+      return NextResponse.json({ claim: row });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+  if (body.answer) {
+    const bidder = String(body.bidder ?? '');
+    if (!ADDRESS.test(bidder)) return NextResponse.json({ error: 'Unknown bidder.' }, { status: 400 });
+    try {
+      const row = await answerOffer(seed, owner, bidder, body.answer === 'accept');
+      if (!row) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      return NextResponse.json({ claim: row });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
   if (body.list) {
     const price = body.price === null || body.price === undefined ? null : Number(body.price);
     if (price !== null && (!Number.isFinite(price) || price <= 0 || price > 1e12)) {
@@ -238,15 +282,20 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!listed || !listed.forSale) {
-      return NextResponse.json({ error: 'That plot is not for sale.' }, { status: 409 });
+    if (!listed) {
+      return NextResponse.json({ error: 'Nobody holds that plot.' }, { status: 409 });
     }
     if (listed.owner.toLowerCase() === owner.toLowerCase()) {
       return NextResponse.json({ error: 'That plot is already yours.' }, { status: 409 });
     }
+    // The bidder's accepted offer, while it holds; otherwise the public price.
+    const due = priceFor(listed, owner);
+    if (due === null) {
+      return NextResponse.json({ error: 'That plot is not for sale.' }, { status: 409 });
+    }
     if (tokenLive()) {
       const transferTx = String(body.transferTx ?? '');
-      const paid = await verifyTransfer(transferTx, owner, listed.owner, listed.forSale);
+      const paid = await verifyTransfer(transferTx, owner, listed.owner, due);
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }

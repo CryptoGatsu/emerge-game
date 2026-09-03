@@ -883,7 +883,9 @@ export function Hud(props: HudProps) {
       {placing && (
         <div className="placement-bar">
           <span>
-            {t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}
+            {placing === 'Clear trees'
+              ? <>{t('Clearing trees')} — {compact ? t('tap the wood to fell everything within reach.') : t('click the wood to fell everything within reach, Esc to cancel.')}</>
+              : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
           </span>
           <button onClick={props.onCancelBuild}>{t('Cancel')}</button>
         </div>

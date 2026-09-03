@@ -23,7 +23,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -268,6 +268,13 @@ export default function Wiki() {
             least what you asked. The settlement goes with the land. The world holds room for about
             two hundred plots across twelve charts, and the map says how many are claimed and how
             many are left.
+          </p>
+          <p>
+            <b>Offers.</b> Any plot can be offered for, listed or not: name a price on its card and
+            the owner sees it in their On-Chain panel and gets a card saying so. Accepting holds the
+            plot for that bidder at that price for two days; they pay your wallet to take it,
+            exactly as for a listed sale. Nothing is escrowed — an offer is a price, not a deposit —
+            so a bidder who walks away costs nobody anything, and the hold simply lapses.
           </p>
           {!landOnChain && (
             <div className="wiki-callout">
@@ -631,6 +638,14 @@ export default function Wiki() {
               ))}
             </tbody>
           </table>
+          <h3>Clearing trees</h3>
+          <p>
+            The Build panel carries a tool for the wood: tap the ground with it and every standing
+            tree within reach is felled, for <b>{CLEAR_TREE_GOLD} Gold a tree</b>, with{' '}
+            <b>{CLEAR_TREE_WOOD} timber each</b> going to the yard. Cleared ground stays cleared
+            through a reload and grows back over the following days, the same way a woodcutter&rsquo;s
+            work does, so clear where you mean to build rather than for the view.
+          </p>
           <h3>Moving and improving</h3>
           <p>
             A building&rsquo;s card has two buttons besides the trade it does. <b>Move</b> picks it

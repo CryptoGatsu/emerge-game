@@ -378,7 +378,15 @@ one on screen. Plots are resold player to player: a listing shows on
 everybody's map, the buyer pays the seller's wallet directly in $EMERGE, nothing
 is burned, and the registry moves the plot and its settlement once it has read
 the transfer off the chain ([`docs/CONTRACTS.md`](docs/CONTRACTS.md) has the
-route).
+route). Any plot can be offered for, listed or not: the owner accepts or
+declines from the On-Chain panel, and an accepted offer holds the plot for the
+bidder at that price for two days. Nothing is escrowed.
+
+The player can clear the wood. The Build panel carries a tool: a tap fells
+every standing tree within reach, at 12 Gold a tree with 3 timber each going
+to the yard. The clearing is saved with the world, so it survives a reload,
+and the wood grows back over the following days on the same clock as a
+woodcutter's felling.
 
 The settlement also builds for itself. With a comfortable surplus in the
 treasury — twice the price and a fortnight of running costs — and the materials

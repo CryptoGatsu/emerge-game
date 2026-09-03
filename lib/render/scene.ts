@@ -22,6 +22,7 @@ import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
+import { CLEARING_DAYS, CLEAR_RADIUS } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, worldToScreen } from '../world/iso';
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
@@ -409,10 +410,29 @@ export class EmergeScene {
 
       if (prop.sway >= 0.4) this.foliage.push({ sprite, baseTint: sprite.tint as number });
       if (prop.name.startsWith('prop.tree.') && prop.name !== 'prop.tree.dead') {
-        this.trees.push({
+        const tree: TreeEntry = {
           sprite, wx: prop.wx, wy: prop.wy, texture: sprite.texture,
           scale: size, state: 'standing', timer: 0,
-        });
+        };
+        // Ground the player cleared lately shows as cleared after a reload:
+        // a stump for the first days, a sapling after, and the wood grows
+        // back on the same clock the woodcutters' felling does.
+        const cleared = (this.world.clearings ?? []).find(([cx, cy, day]) =>
+          this.world.day - day < CLEARING_DAYS && (cx - prop.wx) ** 2 + (cy - prop.wy) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS);
+        if (cleared) {
+          const age = this.world.day - cleared[2];
+          if (age < 5) {
+            tree.state = 'stump';
+            sprite.texture = this.assets.get('prop.stump');
+            tree.timer = 5 - age;
+          } else {
+            tree.state = 'sapling';
+            sprite.texture = this.assets.get('prop.sapling');
+            sprite.scale.set(size * 0.8);
+            tree.timer = Math.max(1, CLEARING_DAYS - age);
+          }
+        }
+        this.trees.push(tree);
       }
 
       if (prop.name.startsWith('prop.campfire')) this.campfires.push(sprite);
@@ -1838,6 +1858,46 @@ export class EmergeScene {
     window.addEventListener('keydown', this.onPlacementKey);
   }
 
+  /**
+   * Arm the clearing cursor: a ring the size of the reach, and a tap fells
+   * every standing tree inside it. The caller decides how many the treasury
+   * can pay for, so `onClear` gets the spot and answers with a count.
+   */
+  startClearing(onClear: (x: number, y: number, standing: number) => number) {
+    this.cancelPlacement();
+    const ring = new Sprite(this.assets.get('fx.select'));
+    ring.anchor.set(0.5, 0.5);
+    ring.alpha = 0.8;
+    ring.scale.set(CLEAR_RADIUS / 2.6);
+    ring.zIndex = 1e6;
+    this.objectLayer.addChild(ring);
+    this.ghost = ring;
+    this.placement = {
+      type: 'Clear trees',
+      onPlace: (x, y) => {
+        const standing = this.trees.filter((t) => t.state === 'standing' && (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS);
+        const allowed = onClear(x, y, standing.length);
+        standing
+          .sort((a, b) => ((a.wx - x) ** 2 + (a.wy - y) ** 2) - ((b.wx - x) ** 2 + (b.wy - y) ** 2))
+          .slice(0, Math.max(0, allowed))
+          .forEach((tree, i) => {
+            tree.state = 'falling';
+            tree.timer = FALL_SECONDS + i * 0.12;
+            tree.sprite.visible = true;
+          });
+      },
+    };
+    this.app.canvas.style.cursor = 'crosshair';
+    this.app.canvas.addEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.addEventListener('pointerup', this.onPlacementCommit);
+    window.addEventListener('keydown', this.onPlacementKey);
+  }
+
+  /** How many standing trees a clearing at this spot would take. */
+  standingTreesNear(x: number, y: number) {
+    return this.trees.filter((t) => t.state === 'standing' && (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS).length;
+  }
+
   cancelPlacement() {
     if (!this.placement) return;
     this.app.canvas.removeEventListener('pointermove', this.onPlacementMove);
@@ -1859,7 +1919,11 @@ export class EmergeScene {
     const wx = Math.max(4, Math.min(96, world.x));
     const wy = Math.max(6, Math.min(94, world.y));
     this.placementSpot = { x: wx, y: wy };
-    this.placementValid = this.canBuildAt(wx, wy);
+    // Clearing is allowed anywhere there is a tree to clear; the ring says
+    // whether there is one under it.
+    this.placementValid = this.placement?.type === 'Clear trees'
+      ? this.standingTreesNear(wx, wy) > 0
+      : this.canBuildAt(wx, wy);
     const height = this.map.heightAt(wx, wy);
     const pos = worldToScreen(wx, wy, height);
     this.ghost.position.set(pos.x, pos.y);

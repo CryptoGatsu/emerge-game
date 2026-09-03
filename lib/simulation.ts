@@ -409,6 +409,12 @@ export interface World {
    * device hand the same compensation out again.
    */
   grants: string[];
+  /**
+   * Ground the player has cleared of trees: where, and on what day. The wood
+   * grows back over the following days, so the renderer reads this to know
+   * which trees to show as stumps after a reload.
+   */
+  clearings?: [number, number, number][];
   counter: number;
 }
 
@@ -2472,6 +2478,7 @@ export function createWorld(seed = 481516, name?: string): World {
       banked: 0, dailyYield: 0, pending: 0, lifetime: 0,
     },
     grants: [],
+    clearings: [],
     counter: 0,
   };
   pushFeed(world, 'world', `${world.name} has emerged.`);
@@ -4200,6 +4207,41 @@ function narrowestCrossing(world: World, island: number) {
     }
   }
   return best;
+}
+
+/** What the player pays to have one tree felled, in Gold. */
+export const CLEAR_TREE_GOLD = 12;
+/** What one felled tree puts in the yard. */
+export const CLEAR_TREE_WOOD = 3;
+/** How far round the tap a clearing reaches, in world units. */
+export const CLEAR_RADIUS = 6;
+/** Days before a clearing has grown back enough to stop being one. */
+export const CLEARING_DAYS = 12;
+
+/**
+ * Clear trees off the plot.
+ *
+ * The renderer owns the trees — it knows where they stand and fells them —
+ * so this is the ledger side: how many the treasury can pay for, the Gold
+ * out, the timber in, and a note of where, so the wood shows as cleared after
+ * a reload and grows back over the days that follow. Returns how many the
+ * player can afford, which the renderer then actually fells.
+ */
+export function clearTrees(world: World, x: number, y: number, standing: number): { felled: number; gold: number; wood: number } {
+  const affordable = Math.floor(world.treasury / CLEAR_TREE_GOLD);
+  const felled = Math.max(0, Math.min(standing, affordable));
+  if (felled === 0) return { felled: 0, gold: 0, wood: 0 };
+  const gold = felled * CLEAR_TREE_GOLD;
+  const wood = felled * CLEAR_TREE_WOOD;
+  spend(world, 'works', gold);
+  world.resources.wood += wood;
+  note(world, 'produced', 'wood', wood);
+  world.clearings = [...(world.clearings ?? []).filter(([, , day]) => world.day - day < CLEARING_DAYS), [x, y, world.day]];
+  noteAttention(world);
+  pushFeed(world, 'build', felled === 1
+    ? `A tree was cleared for ${gold} Gold. ${wood} timber went to the yard.`
+    : `${felled} trees were cleared for ${gold} Gold. ${wood} timber went to the yard.`);
+  return { felled, gold, wood };
 }
 
 /** Lay the deck, and wire the far side into the road network. */

@@ -20,6 +20,25 @@ export interface Claim {
   /** The asking price while the owner has it up for sale. */
   forSale?: number;
   listedAt?: number;
+  /** Offers other players have made, best first. */
+  offers?: Offer[];
+}
+
+export interface Offer {
+  buyer: string;
+  buyerName: string;
+  price: number;
+  at: number;
+  /** The owner accepted it: the bidder may buy at this price until then. */
+  acceptedUntil?: number;
+}
+
+/** What this wallet may buy a plot for: its accepted offer while it holds, else the asking price. */
+export function priceFor(claim: Claim, buyer: string | null): number | null {
+  const mine = buyer?.toLowerCase();
+  const accepted = mine ? (claim.offers ?? []).find((o) => o.buyer === mine && !!o.acceptedUntil && o.acceptedUntil > Date.now()) : undefined;
+  if (accepted) return accepted.price;
+  return claim.forSale && claim.forSale > 0 ? claim.forSale : null;
 }
 
 export interface Find {
@@ -223,6 +242,37 @@ export async function listPlot(seed: number, owner: string, price: number | null
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }
 }
+
+/** One call for the offer verbs: they all come back with the claim as it now stands. */
+async function offerCall(owner: string, body: Record<string, unknown>): Promise<{ ok: boolean; reason?: string; claim?: Claim }> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...body, owner }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; error?: string };
+    if (!response.ok || !json.claim) return { ok: false, reason: json.error ?? 'The registry refused that.' };
+    return { ok: true, claim: json.claim };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+/** Offer a price for somebody else's plot. */
+export const placeOffer = (seed: number, bidder: string, bidderName: string, price: number) =>
+  offerCall(bidder, { seed, offer: true, price, ownerName: bidderName });
+
+/** Take an offer back. */
+export const withdrawOffer = (seed: number, bidder: string) => offerCall(bidder, { seed, withdrawOffer: true });
+
+/** The owner accepts or declines an offer. */
+export const answerOffer = (seed: number, owner: string, bidder: string, accept: boolean) =>
+  offerCall(owner, { seed, answer: accept ? 'accept' : 'decline', bidder });
 
 export type BuyResult =
   | { ok: true; claim: Claim; price: number; seller: string }

@@ -52,7 +52,7 @@ const KEEP = [
   'families', 'citizens', 'buildings', 'resources', 'market',
   'feed', 'gatherings', 'bonds', 'projects', 'hazards', 'resolution',
   'artworks', 'unlockedAreas', 'wageRate', 'marketClock', 'flow', 'flowYesterday', 'ledger',
-  'ledgerYesterday', 'stewardship', 'grants', 'counter',
+  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'counter',
 ] as const;
 
 /**

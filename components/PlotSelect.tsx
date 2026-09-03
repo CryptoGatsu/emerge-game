@@ -38,7 +38,8 @@ import {
 import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { pay, settleBurn, spend } from '@/lib/chain/spend';
 import {
-  buyPlot, fetchClaims, reservePlot, surveyPlot, takePlot, type Claim, type Find,
+  buyPlot, fetchClaims, placeOffer, priceFor, reservePlot, surveyPlot, takePlot, withdrawOffer,
+  type Claim, type Find,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { BrandLine } from './Brand';
@@ -604,6 +605,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
   );
   const [visiting, setVisiting] = useState(false);
   const [buying, setBuying] = useState(false);
+  const [offerAmount, setOfferAmount] = useState('');
+  const [offering, setOffering] = useState(false);
 
   /*
    * Who holds what, minus this player's own land.
@@ -888,7 +891,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
       setNotice(t('Connect a wallet first. A plot belongs to an address, and so does everything you earn on it.'));
       return;
     }
-    const askPrice = listing.forSale ?? 0;
+    const askPrice = priceFor(listing, wallet.address) ?? 0;
     if (player.ledger.balance < askPrice) {
       setNotice(t('{region} costs {price} {ticker}.', { region: listing.region, price: askPrice.toLocaleString(), ticker: TOKEN.ticker }));
       return;
@@ -926,6 +929,25 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
     });
   }, [wallet.address, player, onPlayer, onEnter, setClaims, configured]),
 
+  /** Offer a price for somebody else's plot, or take the offer back. */
+  offer = useCallback(async (listing: Claim, price: number | null) => {
+    if (!wallet.address) {
+      setNotice(t('Connect a wallet first. A plot belongs to an address, and so does everything you earn on it.'));
+      return;
+    }
+    setOffering(true);
+    const result = price === null
+      ? await withdrawOffer(listing.seed, wallet.address)
+      : await placeOffer(listing.seed, wallet.address, player.name, price);
+    setOffering(false);
+    if (!result.ok || !result.claim) { setNotice(result.reason ?? null); return; }
+    const row = result.claim;
+    setClaims((held) => held.map((c) => (c.seed === row.seed ? row : c)));
+    setNotice(price === null
+      ? t('Your offer on {region} was withdrawn.', { region: listing.region })
+      : t('Your offer of {price} {ticker} is with {who}. If they accept, the plot is held for you at that price for two days.', { price: price.toLocaleString(), ticker: TOKEN.ticker, who: listing.ownerName || shortAddress(listing.owner) }));
+  }, [wallet.address, player.name, setClaims]),
+
   /** Go and look at the settlement somebody else built here. */
   visit = useCallback(async (seed: number) => {
     setVisiting(true);
@@ -942,6 +964,18 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
   );
   const worldTotal = worldCapacity();
   const claimedTotal = allClaims.length;
+  /** This wallet's offer on the selected plot, and what the plot would cost it now. */
+  const myOffer = heldByOther && wallet.address
+    ? (heldByOther.offers ?? []).find((o) => o.buyer === wallet.address!.toLowerCase()) ?? null
+    : null;
+  const buyable = heldByOther ? priceFor(heldByOther, wallet.address) : null;
+  const otherOffers = heldByOther ? (heldByOther.offers ?? []).filter((o) => o.buyer !== wallet.address?.toLowerCase()) : [];
+  /** Every offer this wallet has out, across the whole map, so an accepted one is not missed. */
+  const myOffers = useMemo(() => {
+    const me = wallet.address?.toLowerCase();
+    if (!me) return [] as { claim: Claim; offer: NonNullable<Claim['offers']>[number] }[];
+    return allClaims.flatMap((c) => (c.offers ?? []).filter((o) => o.buyer === me).map((offer) => ({ claim: c, offer })));
+  }, [allClaims, wallet.address]);
 
 
   return (
@@ -1027,7 +1061,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             <button className="sheet-close" onClick={() => setSheetOpen(false)} aria-label={t('Back to the map')}>×</button>
             {/* The registry decides, not this browser's memory. A stale local
                 claim on land somebody else now holds must read as theirs. */}
-            <span className="eyebrow">{heldByOther ? (heldByOther.forSale ? t('FOR SALE') : t('SETTLED')) : mine ? t('YOUR WORLD') : t('CLAIM')}</span>
+            <span className="eyebrow">{heldByOther ? (buyable !== null ? t('FOR SALE') : t('SETTLED')) : mine ? t('YOUR WORLD') : t('CLAIM')}</span>
             <h2>{heldByOther ? heldByOther.worldName : mine ? mine.name : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{tn(selected.biomeLabel)}</span>
@@ -1058,6 +1092,62 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
                     {t('Up for sale at {price} {ticker}. The price goes to {who}’s wallet, not to the burn address, and the settlement comes with the land.', { price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })}
                   </p>
                 )}
+                {/* Offers: yours, and the fact of the others'. Any plot can be
+                    offered for, listed or not; the owner decides. */}
+                <div className="offer-box">
+                  <span className="eyebrow">{t('OFFERS')}</span>
+                  {otherOffers.length > 0 && (
+                    <p className="muted small">
+                      {t('{n} other offers, the best at {price} {ticker}.', { n: otherOffers.length, price: otherOffers[0].price.toLocaleString(), ticker: TOKEN.ticker })}
+                    </p>
+                  )}
+                  {myOffer ? (
+                    <div className="my-offer">
+                      <b>{t('Your offer: {price} {ticker}', { price: myOffer.price.toLocaleString(), ticker: TOKEN.ticker })}</b>
+                      <span className="muted small">
+                        {myOffer.acceptedUntil && myOffer.acceptedUntil > Date.now()
+                          ? t('Accepted. It is yours at that price until {when}.', { when: new Date(myOffer.acceptedUntil).toLocaleString() })
+                          : t('Waiting on the owner.')}
+                      </span>
+                      {myOffer.acceptedUntil && myOffer.acceptedUntil > Date.now() ? (
+                        // The payment itself: exactly the accepted amount, to the
+                        // seller's wallet, and the plot is theirs when it lands.
+                        <button
+                          className="claim-button pay-offer"
+                          disabled={buying || !wallet.address || player.ledger.balance < myOffer.price}
+                          onClick={() => buy(heldByOther)}
+                        >
+                          {buying
+                            ? t('Sending payment…')
+                            : player.ledger.balance < myOffer.price
+                              ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                              : t('Send {price} {ticker} to {who}', { price: myOffer.price.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })}
+                        </button>
+                      ) : (
+                        <button className="ghost" onClick={() => offer(heldByOther, null)} disabled={offering}>{t('Withdraw offer')}</button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="offer-row">
+                      <input
+                        value={offerAmount}
+                        inputMode="numeric"
+                        placeholder={String(Math.round((heldByOther.forSale ?? selected.price) * 0.8))}
+                        onChange={(e) => setOfferAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                      />
+                      <button
+                        className="ghost"
+                        disabled={offering || !wallet.address}
+                        onClick={() => offer(heldByOther, Number(offerAmount) || Math.round((heldByOther.forSale ?? selected.price) * 0.8))}
+                      >
+                        {offering ? t('Sending…') : t('Make an offer')}
+                      </button>
+                    </div>
+                  )}
+                  <p className="muted small">
+                    {t('An offer holds nothing back: if the owner accepts, the plot is held for you at that price for two days and you pay their wallet directly, as for any sale.')}
+                  </p>
+                </div>
               </div>
             )}
             {registry?.onChain && registry.owner && !mine && !heldByOther && (
@@ -1102,8 +1192,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             )}
 
             <div className="claim-price">
-              <span>{mine ? t('PAID') : heldByOther?.forSale ? t('ASKING') : t('PRICE')}</span>
-              <b>{(mine ? mine.price : heldByOther?.forSale ? heldByOther.forSale : price).toLocaleString()}</b>
+              <span>{mine ? t('PAID') : buyable !== null ? t('ASKING') : t('PRICE')}</span>
+              <b>{(mine ? mine.price : buyable !== null ? buyable : price).toLocaleString()}</b>
               <em>{TOKEN.ticker}</em>
             </div>
 
@@ -1111,18 +1201,18 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
 
             <button
               className="claim-button"
-              onClick={() => (heldByOther ? (heldByOther.forSale ? buy(heldByOther) : visit(heldByOther.seed)) : claim())}
+              onClick={() => (heldByOther ? (buyable !== null ? buy(heldByOther) : visit(heldByOther.seed)) : claim())}
               disabled={
                 claiming || visiting || buying
                 || (!mine && !heldByOther && !wallet.address)
                 || (!mine && !heldByOther && player.ledger.balance < price)
-                || (!!heldByOther?.forSale && (!wallet.address || player.ledger.balance < heldByOther.forSale))
+                || (buyable !== null && (!wallet.address || player.ledger.balance < buyable))
               }
             >
               {claiming
                 ? t('Claiming…')
-                : heldByOther?.forSale
-                  ? (buying ? t('Buying…') : !wallet.address ? t('Connect a wallet to buy') : player.ledger.balance < heldByOther.forSale ? t('Not enough {ticker}', { ticker: TOKEN.ticker }) : t('Buy {region} · {price} {ticker}', { region: heldByOther.region, price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker }))
+                : heldByOther && buyable !== null
+                  ? (buying ? t('Buying…') : !wallet.address ? t('Connect a wallet to buy') : player.ledger.balance < buyable ? t('Not enough {ticker}', { ticker: TOKEN.ticker }) : t('Buy {region} · {price} {ticker}', { region: heldByOther.region, price: buyable.toLocaleString(), ticker: TOKEN.ticker }))
                 : heldByOther
                   ? (visiting ? t('Travelling…') : t('Visit {world}', { world: heldByOther.worldName }))
                   : mine
@@ -1156,6 +1246,26 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
                     {t('The first {n} worlds you claimed earn {ticker}; the rest are yours to play with. Give one up and the next in line starts earning.', { n: EARNING_PLOT_LIMIT, ticker: TOKEN.ticker })}
                   </p>
                 )}
+              </>
+            )}
+
+            {myOffers.length > 0 && (
+              <>
+                <span className="eyebrow">{t('YOUR OFFERS')}</span>
+                <div className="listing-list">
+                  {myOffers.map(({ claim: c, offer: o }) => {
+                    const held = !!o.acceptedUntil && o.acceptedUntil > Date.now();
+                    return (
+                      <div key={c.seed} className={`listing-row ${held ? 'held' : ''} ${c.seed === selected.seed ? 'here' : ''}`}>
+                        <span>{c.region}{held && <i className="idle-plot accepted">{t('accepted')}</i>}</span>
+                        <b>{o.price.toLocaleString()} {TOKEN.ticker}</b>
+                        <button className="ghost" onClick={() => choose(plots.find((pl) => pl.seed === c.seed) ?? selected)}>
+                          {held ? t('Pay') : t('View')}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </>
             )}
 

@@ -2982,3 +2982,25 @@ button.fold:hover { color: var(--emerald); }
 .region-pin .sale-tag { background: rgba(240, 208, 94, 0.22); color: #f0d05e; }
 .region-pin.settled .pin-dot { box-shadow: 0 0 0 2px rgba(240, 208, 94, 0); }
 .sale-tag-big { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: rgba(240, 208, 94, 0.2); color: #f0d05e; }
+
+/* ---- clearing tool ---- */
+.build-tools { display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: 14px; }
+.build-card.tool { border-color: rgba(240, 208, 94, 0.25); }
+.build-card.tool .build-icon { font-size: 22px; }
+@media (min-width: 781px) { .build-tools { grid-template-columns: minmax(0, 320px); } }
+
+/* ---- offers ---- */
+.offer-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(184, 231, 86, 0.14); display: grid; gap: 6px; }
+.offer-row { display: flex; gap: 8px; }
+.offer-row input { flex: 1; min-width: 0; }
+.my-offer { display: grid; gap: 4px; }
+.my-offer .ghost { justify-self: start; }
+.offers { display: grid; gap: 6px; margin: 10px 0; }
+.offer-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid rgba(184, 231, 86, 0.1); }
+.offer-line i { display: block; font-style: normal; font-size: 11px; color: #f0d05e; }
+.offer-line.held b { color: #f0d05e; }
+.offer-actions { display: flex; gap: 6px; }
+.offer-actions button { font-size: 12px; padding: 4px 10px; }
+.pay-offer { margin-top: 4px; }
+.idle-plot.accepted { color: #f0d05e; }
+.listing-row.held b { color: #f0d05e; }
