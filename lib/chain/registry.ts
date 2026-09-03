@@ -24,7 +24,7 @@
  */
 
 import {
-  ACTIVE_CHAIN, TOKEN, ethCall, hexWord, numWord, registryLive, rpc, tokenLive,
+  ACTIVE_CHAIN, TOKEN, activeProvider, ethCall, hexWord, numWord, registryLive, rpc, tokenLive,
   walletAvailable, type ChainConfig,
 } from './emerge';
 
@@ -207,7 +207,7 @@ export interface ChainTx {
 async function send(from: string, to: string, data: string): Promise<ChainTx> {
   if (!walletAvailable()) return { ok: false, txHash: null, message: 'No wallet to sign with.' };
   try {
-    const txHash = (await window.ethereum!.request({
+    const txHash = (await activeProvider()!.request({
       method: 'eth_sendTransaction',
       params: [{ from, to, data }],
     })) as string;

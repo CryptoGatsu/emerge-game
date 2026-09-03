@@ -16,6 +16,7 @@
  */
 
 import Image from 'next/image';
+import { useState } from 'react';
 import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT } from '@/lib/chain/vault';
@@ -25,24 +26,100 @@ import { WalletPicker, useWallet } from './WalletPicker';
 export const X_URL = 'https://x.com/emergerh';
 export const SITE_DOMAIN = 'emergerh.world';
 
-const NOTES = [
+/**
+ * The three notes under the fold.
+ *
+ * The middle one and the last one both depend on what is actually deployed, and
+ * they are written out per case rather than hedged. A front page that says land
+ * is a token in your wallet while the land contract does not exist is a lie,
+ * and on a token project's front page that is the kind of lie people are right
+ * to leave over.
+ */
+const notesFor = (onChainLand: boolean) => [
   {
     title: 'Nobody is waiting for orders',
     body: `Every being on your plot has their own hunger, trade, friends and grudges. You cannot
       tell anyone what to do — you build them a workshop and watch somebody decide it is theirs.`,
   },
-  {
-    title: 'The land is yours, on chain',
-    body: `A plot is a token in your wallet, not a row in our database. Its price, its owner and
-      its name are all read from the contract, and no one — this game included — can move it.`,
-  },
-  {
-    title: 'You are paid for judgement',
-    body: `Running a settlement well earns ${TOKEN.ticker}; neglecting it earns almost nothing.
-      Only your first ${EARNING_PLOT_LIMIT} plots pay, so no wallet is large enough to buy past
-      the ceiling.`,
-  },
+  onChainLand
+    ? {
+        title: 'The land is yours, on chain',
+        body: `A plot is a token in your wallet, not a row in our database. Its price, its owner
+          and its name are all read from the contract, and no one — this game included — can
+          move it.`,
+      }
+    : {
+        title: 'The land is yours, and paid for',
+        body: `Claiming burns ${TOKEN.ticker} from your own wallet, and the registry will not
+          record a plot until it has read that burn off the chain. One owner per plot, held
+          against your address rather than your browser, so it follows you to any device. The
+          land contract is not deployed yet, so this is our registry rather than an on-chain
+          title — said plainly here because it is the difference that matters.`,
+      },
+  onChainLand
+    ? {
+        title: 'You are paid for judgement',
+        body: `Running a settlement well earns ${TOKEN.ticker}; neglecting it earns almost
+          nothing. Only your first ${EARNING_PLOT_LIMIT} plots pay, so no wallet is large enough
+          to buy past the ceiling.`,
+      }
+    : {
+        title: 'Every charge is burned',
+        body: `Claiming land, surveying it, renaming a world: each one destroys the
+          ${TOKEN.ticker} it costs, and the supply falls with it. Nothing the game charges is
+          collected by anybody. Deposits are the one exception, because the withdrawal door has
+          to be able to give them back.`,
+      },
 ];
+
+/**
+ * The token's address, offered to be copied.
+ *
+ * Read from the chain config rather than written out here, so the address on
+ * the front page is the one the game actually transacts against and the two
+ * cannot drift. Shown in full: an abbreviated contract address is no use to
+ * somebody who wants to paste it into a wallet, and around a launch a
+ * half-shown address is exactly what an impersonator relies on.
+ */
+function ContractAddress() {
+  const [copied, setCopied] = useState(false);
+  const address = ACTIVE_CHAIN.tokenAddress;
+  if (!address) return null;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard refused; the address is on screen to be selected by hand.
+    }
+  };
+
+  return (
+    <section className="contract">
+      <span className="contract-label">{TOKEN.ticker} CONTRACT</span>
+      <button className="contract-address" onClick={copy} title="Copy the contract address">
+        <code>{address}</code>
+        <em>{copied ? 'copied' : 'copy'}</em>
+      </button>
+      <p className="muted small">
+        On {ACTIVE_CHAIN.label}{ACTIVE_CHAIN.chainId ? ` · chain ${ACTIVE_CHAIN.chainId}` : ''}. Check
+        it before you buy, and trust nothing that does not match.
+        {ACTIVE_CHAIN.explorerUrl && (
+          <>
+            {' '}
+            <a
+              href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/token/${address}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >View it on the explorer</a>.
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
 
 export default function Landing({ onEnter }: { onEnter: () => void }) {
   const { wallet } = useWallet();
@@ -94,8 +171,10 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
           </div>
         </section>
 
+        <ContractAddress />
+
         <section className="notes">
-          {NOTES.map((note) => (
+          {notesFor(onChainClaimsLive()).map((note) => (
             <article key={note.title}>
               <h2>{note.title}</h2>
               <p>{note.body}</p>

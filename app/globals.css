@@ -2015,6 +2015,71 @@ button.fold:hover { color: var(--emerald); }
 }
 .enter-button:hover { filter: brightness(1.08); }
 
+/* ---------------------------------------------------------------- *
+ * The contract address
+ *
+ * Given its own block on the front page rather than buried in the
+ * footer. Around a launch this is the line people are looking for,
+ * and the one an impersonator hopes they will not check.
+ * ---------------------------------------------------------------- */
+
+.contract {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  margin: 0 auto 40px;
+  padding: 22px 20px 20px;
+  width: min(620px, 100%);
+  border-radius: 14px;
+  border: 1px solid var(--panel-edge);
+  background: rgba(1, 26, 17, 0.5);
+}
+.contract-label {
+  font-size: 10px;
+  letter-spacing: 2.4px;
+  color: var(--emerald);
+}
+.contract-address {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s ease;
+}
+.contract-address:hover { border-color: var(--emerald); }
+.contract-address code {
+  /* The whole address, wrapping rather than truncating: half an address is
+     worse than none, because it looks checkable and is not. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cream);
+  word-break: break-all;
+  text-align: left;
+}
+.contract-address em {
+  flex: none;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--emerald);
+}
+.contract p { margin: 0; max-width: 52ch; }
+.contract a { color: var(--emerald); }
+
+@media (max-width: 720px) {
+  .contract { margin-bottom: 28px; padding: 18px 15px 16px; }
+  .contract-address { flex-direction: column; align-items: stretch; gap: 8px; }
+  .contract-address code { font-size: 11.5px; text-align: center; }
+}
+
 /* Three short notes rather than four argued cards: the game is where the
    rest of it is learned. */
 .notes {

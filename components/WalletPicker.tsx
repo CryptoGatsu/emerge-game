@@ -70,7 +70,30 @@ let resuming: Promise<void> | null = null;
 
 function resumeOnce(available: DiscoveredWallet[]) {
   if (resuming || current.status === 'connected') return;
-  const preferred = available.find((w) => w.name === lastWallet()) ?? available[0];
+
+  /*
+   * Only resume a wallet we can identify.
+   *
+   * This used to fall back to `available[0]` — whichever extension happened to
+   * be first in the list — and then ask it for accounts. A second wallet
+   * installed alongside the intended one answers that question perfectly well
+   * about *its own* account, so the game would silently come up connected to
+   * the wrong wallet, showing an address the player does not recognise on a
+   * chain they are not on, and every signature after that would be refused by
+   * a wallet that had never heard of the account being asked about.
+   *
+   * So: the wallet they last chose, or the only one there. With several
+   * installed and no memory of a choice, resuming is a guess — and the right
+   * answer to a guess about somebody's money is to ask.
+   */
+  const remembered = lastWallet();
+  const preferred = remembered
+    ? available.find((w) => w.name === remembered)
+    : available.length === 1
+      ? available[0]
+      : undefined;
+  if (!preferred) return;
+
   resuming = resumeWallet(preferred).then((state) => {
     if (state && current.status !== 'connected') publish(state);
   }).catch(() => { /* nothing to resume */ });

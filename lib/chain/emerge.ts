@@ -199,8 +199,34 @@ export interface WalletState {
 
 export const INITIAL_WALLET: WalletState = { status: 'disconnected', address: null, chainId: null, wallet: null, error: null };
 
+/**
+ * The provider the player actually connected with.
+ *
+ * `window.ethereum` is not it. With more than one wallet extension installed —
+ * MetaMask beside anything else — that property is whichever one won the
+ * injection race at page load, which need not be the wallet the player chose
+ * from the picker and need not hold the address the game is transacting for.
+ * The symptom is a wallet that refuses to sign because it has never heard of
+ * the account being asked about, and there is nothing on screen to explain it.
+ *
+ * So the provider is remembered at connect time and every signing path goes
+ * through here. The fallback to `window.ethereum` is for the single-wallet
+ * case, where the two are the same object anyway.
+ */
+let connected: Eip1193Provider | null = null;
+
+export function activeProvider(): Eip1193Provider | undefined {
+  if (connected) return connected;
+  return typeof window !== 'undefined' ? window.ethereum : undefined;
+}
+
+/** Remember which wallet signed, so everything after connect asks the same one. */
+export function rememberProvider(provider: Eip1193Provider | undefined | null): void {
+  connected = provider ?? null;
+}
+
 export function walletAvailable() {
-  return typeof window !== 'undefined' && !!window.ethereum;
+  return !!activeProvider();
 }
 
 export function shortAddress(address: string | null) {
@@ -221,6 +247,8 @@ export async function connectWallet(wallet?: DiscoveredWallet): Promise<WalletSt
   try {
     const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[];
     const rawChain = (await provider.request({ method: 'eth_chainId' })) as string;
+    // Whatever answered is what everything else must ask from now on.
+    if (accounts?.length) rememberProvider(provider);
     return {
       status: accounts?.length ? 'connected' : 'disconnected',
       address: accounts?.[0] ?? null,
@@ -251,6 +279,8 @@ export async function resumeWallet(preferred?: DiscoveredWallet): Promise<Wallet
   try {
     const accounts = (await provider.request({ method: 'eth_accounts' })) as string[];
     if (!accounts?.length) return null;
+    // A resumed session signs with the same wallet it was opened with.
+    rememberProvider(provider);
     const rawChain = (await provider.request({ method: 'eth_chainId' })) as string;
     return {
       status: 'connected',
@@ -271,12 +301,12 @@ export async function switchToEmergeChain(config: ChainConfig = ACTIVE_CHAIN): P
   if (!chainConfigured(config)) return `${config.label} is not configured in this deployment yet.`;
   const hexId = `0x${config.chainId!.toString(16)}`;
   try {
-    await window.ethereum!.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexId }] });
+    await activeProvider()!.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexId }] });
     return null;
   } catch {
     // 4902-style "unknown chain": offer to add it from the configured details.
     try {
-      await window.ethereum!.request({
+      await activeProvider()!.request({
         method: 'wallet_addEthereumChain',
         params: [{
           chainId: hexId,
@@ -612,7 +642,7 @@ export async function transferTokens(
     const units = BigInt(Math.round(whole)) * 10n ** BigInt(decimals);
     // transfer(address,uint256)
     const data = '0xa9059cbb' + hexWord(to) + units.toString(16).padStart(64, '0');
-    const txHash = (await window.ethereum!.request({
+    const txHash = (await activeProvider()!.request({
       method: 'eth_sendTransaction',
       params: [{ from, to: config.tokenAddress, data }],
     })) as string;
@@ -686,7 +716,7 @@ async function burnViaToken(
   }
   const units = BigInt(Math.round(whole)) * 10n ** BigInt(await tokenDecimals(config));
   try {
-    const txHash = (await window.ethereum!.request({
+    const txHash = (await activeProvider()!.request({
       method: 'eth_sendTransaction',
       params: [{ from, to: config.tokenAddress, data: `0x42966c68${numWord(units)}` }],
     })) as string;

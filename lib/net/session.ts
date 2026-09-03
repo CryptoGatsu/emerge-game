@@ -11,6 +11,7 @@
  * off as a sign-in.
  */
 
+import { activeProvider } from '@/lib/chain/emerge';
 import { currentWallet } from '@/components/WalletPicker';
 
 /** Which address this browser has already proved, so a session is asked for once. */
@@ -50,7 +51,12 @@ export async function ensureSession(address: string): Promise<boolean> {
     // Perhaps this browser is already signed in from an earlier visit.
     if ((await readSession()) === want) { proved = want; return true; }
 
-    const provider = typeof window !== 'undefined' ? window.ethereum : undefined;
+    /*
+     * The wallet the player connected with, not whichever extension owns
+     * `window.ethereum`. Asking the wrong one to sign for an address it has
+     * never seen is a refusal with no explanation attached.
+     */
+    const provider = activeProvider();
     if (!provider) return false;
 
     try {
