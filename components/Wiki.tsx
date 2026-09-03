@@ -31,6 +31,9 @@ import {
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { BrandLine } from './Brand';
+import { LanguageSwitch } from './LanguageSwitch';
+import { useLocale } from '@/lib/i18n';
+import { WikiZh } from './WikiZh';
 
 const n = (value: number) => value.toLocaleString();
 const pct = (value: number) => `${Math.round(value * 100)}%`;
@@ -184,12 +187,15 @@ const SECTIONS = [
 export default function Wiki() {
   const landOnChain = onChainClaimsLive();
   const live = tokenLive();
+  const locale = useLocale();
+  if (locale === 'zh') return <WikiZh />;
 
   return (
     <main className="wiki">
       <div className="wiki-inner">
         <header className="wiki-head">
           <Link href="/" className="wiki-home"><BrandLine size={40} /></Link>
+          <LanguageSwitch className="wiki-lang" />
           <h1>How Emerge works</h1>
           <p className="wiki-lede">
             A living world of autonomous beings that you own land in and shape, but do not command.

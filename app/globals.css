@@ -2962,3 +2962,15 @@ button.fold:hover { color: var(--emerald); }
 .build-advice p { margin: 4px 0; font-size: 12px; line-height: 1.55; }
 .build-advice p b { color: var(--cream); }
 .build-advice p em { font-style: normal; color: var(--muted); }
+
+/* ---- language switch ---- */
+.lang-switch { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid rgba(184, 231, 86, 0.22); border-radius: 999px; background: rgba(1, 10, 6, 0.55); }
+.lang-switch button { border: 0; background: transparent; color: #9db89a; font: inherit; font-size: 12px; letter-spacing: 0.04em; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+.lang-switch button.on { background: rgba(184, 231, 86, 0.18); color: #e6f5c8; }
+.lang-switch button:hover:not(.on) { color: #e6f5c8; }
+.landing-lang { position: absolute; top: 16px; right: 16px; z-index: 3; }
+.landing-inner { position: relative; }
+.wiki-head { position: relative; }
+.wiki-lang { position: absolute; top: 4px; right: 0; }
+.hud .hud-lang { position: absolute; left: 14px; top: 62px; z-index: 5; transform: scale(0.9); transform-origin: left top; }
+@media (max-width: 780px) { .hud .hud-lang { top: 56px; } .landing-lang { top: 10px; right: 10px; } }

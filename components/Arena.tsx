@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_STAKE, MAX_STAKE_PER_DAY, offered, payout, refuse } from '@/lib/arena/betting';
 import { enterFighter, fetchArena, type ArenaState, type Bout, type Fighter } from '@/lib/net/arena';
 import { skillDays, skillLevel, vigourOf, type Citizen, type World, type WorkingJob } from '@/lib/simulation';
+import { t, tj, useLocale } from '@/lib/i18n';
 
 /** How often the card is re-read. Faster than a bout, slower than the clock. */
 const POLL = 8_000;
@@ -61,13 +62,13 @@ function Corner({ fighter, side, odds, winner, health }: {
   const lost = winner && winner !== side;
   return (
     <div className={`corner ${side} ${winner === side ? 'won' : ''} ${lost ? 'lost' : ''}`}>
-      <span className="corner-side">{side === 'red' ? 'RED CORNER' : 'BLUE CORNER'}</span>
+      <span className="corner-side">{side === 'red' ? t('RED CORNER') : t('BLUE CORNER')}</span>
       <b>{fighter.name}</b>
-      <span className="corner-from">{fighter.job} of {fighter.worldName}</span>
+      <span className="corner-from">{t('{job} of {world}', { job: tj(fighter.job), world: fighter.worldName })}</span>
       <div className="corner-health"><i style={{ width: `${health}%` }} /></div>
       <div className="corner-stats">
-        <span>level {fighter.level}</span>
-        <span>vigour {fighter.vigour}</span>
+        <span>{t('level {n}', { n: fighter.level })}</span>
+        <span>{t('vigour {n}', { n: fighter.vigour })}</span>
         {(fighter.won > 0 || fighter.lost > 0) && <span>{fighter.won}W {fighter.lost}L</span>}
       </div>
       <em className="corner-odds">{odds.toFixed(2)}&times;</em>
@@ -102,6 +103,7 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
   /** Bouts already paid, so a re-poll cannot pay a winning bet twice. */
   const settled = useRef(new Set<number>());
   const [verified, setVerified] = useState<boolean | null>(null);
+  useLocale();
 
   useEffect(() => {
     let live = true;
@@ -182,10 +184,10 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
       const back = payout(bet.gold, bet.odds);
       onStake(-back, `the ${bet.on} corner`);
       onCue('win');
-      setNotice(`${bet.on === 'red' ? finished.red.name : finished.blue.name} won. ${back.toLocaleString()} Gold came back.`);
+      setNotice(t('{who} won. {gold} Gold came back.', { who: bet.on === 'red' ? finished.red.name : finished.blue.name, gold: back.toLocaleString() }));
     } else {
       onCue('lose');
-      setNotice(`${bet.on === 'red' ? finished.red.name : finished.blue.name} went down. The stake is gone.`);
+      setNotice(t('{who} went down. The stake is gone.', { who: bet.on === 'red' ? finished.red.name : finished.blue.name }));
     }
     setBet(null);
   }, [state, bet, onStake, onCue]);
@@ -206,15 +208,15 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
     if (!bout) return;
     const gold = Number(stake);
     const refusal = refuse(gold, treasury, stakedToday.current);
-    if (refusal) { setNotice(refusal); return; }
-    if (bet) { setNotice('You already have a bet on this bout.'); return; }
+    if (refusal) { setNotice(t(refusal)); return; }
+    if (bet) { setNotice(t('You already have a bet on this bout.')); return; }
     const price = offered(on === 'red' ? bout.odds.red : bout.odds.blue);
     const who = on === 'red' ? bout.red.name : bout.blue.name;
-    if (!onStake(gold, who)) { setNotice('Your treasury cannot cover that.'); return; }
+    if (!onStake(gold, who)) { setNotice(t('Your treasury cannot cover that.')); return; }
     stakedToday.current += gold;
     onCue('coin');
     setBet({ boutId: bout.id, on, gold, odds: price });
-    setNotice(`${gold.toLocaleString()} Gold on ${who} at ${price.toFixed(2)}×.`);
+    setNotice(t('{gold} Gold on {who} at {odds}×.', { gold: gold.toLocaleString(), who, odds: price.toFixed(2) }));
   };
 
   /** Who this settlement could send. */
@@ -240,7 +242,7 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
       ownerName: playerName,
     });
     setEntering(false);
-    setNotice(result.ok ? `${c.name} is on the roster.` : result.error);
+    setNotice(result.ok ? t('{name} is on the roster.', { name: c.name }) : result.error);
   }, [address, seed, worldName, playerName]);
 
   const mine = state?.roster.filter((f) => f.seed === seed) ?? [];
@@ -250,24 +252,22 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
       <section className="overlay-panel wide arena" onClick={(e) => e.stopPropagation()}>
         <header>
           <div>
-            <h3>The Colosseum</h3>
+            <h3>{t('The Colosseum')}</h3>
             <p className="muted">
-              An island nobody owns. Fighters come from real settlements, the bout is the same one
-              for everybody watching, and the result cannot be known before the bell.
+              {t('An island nobody owns. Fighters come from real settlements, the bout is the same one for everybody watching, and the result cannot be known before the bell.')}
             </p>
           </div>
-          <button className="panel-close" onClick={onClose} aria-label="Close">×</button>
+          <button className="panel-close" onClick={onClose} aria-label={t('Close')}>×</button>
         </header>
 
         <div className="overlay-body">
-          {!state && <p className="muted">Crossing to the island…</p>}
+          {!state && <p className="muted">{t('Crossing to the island…')}</p>}
 
           {state && !bout && (
             <div className="arena-empty">
-              <b>No bout on the card.</b>
+              <b>{t('No bout on the card.')}</b>
               <p className="muted">
-                The arena needs two fighters before it can run one. Send somebody from your own
-                settlement and the next bell will pair them.
+                {t('The arena needs two fighters before it can run one. Send somebody from your own settlement and the next bell will pair them.')}
               </p>
             </div>
           )}
@@ -275,9 +275,9 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
           {bout && (
             <>
               <div className={`arena-clock ${phase}`}>
-                {phase === 'betting' && <><b>Betting closes in {clock(bout.closesAt - now)}</b><span>Bout #{bout.id}</span></>}
-                {phase === 'fighting' && <><b>Fighting</b><span>{clock(bout.endsAt - now)} left</span></>}
-                {phase === 'settled' && <><b>Bout over</b><span>Next bell in {clock(bout.endsAt + (state?.boutMs ?? 180_000) - now)}</span></>}
+                {phase === 'betting' && <><b>{t('Betting closes in {time}', { time: clock(bout.closesAt - now) })}</b><span>{t('Bout #{id}', { id: bout.id })}</span></>}
+                {phase === 'fighting' && <><b>{t('Fighting')}</b><span>{t('{time} left', { time: clock(bout.endsAt - now) })}</span></>}
+                {phase === 'settled' && <><b>{t('Bout over')}</b><span>{t('Next bell in {time}', { time: clock(bout.endsAt + (state?.boutMs ?? 180_000) - now) })}</span></>}
               </div>
 
               <div className="arena-ring">
@@ -286,8 +286,8 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
                   odds={offered(bout.odds.red)} winner={shown.done ? bout.winner : undefined}
                 />
                 <div className="arena-versus">
-                  <span>vs</span>
-                  {bet && <em className="arena-bet">{bet.gold.toLocaleString()} on {bet.on} at {bet.odds.toFixed(2)}×</em>}
+                  <span>{t('vs')}</span>
+                  {bet && <em className="arena-bet">{t('{gold} on {side} at {odds}×', { gold: bet.gold.toLocaleString(), side: t(bet.on), odds: bet.odds.toFixed(2) })}</em>}
                 </div>
                 <Corner
                   fighter={bout.blue} side="blue" health={shown.blue}
@@ -298,7 +298,7 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
               {phase === 'betting' && (
                 <div className="arena-bet-row">
                   <label>
-                    <span>STAKE</span>
+                    <span>{t('STAKE')}</span>
                     <input
                       type="number" min={1} max={MAX_STAKE} value={stake}
                       onChange={(e) => setStake(e.target.value)}
@@ -315,45 +315,42 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
 
               {(phase === 'fighting' || phase === 'settled') && (
                 <div className="arena-blows">
-                  {shown.rounds.length === 0 && <p className="muted small">They are circling…</p>}
+                  {shown.rounds.length === 0 && <p className="muted small">{t('They are circling…')}</p>}
                   {shown.rounds.map((r, i) => (
                     <p key={i} className={r.by}>
-                      <b>{r.by === 'red' ? bout.red.name : bout.blue.name}</b> {MOVES[r.move % MOVES.length]} — {r.hit}
+                      <b>{r.by === 'red' ? bout.red.name : bout.blue.name}</b> {t(MOVES[r.move % MOVES.length])} — {r.hit}
                     </p>
                   ))}
                   {shown.done && bout.winner && (
                     <p className="arena-result">
-                      <b>{bout.winner === 'red' ? bout.red.name : bout.blue.name}</b> takes it.
+                      <b>{bout.winner === 'red' ? bout.red.name : bout.blue.name}</b> {t('takes it.')}
                     </p>
                   )}
                 </div>
               )}
 
               <div className="arena-proof">
-                <span className="eyebrow">THE ARENA&rsquo;S PROMISE</span>
-                <code title="Published before a single bet was placed">{bout.commit.slice(0, 32)}…</code>
+                <span className="eyebrow">{t('THE ARENA’S PROMISE')}</span>
+                <code title={t('Published before a single bet was placed')}>{bout.commit.slice(0, 32)}…</code>
                 <p className="muted small">
-                  {verified === true && 'Checked in your browser: the revealed secret matches the hash published before betting opened. This bout was not rewritten.'}
-                  {verified === false && 'The revealed secret does NOT match what was published. Do not trust this result.'}
-                  {verified === null && 'The secret behind this bout is sealed until the bell. Nobody can know the winner while the money is going on — including the house.'}
+                  {verified === true && t('Checked in your browser: the revealed secret matches the hash published before betting opened. This bout was not rewritten.')}
+                  {verified === false && t('The revealed secret does NOT match what was published. Do not trust this result.')}
+                  {verified === null && t('The secret behind this bout is sealed until the bell. Nobody can know the winner while the money is going on — including the house.')}
                 </p>
               </div>
             </>
           )}
 
-          <h4>Send a fighter</h4>
+          <h4>{t('Send a fighter')}</h4>
           {!world || !candidates.length ? (
-            <p className="muted small">You need a settlement of your own to enter somebody.</p>
+            <p className="muted small">{t('You need a settlement of your own to enter somebody.')}</p>
           ) : (
             <>
               <p className="muted small">
-                Fitness is the person as your settlement made them — rested, fed, warm and clothed.
-                Skill is the trade they have spent their life at. Neither is a hidden number.
+                {t('Fitness is the person as your settlement made them — rested, fed, warm and clothed. Skill is the trade they have spent their life at. Neither is a hidden number.')}
               </p>
               <p className="muted small">
-                An entry is good for <b>one bout</b>. Whoever is drawn comes straight off the
-                roster and goes home afterwards, so sending somebody back out is your call every
-                time rather than something that happens to them.
+                {t('An entry is good for one bout. Whoever is drawn comes straight off the roster and goes home afterwards, so sending somebody back out is your call every time rather than something that happens to them.')}
               </p>
               <div className="arena-bench">
                 {candidates.map((c) => {
@@ -371,8 +368,8 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
                       onClick={() => void send(c)}
                     >
                       <b>{c.name}</b>
-                      <span>level {level} · vigour {vigourOf(c)}</span>
-                      <em>{fighting ? 'in the ring' : already ? 'on the roster' : 'send'}</em>
+                      <span>{t('level {n}', { n: level })} · {t('vigour {n}', { n: vigourOf(c) })}</span>
+                      <em>{fighting ? t('in the ring') : already ? t('on the roster') : t('send')}</em>
                     </button>
                   );
                 })}
@@ -382,12 +379,12 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
 
           {state && state.results.length > 0 && (
             <>
-              <h4>Recent bouts</h4>
+              <h4>{t('Recent bouts')}</h4>
               <div className="arena-history">
                 {state.results.map((r) => (
                   <p key={r.id}>
-                    <b>{r.winner}</b> <span className="muted">of {r.winnerWorld} beat</span> {r.loser}
-                    {' '}<span className="muted">of {r.loserWorld}</span>
+                    <b>{r.winner}</b> <span className="muted">{t('of {world} beat', { world: r.winnerWorld })}</span> {r.loser}
+                    {' '}<span className="muted">{t('of {world}', { world: r.loserWorld })}</span>
                   </p>
                 ))}
               </div>
@@ -396,11 +393,7 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
 
           {notice && <p className="arena-notice">{notice}</p>}
           <p className="muted small arena-rules">
-            Bets are with your own treasury at the odds shown, capped at {MAX_STAKE} Gold a bout and
-            {' '}{MAX_STAKE_PER_DAY.toLocaleString()} a day. They are not pooled against other
-            players: Gold lives in your browser and the arena has no way to prove what anybody
-            holds, so a pot would be a pot a dishonest client could take from honest ones. The
-            fight is shared; the money stays at home.
+            {t('Bets are with your own treasury at the odds shown, capped at {max} Gold a bout and {day} a day. They are not pooled against other players: Gold lives in your browser and the arena has no way to prove what anybody holds, so a pot would be a pot a dishonest client could take from honest ones. The fight is shared; the money stays at home.', { max: MAX_STAKE, day: MAX_STAKE_PER_DAY.toLocaleString() })}
           </p>
         </div>
       </section>

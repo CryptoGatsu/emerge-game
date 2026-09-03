@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { t, useLocale } from '@/lib/i18n';
 
 /**
  * How often a running client asks whether it is still current.
@@ -35,6 +36,7 @@ const CHECK_INTERVAL = 5 * 60_000;
 export function UpdateNotice({ build }: { build: string }) {
   const [waiting, setWaiting] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  useLocale();
   // Held in a ref as well as state so the poll can read it without being torn
   // down and rebuilt every time it changes.
   const seen = useRef(build);
@@ -72,15 +74,15 @@ export function UpdateNotice({ build }: { build: string }) {
   return (
     <div className="update-notice" role="status">
       <div>
-        <b>A new version of Emerge is out.</b>
-        <span>Reload when you are ready — your world and your land are safe.</span>
+        <b>{t('A new version of Emerge is out.')}</b>
+        <span>{t('Reload when you are ready — your world and your land are safe.')}</span>
       </div>
       <div className="update-actions">
-        <button className="update-reload" onClick={() => window.location.reload()}>Reload</button>
+        <button className="update-reload" onClick={() => window.location.reload()}>{t('Reload')}</button>
         {/* No aria-label: the word on the button is already the label, and an
             override that says something else is a button that reads one way to
             a sighted player and another to a screen reader. */}
-        <button className="update-later" onClick={() => setDismissed(waiting)}>Later</button>
+        <button className="update-later" onClick={() => setDismissed(waiting)}>{t('Later')}</button>
       </div>
     </div>
   );

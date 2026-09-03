@@ -35,6 +35,8 @@ import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet } from './WalletPicker';
+import { t, tn, tx, useLocale } from '@/lib/i18n';
+import { GuideZh } from './GuideZh';
 
 export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | null;
 
@@ -121,7 +123,7 @@ function Shell({ title, subtitle, onClose, children, wide }: {
             <h2>{title}</h2>
             <p className="muted">{subtitle}</p>
           </div>
-          <button className="panel-close" onClick={onClose} aria-label="Close">×</button>
+          <button className="panel-close" onClick={onClose} aria-label={t('Close')}>×</button>
         </header>
         <div className="overlay-body">{children}</div>
       </section>
@@ -130,6 +132,7 @@ function Shell({ title, subtitle, onClose, children, wide }: {
 }
 
 function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
+  useLocale();
   const [focus, setFocus] = useState(view.market[0]?.key ?? 'wheat');
   const row = view.market.find((m) => m.key === focus) ?? view.market[0];
   const store = (key: string) => Math.floor(view.resources.find((r) => r.key === key)?.amount ?? 0);
@@ -140,33 +143,31 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
 
   return (
     <Shell
-      title="World Market"
+      title={t('World Market')}
       subtitle={world.live
-        ? 'One market across every settlement. Prices are the same everywhere; what your town buys and sells is its own.'
-        : 'Households buy food, producers consume inputs, and the market moves to close the gaps.'}
+        ? t('One market across every settlement. Prices are the same everywhere; what your town buys and sells is its own.')
+        : t('Households buy food, producers consume inputs, and the market moves to close the gaps.')}
       onClose={onClose}
       wide
     >
       <p className={`market-source ${world.live ? 'live' : ''}`}>
         {world.live ? (
           <>
-            <b>Trading with {world.traders === 1 ? 'one settlement' : `${world.traders} settlements`}.</b>{' '}
-            Every price below is what the same good costs in every other world right now. Your
-            stores decide whether you are buying or selling at it.
+            <b>{world.traders === 1 ? t('Trading with one settlement.') : t('Trading with {n} settlements.', { n: world.traders })}</b>{' '}
+            {t('Every price below is what the same good costs in every other world right now. Your stores decide whether you are buying or selling at it.')}
           </>
         ) : (
           <>
-            <b>Pricing your own stores.</b> The world market is out of reach, so this settlement is
-            quoting what it can see — the way it did before there were others to trade with.
+            <b>{t('Pricing your own stores.')}</b> {t('The world market is out of reach, so this settlement is quoting what it can see — the way it did before there were others to trade with.')}
           </>
         )}
       </p>
       {row && (
         <div className="market-focus">
           <div>
-            <span className="eyebrow">FOCUS</span>
-            <h3>{row.label}</h3>
-            <strong>{row.quote.price.toFixed(2)} <small>GOLD / UNIT</small></strong>
+            <span className="eyebrow">{t('FOCUS')}</span>
+            <h3>{tn(row.label)}</h3>
+            <strong>{row.quote.price.toFixed(2)} <small>{t('GOLD / UNIT')}</small></strong>
           </div>
           {/* A chart of one point is an empty box the height of a chart, which
               is what a brand-new world shows on its first day. Say so instead
@@ -175,23 +176,23 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
             {row.quote.history.length > 1 ? (
               <>
                 <span className="eyebrow">
-                  LAST {row.quote.history.length} {row.quote.history.length === 1 ? 'DAY' : 'DAYS'}
+                  {t('LAST {n} DAYS', { n: row.quote.history.length })}
                 </span>
                 <Sparkline values={row.quote.history} width={260} height={54} />
               </>
             ) : (
               <>
-                <span className="eyebrow">PRICE HISTORY</span>
-                <p className="muted small no-history">Nothing to plot yet — come back tomorrow.</p>
+                <span className="eyebrow">{t('PRICE HISTORY')}</span>
+                <p className="muted small no-history">{t('Nothing to plot yet — come back tomorrow.')}</p>
               </>
             )}
           </div>
           <div className="market-figures">
-            <div><span>IN STORE</span><b>{store(row.key)}</b></div>
-            <div><span>MADE / DAY</span><b>{Math.round(view.production[row.key] ?? 0)}</b></div>
-            <div><span>USED / DAY</span><b>{Math.round(view.consumption[row.key] ?? 0)}</b></div>
+            <div><span>{t('IN STORE')}</span><b>{store(row.key)}</b></div>
+            <div><span>{t('MADE / DAY')}</span><b>{Math.round(view.production[row.key] ?? 0)}</b></div>
+            <div><span>{t('USED / DAY')}</span><b>{Math.round(view.consumption[row.key] ?? 0)}</b></div>
             <div>
-              <span>TREND</span>
+              <span>{t('TREND')}</span>
               <b className={row.quote.trend >= 0 ? 'up' : 'down'}>
                 {row.quote.trend >= 0 ? '+' : ''}{row.quote.trend.toFixed(3)}
               </b>
@@ -202,7 +203,7 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
 
       <div className="market-rows">
         <div className="market-row head">
-          <span>RESOURCE</span><span>PRICE</span><span>30 DAYS</span><span>PRESSURE</span><span>IN STORE</span><span>FLOW</span>
+          <span>{t('RESOURCE')}</span><span>{t('PRICE')}</span><span>{t('30 DAYS')}</span><span>{t('PRESSURE')}</span><span>{t('IN STORE')}</span><span>{t('FLOW')}</span>
         </div>
         {view.market.map((m) => {
           const pressure = m.quote.demand - m.quote.supply;
@@ -212,14 +213,14 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
             // label and the row reflows into two lines rather than being
             // squeezed into six unreadable slivers.
             <button key={m.key} className={`market-row ${focus === m.key ? 'focused' : ''}`} onClick={() => setFocus(m.key)}>
-              <span className="cell name">{m.label}</span>
-              <b className="cell price"><i>price</i>{m.quote.price.toFixed(2)}</b>
+              <span className="cell name">{tn(m.label)}</span>
+              <b className="cell price"><i>{t('price')}</i>{m.quote.price.toFixed(2)}</b>
               <span className="cell spark"><Sparkline values={m.quote.history} width={78} height={18} subtle /></span>
               <span className={`cell ${pressure > 0 ? 'buy' : 'sell'}`}>
-                <i>pressure</i>{pressure > 0 ? 'WANTED' : 'SURPLUS'} {Math.abs(Math.round(pressure))}
+                <i>{t('pressure')}</i>{pressure > 0 ? t('WANTED') : t('SURPLUS')} {Math.abs(Math.round(pressure))}
               </span>
-              <span className="cell store"><i>in store</i>{store(m.key)}</span>
-              <span className={`cell ${flow >= 0 ? 'buy' : 'sell'}`}><i>flow</i>{flow >= 0 ? '+' : ''}{flow}/day</span>
+              <span className="cell store"><i>{t('in store')}</i>{store(m.key)}</span>
+              <span className={`cell ${flow >= 0 ? 'buy' : 'sell'}`}><i>{t('flow')}</i>{flow >= 0 ? '+' : ''}{flow}{t('/day')}</span>
             </button>
           );
         })}
@@ -239,6 +240,8 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
  */
 function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
   const steward = view.stewardship;
+  const locale = useLocale();
+  if (locale === 'zh') return <GuideZh view={view} onClose={onClose} />;
   return (
     <Shell
       title="Game Guide"
@@ -713,6 +716,7 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
   const [travelling, setTravelling] = useState<number | null>(null);
   const { wallet } = useWallet();
   const endRef = useRef<HTMLDivElement | null>(null);
+  useLocale();
 
   /*
    * Which of the people talking own somewhere you can go.
@@ -873,7 +877,7 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
         {theirs && !self ? (
           <button
             className={`chat-who ${host ? 'host' : ''}`}
-            title={host ? `${shown} owns ${view.name} · ${who}` : `Visit ${theirs.worldName} · ${who}`}
+            title={host ? t('{who} owns {world} · {address}', { who: shown, world: view.name, address: who }) : t('Visit {world} · {address}', { world: theirs.worldName, address: who })}
             disabled={travelling !== null}
             onClick={() => travelTo(theirs)}
           >
@@ -916,7 +920,7 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
       const paid = await spend(player.ledger, RENAME_PLAYER_EMERGE, wallet.address);
       if (!paid.ok) {
         setNotice(paid.refused
-          ?? `Changing your name again costs ${RENAME_PLAYER_EMERGE.toLocaleString()} ${TOKEN.ticker}.`);
+          ?? t('Changing your name again costs {cost} {ticker}.', { cost: RENAME_PLAYER_EMERGE.toLocaleString(), ticker: TOKEN.ticker }));
         return;
       }
       onPlayer({
@@ -938,10 +942,10 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
 
   return (
     <Shell
-      title="Chat"
+      title={t('Chat')}
       subtitle={wallet.address
-        ? `Posting as ${who}, under ${shortAddress(wallet.address)}.`
-        : `Posting as ${who} — connect a wallet to post under your address.`}
+        ? t('Posting as {who}, under {address}.', { who, address: shortAddress(wallet.address) })
+        : t('Posting as {who} — connect a wallet to post under your address.', { who })}
       onClose={onClose}
       wide
     >
@@ -951,20 +955,20 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
           <em>{channelOf(state, worldChannel(claimed.seed)).length}</em>
         </button>
         <button className={kind === 'global' ? 'on' : ''} onClick={() => setKind('global')}>
-          Global
+          {t('Global')}
           <em>{channelOf(state, 'global').length}</em>
         </button>
         <button
           className={`ghost bell ${chatNotices ? 'on' : ''}`}
           onClick={onToggleNotices}
           title={chatNotices
-            ? 'Messages raise a card when this panel is closed'
-            : 'Messages arrive quietly'}
+            ? t('Messages raise a card when this panel is closed')
+            : t('Messages arrive quietly')}
         >
-          {chatNotices ? '🔔 Alerts on' : '🔕 Alerts off'}
+          {chatNotices ? t('🔔 Alerts on') : t('🔕 Alerts off')}
         </button>
         <button className="ghost handle" onClick={() => setNaming((n) => !n)}>
-          {player.nameChanges === 0 ? 'Change name · free' : 'Change name'}
+          {player.nameChanges === 0 ? t('Change name · free') : t('Change name')}
         </button>
       </div>
 
@@ -978,8 +982,8 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
           />
           <span className="muted small">
             {player.nameChanges === 0
-              ? 'Your first change is free. Press enter.'
-              : `${RENAME_PLAYER_EMERGE.toLocaleString()} ${TOKEN.ticker}, burned. Press enter.`}
+              ? t('Your first change is free. Press enter.')
+              : t('{cost} {ticker}, burned. Press enter.', { cost: RENAME_PLAYER_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
           </span>
         </div>
       )}
@@ -988,8 +992,8 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
         {messages.length === 0 && (
           <p className="muted small">
             {kind === 'global'
-              ? 'Nothing on the global channel yet. Say hello.'
-              : `Nothing said about ${view.name} yet.`}
+              ? t('Nothing on the global channel yet. Say hello.')
+              : t('Nothing said about {world} yet.', { world: view.name })}
           </p>
         )}
         {rows}
@@ -1000,24 +1004,22 @@ function ChatPanel({ view, claimed, player, onClose, onPlayer, onVisit, chatNoti
         <input
           value={draft}
           maxLength={MESSAGE_LIMIT}
-          placeholder={kind === 'global' ? 'Say something to everyone' : `Say something about ${view.name}`}
+          placeholder={kind === 'global' ? t('Say something to everyone') : t('Say something about {world}', { world: view.name })}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') post(); }}
         />
-        <button onClick={post} disabled={!draft.trim()}>Send</button>
+        <button onClick={post} disabled={!draft.trim()}>{t('Send')}</button>
       </div>
-      {notice && <p className="warn">{notice}</p>}
+      {notice && <p className="warn">{tx(notice)}</p>}
 
       {/* What the relay can actually reach, said plainly either way. */}
       {reach.offline ? (
         <p className="muted small">
-          The relay is not answering. Your messages are being kept here and nobody else can see them
-          until it comes back.
+          {t('The relay is not answering. Your messages are being kept here and nobody else can see them until it comes back.')}
         </p>
       ) : !reach.shared ? (
         <p className="muted small">
-          This build has no shared relay behind it yet, so what you say reaches players on the same
-          server and no further. Said plainly rather than left for you to discover.
+          {t('This build has no shared relay behind it yet, so what you say reaches players on the same server and no further. Said plainly rather than left for you to discover.')}
         </p>
       ) : null}
     </Shell>
@@ -1037,6 +1039,7 @@ function GachaPanel({ player, onClose, onDig }: {
 }) {
   const [last, setLast] = useState<{ prize: Prize; story: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useLocale();
   const table = odds();
   const affordable = player.ledger.balance >= DIG_COST_EMERGE;
 
@@ -1054,52 +1057,49 @@ function GachaPanel({ player, onClose, onDig }: {
 
   return (
     <Shell
-      title="Send out a party"
-      subtitle="Hire prospectors for a day. They always come back with something."
+      title={t('Send out a party')}
+      subtitle={t('Hire prospectors for a day. They always come back with something.')}
       onClose={onClose}
       wide
     >
       <div className="dig">
         <button className="dig-button" onClick={pull} disabled={digging || !affordable}>
-          <span>{digging ? 'SENDING…' : affordable ? 'SEND THEM OUT' : `NOT ENOUGH ${TOKEN.ticker}`}</span>
+          <span>{digging ? t('SENDING…') : affordable ? t('SEND THEM OUT') : t('NOT ENOUGH {ticker}', { ticker: TOKEN.ticker })}</span>
           <b>{DIG_COST_EMERGE.toLocaleString()} {TOKEN.ticker}</b>
-          <i>burned, not collected</i>
+          <i>{t('burned, not collected')}</i>
         </button>
 
         {last && (
           <div className={`dig-result ${last.prize.kind}`}>
-            <span className="eyebrow">THEY CAME BACK WITH</span>
-            <b>{last.prize.label}</b>
-            <p>{last.story}</p>
+            <span className="eyebrow">{t('THEY CAME BACK WITH')}</span>
+            <b>{tx(last.prize.label)}</b>
+            <p>{tx(last.story)}</p>
           </div>
         )}
         {!last && (
           <div className="dig-result waiting">
-            <span className="eyebrow">NOTHING SENT YET</span>
+            <span className="eyebrow">{t('NOTHING SENT YET')}</span>
             <p>
-              Every party comes back with something — the worst outcome on the table is still worth
-              more than a wasted afternoon.
+              {t('Every party comes back with something — the worst outcome on the table is still worth more than a wasted afternoon.')}
             </p>
           </div>
         )}
       </div>
 
-      {notice && <p className="warn">{notice}</p>}
+      {notice && <p className="warn">{tx(notice)}</p>}
 
-      <h4>What they might find</h4>
+      <h4>{t('What they might find')}</h4>
       <div className="odds">
         {table.map((prize) => (
           <div key={prize.id} className={`odds-row ${prize.kind}`}>
-            <span>{prize.label}</span>
+            <span>{tx(prize.label)}</span>
             <div className="odds-bar"><i style={{ width: `${Math.max(3, prize.percent * 3)}%` }} /></div>
             <b>{prize.percent.toFixed(1)}%</b>
           </div>
         ))}
       </div>
       <p className="muted small">
-        These are the real weights: the panel computes them from the same table the draw rolls
-        against, so they cannot drift apart. Naming rights let you rename one citizen without paying
-        the usual fee, and you hold {player.nameTokens} of them.
+        {t('These are the real weights: the panel computes them from the same table the draw rolls against, so they cannot drift apart. Naming rights let you rename one citizen without paying the usual fee, and you hold {n} of them.', { n: player.nameTokens })}
       </p>
     </Shell>
   );
@@ -1129,15 +1129,16 @@ function GiftPanel({ player, visit, onClose, onGift }: {
   const cost = gold * EMERGE_PER_GOLD;
   const affordable = player.ledger.balance >= cost;
   const who = visit.ownerName?.trim() ? visit.ownerName : shortAddress(visit.owner);
+  useLocale();
 
   const send = async () => {
-    if (!(gold > 0)) { setNotice('Enter an amount to send.'); return; }
+    if (!(gold > 0)) { setNotice(t('Enter an amount to send.')); return; }
     if (gold > MAX_GIFT_GOLD) {
-      setNotice(`A single gift carries at most ${MAX_GIFT_GOLD.toLocaleString()} Gold.`);
+      setNotice(t('A single gift carries at most {max} Gold.', { max: MAX_GIFT_GOLD.toLocaleString() }));
       return;
     }
     if (!affordable) {
-      setNotice(`That is ${cost.toLocaleString()} ${TOKEN.ticker}, and you hold ${Math.floor(player.ledger.balance).toLocaleString()}.`);
+      setNotice(t('That is {cost} {ticker}, and you hold {held}.', { cost: cost.toLocaleString(), ticker: TOKEN.ticker, held: Math.floor(player.ledger.balance).toLocaleString() }));
       return;
     }
     setSending(true);
@@ -1150,47 +1151,44 @@ function GiftPanel({ player, visit, onClose, onGift }: {
 
   return (
     <Shell
-      title={`Send Gold to ${visit.worldName}`}
-      subtitle={`${who} built this place. You cannot change it — but you can help pay for it.`}
+      title={t('Send Gold to {world}', { world: visit.worldName })}
+      subtitle={t('{who} built this place. You cannot change it — but you can help pay for it.', { who })}
       onClose={onClose}
     >
       <div className="vault-card">
-        <span className="eyebrow">HOW MUCH</span>
+        <span className="eyebrow">{t('HOW MUCH')}</span>
         <div className="vault-row">
           <input
             value={amount}
             inputMode="numeric"
             onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
           />
-          <span className="muted">Gold</span>
+          <span className="muted">{t('Gold')}</span>
         </div>
         <p className="muted small">
           {gold > 0
-            ? `${cost.toLocaleString()} ${TOKEN.ticker}, burned out of your balance. ${who} finds ${gold.toLocaleString()} Gold in their treasury when they next open ${visit.worldName}.`
-            : `${EMERGE_PER_GOLD.toLocaleString()} ${TOKEN.ticker} per Gold, the same rate as your own deposits.`}
+            ? t('{cost} {ticker}, burned out of your balance. {who} finds {gold} Gold in their treasury when they next open {world}.', { cost: cost.toLocaleString(), ticker: TOKEN.ticker, who, gold: gold.toLocaleString(), world: visit.worldName })
+            : t('{rate} {ticker} per Gold, the same rate as your own deposits.', { rate: EMERGE_PER_GOLD.toLocaleString(), ticker: TOKEN.ticker })}
         </p>
         <button className="claim-button" onClick={send} disabled={sending || !affordable || !(gold > 0)}>
           {sending
-            ? 'Sending…'
+            ? t('Sending…')
             : !(gold > 0)
-              ? 'Enter an amount'
+              ? t('Enter an amount')
               : !affordable
-                ? `Not enough ${TOKEN.ticker}`
-                : `Send ${gold.toLocaleString()} Gold`}
+                ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                : t('Send {gold} Gold', { gold: gold.toLocaleString() })}
         </button>
         {sent !== null && (
           <p className="muted small">
-            Sent. {sent.toLocaleString()} Gold is waiting for {who}, and{' '}
-            {(sent * EMERGE_PER_GOLD).toLocaleString()} {TOKEN.ticker} has left the supply for good.
+            {t('Sent. {gold} Gold is waiting for {who}, and {burned} {ticker} has left the supply for good.', { gold: sent.toLocaleString(), who, burned: (sent * EMERGE_PER_GOLD).toLocaleString(), ticker: TOKEN.ticker })}
           </p>
         )}
-        {notice && <p className="warn">{notice}</p>}
+        {notice && <p className="warn">{tx(notice)}</p>}
       </div>
 
       <p className="muted small">
-        At most {MAX_GIFT_GOLD.toLocaleString()} Gold at a time. Gifts cannot be sent to a world you
-        own — putting your own tokens into your own treasury is what the Bank is for, and it is
-        priced the same either way.
+        {t('At most {max} Gold at a time. Gifts cannot be sent to a world you own — putting your own tokens into your own treasury is what the Bank is for, and it is priced the same either way.', { max: MAX_GIFT_GOLD.toLocaleString() })}
       </p>
     </Shell>
   );
@@ -1215,7 +1213,7 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
     <div className="wages">
       <div className="wage-head">
         <b>{pct(rate)}</b>
-        <span className="muted small">of the going rate · {bill.toLocaleString()} Gold a day</span>
+        <span className="muted small">{t('of the going rate · {bill} Gold a day', { bill: bill.toLocaleString() })}</span>
       </div>
       <input
         className="wage-slider"
@@ -1225,7 +1223,7 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
         step={5}
         value={Math.round(rate * 100)}
         onChange={(e) => onWages(Number(e.target.value) / 100)}
-        aria-label="Wages, as a share of the going rate"
+        aria-label={t('Wages, as a share of the going rate')}
       />
       <div className="wage-scale">
         <span>{pct(WAGE_MIN)}</span>
@@ -1234,22 +1232,22 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
       </div>
       <div className="wage-effect">
         <div>
-          <span>WORK DONE</span>
+          <span>{t('WORK DONE')}</span>
           <b className={effort >= 1 ? 'up' : 'down'}>{pct(effort)}</b>
         </div>
         <div>
-          <span>MOOD</span>
+          <span>{t('MOOD')}</span>
           <b className={rate >= WAGE_STANDARD ? 'up' : 'down'}>
-            {rate === WAGE_STANDARD ? 'steady' : rate > WAGE_STANDARD ? 'lifting' : 'sinking'}
+            {rate === WAGE_STANDARD ? t('steady') : rate > WAGE_STANDARD ? t('lifting') : t('sinking')}
           </b>
         </div>
       </div>
       <p className="muted small">
         {rate < WAGE_STANDARD
-          ? 'Paying under the rate does not even leave you richer. People do less and lose heart, the settlement produces and sells less, and a hundred and fifty days of it ends with a smaller town and an emptier treasury than paying properly would have.'
+          ? t('Paying under the rate does not even leave you richer. People do less and lose heart, the settlement produces and sells less, and a hundred and fifty days of it ends with a smaller town and an emptier treasury than paying properly would have.')
           : rate > WAGE_STANDARD
-            ? 'Paying over the rate does not pay for itself: a wage bill rises far faster than the work does. What it buys is a contented, growing settlement, and it is paid for in Gold that does not all come home.'
-            : 'The going rate. People work as expected and their sense of purpose holds steady.'}
+            ? t('Paying over the rate does not pay for itself: a wage bill rises far faster than the work does. What it buys is a contented, growing settlement, and it is paid for in Gold that does not all come home.')
+            : t('The going rate. People work as expected and their sense of purpose holds steady.')}
       </p>
     </div>
   );
@@ -1270,6 +1268,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
   const { wallet } = useWallet();
   const ledger = player.ledger;
   const steward = view.stewardship;
+  useLocale();
 
   /** Who is asking, so a queued payout can be attributed and paid. */
   const who = {
@@ -1317,7 +1316,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
     setBusy(null);
     setMessage(result.message);
     if (!result.ok) return;
-    onVault(result.ledger, depositGold, `${depositGold} Gold arrived from the ${TOKEN.ticker} vault.`);
+    onVault(result.ledger, depositGold, t('{gold} Gold arrived from the {ticker} vault.', { gold: depositGold, ticker: TOKEN.ticker }));
     void refreshHistory();
   };
 
@@ -1329,7 +1328,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
     setBusy(null);
     setMessage(result.message);
     if (!result.ok) return;
-    onVault(result.ledger, -quote.gold, `${quote.gold} Gold of principal was withdrawn to ${TOKEN.ticker}.`);
+    onVault(result.ledger, -quote.gold, t('{gold} Gold of principal was withdrawn to {ticker}.', { gold: quote.gold, ticker: TOKEN.ticker }));
     void refreshHistory();
   };
 
@@ -1342,133 +1341,122 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
     if (!result.ok) return;
     // Collecting earnings does not touch the treasury: the settlement's Gold is
     // the settlement's, and what the player earned is for their work.
-    onVault(result.ledger, 0, `${amount.toLocaleString()} ${TOKEN.ticker} of earnings was collected.`);
+    onVault(result.ledger, 0, t('{amount} {ticker} of earnings was collected.', { amount: amount.toLocaleString(), ticker: TOKEN.ticker }));
     void refreshHistory();
   };
 
   return (
-    <Shell title="Bank" subtitle="Gold circulates between the treasury, workers, households and the market." onClose={onClose} wide>
-      <div className="bank-balance">{Math.floor(view.treasury).toLocaleString()} <small>GOLD</small></div>
+    <Shell title={t('Bank')} subtitle={t('Gold circulates between the treasury, workers, households and the market.')} onClose={onClose} wide>
+      <div className="bank-balance">{Math.floor(view.treasury).toLocaleString()} <small>{t('GOLD')}</small></div>
       <div className="bank-grid">
-        <div><span>HOUSEHOLD WEALTH</span><b>{Math.floor(view.householdWealth).toLocaleString()}</b></div>
-        <div><span>WAGES PER DAY</span><b>{Math.floor(view.dailyWages).toLocaleString()}</b></div>
-        <div><span>FAMILIES</span><b>{view.familyCount}</b></div>
-        <div><span>BUILDINGS ON UPKEEP</span><b>{view.upkeep}</b></div>
+        <div><span>{t('HOUSEHOLD WEALTH')}</span><b>{Math.floor(view.householdWealth).toLocaleString()}</b></div>
+        <div><span>{t('WAGES PER DAY')}</span><b>{Math.floor(view.dailyWages).toLocaleString()}</b></div>
+        <div><span>{t('FAMILIES')}</span><b>{view.familyCount}</b></div>
+        <div><span>{t('BUILDINGS ON UPKEEP')}</span><b>{view.upkeep}</b></div>
       </div>
 
-      <h4>Wages</h4>
+      <h4>{t('Wages')}</h4>
       <WageControl view={view} onWages={onWages} />
 
-      <h4>The day's books</h4>
+      <h4>{t('The day’s books')}</h4>
       <p className="muted small">
-        Every Gold in or out of the treasury is booked under a heading, and the headings add up to
-        the change in the balance above. Yesterday closed {netYesterday >= 0 ? 'up' : 'down'}
-        {' '}{Math.abs(Math.round(netYesterday)).toLocaleString()} Gold.
+        {t('Every Gold in or out of the treasury is booked under a heading, and the headings add up to the change in the balance above.')}{' '}
+        {netYesterday >= 0
+          ? t('Yesterday closed up {gold} Gold.', { gold: Math.abs(Math.round(netYesterday)).toLocaleString() })
+          : t('Yesterday closed down {gold} Gold.', { gold: Math.abs(Math.round(netYesterday)).toLocaleString() })}
       </p>
       <div className="books">
         <div className="books-col earning">
           <div className="books-head">
-            <span>EARNED YESTERDAY</span>
+            <span>{t('EARNED YESTERDAY')}</span>
             <b>+{Math.round(view.earnedYesterday).toLocaleString()}</b>
           </div>
           {view.incomeLines.length ? view.incomeLines.map((line) => (
             <div key={line.key} className="books-line">
-              <span>{line.label}</span><b>{Math.round(line.amount).toLocaleString()}</b>
+              <span>{tn(line.label)}</span><b>{Math.round(line.amount).toLocaleString()}</b>
             </div>
-          )) : <div className="books-line empty"><span>Nothing came in</span></div>}
-          <div className="books-line today"><span>So far today</span><b>+{Math.round(view.earnedToday).toLocaleString()}</b></div>
+          )) : <div className="books-line empty"><span>{t('Nothing came in')}</span></div>}
+          <div className="books-line today"><span>{t('So far today')}</span><b>+{Math.round(view.earnedToday).toLocaleString()}</b></div>
         </div>
         <div className="books-col spending">
           <div className="books-head">
-            <span>SPENT YESTERDAY</span>
+            <span>{t('SPENT YESTERDAY')}</span>
             <b>−{Math.round(view.spentYesterday).toLocaleString()}</b>
           </div>
           {view.outgoingLines.length ? view.outgoingLines.map((line) => (
             <div key={line.key} className="books-line">
-              <span>{line.label}</span><b>{Math.round(line.amount).toLocaleString()}</b>
+              <span>{tn(line.label)}</span><b>{Math.round(line.amount).toLocaleString()}</b>
             </div>
-          )) : <div className="books-line empty"><span>Nothing went out</span></div>}
-          <div className="books-line today"><span>So far today</span><b>−{Math.round(view.spentToday).toLocaleString()}</b></div>
+          )) : <div className="books-line empty"><span>{t('Nothing went out')}</span></div>}
+          <div className="books-line today"><span>{t('So far today')}</span><b>−{Math.round(view.spentToday).toLocaleString()}</b></div>
         </div>
       </div>
 
-      <h4>What you are earning</h4>
+      <h4>{t('What you are earning')}</h4>
       <p className="muted small">
-        Gold is the settlement&rsquo;s money and stays in the settlement. The {TOKEN.ticker} you earn is minted
-        against how well you run the place: a daily ceiling of {steward.cap.toLocaleString()}, multiplied by how
-        the settlement is doing and by how recently you did anything about it. A world nobody touches earns a
-        fraction of one that is being run.
+        {t('Gold is the settlement’s money and stays in the settlement. The {ticker} you earn is minted against how well you run the place: a daily ceiling of {cap}, multiplied by how the settlement is doing and by how recently you did anything about it. A world nobody touches earns a fraction of one that is being run.', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })}
       </p>
       <div className="steward-grid">
         <div>
-          <span>HOW IT IS RUN</span>
+          <span>{t('HOW IT IS RUN')}</span>
           <b>{Math.round(steward.score * 100)}%</b>
-          <em>Housed, fed, employed, content and safe</em>
+          <em>{t('Housed, fed, employed, content and safe')}</em>
         </div>
         <div className={steward.attention < 0.5 ? 'fading' : ''}>
-          <span>YOUR ATTENTION</span>
+          <span>{t('YOUR ATTENTION')}</span>
           <b>{Math.round(steward.attention * 100)}%</b>
           <em>
             {steward.idleHours < 1
-              ? 'Acted on just now'
+              ? t('Acted on just now')
               : steward.idleHours < 24
-                ? `Nothing done for ${Math.floor(steward.idleHours)}h`
-                : `Nothing done for ${Math.floor(steward.idleHours / 24)} ${Math.floor(steward.idleHours / 24) === 1 ? 'day' : 'days'}`}
+                ? t('Nothing done for {n}h', { n: Math.floor(steward.idleHours) })
+                : t('Nothing done for {n} days', { n: Math.floor(steward.idleHours / 24) })}
           </em>
         </div>
         <div className={earning ? '' : 'fading'}>
-          <span>EARNING PER DAY</span>
-          <b>{earning ? steward.dailyYield.toLocaleString() : 'nothing'}</b>
+          <span>{t('EARNING PER DAY')}</span>
+          <b>{earning ? steward.dailyYield.toLocaleString() : t('nothing')}</b>
           <em>
             {earning
-              ? `${TOKEN.ticker} a real day, of ${steward.cap.toLocaleString()} possible`
-              : `beyond your first ${EARNING_PLOT_LIMIT} plots`}
+              ? t('{ticker} a real day, of {cap} possible', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })
+              : t('beyond your first {n} plots', { n: EARNING_PLOT_LIMIT })}
           </em>
         </div>
         <div>
-          <span>EARNED HERE</span>
+          <span>{t('EARNED HERE')}</span>
           <b>{Math.floor(ledger.lifetimeEarned).toLocaleString()}</b>
-          <em>{Math.floor(ledger.earnedEmerge).toLocaleString()} uncollected</em>
+          <em>{t('{n} uncollected', { n: Math.floor(ledger.earnedEmerge).toLocaleString() })}</em>
         </div>
       </div>
 
       {!earning && (
         <p className="warn">
-          This world does not pay. Only the first {EARNING_PLOT_LIMIT} plots you claimed earn
-          {' '}{TOKEN.ticker} — this one is yours to build in, and everything you do here still
-          counts towards the settlement, just not towards your balance. Give up one of the four and
-          the next in line starts earning.
+          {t('This world does not pay. Only the first {n} plots you claimed earn {ticker} — this one is yours to build in, and everything you do here still counts towards the settlement, just not towards your balance. Give up one of the four and the next in line starts earning.', { n: EARNING_PLOT_LIMIT, ticker: TOKEN.ticker })}
         </p>
       )}
 
       {liveToken() && (
         <p className="muted small vault-note">
-          Both directions are real transfers. A deposit is signed by you and lands in the vault at
-          {' '}<b>{shortAddress(VAULT_ADDRESS)}</b>; a withdrawal is signed by the vault and lands in
-          your wallet, straight away and without anybody approving it. Everything the game
-          <em> charges</em> goes to the burn address instead and is gone. The
-          {' '}{Math.round(WITHDRAW_BURN_RATE * 100)}% taken off a withdrawal is the one thing that
-          stays put: it remains in the vault to be burned.
+          {t('Both directions are real transfers. A deposit is signed by you and lands in the vault at {vault}; a withdrawal is signed by the vault and lands in your wallet, straight away and without anybody approving it. Everything the game charges goes to the burn address instead and is gone. The {pct}% taken off a withdrawal is the one thing that stays put: it remains in the vault to be burned.', { vault: shortAddress(VAULT_ADDRESS), pct: Math.round(WITHDRAW_BURN_RATE * 100) })}
           {history && !history.automatic && (
-            <> This build has no vault key configured, so withdrawals are refused rather than paid —
-            nothing here will pretend otherwise.</>
+            <> {t('This build has no vault key configured, so withdrawals are refused rather than paid — nothing here will pretend otherwise.')}</>
           )}
         </p>
       )}
 
       {liveToken() && history && (history.payouts.length > 0 || ledger.pendingEmerge > 0) && (
         <div className="payout-queue">
-          <span className="eyebrow">PAID OUT</span>
+          <span className="eyebrow">{t('PAID OUT')}</span>
           {ledger.pendingEmerge > 0 && (
             <div className="vault-line">
-              <span>Requested before payouts were automatic</span>
+              <span>{t('Requested before payouts were automatic')}</span>
               <b>{Math.floor(ledger.pendingEmerge).toLocaleString()} {TOKEN.ticker}</b>
             </div>
           )}
           {history.payouts.slice(0, 6).map((row) => (
             <div key={row.id} className="payout-row paid">
               <span>
-                {row.kind === 'principal' ? `${row.gold} Gold of principal` : 'Stewardship earnings'}
+                {row.kind === 'principal' ? t('{gold} Gold of principal', { gold: row.gold }) : t('Stewardship earnings')}
                 {' · '}{new Date(row.at).toLocaleDateString()}
               </span>
               <b>{row.net.toLocaleString()} {TOKEN.ticker}</b>
@@ -1479,17 +1467,17 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
                   href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/tx/${row.txHash}`}
                   target="_blank"
                   rel="noreferrer noopener"
-                >sent</a>
-              ) : <em>sent</em>}
+                >{t('sent')}</a>
+              ) : <em>{t('sent')}</em>}
             </div>
           ))}
         </div>
       )}
 
       <div className="vault-card claim-card">
-        <span className="eyebrow">COLLECT EARNINGS</span>
+        <span className="eyebrow">{t('COLLECT EARNINGS')}</span>
         <label className="name-field">
-          <span>{TOKEN.ticker} TO COLLECT</span>
+          <span>{t('{ticker} TO COLLECT', { ticker: TOKEN.ticker })}</span>
           <input
             value={claimAmount}
             inputMode="numeric"
@@ -1497,94 +1485,90 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
             onChange={(e) => setClaimAmount(e.target.value.replace(/[^0-9]/g, ''))}
           />
         </label>
-        <div className="vault-line"><span>Available</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
-        <div className="vault-line burn"><span>Burn</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
+        <div className="vault-line"><span>{t('Available')}</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
+        <div className="vault-line burn"><span>{t('Burn')}</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
         {history?.room && (
           <div className="vault-line">
-            <span>Collectable today</span>
+            <span>{t('Collectable today')}</span>
             <b>{Math.min(history.room.left, history.room.globalLeft).toLocaleString()} {TOKEN.ticker}</b>
           </div>
         )}
         {history?.land && history.land !== 'holds' && (
           <p className="warn">
             {history.land === 'no-registry'
-              ? `Stewardship cannot be collected until ${TOKEN.ticker} is live here. Your balance keeps accruing and is safe.`
+              ? t('Stewardship cannot be collected until {ticker} is live here. Your balance keeps accruing and is safe.', { ticker: TOKEN.ticker })
               : history.land === 'unreachable'
-                ? 'What land this wallet holds could not be checked just now. Your balance is safe — try again shortly.'
-                : 'No plot stands in this wallet\u2019s name. Stewardship is paid to the wallet that holds the land, so if you claimed with a different one, connect that.'}
+                ? t('What land this wallet holds could not be checked just now. Your balance is safe — try again shortly.')
+                : t('No plot stands in this wallet’s name. Stewardship is paid to the wallet that holds the land, so if you claimed with a different one, connect that.')}
           </p>
         )}
         <button onClick={doClaim} disabled={busy !== null || ledger.earnedEmerge < 1}>
-          {busy === 'collect' ? 'Sending…' : liveToken() ? 'Collect to wallet' : 'Collect'}
+          {busy === 'collect' ? t('Sending…') : liveToken() ? t('Collect to wallet') : t('Collect')}
         </button>
       </div>
 
-      <h4>{TOKEN.ticker} vault</h4>
+      <h4>{t('{ticker} vault', { ticker: TOKEN.ticker })}</h4>
       <p className="muted small">
-        {EMERGE_PER_GOLD.toLocaleString()} {TOKEN.ticker} buys 1 Gold, so 1,000,000 {TOKEN.ticker} is 100 Gold.
-        Deposits fund the treasury, and the same Gold can be taken back out — that is your own money and moving
-        it mints nothing, which is why a deposit is the one movement in the game that is vaulted rather than
-        burned. Withdrawals take {Math.round(WITHDRAW_BURN_RATE * 100)}%, and that share is burned. The
-        settlement&rsquo;s own surplus is not withdrawable: it is what the town pays its people with.
-        {liveToken() && ' What you can take back out is what the chain shows you put in, so it is the same figure on any device you connect this wallet to.'}
+        {t('{rate} {ticker} buys 1 Gold, so 1,000,000 {ticker} is 100 Gold. Deposits fund the treasury, and the same Gold can be taken back out — that is your own money and moving it mints nothing, which is why a deposit is the one movement in the game that is vaulted rather than burned. Withdrawals take {pct}%, and that share is burned. The settlement’s own surplus is not withdrawable: it is what the town pays its people with.', { rate: EMERGE_PER_GOLD.toLocaleString(), ticker: TOKEN.ticker, pct: Math.round(WITHDRAW_BURN_RATE * 100) })}
+        {liveToken() && ` ${t('What you can take back out is what the chain shows you put in, so it is the same figure on any device you connect this wallet to.')}`}
       </p>
 
       <div className="vault-grid">
         <div className="vault-card">
-          <span className="eyebrow">DEPOSIT</span>
+          <span className="eyebrow">{t('DEPOSIT')}</span>
           <label className="name-field">
-            <span>{TOKEN.ticker} TO DEPOSIT</span>
+            <span>{t('{ticker} TO DEPOSIT', { ticker: TOKEN.ticker })}</span>
             <input value={depositAmount} inputMode="numeric" onChange={(e) => setDepositAmount(e.target.value.replace(/[^0-9]/g, ''))} />
           </label>
-          <div className="vault-line"><span>Buys</span><b>{depositGold} Gold</b></div>
-          <div className="vault-line"><span>Balance</span><b>{Math.floor(ledger.balance).toLocaleString()} {TOKEN.ticker}</b></div>
+          <div className="vault-line"><span>{t('Buys')}</span><b>{t('{n} Gold', { n: depositGold })}</b></div>
+          <div className="vault-line"><span>{t('Balance')}</span><b>{Math.floor(ledger.balance).toLocaleString()} {TOKEN.ticker}</b></div>
           <button
             onClick={doDeposit}
             disabled={busy !== null || depositGold < 0.01 || Number(depositAmount) > ledger.balance}
           >
-            {busy === 'deposit' ? 'Signing…' : 'Deposit'}
+            {busy === 'deposit' ? t('Signing…') : t('Deposit')}
           </button>
         </div>
 
         <div className="vault-card">
-          <span className="eyebrow">WITHDRAW</span>
+          <span className="eyebrow">{t('WITHDRAW')}</span>
           <label className="name-field">
-            <span>GOLD TO WITHDRAW</span>
+            <span>{t('GOLD TO WITHDRAW')}</span>
             <input value={withdrawAmount} inputMode="numeric" onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, ''))} />
           </label>
-          <div className="vault-line"><span>You receive</span><b>{quote.received.toLocaleString()} {TOKEN.ticker}</b></div>
+          <div className="vault-line"><span>{t('You receive')}</span><b>{quote.received.toLocaleString()} {TOKEN.ticker}</b></div>
           <div className="vault-line burn">
-            <span>{liveToken() ? 'Stays in the vault to burn' : 'Burned'}</span>
+            <span>{liveToken() ? t('Stays in the vault to burn') : t('Burned')}</span>
             <b>{quote.burned.toLocaleString()} {TOKEN.ticker}</b>
           </div>
           <div className="vault-line">
-            <span>Principal standing</span>
-            <b>{standingGold.toLocaleString()} Gold</b>
+            <span>{t('Principal standing')}</span>
+            <b>{t('{n} Gold', { n: standingGold.toLocaleString() })}</b>
           </div>
           <button
             onClick={doWithdraw}
             disabled={busy !== null || quote.gold < 1 || quote.gold > Math.floor(view.treasury) || quote.gold > standingGold}
           >
-            {busy === 'withdraw' ? 'Sending…' : liveToken() ? 'Withdraw to wallet' : 'Withdraw'}
+            {busy === 'withdraw' ? t('Sending…') : liveToken() ? t('Withdraw to wallet') : t('Withdraw')}
           </button>
         </div>
       </div>
 
-      {message && <p className="warn">{message}</p>}
+      {message && <p className="warn">{tx(message)}</p>}
       <div className="vault-ledger">
-        <span>Deposited {ledger.depositedGold.toLocaleString()} Gold</span>
-        <span>Earned {Math.floor(ledger.lifetimeEarned).toLocaleString()} {TOKEN.ticker}</span>
-        <span>Withdrawn {ledger.withdrawnEmerge.toLocaleString()} {TOKEN.ticker}</span>
-        <span>Burned {ledger.burnedEmerge.toLocaleString()} {TOKEN.ticker}</span>
-        {ledger.pendingEmerge > 0 && <span>Queued {Math.floor(ledger.pendingEmerge).toLocaleString()} {TOKEN.ticker}</span>}
-        {ledger.vaultBurn > 0 && <span>To burn from the vault {Math.floor(ledger.vaultBurn).toLocaleString()} {TOKEN.ticker}</span>}
+        <span>{t('Deposited {n} Gold', { n: ledger.depositedGold.toLocaleString() })}</span>
+        <span>{t('Earned {n} {ticker}', { n: Math.floor(ledger.lifetimeEarned).toLocaleString(), ticker: TOKEN.ticker })}</span>
+        <span>{t('Withdrawn {n} {ticker}', { n: ledger.withdrawnEmerge.toLocaleString(), ticker: TOKEN.ticker })}</span>
+        <span>{t('Burned {n} {ticker}', { n: ledger.burnedEmerge.toLocaleString(), ticker: TOKEN.ticker })}</span>
+        {ledger.pendingEmerge > 0 && <span>{t('Queued {n} {ticker}', { n: Math.floor(ledger.pendingEmerge).toLocaleString(), ticker: TOKEN.ticker })}</span>}
+        {ledger.vaultBurn > 0 && <span>{t('To burn from the vault {n} {ticker}', { n: Math.floor(ledger.vaultBurn).toLocaleString(), ticker: TOKEN.ticker })}</span>}
       </div>
 
-      <h4>Stores</h4>
+      <h4>{t('Stores')}</h4>
       <div className="resource-grid">
         {view.resources.map((r) => (
           <div key={r.key} className="resource-cell">
-            <span>{r.label}</span>
+            <span>{tn(r.label)}</span>
             <b>{Math.floor(r.amount)}</b>
           </div>
         ))}
@@ -1597,25 +1581,26 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
   const stone = stock('stone');
+  useLocale();
   return (
     <Shell
-      title="Build"
-      subtitle="Gold and materials both. A building takes timber and stone out of the yard, so what the settlement can raise depends on what it has cut and quarried."
+      title={t('Build')}
+      subtitle={t('Gold and materials both. A building takes timber and stone out of the yard, so what the settlement can raise depends on what it has cut and quarried.')}
       onClose={onClose}
       wide
     >
       {view.advice.length > 0 && (
         <div className="build-advice">
-          <span>THE HELPER SUGGESTS</span>
+          <span>{t('THE HELPER SUGGESTS')}</span>
           {view.advice.map((a, i) => (
-            <p key={`${a.kind}-${a.type ?? ''}-${i}`}><b>{a.title}</b> — {a.why} <em>{a.gain}</em></p>
+            <p key={`${a.kind}-${a.type ?? ''}-${i}`}><b>{tx(a.title)}</b> — {tx(a.why)} <em>{tx(a.gain)}</em></p>
           ))}
         </div>
       )}
       <div className="build-stores">
-        <span>IN THE YARD</span>
-        <b>{Math.floor(wood)} wood</b>
-        <b>{Math.floor(stone)} stone</b>
+        <span>{t('IN THE YARD')}</span>
+        <b>{t('{n} wood', { n: Math.floor(wood) })}</b>
+        <b>{t('{n} stone', { n: Math.floor(stone) })}</b>
       </div>
       <div className="build-grid">
         {BUILDABLE.map((option) => {
@@ -1626,18 +1611,18 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
           return (
             <div key={option.type} className={`build-card ${ready ? '' : 'locked'}`}>
               <div className="build-icon">{option.icon}</div>
-              <h3>{option.type}</h3>
-              <p>{option.blurb}</p>
+              <h3>{tn(option.type)}</h3>
+              <p>{t(option.blurb)}</p>
               <div className="build-cost">
-                <b>{option.cost} Gold</b>
-                <small>{maintenanceCost(option.type)}/day upkeep</small>
+                <b>{t('{n} Gold', { n: option.cost })}</b>
+                <small>{t('{n}/day upkeep', { n: maintenanceCost(option.type) })}</small>
               </div>
               <div className="build-materials">
-                <span className={wood >= need.wood ? '' : 'short'}>{need.wood} wood</span>
-                <span className={stone >= need.stone ? '' : 'short'}>{need.stone} stone</span>
+                <span className={wood >= need.wood ? '' : 'short'}>{t('{n} wood', { n: need.wood })}</span>
+                <span className={stone >= need.stone ? '' : 'short'}>{t('{n} stone', { n: need.stone })}</span>
               </div>
               <button disabled={!ready} onClick={() => onBuild(option.type, option.cost)}>
-                {ready ? 'Place' : !paid ? 'Not enough Gold' : 'Not enough materials'}
+                {ready ? t('Place') : !paid ? t('Not enough Gold') : t('Not enough materials')}
               </button>
             </div>
           );
@@ -1659,99 +1644,95 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   const affordable = player.ledger.balance >= RENAME_COST_EMERGE;
   const changed = draftName.trim().length > 0 && draftName.trim() !== view.name;
   const listing = player.listings.find((l) => l.seed === claimed.seed);
+  useLocale();
 
   return (
     <Shell
-      title="On-Chain"
-      subtitle={`Emerge is a hybrid world: the settlement runs off-chain, and ${TOKEN.ticker} on ${ACTIVE_CHAIN.label} carries ownership and value.`}
+      title={t('On-Chain')}
+      subtitle={t('Emerge is a hybrid world: the settlement runs off-chain, and {ticker} on {chain} carries ownership and value.', { ticker: TOKEN.ticker, chain: ACTIVE_CHAIN.label })}
       onClose={onClose}
       wide
     >
       <div className="connect-grid">
         <div className="connect-card">
-          <span className="eyebrow">WALLET</span>
+          <span className="eyebrow">{t('WALLET')}</span>
           <WalletPicker />
           <div className="vault-line" style={{ marginTop: 12 }}>
-            <span>Balance</span><b>{Math.floor(player.ledger.balance).toLocaleString()} {TOKEN.ticker}</b>
+            <span>{t('Balance')}</span><b>{Math.floor(player.ledger.balance).toLocaleString()} {TOKEN.ticker}</b>
           </div>
         </div>
 
         <div className="connect-card">
-          <span className="eyebrow">YOUR PLOT</span>
+          <span className="eyebrow">{t('YOUR PLOT')}</span>
           <h3>{claimed.region}</h3>
           <p className="muted">
-            Claimed for {claimed.price.toLocaleString()} {TOKEN.ticker} · seed {view.seed} · day {view.day}
+            {t('Claimed for {price} {ticker} · seed {seed} · day {day}', { price: claimed.price.toLocaleString(), ticker: TOKEN.ticker, seed: view.seed, day: view.day })}
           </p>
           <p className="muted small">
             {claimed.txHash
-              ? `Settled on chain: ${claimed.txHash}`
-              : 'Recorded in this browser. Not settled on chain yet.'}
+              ? t('Settled on chain: {tx}', { tx: claimed.txHash })
+              : t('Recorded in this browser. Not settled on chain yet.')}
           </p>
           <label className="name-field">
-            <span>WORLD NAME</span>
+            <span>{t('WORLD NAME')}</span>
             <input value={draftName} maxLength={24} onChange={(e) => setDraftName(e.target.value)} />
           </label>
           <button onClick={() => onRenameWorld(draftName)} disabled={!changed || !affordable}>
-            {affordable ? `Rename for ${RENAME_COST_EMERGE.toLocaleString()} ${TOKEN.ticker}` : `Not enough ${TOKEN.ticker}`}
+            {affordable ? t('Rename for {cost} {ticker}', { cost: RENAME_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker }) : t('Not enough {ticker}', { ticker: TOKEN.ticker })}
           </button>
         </div>
 
         <div className="connect-card">
-          <span className="eyebrow">SELL THIS PLOT</span>
+          <span className="eyebrow">{t('SELL THIS PLOT')}</span>
           {listing ? (
             <>
-              <h3>Listed at {listing.price.toLocaleString()} {TOKEN.ticker}</h3>
+              <h3>{t('Listed at {price} {ticker}', { price: listing.price.toLocaleString(), ticker: TOKEN.ticker })}</h3>
               <p className="muted small">
-                Waiting for a buyer. Resale between players needs the plot registry on
-                {' '}{ACTIVE_CHAIN.label}; until it is deployed the listing is local to this browser.
+                {t('Waiting for a buyer. Resale between players needs the plot registry on {chain}; until it is deployed the listing is local to this browser.', { chain: ACTIVE_CHAIN.label })}
               </p>
-              <button onClick={() => onList(null)}>Withdraw listing</button>
+              <button onClick={() => onList(null)}>{t('Withdraw listing')}</button>
             </>
           ) : (
             <>
               <label className="name-field">
-                <span>ASKING PRICE ({TOKEN.ticker})</span>
+                <span>{t('ASKING PRICE ({ticker})', { ticker: TOKEN.ticker })}</span>
                 <input value={askPrice} inputMode="numeric" onChange={(e) => setAskPrice(e.target.value.replace(/[^0-9]/g, ''))} />
               </label>
               <button onClick={() => onList(Number(askPrice) || 0)} disabled={!(Number(askPrice) > 0)}>
-                List for sale
+                {t('List for sale')}
               </button>
             </>
           )}
           {/* Leaving is not selling. It used to be: stepping out of a world
               deleted the claim, so a player who wanted a look at the map had to
               buy their own land back. */}
-          <button className="ghost" onClick={onLeave}>Back to the world map</button>
+          <button className="ghost" onClick={onLeave}>{t('Back to the world map')}</button>
           <button className="danger" onClick={() => {
             if (releasing) onRelease();
             else setReleasing(true);
           }}>
-            {releasing ? 'Give it up for good — tap again' : 'Give up this plot'}
+            {releasing ? t('Give it up for good — tap again') : t('Give up this plot')}
           </button>
           {releasing && (
             <p className="muted small">
-              {claimed.region} goes back on the market and the {claimed.price.toLocaleString()} {TOKEN.ticker}
-              {' '}is not refunded. Your world keeps running until you do.
+              {t('{region} goes back on the market and the {price} {ticker} is not refunded. Your world keeps running until you do.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })}
             </p>
           )}
         </div>
       </div>
 
-      <h4>{TOKEN.ticker} on {ACTIVE_CHAIN.label}</h4>
+      <h4>{t('{ticker} on {chain}', { ticker: TOKEN.ticker, chain: ACTIVE_CHAIN.label })}</h4>
       {!configured && (
         <p className="muted small">
-          This build reaches {ACTIVE_CHAIN.label} at {ACTIVE_CHAIN.rpcUrl} (chain {ACTIVE_CHAIN.chainId}), and
-          your wallet can switch to it. What is missing is the {TOKEN.ticker} contract and the land registry:
-          until those are deployed and their addresses set, these are the actions the economy layer is designed
-          around, and balances and listings are local to this browser.
+          {t('This build reaches {chain} at {rpc} (chain {id}), and your wallet can switch to it. What is missing is the {ticker} contract and the land registry: until those are deployed and their addresses set, these are the actions the economy layer is designed around, and balances and listings are local to this browser.', { chain: ACTIVE_CHAIN.label, rpc: ACTIVE_CHAIN.rpcUrl ?? '', id: ACTIVE_CHAIN.chainId ?? '', ticker: TOKEN.ticker })}
         </p>
       )}
       <div className="token-grid">
         {tokenActions().map((action) => (
           <div key={action.id} className={`token-card ${action.ready ? '' : 'pending'}`}>
-            <b>{action.label}</b>
-            <span>{action.detail}</span>
-            <em>{action.ready ? 'Ready' : 'Awaiting chain config'}</em>
+            <b>{t(action.label)}</b>
+            <span>{t(action.detail)}</span>
+            <em>{action.ready ? t('Ready') : t('Awaiting chain config')}</em>
           </div>
         ))}
       </div>

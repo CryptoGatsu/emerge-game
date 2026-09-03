@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
 import { channelOf, loadChat, poll, worldChannel, type ChatState } from '@/lib/chat';
 import { shortAddress } from '@/lib/chain/emerge';
+import { t } from '@/lib/i18n';
 
 export interface Notice {
   id: string;
@@ -133,7 +134,7 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
           kind: 'chat',
           title: m.wallet ? shortAddress(m.author) : m.author,
           body: m.text,
-          action: { label: 'Open chat', run: () => onOpenChatRef.current() },
+          action: { label: t('Open chat'), run: () => onOpenChatRef.current() },
         });
       }
       // The set only ever grows while a tab is open; a settlement session is
@@ -178,8 +179,8 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
         push({
           id: `claim-${c.seed}-${c.at}`,
           kind: 'claim',
-          title: 'Land claimed',
-          body: `${nameOf(c)} settled ${c.region} and called it ${c.worldName}.`,
+          title: t('Land claimed'),
+          body: t('{who} settled {region} and called it {world}.', { who: nameOf(c), region: c.region, world: c.worldName }),
         });
       }
     };
@@ -217,7 +218,7 @@ export function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: 
               </button>
             )}
           </div>
-          <button className="notice-close" onClick={() => onDismiss(notice.id)} aria-label="Dismiss">×</button>
+          <button className="notice-close" onClick={() => onDismiss(notice.id)} aria-label={t('Dismiss')}>×</button>
         </div>
       ))}
     </div>

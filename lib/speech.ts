@@ -11,6 +11,7 @@ import {
   JOB_LABELS, SKILL_TITLES, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
   type Citizen, type WorkingJob, type World,
 } from './simulation';
+import { tx } from './i18n';
 
 type Line = string;
 
@@ -115,6 +116,11 @@ const BY_WEATHER: Partial<Record<string, Line[]>> = {
 
 /** A line for a citizen at the current beat, or null when they have nothing to say. */
 export function speechFor(world: World, c: Citizen, beat: number): string | null {
+  const line = speechLine(world, c, beat);
+  return line === null ? null : tx(line);
+}
+
+function speechLine(world: World, c: Citizen, beat: number): string | null {
   // An actual conversation outranks anything this module can invent. When
   // somebody is mid-exchange the bubble is their turn in it, so two people
   // standing together take turns on one subject instead of saying two
@@ -211,6 +217,10 @@ function moodLine(world: World, c: Citizen, beat: number): string | null {
 
 /** One-line status used by the inspector and the selected-being card. */
 export function statusLine(c: Citizen, world?: World): string {
+  return tx(statusText(c, world));
+}
+
+function statusText(c: Citizen, world?: World): string {
   if (c.age < 16) return c.activity === 'walking' ? 'Exploring the settlement' : 'Playing outside';
   // Crossing the settlement to find somebody is the most interesting thing a
   // person can be doing, so it outranks the generic reading of their activity.

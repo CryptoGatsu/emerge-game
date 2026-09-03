@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ACTIVE_CHAIN, TOKEN } from '@/lib/chain/emerge';
 import { fetchTokenStats, type PricePoint, type TokenStats as Stats } from '@/lib/net/token';
+import { t, useLocale } from '@/lib/i18n';
 
 const POLL = 60_000;
 type Range = '24h' | '7d';
@@ -63,8 +64,8 @@ function Chart({ points, range }: { points: PricePoint[]; range: Range }) {
       <div className="token-chart empty">
         <p className="muted small">
           {points.length === 1
-            ? `One reading so far, ${money(points[0].price)}. The line fills in as the server samples the price every five minutes.`
-            : 'Collecting price history. The line fills in as the server samples the price every five minutes.'}
+            ? t('One reading so far, {price}. The line fills in as the server samples the price every five minutes.', { price: money(points[0].price) })
+            : t('Collecting price history. The line fills in as the server samples the price every five minutes.')}
         </p>
       </div>
     );
@@ -114,13 +115,14 @@ function Chart({ points, range }: { points: PricePoint[]; range: Range }) {
         <text className="axis" x={W - PAD.r} y={H - PAD.b - 4} textAnchor="end">{money(geom.lo)}</text>
       </svg>
       <div className={`token-tip ${at ? 'on' : ''}`} aria-live="polite">
-        {at ? <><b>{money(at.price)}</b><span>{when(at.at)}</span></> : <span className="muted">Hover or touch the line for a price.</span>}
+        {at ? <><b>{money(at.price)}</b><span>{when(at.at)}</span></> : <span className="muted">{t('Hover or touch the line for a price.')}</span>}
       </div>
     </div>
   );
 }
 
 export default function TokenStats() {
+  useLocale();
   const [stats, setStats] = useState<Stats | null>(null);
   const [range, setRange] = useState<Range>('24h');
   const [asTable, setAsTable] = useState(false);
@@ -145,46 +147,46 @@ export default function TokenStats() {
 
   const change = stats?.change24h ?? null;
   const cap = stats?.marketCap ?? stats?.fdv ?? null;
-  const capLabel = stats?.marketCap !== null && stats?.marketCap !== undefined ? 'MARKET CAP' : 'FULLY DILUTED';
+  const capLabel = stats?.marketCap !== null && stats?.marketCap !== undefined ? t('MARKET CAP') : t('FULLY DILUTED');
 
   return (
     <section className="token-stats" aria-label={`${TOKEN.ticker} market`}>
       <div className="token-head">
-        <span className="contract-label">{TOKEN.ticker} MARKET</span>
+        <span className="contract-label">{t('{ticker} MARKET', { ticker: TOKEN.ticker })}</span>
         {stats?.pairUrl && (
           <a href={stats.pairUrl} target="_blank" rel="noreferrer noopener" className="small">
-            Trade on {stats.dex ?? 'the DEX'} ↗
+            {t('Trade on {dex}', { dex: stats.dex ?? t('the DEX') })} ↗
           </a>
         )}
       </div>
       <div className="token-tiles">
         <div className="token-tile">
-          <span>PRICE</span>
+          <span>{t('PRICE')}</span>
           <b>{money(stats?.priceUsd ?? null)}</b>
           {change !== null && (
             <em className={change >= 0 ? 'up' : 'down'}>{change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(2)}% · 24h</em>
           )}
         </div>
         <div className="token-tile"><span>{capLabel}</span><b>{money(cap, true)}</b></div>
-        <div className="token-tile"><span>24H VOLUME</span><b>{money(stats?.volume24h ?? null, true)}</b></div>
+        <div className="token-tile"><span>{t('24H VOLUME')}</span><b>{money(stats?.volume24h ?? null, true)}</b></div>
         <div className="token-tile">
-          <span>HOLDERS</span>
+          <span>{t('HOLDERS')}</span>
           <b>{stats?.holders !== null && stats?.holders !== undefined ? stats.holders.toLocaleString() : '—'}</b>
         </div>
       </div>
       {stats && !stats.available && (
-        <p className="muted small token-note">{stats.reason ?? 'Market data is not available yet.'}</p>
+        <p className="muted small token-note">{stats.reason ?? t('Market data is not available yet.')}</p>
       )}
       <div className="token-range" role="group" aria-label="Chart range">
         {(['24h', '7d'] as Range[]).map((r) => (
           <button key={r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>{r}</button>
         ))}
-        <button className="ghost" onClick={() => setAsTable((t) => !t)}>{asTable ? 'Chart' : 'Table'}</button>
+        <button className="ghost" onClick={() => setAsTable((t) => !t)}>{asTable ? t('Chart') : t('Table')}</button>
       </div>
       {asTable ? (
         <div className="token-table">
           <table>
-            <thead><tr><th>When</th><th>Price</th></tr></thead>
+            <thead><tr><th>{t('When')}</th><th>{t('Price')}</th></tr></thead>
             <tbody>
               {[...points].reverse().slice(0, 48).map((p) => (
                 <tr key={p.at}><td>{when(p.at)}</td><td>{money(p.price)}</td></tr>
@@ -197,8 +199,8 @@ export default function TokenStats() {
       )}
       {stats?.at && (
         <p className="muted small token-note">
-          Read {new Date(stats.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          {stats.dex ? ` from ${stats.dex}` : ''}{stats.holders !== null ? ' and the explorer' : ''}. Not advice.
+          {t('Read {time}', { time: new Date(stats.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+          {stats.dex ? t(' from {dex}', { dex: stats.dex }) : ''}{stats.holders !== null ? t(' and the explorer') : ''}. {t('Not advice.')}
         </p>
       )}
     </section>

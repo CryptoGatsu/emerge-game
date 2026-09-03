@@ -18,6 +18,8 @@ import { TOKEN, shortAddress } from '@/lib/chain/emerge';
 import { BrandMark } from './Brand';
 import type { PanelKey } from './Panels';
 import { SPEEDS, type Speed } from './EmergeClient';
+import { t, tj, tn, tx, useLocale } from '@/lib/i18n';
+import { LanguageSwitch } from './LanguageSwitch';
 
 interface HudProps {
   view: Snapshot;
@@ -152,8 +154,8 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   if (!hover) return null;
   return (
     <div ref={ref} className="hover-tip">
-      <b>{hover.title}</b>
-      {hover.lines.map((line) => <span key={line}>{line}</span>)}
+      <b>{tx(hover.title)}</b>
+      {hover.lines.map((line) => <span key={line}>{tx(line)}</span>)}
     </div>
   );
 }
@@ -176,29 +178,30 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
   const [draft, setDraft] = useState('');
   const [confirming, setConfirming] = useState<string | null>(null);
   const affordable = player.ledger.balance >= RENAME_CITIZEN_EMERGE;
+  useLocale();
   if (focus.kind === 'building') {
     return (
       <section className="panel being-card">
-        <button className="panel-close" onClick={onClear} aria-label="Clear selection">×</button>
+        <button className="panel-close" onClick={onClear} aria-label={t('Clear selection')}>×</button>
         <div className="being-head">
           <div className="being-portrait building">⌂</div>
           <div>
-            <div className="being-eyebrow">PLACE</div>
-            <h2>{focus.type}</h2>
-            <p>{focus.production ? `Producing · ${focus.production}` : focus.occupants ? `${focus.occupants} inside` : 'Quiet right now'}</p>
+            <div className="being-eyebrow">{t('PLACE')}</div>
+            <h2>{tn(focus.type)}</h2>
+            <p>{focus.production ? t('Producing · {what}', { what: tx(focus.production) }) : focus.occupants ? t('{n} inside', { n: focus.occupants }) : t('Quiet right now')}</p>
             {/* What it has been improved to, and what that is costing every
                 day — the second half matters, because upkeep is what makes
                 improving everything a decision rather than a free win. */}
             <p className="muted small building-level">
-              Level {focus.level} of {focus.maxLevel} · {focus.upkeep} Gold a day to keep
+              {t('Level {level} of {max} · {upkeep} Gold a day to keep', { level: focus.level, max: focus.maxLevel, upkeep: focus.upkeep })}
             </p>
           </div>
         </div>
         <div className="being-people">
-          {focus.people.length === 0 && <span className="muted">Nobody here at the moment.</span>}
+          {focus.people.length === 0 && <span className="muted">{t('Nobody here at the moment.')}</span>}
           {focus.people.map((p) => (
             <button key={p.id} className="person-chip" onClick={() => onFocus({ kind: 'citizen', id: p.id })}>
-              {p.name} <em>{p.doing}</em>
+              {p.name} <em>{tx(p.doing)}</em>
             </button>
           ))}
         </div>
@@ -210,28 +213,27 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 disabled={treasury < focus.upgrade.gold || !focus.upgrade.stocked}
                 onClick={() => onUpgrade(focus.id)}
               >
-                Improve · {focus.upgrade.gold} Gold
+                {t('Improve · {gold} Gold', { gold: focus.upgrade.gold })}
                 <em>
-                  {focus.upgrade.wood} timber · {focus.upgrade.stone} stone
-                  {focus.upgrade.stocked ? '' : ' — not in the yard'}
+                  {t('{wood} timber · {stone} stone', { wood: focus.upgrade.wood, stone: focus.upgrade.stone })}
+                  {focus.upgrade.stocked ? '' : t(' — not in the yard')}
                 </em>
               </button>
             ) : (
-              <span className="muted small">As good as it gets.</span>
+              <span className="muted small">{t('As good as it gets.')}</span>
             )}
             <button
               className={moving === focus.id ? 'shift armed' : 'shift'}
               disabled={treasury < focus.moveGold}
               onClick={() => onMove(moving === focus.id ? null : focus.id)}
             >
-              {moving === focus.id ? 'Tap the ground' : `Move · ${focus.moveGold} Gold`}
+              {moving === focus.id ? t('Tap the ground') : t('Move · {gold} Gold', { gold: focus.moveGold })}
             </button>
           </div>
         )}
         {focus.upgrade && !readOnly && (
           <p className="muted small">
-            An improved building gets about a fifth more done — and costs half again in
-            upkeep for as long as it stands.
+            {t('An improved building gets about a fifth more done — and costs half again in upkeep for as long as it stands.')}
           </p>
         )}
         {focus.demolishable && !readOnly && (
@@ -243,10 +245,10 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 else setConfirming(focus.id);
               }}
             >
-              {confirming === focus.id ? 'Pull it down — tap again' : 'Pull down'}
+              {confirming === focus.id ? t('Pull it down — tap again') : t('Pull down')}
             </button>
             <span className="muted small">
-              Salvages {focus.salvage.wood} timber and {focus.salvage.stone} stone. The Gold does not come back.
+              {t('Salvages {wood} timber and {stone} stone. The Gold does not come back.', { wood: focus.salvage.wood, stone: focus.salvage.stone })}
             </span>
           </div>
         )}
@@ -256,7 +258,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
 
   return (
     <section className="panel being-card">
-      <button className="panel-close" onClick={onClear} aria-label="Clear selection">×</button>
+      <button className="panel-close" onClick={onClear} aria-label={t('Clear selection')}>×</button>
       <div className="being-head">
         <div className="being-portrait">{focus.name.slice(0, 1)}</div>
         <div>
@@ -265,7 +267,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             {!readOnly && (
               <button
                 className="rename-pen"
-                title={`Rename for ${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}`}
+                title={t('Rename for {cost} {ticker}', { cost: RENAME_CITIZEN_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
                 onClick={() => { setDraft(focus.name); setRenaming((r) => !r); }}
               >
                 ✎
@@ -273,20 +275,20 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             )}
           </h2>
           <div className="being-handle">{focus.handle}</div>
-          <p className="muted">{focus.job} · age {focus.age} · {focus.family} family</p>
+          <p className="muted">{tj(focus.job)} · {t('age {age}', { age: focus.age })} · {t('{family} family', { family: focus.family })}</p>
           {/* What they are worth at the work, which is the difference between
               a settlement of strangers and one that has been running a while. */}
           {focus.skill && (
-            <div className="being-skill" title={`${focus.skill.days} days at the trade`}>
-              <span className="skill-title">{focus.skill.title}</span>
-              <span className="skill-pips" aria-label={`Level ${focus.skill.level} of 10`}>
+            <div className="being-skill" title={t('{days} days at the trade', { days: focus.skill.days })}>
+              <span className="skill-title">{tn(focus.skill.title)}</span>
+              <span className="skill-pips" aria-label={t('Level {level} of 10', { level: focus.skill.level })}>
                 {Array.from({ length: 10 }, (_, i) => (
                   <i key={i} className={i < focus.skill!.level ? 'on' : ''} />
                 ))}
               </span>
               <em>
-                {focus.skill.output > 1 ? `+${Math.round((focus.skill.output - 1) * 100)}% output` : 'learning the work'}
-                {focus.skill.toNext !== null && ` · ${focus.skill.toNext}d to next`}
+                {focus.skill.output > 1 ? t('+{pct}% output', { pct: Math.round((focus.skill.output - 1) * 100) }) : t('learning the work')}
+                {focus.skill.toNext !== null && ` · ${t('{days}d to next', { days: focus.skill.toNext })}`}
               </em>
             </div>
           )}
@@ -308,30 +310,30 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             disabled={!affordable || !draft.trim() || draft.trim() === focus.name}
             onClick={() => { onRenameCitizen(focus.id, draft); setRenaming(false); }}
           >
-            {affordable ? `${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}` : 'Not enough'}
+            {affordable ? `${RENAME_CITIZEN_EMERGE.toLocaleString()} ${TOKEN.ticker}` : t('Not enough')}
           </button>
         </div>
       )}
       <div className="being-meters">
-        <Meter label="Mood" value={focus.mood} tone="linear-gradient(90deg,#4f9a3f,#8bf16b)" />
-        <Meter label="Energy" value={focus.energy} tone="linear-gradient(90deg,#b08a2c,#f0d05e)" />
-        <Meter label="Purpose" value={focus.purpose} tone="linear-gradient(90deg,#6d4f9a,#b98ce8)" />
+        <Meter label={t('Mood')} value={focus.mood} tone="linear-gradient(90deg,#4f9a3f,#8bf16b)" />
+        <Meter label={t('Energy')} value={focus.energy} tone="linear-gradient(90deg,#b08a2c,#f0d05e)" />
+        <Meter label={t('Purpose')} value={focus.purpose} tone="linear-gradient(90deg,#6d4f9a,#b98ce8)" />
       </div>
       <div className="being-status">
         <span className="pulse" />
-        {focus.status}
+        {tx(focus.status)}
         <button
           className={`follow-toggle ${following === focus.id ? 'on' : ''}`}
           onClick={onToggleFollow}
-          title="Keep the camera on this being (F)"
+          title={t('Keep the camera on this being (F)')}
         >
-          {following === focus.id ? 'Following' : 'Follow'}
+          {following === focus.id ? t('Following') : t('Follow')}
         </button>
       </div>
-      {focus.project && <div className="being-note">Working on {focus.project}</div>}
+      {focus.project && <div className="being-note">{t('Working on {project}', { project: tx(focus.project) })}</div>}
       {focus.friends.length > 0 && (
         <div className="being-people">
-          <span className="muted">Friends</span>
+          <span className="muted">{t('Friends')}</span>
           {focus.friends.map((f) => (
             <button key={f.id} className="person-chip" onClick={() => onFocus({ kind: 'citizen', id: f.id })}>{f.name}</button>
           ))}
@@ -388,30 +390,31 @@ function Folding({ id, title, badge, children, defaultOpen = true }: {
 }
 
 function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['woodland'] }) {
+  useLocale();
   return (
-    <Folding id="status" title="WORLD STATUS" badge={<span>✦</span>}>
-      <Stat icon="◍" label="Population" value={`${view.population}`} />
-      <Stat icon="♥" label="Happiness" value={`${view.happiness}%`} />
-      <Stat icon="⚡" label="Energy" value={`${view.energy}%`} />
-      <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label="Day" value={`${view.day} · ${view.clock}`} />
+    <Folding id="status" title={t('WORLD STATUS')} badge={<span>✦</span>}>
+      <Stat icon="◍" label={t('Population')} value={`${view.population}`} />
+      <Stat icon="♥" label={t('Happiness')} value={`${view.happiness}%`} />
+      <Stat icon="⚡" label={t('Energy')} value={`${view.energy}%`} />
+      <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label={t('Day')} value={`${view.day} · ${view.clock}`} />
       <Stat
         icon={view.temperature <= 2 ? '❄' : view.temperature >= 30 ? '☼' : '🌡'}
-        label="Temperature"
-        value={`${Math.round(view.temperature)}°C · ${view.temperatureLabel}`}
+        label={t('Temperature')}
+        value={`${Math.round(view.temperature)}°C · ${tn(view.temperatureLabel)}`}
       />
       {woodland && (
         <Stat
           icon="♣"
-          label="Woodland"
+          label={t('Woodland')}
           value={woodland.stumps + woodland.saplings > 0
-            ? `${woodland.standing} · ${woodland.stumps + woodland.saplings} regrowing`
-            : `${woodland.standing} trees`}
+            ? t('{standing} · {regrowing} regrowing', { standing: woodland.standing, regrowing: woodland.stumps + woodland.saplings })
+            : t('{standing} trees', { standing: woodland.standing })}
         />
       )}
       <div className="status-foot">
-        <span>{view.season} · {view.weather}</span>
-        <span>{view.employed} working · {view.outdoors} outdoors{view.seated > 0 ? ` · ${view.seated} sitting` : ''}</span>
-        <span>{view.births} born · {view.deaths} died here</span>
+        <span>{tn(view.season)} · {tn(view.weather)}</span>
+        <span>{t('{n} working', { n: view.employed })} · {t('{n} outdoors', { n: view.outdoors })}{view.seated > 0 ? ` · ${t('{n} sitting', { n: view.seated })}` : ''}</span>
+        <span>{t('{born} born · {died} died here', { born: view.births, died: view.deaths })}</span>
       </div>
     </Folding>
   );
@@ -427,18 +430,18 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
  */
 function HelperPanel({ view, onPanel }: { view: Snapshot; onPanel: (panel: PanelKey) => void }) {
   return (
-    <Folding id="helper" title="PLOT HELPER" badge={view.advice.length ? <span>{view.advice.length}</span> : undefined}>
+    <Folding id="helper" title={t('PLOT HELPER')} badge={view.advice.length ? <span>{view.advice.length}</span> : undefined}>
       {view.advice.length === 0 && (
-        <p className="muted small">Nothing is asking to be built. Put the surplus by, or improve what stands.</p>
+        <p className="muted small">{t('Nothing is asking to be built. Put the surplus by, or improve what stands.')}</p>
       )}
       {view.advice.map((a, i) => (
         <div key={`${a.kind}-${a.type ?? ''}-${i}`} className={`advice ${a.kind}`}>
           <div className="advice-head">
-            <b>{a.title}</b>
-            {a.kind === 'build' && <button className="ghost small" onClick={() => onPanel('build')}>Build</button>}
+            <b>{tx(a.title)}</b>
+            {a.kind === 'build' && <button className="ghost small" onClick={() => onPanel('build')}>{t('Build')}</button>}
           </div>
-          <span>{a.why}</span>
-          <em>{a.gain}</em>
+          <span>{tx(a.why)}</span>
+          <em>{tx(a.gain)}</em>
         </div>
       ))}
     </Folding>
@@ -453,65 +456,67 @@ function HelperPanel({ view, onPanel }: { view: Snapshot; onPanel: (panel: Panel
  * rather than a post-mortem after it.
  */
 function DangerPanel({ view }: { view: Snapshot }) {
+  useLocale();
   const worst = view.readiness[0];
   return (
-    <Folding id="danger" title="WHAT COULD GO WRONG" defaultOpen={false}>
+    <Folding id="danger" title={t('WHAT COULD GO WRONG')} defaultOpen={false}>
       {view.hazards.map((h) => (
         <div key={h.id} className={`hazard ${h.kind}`}>
           <div className="hazard-head">
-            <span>{h.label}</span>
-            <b>{h.days === 1 ? 'today' : `${h.days} days`}</b>
+            <span>{tn(h.label)}</span>
+            <b>{h.days === 1 ? t('today') : t('{n} days', { n: h.days })}</b>
           </div>
-          <em>{h.effect}</em>
+          <em>{tx(h.effect)}</em>
         </div>
       ))}
       {view.hazards.length === 0 && (
         <p className="muted small">
-          Nothing is wrong today.{worst && worst.percent < 60 ? ` The settlement is least ready for ${worst.label.toLowerCase()}.` : ''}
+          {t('Nothing is wrong today.')}{worst && worst.percent < 60 ? ` ${t('The settlement is least ready for {hazard}.', { hazard: tn(worst.label).toLowerCase() })}` : ''}
         </p>
       )}
       <div className="readiness">
         {view.readiness.map((r) => (
-          <div key={r.kind} className="ready-row" title={r.defence}>
-            <span>{r.label}</span>
+          <div key={r.kind} className="ready-row" title={tx(r.defence)}>
+            <span>{tn(r.label)}</span>
             <div className="ready-bar"><i style={{ width: `${r.percent}%` }} className={r.percent < 40 ? 'low' : r.percent < 75 ? 'mid' : ''} /></div>
             <b>{r.percent}%</b>
           </div>
         ))}
       </div>
-      {worst && worst.percent < 75 && <p className="muted small">{worst.defence}</p>}
+      {worst && worst.percent < 75 && <p className="muted small">{tx(worst.defence)}</p>}
     </Folding>
   );
 }
 
 function EventsPanel({ view }: { view: Snapshot }) {
+  useLocale();
   return (
-    <Folding id="events" title="ACTIVE EVENTS">
-      {view.events.length === 0 && <p className="muted small">Nothing scheduled today.</p>}
+    <Folding id="events" title={t('ACTIVE EVENTS')}>
+      {view.events.length === 0 && <p className="muted small">{t('Nothing scheduled today.')}</p>}
       {view.events.map((e) => (
         <div key={e.id} className={`event-row ${e.status}`}>
           <div className="event-head">
-            <span>{e.name}</span>
-            <b>{e.time}</b>
+            <span>{tn(e.name)}</span>
+            <b>{tx(e.time)}</b>
           </div>
           {/* What actually came of it. A meeting that resolved nothing and a
               showcase nobody attended both say so. */}
-          {e.outcome && <em className="event-outcome">{e.outcome}</em>}
+          {e.outcome && <em className="event-outcome">{tx(e.outcome)}</em>}
           {!e.outcome && e.status === 'now' && e.attendees > 0 && (
-            <em className="event-outcome">{e.attendees} there</em>
+            <em className="event-outcome">{t('{n} there', { n: e.attendees })}</em>
           )}
         </div>
       ))}
       {view.resolution && (
         <div className="resolution">
-          <span>THE TOWN RESOLVED</span>
-          <p>{view.resolution.text[0].toUpperCase()}{view.resolution.text.slice(1)}.</p>
-          <em>{view.resolution.voters} in the room, day {view.resolution.day}</em>
+          <span>{t('THE TOWN RESOLVED')}</span>
+          <p>{tx(view.resolution.text[0].toUpperCase() + view.resolution.text.slice(1))}.</p>
+          <em>{t('{n} in the room, day {day}', { n: view.resolution.voters, day: view.resolution.day })}</em>
         </div>
       )}
       {view.artworks.length > 0 && (
         <div className="gallery">
-          <span>THE SETTLEMENT&rsquo;S WORK</span>
+          <span>{t('THE SETTLEMENT’S WORK')}</span>
           {view.artworks.slice(0, 4).map((a) => (
             <div key={a.id} className="gallery-row">
               <span>&ldquo;{a.title}&rdquo;</span>
@@ -525,13 +530,14 @@ function EventsPanel({ view }: { view: Snapshot }) {
 }
 
 function FeedPanel({ view }: { view: Snapshot }) {
+  useLocale();
   return (
-    <Folding id="feed" title="WORLD FEED" badge={<span>✦</span>}>
+    <Folding id="feed" title={t('WORLD FEED')} badge={<span>✦</span>}>
       <div className="feed-scroll">
         {view.feed.map((entry) => (
           <div key={entry.id} className={`feed-row kind-${entry.kind}`}>
             <i>{FEED_ICON[entry.kind]}</i>
-            <span>{entry.text}</span>
+            <span>{tx(entry.text)}</span>
           </div>
         ))}
       </div>
@@ -548,9 +554,9 @@ function EconomyRow({ view, activePanel, onPanel }: {
           purse and opened the same panel — two of the same button, one of them
           always redundant. */}
       <button className="market-chip" onClick={() => onPanel(activePanel === 'market' ? null : 'market')}>
-        <span>MARKET</span>
+        <span>{t('MARKET')}</span>
         <b>{view.food}</b>
-        <em>FOOD IN STORE</em>
+        <em>{t('FOOD IN STORE')}</em>
       </button>
     </div>
   );
@@ -571,7 +577,7 @@ function Purse({ view, player, visiting, onPanel }: {
     <button
       className="purse"
       onClick={() => onPanel(visiting ? 'gift' : 'bank')}
-      title={visiting ? 'Send Gold to this settlement' : 'Open the Bank'}
+      title={visiting ? t('Send Gold to this settlement') : t('Open the Bank')}
     >
       {/*
         * A settlement's treasury is its owner's business.
@@ -583,21 +589,21 @@ function Purse({ view, player, visiting, onPanel }: {
         */}
       {visiting ? (
         <span className="purse-cell gift">
-          <em>THEIR TREASURY</em>
+          <em>{t('THEIR TREASURY')}</em>
           <b>—</b>
         </span>
       ) : (
         <span className="purse-cell gold">
-          <em>GOLD</em>
+          <em>{t('GOLD')}</em>
           <b>{Math.floor(view.treasury).toLocaleString()}</b>
         </span>
       )}
       <span className="purse-cell emerge">
-        <em>{TOKEN.ticker} EARNED</em>
+        <em>{t('{ticker} EARNED', { ticker: TOKEN.ticker })}</em>
         <b>{uncollected.toLocaleString()}</b>
       </span>
       <span className="purse-cell wallet">
-        <em>WALLET</em>
+        <em>{t('WALLET')}</em>
         <b>{Math.floor(player.ledger.balance).toLocaleString()}</b>
       </span>
     </button>
@@ -625,12 +631,12 @@ const VISITOR_GIFT = {
 /** How long ago a visited world was published, in words. */
 function sinceWhen(at: number) {
   const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
-  if (minutes < 2) return 'live';
-  if (minutes < 60) return `${minutes} minutes ago`;
+  if (minutes < 2) return t('live');
+  if (minutes < 60) return t('{n} minutes ago', { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  if (hours < 24) return hours === 1 ? t('1 hour ago') : t('{n} hours ago', { n: hours });
   const days = Math.round(hours / 24);
-  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  return days === 1 ? t('1 day ago') : t('{n} days ago', { n: days });
 }
 
 const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; short: string; blurb: string }[] = [
@@ -645,6 +651,7 @@ const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; shor
 
 export function Hud(props: HudProps) {
   const { view, paused, speed, placing, activePanel } = props;
+  useLocale();
   const compact = useCompact();
   const [railOpen, setRailOpen] = useState(false);
   // The opening titles have said their piece by the time the world is worth
@@ -676,9 +683,10 @@ export function Hud(props: HudProps) {
   return (
     <div className={`hud ${props.visiting ? 'is-visiting' : ''}`}>
       <HoverTip hover={props.hover} />
+      {!introShown && <LanguageSwitch className="hud-lang" />}
 
       {!introShown && (
-        <button className="world-chip" onClick={() => setIntroShown(true)} title="About Emerge">
+        <button className="world-chip" onClick={() => setIntroShown(true)} title={t('About Emerge')}>
           <span>✦</span>
           <b>{view.name}</b>
         </button>
@@ -689,11 +697,11 @@ export function Hud(props: HudProps) {
           <BrandMark />
           <div>
             <div className="wordmark">EMERGE</div>
-            <div className="tagline">{view.name === 'Emerge' ? 'THE AI WORLD' : view.name.toUpperCase()}</div>
+            <div className="tagline">{view.name === 'Emerge' ? t('THE AI WORLD') : view.name.toUpperCase()}</div>
           </div>
         </div>
-        <p className="brand-copy">A living world of autonomous AI beings. They think. They socialise. They build. They evolve.</p>
-        <p className="brand-copy accent">You don&apos;t control them.<br />You discover them.<br />You shape the world they live in.</p>
+        <p className="brand-copy">{t('A living world of autonomous AI beings. They think. They socialise. They build. They evolve.')}</p>
+        <p className="brand-copy accent">{t('You don’t control them.')}<br />{t('You discover them.')}<br />{t('You shape the world they live in.')}</p>
       </header>
 
       {/* One centred column: population, then the clock, then what the player
@@ -703,21 +711,21 @@ export function Hud(props: HudProps) {
       <div className="top-centre">
         <div className="beings-pill">
           <span className="spark">✦</span>
-          <b>AI BEINGS</b>
-          <em>{view.population} here</em>
+          <b>{t('AI BEINGS')}</b>
+          <em>{t('{n} here', { n: view.population })}</em>
           {/* Two different populations, and they are easy to confuse, so they
               are labelled rather than left as two numbers side by side: the
               beings who live on this plot, and the people playing the game. */}
           {props.online !== null && (
-            <span className="players-online" title="People playing Emerge right now">
+            <span className="players-online" title={t('People playing Emerge right now')}>
               <i aria-hidden>●</i>
-              {props.online.toLocaleString()} {props.online === 1 ? 'player' : 'players'}
+              {props.online === 1 ? t('1 player') : t('{n} players', { n: props.online.toLocaleString() })}
             </span>
           )}
         </div>
         <div className="time-controls">
           <button className={paused ? 'live paused' : 'live'} onClick={props.onTogglePause}>
-            {paused ? '▶ Resume' : '❙❙ Pause'}
+            {paused ? t('▶ Resume') : t('❙❙ Pause')}
           </button>
           {SPEEDS.map((s) => (
             <button key={s} className={speed === s ? 'sel' : ''} onClick={() => props.onSpeed(s)}>{s}×</button>
@@ -725,7 +733,7 @@ export function Hud(props: HudProps) {
           <button
             className={props.sound ? 'sel' : ''}
             onClick={props.onToggleSound}
-            title={props.sound ? 'Mute the world' : 'Listen to the world'}
+            title={props.sound ? t('Mute the world') : t('Listen to the world')}
           >
             {props.sound ? '♪' : '♪̸'}
           </button>
@@ -737,12 +745,12 @@ export function Hud(props: HudProps) {
           <div
             className="watching"
             title={props.watching === 1
-              ? 'Somebody else has this world open'
-              : `${props.watching} other people have this world open`}
+              ? t('Somebody else has this world open')
+              : t('{n} other people have this world open', { n: props.watching })}
           >
             <span aria-hidden>◉</span>
             <b>{props.watching}</b>
-            <em>watching</em>
+            <em>{t('watching')}</em>
           </div>
         )}
       </div>
@@ -752,13 +760,13 @@ export function Hud(props: HudProps) {
           forgot where they were would read the difference as a bug. */}
       {props.visiting && (
         <div className="visiting-bar">
-          <span className="eyebrow">VISITING</span>
+          <span className="eyebrow">{t('VISITING')}</span>
           <b>{props.visiting.worldName}</b>
           <em>
             {props.visiting.ownerName?.trim() ? props.visiting.ownerName : shortAddress(props.visiting.owner)}
             {' · '}{sinceWhen(props.visiting.at)}
           </em>
-          <button className="ghost" onClick={props.onEndVisit}>Leave</button>
+          <button className="ghost" onClick={props.onEndVisit}>{t('Leave')}</button>
         </div>
       )}
 
@@ -771,7 +779,7 @@ export function Hud(props: HudProps) {
               aria-expanded={railOpen}
             >
               <span>✦</span>
-              <b>{railOpen ? 'CLOSE' : 'WORLD'}</b>
+              <b>{railOpen ? t('CLOSE') : t('WORLD')}</b>
             </button>
             <aside className={`phone-sheet ${railOpen ? 'open' : ''}`} aria-hidden={!railOpen}>
               <div className="sheet-grip" />
@@ -815,17 +823,17 @@ export function Hud(props: HudProps) {
           )
           : (
             <section className="panel hint-card">
-              <div className="being-eyebrow">OBSERVE</div>
+              <div className="being-eyebrow">{t('OBSERVE')}</div>
               <p>
-                Tap any being or place to follow their story.
-                {compact ? ' Drag to pan, pinch to zoom.' : ' Drag to pan, scroll to zoom.'}
+                {t('Tap any being or place to follow their story.')}
+                {compact ? ` ${t('Drag to pan, pinch to zoom.')}` : ` ${t('Drag to pan, scroll to zoom.')}`}
               </p>
             </section>
           )}
       </div>
 
       <nav className="action-bar">
-        <div className="action-title">{props.visiting ? 'SOMEBODY ELSE\u2019S WORLD' : 'WHAT WILL YOU DO?'}</div>
+        <div className="action-title">{props.visiting ? t('SOMEBODY ELSE’S WORLD') : t('WHAT WILL YOU DO?')}</div>
         <div className="action-row">
           {actions.map((action) => {
             const active = action.key === activePanel;
@@ -838,8 +846,8 @@ export function Hud(props: HudProps) {
                 }}
               >
                 <b>{action.icon}</b>
-                <span>{compact ? action.short : action.label}</span>
-                <small>{action.blurb}</small>
+                <span>{t(compact ? action.short : action.label)}</span>
+                <small>{t(action.blurb)}</small>
               </button>
             );
           })}
@@ -851,21 +859,21 @@ export function Hud(props: HudProps) {
           // A minimap is not worth a third of a phone screen, but zoom controls
           // are: not every touch device is comfortable to pinch on.
           <div className="touch-zoom">
-            <button onClick={() => props.onZoom(1.25)} aria-label="Zoom in">+</button>
-            <button onClick={() => props.onZoom(0.8)} aria-label="Zoom out">−</button>
-            <button onClick={props.onResetView} aria-label="Reset view">⌂</button>
+            <button onClick={() => props.onZoom(1.25)} aria-label={t('Zoom in')}>+</button>
+            <button onClick={() => props.onZoom(0.8)} aria-label={t('Zoom out')}>−</button>
+            <button onClick={props.onResetView} aria-label={t('Reset view')}>⌂</button>
           </div>
         )
         : (
           <aside className="bottom-right">
             <section className="panel minimap-panel">
-              <h3>WORLD MAP</h3>
+              <h3>{t('WORLD MAP')}</h3>
               <Minimap draw={props.drawMinimap} onJump={props.onMinimapJump} />
               <div className="map-tools">
-                <button onClick={() => props.onZoom(1.18)} aria-label="Zoom in">+</button>
-                <button onClick={() => props.onZoom(0.85)} aria-label="Zoom out">−</button>
-                <button onClick={props.onResetView} aria-label="Reset view">⌂</button>
-                <span>{view.unlockedAreas.length} areas</span>
+                <button onClick={() => props.onZoom(1.18)} aria-label={t('Zoom in')}>+</button>
+                <button onClick={() => props.onZoom(0.85)} aria-label={t('Zoom out')}>−</button>
+                <button onClick={props.onResetView} aria-label={t('Reset view')}>⌂</button>
+                <span>{t('{n} areas', { n: view.unlockedAreas.length })}</span>
               </div>
             </section>
             <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
@@ -875,9 +883,9 @@ export function Hud(props: HudProps) {
       {placing && (
         <div className="placement-bar">
           <span>
-            Placing <b>{placing}</b> — {compact ? 'tap open ground to build.' : 'click open ground to build, Esc to cancel.'}
+            {t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}
           </span>
-          <button onClick={props.onCancelBuild}>Cancel</button>
+          <button onClick={props.onCancelBuild}>{t('Cancel')}</button>
         </div>
       )}
     </div>

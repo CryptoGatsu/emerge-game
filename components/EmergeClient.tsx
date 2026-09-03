@@ -45,6 +45,7 @@ import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
 import { useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
+import { t, tn } from '@/lib/i18n';
 import {
   EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger,
@@ -853,8 +854,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       announce({
         id: `cloud-${seed}-${remote.day}`,
         kind: 'sync',
-        title: 'Picked up where you left off',
-        body: `${remote.name} is on day ${remote.day}, as you last left it on another device.`,
+        title: t('Picked up where you left off'),
+        body: t('{name} is on day {day}, as you last left it on another device.', { name: remote.name, day: remote.day }),
         lifetime: 20_000,
       });
     })();
@@ -942,10 +943,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       announce({
         id: `sale-${world.day}-${Math.round(world.hour)}-${Math.round(sold.gold)}`,
         kind: 'sale',
-        title: `${Math.round(sold.gold).toLocaleString()} Gold from the stalls`,
+        title: t('{gold} Gold from the stalls', { gold: Math.round(sold.gold).toLocaleString() }),
         body: sold.units > sold.bestUnits
-          ? `Your people sold ${Math.round(sold.units)} goods, mostly ${good}.`
-          : `Your people sold ${Math.round(sold.bestUnits)} ${good}.`,
+          ? t('Your people sold {n} goods, mostly {good}.', { n: Math.round(sold.units), good: tn(good) })
+          : t('Your people sold {n} {good}.', { n: Math.round(sold.bestUnits), good: tn(good) }),
       });
     };
     const timer = window.setInterval(tick, SALE_NOTICE_INTERVAL);
@@ -1097,8 +1098,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         announce({
           id: `gift-${g.gold}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           kind: 'claim',
-          title: 'A gift arrived',
-          body: `${g.fromName || 'Somebody'} sent ${g.gold.toLocaleString()} Gold to your treasury.`,
+          title: t('A gift arrived'),
+          body: t('{who} sent {gold} Gold to your treasury.', { who: g.fromName || t('Somebody'), gold: g.gold.toLocaleString() }),
         });
       }
       refresh();
@@ -1258,7 +1259,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         <div className="boot">
           <div className="boot-mark">✦</div>
           <div className="boot-word">{claimed.name.toUpperCase()}</div>
-          <p>Painting a world…</p>
+          <p>{t('Painting a world…')}</p>
         </div>
       )}
 

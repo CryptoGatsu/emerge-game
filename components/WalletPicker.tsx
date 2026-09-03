@@ -14,6 +14,7 @@ import {
   resumeWallet, shortAddress, switchToEmergeChain,
   type DiscoveredWallet, type WalletState,
 } from '@/lib/chain/emerge';
+import { t, useLocale } from '@/lib/i18n';
 
 /**
  * One wallet, shared by everything that asks for it.
@@ -130,16 +131,17 @@ export function useWallet() {
 export function WalletPicker({ compact = false }: { compact?: boolean }) {
   const { wallet, available, connect } = useWallet();
   const [notice, setNotice] = useState<string | null>(null);
+  useLocale();
 
   if (wallet.status === 'connected') {
     const wrongChain = ACTIVE_CHAIN.chainId !== null && wallet.chainId !== ACTIVE_CHAIN.chainId;
     return (
       <div className="wallet-box">
         <span className="wallet-ok">◈ {shortAddress(wallet.address)}</span>
-        <small className="muted">{wallet.wallet} · chain {wallet.chainId ?? '—'}</small>
+        <small className="muted">{wallet.wallet} · {t('chain')} {wallet.chainId ?? '—'}</small>
         {wrongChain && (
           <button className="ghost" onClick={async () => setNotice(await switchToEmergeChain())}>
-            Switch to {ACTIVE_CHAIN.label}
+            {t('Switch to {chain}', { chain: ACTIVE_CHAIN.label })}
           </button>
         )}
         {notice && <p className="warn">{notice}</p>}
@@ -151,8 +153,8 @@ export function WalletPicker({ compact = false }: { compact?: boolean }) {
     return (
       <div className="wallet-box">
         <small className="muted">
-          No wallet detected. {PREFERRED_WALLETS.join(' or ')} works with {ACTIVE_CHAIN.label}
-          {compact ? ' — you can still claim and play.' : '.'}
+          {t('No wallet detected. {wallets} works with {chain}', { wallets: PREFERRED_WALLETS.join(t(' or ')), chain: ACTIVE_CHAIN.label })}
+          {compact ? t(' — you can still claim and play.') : '.'}
         </small>
       </div>
     );
@@ -160,7 +162,7 @@ export function WalletPicker({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className="wallet-box">
-      {!compact && <small className="muted">{PREFERRED_WALLETS.join(' and ')} both work with {ACTIVE_CHAIN.label}.</small>}
+      {!compact && <small className="muted">{t('{wallets} both work with {chain}.', { wallets: PREFERRED_WALLETS.join(t(' and ')), chain: ACTIVE_CHAIN.label })}</small>}
       <div className="wallet-options">
         {available.map((option) => (
           <button key={option.id} className="wallet-option" onClick={() => connect(option)} disabled={wallet.status === 'connecting'}>

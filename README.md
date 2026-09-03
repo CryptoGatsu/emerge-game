@@ -612,6 +612,25 @@ because that is what it is.
 | Site | [emergerh.world](https://emergerh.world) |
 | X | [@emergerh](https://x.com/emergerh) |
 
+## Two languages
+
+The interface, the front page and the wiki are in English and Simplified
+Chinese, switched from the small control on the front page, the world map, the
+HUD and the wiki. The choice is remembered in the browser and defaults to the
+browser's own language the first time.
+
+`lib/i18n` does it. The English text is the key — `t('Open the world map')`
+— so a string with no translation is still a string, never a bare identifier.
+The long prose (the in-game guide, the wiki) is written twice rather than
+translated sentence by sentence, in `GuideZh.tsx` and `WikiZh.tsx`, with every
+number read from the same constants as the English. Text the world writes as it
+goes — the feed, what people say, the plot helper — is written in English by
+the simulation and turned into Chinese as it is shown, by `tx()`, against a
+table of patterns in `lib/i18n/zh.ts`; a line the table does not know stays
+English rather than disappearing. Measured over forty days on three plots,
+every line the world produced translated. Messages that come from the server —
+a refusal from the registry, a chat relay error — are still English.
+
 ## Sound
 
 There are no audio files. Wind is filtered noise whose cutoff drifts, rain is the same

@@ -23,6 +23,8 @@ import { EARNING_PLOT_LIMIT } from '@/lib/chain/vault';
 import { VERSION } from '@/lib/version';
 import TokenStats from './TokenStats';
 import { WalletPicker, useWallet } from './WalletPicker';
+import { LanguageSwitch } from './LanguageSwitch';
+import { t, useLocale } from '@/lib/i18n';
 
 /** Where to find the project outside the game. */
 export const X_URL = 'https://x.com/emergerh';
@@ -39,38 +41,26 @@ export const SITE_DOMAIN = 'emergerh.world';
  */
 const notesFor = (onChainLand: boolean) => [
   {
-    title: 'Nobody is waiting for orders',
-    body: `Every being on your plot has their own hunger, trade, friends and grudges. You cannot
-      tell anyone what to do — you build them a workshop and watch somebody decide it is theirs.`,
+    title: t('Nobody is waiting for orders'),
+    body: t('Every being on your plot has their own hunger, trade, friends and grudges. You cannot tell anyone what to do — you build them a workshop and watch somebody decide it is theirs.'),
   },
   onChainLand
     ? {
-        title: 'The land is yours, on chain',
-        body: `A plot is a token in your wallet, not a row in our database. Its price, its owner
-          and its name are all read from the contract, and no one — this game included — can
-          move it.`,
+        title: t('The land is yours, on chain'),
+        body: t('A plot is a token in your wallet, not a row in our database. Its price, its owner and its name are all read from the contract, and no one — this game included — can move it.'),
       }
     : {
-        title: 'The land is yours, and paid for',
-        body: `Claiming burns ${TOKEN.ticker} from your own wallet, and the registry will not
-          record a plot until it has read that burn off the chain. One owner per plot, held
-          against your address rather than your browser, so it follows you to any device. The
-          land contract is not deployed yet, so this is our registry rather than an on-chain
-          title — said plainly here because it is the difference that matters.`,
+        title: t('The land is yours, and paid for'),
+        body: t('Claiming burns {ticker} from your own wallet, and the registry will not record a plot until it has read that burn off the chain. One owner per plot, held against your address rather than your browser, so it follows you to any device. The land contract is not deployed yet, so this is our registry rather than an on-chain title — said plainly here because it is the difference that matters.', { ticker: TOKEN.ticker }),
       },
   onChainLand
     ? {
-        title: 'You are paid for judgement',
-        body: `Running a settlement well earns ${TOKEN.ticker}; neglecting it earns almost
-          nothing. Only your first ${EARNING_PLOT_LIMIT} plots pay, so no wallet is large enough
-          to buy past the ceiling.`,
+        title: t('You are paid for judgement'),
+        body: t('Running a settlement well earns {ticker}; neglecting it earns almost nothing. Only your first {limit} plots pay, so no wallet is large enough to buy past the ceiling.', { ticker: TOKEN.ticker, limit: EARNING_PLOT_LIMIT }),
       }
     : {
-        title: 'Every charge is burned',
-        body: `Claiming land, surveying it, renaming a world: each one destroys the
-          ${TOKEN.ticker} it costs, and the supply falls with it. Nothing the game charges is
-          collected by anybody. Deposits are the one exception, because the withdrawal door has
-          to be able to give them back.`,
+        title: t('Every charge is burned'),
+        body: t('Claiming land, surveying it, renaming a world: each one destroys the {ticker} it costs, and the supply falls with it. Nothing the game charges is collected by anybody. Deposits are the one exception, because the withdrawal door has to be able to give them back.', { ticker: TOKEN.ticker }),
       },
 ];
 
@@ -100,14 +90,13 @@ function ContractAddress() {
 
   return (
     <section className="contract">
-      <span className="contract-label">{TOKEN.ticker} CONTRACT</span>
-      <button className="contract-address" onClick={copy} title="Copy the contract address">
+      <span className="contract-label">{t('{ticker} CONTRACT', { ticker: TOKEN.ticker })}</span>
+      <button className="contract-address" onClick={copy} title={t('Copy the contract address')}>
         <code>{address}</code>
-        <em>{copied ? 'copied' : 'copy'}</em>
+        <em>{copied ? t('copied') : t('copy')}</em>
       </button>
       <p className="muted small">
-        On {ACTIVE_CHAIN.label}{ACTIVE_CHAIN.chainId ? ` · chain ${ACTIVE_CHAIN.chainId}` : ''}. Check
-        it before you buy, and trust nothing that does not match.
+        {t('On {chain}{id}. Check it before you buy, and trust nothing that does not match.', { chain: ACTIVE_CHAIN.label, id: ACTIVE_CHAIN.chainId ? ` · chain ${ACTIVE_CHAIN.chainId}` : '' })}
         {ACTIVE_CHAIN.explorerUrl && (
           <>
             {' '}
@@ -115,7 +104,7 @@ function ContractAddress() {
               href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/token/${address}`}
               target="_blank"
               rel="noreferrer noopener"
-            >View it on the explorer</a>.
+            >{t('View it on the explorer')}</a>.
           </>
         )}
       </p>
@@ -126,10 +115,12 @@ function ContractAddress() {
 export default function Landing({ onEnter }: { onEnter: () => void }) {
   const { wallet } = useWallet();
   const connected = wallet.status === 'connected' && !!wallet.address;
+  useLocale();
 
   return (
     <main className="landing">
       <div className="landing-inner">
+        <LanguageSwitch className="landing-lang" />
         <section className="hero">
           {/*
             The mark, at the size it was drawn to be seen at. Rendered with
@@ -139,39 +130,35 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
           <Image
             className="hero-mark"
             src="/emerge-logo.png"
-            alt="Emerge — the AI world"
+            alt={t('Emerge — the AI world')}
             width={320}
             height={320}
             priority
           />
-          <h1>A world that gets on with its life.</h1>
+          <h1>{t('A world that gets on with its life.')}</h1>
           <p className="hero-lede">
-            Claim a plot of land, name the world that grows on it, and the beings who live there
-            will call it that. They think, they work, they fall out with each other and they bury
-            their dead whether or not you are watching. You do not control them. You shape the
-            place they live in.
+            {t('Claim a plot of land, name the world that grows on it, and the beings who live there will call it that. They think, they work, they fall out with each other and they bury their dead whether or not you are watching. You do not control them. You shape the place they live in.')}
           </p>
 
           <div className="gate">
             {connected ? (
               <>
-                <button className="enter-button" onClick={onEnter}>Open the world map</button>
+                <button className="enter-button" onClick={onEnter}>{t('Open the world map')}</button>
                 <div className="gate-wallet"><WalletPicker compact /></div>
                 <p className="muted small">
-                  Everything you claim, earn and are called belongs to this address.
+                  {t('Everything you claim, earn and are called belongs to this address.')}
                 </p>
               </>
             ) : (
               <>
                 <div className="gate-wallet"><WalletPicker /></div>
                 <p className="muted small">
-                  A plot belongs to an address, and so does your balance and your name. Connect a
-                  wallet and the map opens — nothing before that point costs you anything.
+                  {t('A plot belongs to an address, and so does your balance and your name. Connect a wallet and the map opens — nothing before that point costs you anything.')}
                 </p>
               </>
             )}
             <a className="gate-guide" href="/wiki">
-              Read the guide first &rarr;
+              {t('Read the guide first')} &rarr;
             </a>
           </div>
         </section>
@@ -190,7 +177,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
 
         <footer className="landing-foot">
           <div className="foot-links">
-            <a href="/wiki">Guide</a>
+            <a href="/wiki">{t('Guide')}</a>
             <span aria-hidden>·</span>
             <span className="foot-version">v{VERSION}</span>
             <span aria-hidden>·</span>
@@ -202,10 +189,10 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
           </div>
           <p className="muted small">
             {onChainClaimsLive()
-              ? `Land is an ERC-721 token whose id is the plot's own seed, so ownership is readable on any explorer without asking us. Every ${TOKEN.ticker} the game charges is burned; deposits are held in the vault so they can be given back.`
+              ? t('Land is an ERC-721 token whose id is the plot’s own seed, so ownership is readable on any explorer without asking us. Every {ticker} the game charges is burned; deposits are held in the vault so they can be given back.', { ticker: TOKEN.ticker })
               : tokenLive()
-                ? `Balances are read from the ${TOKEN.ticker} contract and every charge is burned on chain. The land registry contract is not deployed yet, so ownership is held in the shared registry — enforced for every player, but not yet an on-chain title.`
-                : `The ${TOKEN.ticker} contract is not deployed yet, so balances are a local development allocation and nothing on this page moves a real token. Every panel says so where it matters.`}
+                ? t('Balances are read from the {ticker} contract and every charge is burned on chain. The land registry contract is not deployed yet, so ownership is held in the shared registry — enforced for every player, but not yet an on-chain title.', { ticker: TOKEN.ticker })
+                : t('The {ticker} contract is not deployed yet, so balances are a local development allocation and nothing on this page moves a real token. Every panel says so where it matters.', { ticker: TOKEN.ticker })}
           </p>
         </footer>
       </div>
