@@ -44,6 +44,22 @@ Any ERC-20 works. The game reads `decimals()`, `balanceOf(address)`,
 `allowance(address,address)`, and asks the player to sign `transfer` and
 `approve`. It never mints, never holds a key, and never has an owner role on it.
 
+**If the token comes from a launchpad, check these five things first.** A
+launchpad's default template is usually not a plain ERC-20, and three of these
+will stop the game working on the day you launch rather than later:
+
+| Feature | What it does here |
+| --- | --- |
+| **Fee on transfer** | Handled. Deposits are credited from the `Transfer` logs — what the vault *received* — not from the amount the calldata asked for, so a tax cannot be arbitraged by depositing and withdrawing. But every price in the game is quoted before tax, so players receive slightly less than the Bank says. Prefer zero tax, or exempt the vault. |
+| **Max wallet / max holding** | **Breaks deposits.** The vault accumulates every deposit, so it will hit a max-wallet cap and start reverting. Exempt the vault address, or do not use the feature. |
+| **Max transaction size** | **Breaks large claims and withdrawals.** A plot costs ~300,000 and `MAX_PAYOUT_EMERGE` is 700,000. Exempt the vault and the registry, or set the cap above both. |
+| **Trading not enabled until launch** | Every transfer reverts until you switch it on. Turn it on before pointing the game at the token. |
+| **Blacklist / pausable** | If the vault is ever blacklisted or the token paused, deposits and withdrawals both stop. Nothing is lost, but know who holds that switch. |
+
+And the one that matters for the registry:
+
+| **Reverts on transfer to `0x0`** | **Breaks every plot claim.** `claim` sends the price straight to the burn address inside the transaction. Use `0x…dEaD` for both `burnTo` and `NEXT_PUBLIC_BURN_ADDRESS` if so. |
+
 > **One thing to check before you deploy.** Many ERC-20 implementations —
 > OpenZeppelin's among them — **revert on a transfer to the zero address**. If
 > yours does, every charge in the game fails with a rejected transaction. The

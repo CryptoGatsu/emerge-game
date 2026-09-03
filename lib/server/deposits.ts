@@ -5,17 +5,27 @@ import 'server-only';
  *
  * A player deposits by signing an ordinary ERC-20 transfer into the vault, then
  * telling us the transaction hash. Nothing about that claim is trusted: this
- * goes and looks. The transaction has to exist, have succeeded, be a call to
- * the configured $EMERGE contract, be a `transfer` whose recipient is the
- * vault, and come from the address claiming it.
+ * goes and looks.
  *
- * That last check is the one that matters most and the easiest to leave out.
- * Without it, anybody could watch the chain for somebody else's deposit and
- * claim the credit for it — the transaction would verify perfectly and the
- * money would land in the wrong ledger.
+ * Two things are checked, and they are different questions.
+ *
+ * **Whose deposit is it?** The transaction has to have been sent by the address
+ * claiming it. The easiest check to leave out and the one that matters most —
+ * without it anybody could watch the chain for somebody else's deposit and
+ * claim the credit, and the transaction would verify perfectly.
+ *
+ * **How much actually arrived?** Read from the `Transfer` events the
+ * transaction emitted, summing what reached the vault — never from the amount
+ * the calldata asked for. Those are not the same number for every token. A
+ * fee-on-transfer token, the sort a launchpad hands out as a matter of course,
+ * moves less than it is told to; crediting the requested amount would let a
+ * player deposit, be credited in full, withdraw in full, and pocket the
+ * difference on every lap. Reading the log asks the token what it did rather
+ * than what it was asked to do, which is also the only reading that survives a
+ * deposit routed through an aggregator or a multicall.
  */
 
-import { createPublicClient, decodeFunctionData, defineChain, http, type Hex } from 'viem';
+import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, TOKEN } from '../chain/emerge';
 
 const chain = () => defineChain({
@@ -45,6 +55,9 @@ const ERC20 = [
  * network ever justifies it.
  */
 const CONFIRMATIONS = Math.max(1, Number(process.env.EMERGE_DEPOSIT_CONFIRMATIONS) || 3);
+
+/** `keccak256("Transfer(address,address,uint256)")`. */
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
 export type DepositCheck =
   | { ok: true; whole: number }
@@ -121,23 +134,33 @@ export async function verifyDeposit(
   if (!same(tx.from, claimant)) {
     return { ok: false, reason: 'That deposit was sent from a different wallet.', retry: false };
   }
-  if (!same(tx.to, ACTIVE_CHAIN.tokenAddress)) {
-    return { ok: false, reason: `That transaction is not a ${TOKEN.ticker} transfer.`, retry: false };
+  /*
+   * What the vault actually received.
+   *
+   * Every `Transfer` this transaction emitted, from the $EMERGE contract, whose
+   * recipient is the vault. Summed rather than taken singly, because a token
+   * with a fee emits more than one and a router may pass through several.
+   */
+  let received = 0n;
+  for (const log of receipt.logs) {
+    if (!same(log.address, ACTIVE_CHAIN.tokenAddress)) continue;
+    if (log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
+    // topics: [signature, from, to]; the amount is the (unindexed) data word.
+    const to = log.topics[2];
+    if (!to || !same(`0x${to.slice(-40)}`, vault)) continue;
+    try {
+      received += BigInt(log.data);
+    } catch {
+      // A malformed log is not a reason to credit anything.
+    }
   }
 
-  let decoded;
-  try {
-    decoded = decodeFunctionData({ abi: ERC20, data: tx.input });
-  } catch {
-    return { ok: false, reason: `That transaction is not a ${TOKEN.ticker} transfer.`, retry: false };
-  }
-  if (decoded.functionName !== 'transfer') {
-    return { ok: false, reason: `That transaction is not a ${TOKEN.ticker} transfer.`, retry: false };
-  }
-
-  const [to, units] = decoded.args as readonly [Hex, bigint];
-  if (!same(to, vault)) {
-    return { ok: false, reason: 'That transfer did not go to the vault.', retry: false };
+  if (received === 0n) {
+    return {
+      ok: false,
+      reason: `That transaction did not move any ${TOKEN.ticker} into the vault.`,
+      retry: false,
+    };
   }
 
   try {
@@ -146,7 +169,7 @@ export async function verifyDeposit(
     });
     // Whole tokens, rounded down: a deposit is credited for what it certainly
     // covers, never for a fraction rounded up in the player's favour.
-    const whole = Number(units / 10n ** BigInt(Number(decimals)));
+    const whole = Number(received / 10n ** BigInt(Number(decimals)));
     if (!(whole > 0)) {
       return { ok: false, reason: 'That deposit was too small to buy any Gold.', retry: false };
     }

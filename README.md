@@ -670,10 +670,15 @@ registry: those are this game's own deployments. `tokenLive()` is the test the
 interface actually asks, and while it is false the panels say plainly that balances and
 claims live in this browser rather than showing a transaction that bought nothing.
 
-> **One thing to check before deploying the token.** Many ERC-20 implementations,
-> OpenZeppelin's among them, **revert on a transfer to the zero address** — which
-> would make every charge in the game fail. No code change is needed if yours
-> does: point `NEXT_PUBLIC_BURN_ADDRESS` at a dead address the token accepts.
+> **Check the token before pointing the game at it**, especially one from a
+> launchpad, whose templates are rarely plain ERC-20s. Reverting on a transfer
+> to the zero address (common, OpenZeppelin included) breaks every charge — point
+> `NEXT_PUBLIC_BURN_ADDRESS` at `0x…dEaD` instead. A max-wallet cap breaks
+> deposits, because the vault accumulates them. A max-transaction cap breaks
+> claims and withdrawals. Fee-on-transfer is handled — deposits are credited
+> from the `Transfer` logs rather than the calldata, so a tax cannot be
+> arbitraged — but it still makes every quoted price slightly optimistic.
+> [`docs/CONTRACTS.md`](docs/CONTRACTS.md) has the full table.
 
 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) has the whole deployment, in order.
 
