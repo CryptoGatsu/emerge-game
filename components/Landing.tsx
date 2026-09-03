@@ -20,6 +20,7 @@ import { useState } from 'react';
 import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT } from '@/lib/chain/vault';
+import { VERSION } from '@/lib/version';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 /** Where to find the project outside the game. */
@@ -188,6 +189,8 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
         <footer className="landing-foot">
           <div className="foot-links">
             <a href="/wiki">Guide</a>
+            <span aria-hidden>·</span>
+            <span className="foot-version">v{VERSION}</span>
             <span aria-hidden>·</span>
             <a href={X_URL} target="_blank" rel="noreferrer noopener">@emergerh</a>
             <span aria-hidden>·</span>

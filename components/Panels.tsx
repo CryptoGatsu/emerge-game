@@ -225,6 +225,16 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
       wide
     >
       <div className="guide">
+        {/* The long-form version of all of this, for reading rather than for
+            glancing at mid-game. Opened in its own tab on purpose: leaving the
+            page would tear down a running settlement. */}
+        <a className="guide-wiki" href="/wiki" target="_blank" rel="noreferrer">
+          <b>The full guide &rarr;</b>
+          <span>
+            Every price, the yield worked through, how the world market is priced, and what is
+            settled on chain. Opens in a new tab.
+          </span>
+        </a>
         <section className="opening">
           <h4>You are not the mayor</h4>
           <p>

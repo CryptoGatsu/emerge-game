@@ -2532,3 +2532,89 @@ button.fold:hover { color: var(--emerald); }
 @media (max-width: 720px) {
   .wiki-table td.ledger { min-width: 14ch; }
 }
+
+/* ---------------------------------------------------------------- *
+ * "There is a newer version"
+ *
+ * Bottom-left, above the action bar and clear of the panels, because
+ * this is the least urgent thing on the screen: a settlement is
+ * running and nothing is wrong. It never covers the world for long
+ * and it never reloads on its own.
+ * ---------------------------------------------------------------- */
+
+.update-notice {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: min(460px, calc(100vw - 36px));
+  padding: 13px 15px;
+  border-radius: 13px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  backdrop-filter: blur(9px);
+  box-shadow: var(--shadow);
+  animation: update-in 0.35s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+@keyframes update-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.update-notice > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.update-notice b { font-size: 12.5px; color: var(--emerald); }
+.update-notice span { font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.update-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.update-reload {
+  padding: 8px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #06180c;
+  background: linear-gradient(160deg, var(--emerald), #6f9c3a);
+}
+.update-reload:hover { filter: brightness(1.08); }
+.update-later {
+  padding: 8px 10px;
+  font-size: 11.5px;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+}
+.update-later:hover { color: var(--text); }
+
+@media (max-width: 720px) {
+  /* Above the action bar rather than under it, and full width, because on a
+     phone a floating card in the corner is a card over a button. */
+  .update-notice {
+    left: 10px;
+    right: 10px;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    max-width: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 11px;
+  }
+  .update-actions { justify-content: flex-end; }
+}
+
+/* The way from the in-game guide to the long one. */
+.guide-wiki {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge);
+  background: rgba(1, 26, 17, 0.5);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.guide-wiki:hover { border-color: var(--emerald); background: rgba(1, 26, 17, 0.75); }
+.guide-wiki b { font-size: 13px; color: var(--emerald); }
+.guide-wiki span { font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+.foot-version { color: var(--muted); font-variant-numeric: tabular-nums; }
