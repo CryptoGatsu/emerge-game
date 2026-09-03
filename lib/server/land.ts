@@ -9,22 +9,29 @@ import 'server-only';
  * expensive it is to *be* a player at all. A plot costs two hundred thousand
  * $EMERGE or more and burns it, so an identity has to spend before it can earn.
  *
- * The chain is asked, not the relay. The relay's claims are the server's own
- * word about who owns what, and using them here would mean an attacker who can
- * write a claim can also unlock earnings; `balanceOf` on the land registry
- * cannot be talked into a wrong answer.
+ * Where a registry is deployed the chain is asked and nothing else: `balanceOf`
+ * on the land registry cannot be talked into a wrong answer.
  *
- * **Where there is no registry deployed this answers false**, and stewardship
- * is not paid at all. It used to answer true, on the reasoning that there was
- * no on-chain fact to check yet — which was exactly backwards. A live token
- * with no registry would have meant every wallet in the world could collect the
- * daily ceiling having spent nothing, bounded only by the vault's global
- * budget: a faucet, not a game. Deposits and principal withdrawals still work
- * without a registry; only earnings wait for it.
+ * **Where there is no registry, a claim row counts — but only while the token
+ * is live.** The relay's claims are the server's own word about who owns what,
+ * and on their own they would be worthless here: an attacker who can write a
+ * claim could unlock earnings. What makes them worth something in this one
+ * configuration is `/api/plots`, which in exactly this case refuses to write a
+ * row until it has read a burn off the chain: a real transaction, from this
+ * wallet, settled, worth at least the plot price, and single-use. So the row is
+ * evidence that this identity spent, which is the whole property the registry
+ * was here to provide. The question is only ever *how* it was proved.
+ *
+ * With no registry **and** no token, claiming costs nothing at all, so a claim
+ * row proves nothing and this answers false. That is the case the earlier
+ * blanket refusal was really written for — a live token with a free claim would
+ * have been a faucet, not a game. Deposits and principal withdrawals never
+ * depended on any of this.
  */
 
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
-import { ACTIVE_CHAIN } from '../chain/emerge';
+import { ACTIVE_CHAIN, tokenLive } from '../chain/emerge';
+import { allClaims } from './registry';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -46,6 +53,13 @@ const ERC721 = [
 
 export type LandCheck = 'holds' | 'none' | 'no-registry' | 'unreachable';
 
+/** Whether the relay shows any plot standing in this wallet's name. */
+async function claimsHeldBy(address: string): Promise<boolean> {
+  const wanted = address.toLowerCase();
+  const claims = await allClaims();
+  return claims.some((c) => c.owner.toLowerCase() === wanted);
+}
+
 /**
  * The same question, answered in a way the caller can explain to a player.
  *
@@ -57,7 +71,19 @@ export type LandCheck = 'holds' | 'none' | 'no-registry' | 'unreachable';
  */
 export async function landCheck(address: string): Promise<LandCheck> {
   const registry = ACTIVE_CHAIN.registryAddress;
-  if (!registry) return 'no-registry';
+  if (!registry) {
+    // No registry and no token: claiming is free, so a claim row is not
+    // evidence of anything and stewardship stays shut.
+    if (!tokenLive()) return 'no-registry';
+    try {
+      const held = await claimsHeldBy(address);
+      return held ? 'holds' : 'none';
+    } catch {
+      // The relay is the only record there is here, so not being able to read
+      // it is the same kind of "we could not find out" as an unreachable node.
+      return 'unreachable';
+    }
+  }
   try {
     const client = createPublicClient({ chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
     const held = await client.readContract({

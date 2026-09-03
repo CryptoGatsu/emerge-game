@@ -45,7 +45,7 @@ import {
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
-import { VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
+import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
 import { landCheck } from '@/lib/server/land';
 
 export const dynamic = 'force-dynamic';
@@ -181,10 +181,10 @@ export async function POST(request: Request) {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.
       const said = land === 'no-registry'
-        ? 'The land registry is not live on this deployment yet, so stewardship cannot be paid. Your balance is safe and nothing was taken.'
+        ? `Stewardship cannot be paid until ${TOKEN.ticker} is live on this deployment. Your balance is safe and nothing was taken.`
         : land === 'unreachable'
-          ? 'The land registry could not be reached to check this wallet. Nothing was taken — try again in a minute.'
-          : 'Stewardship is paid to wallets that hold land on chain. If you claimed this plot before the registry went live, claim it on chain from the world map and it will start paying.';
+          ? 'We could not check what land this wallet holds. Nothing was taken — try again in a minute.'
+          : 'Stewardship is paid to the wallet that holds the land. No plot stands in this one\u2019s name — if you claimed with a different wallet, collect from that one.';
       return NextResponse.json({ error: said, land }, { status: 403 });
     }
   }

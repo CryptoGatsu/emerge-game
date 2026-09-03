@@ -285,12 +285,24 @@ per identity. Set `EMERGE_DAILY_EMISSION` to something near your real player
 count once you know it; it is the backstop that stops any single day emptying
 the vault.
 
-**The land gate answers false when no registry is deployed, and stewardship is
-not paid at all.** It used to answer true, on the reasoning that there was no
-on-chain fact to check — which was backwards: a live token with no registry
-would have let every wallet in the world collect the daily ceiling having spent
-nothing. Deposits and principal withdrawals work without a registry; only
-earnings wait for it.
+**The land gate asks the chain where a registry is deployed, and the claim rows
+where one is not — but only while the token is live.** The question it is really
+asking is whether this identity paid to be here, and there are two ways to know.
+With `EmergeLand` deployed, `balanceOf` answers it and nothing else is consulted.
+Without it, `/api/plots` will not write a claim row until it has read the burn
+off the chain itself — a real transaction, from that wallet, settled, worth at
+least the plot price, and single-use — so the row is evidence of the same spend.
+
+With no registry **and** no token, claiming costs nothing, a claim row proves
+nothing, and the gate answers false. That is the case worth being strict about:
+a live token with a free claim would have let every wallet in the world collect
+the daily ceiling having spent nothing. Deposits and principal withdrawals never
+depended on any of this.
+
+One consequence worth knowing: rows written before the token went live were not
+burn-checked, because there was nothing to check. Those wallets count as holding
+land. If that matters for a given deployment, deploy the registry — the chain
+then becomes the only authority again.
 
 **The floor and the rate limits are not about the money, they are about the
 gas.** Every payout is a transaction the *vault* pays for. Without a floor, a
