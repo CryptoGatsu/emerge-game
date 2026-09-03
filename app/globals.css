@@ -2991,8 +2991,24 @@ button.fold:hover { color: var(--emerald); }
 
 /* ---- offers ---- */
 .offer-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(184, 231, 86, 0.14); display: grid; gap: 6px; }
-.offer-row { display: flex; gap: 8px; }
-.offer-row input { flex: 1; min-width: 0; }
+.offer-row { display: flex; gap: 8px; align-items: stretch; }
+/* The card makes its buttons full-width; the offer button sits beside the
+   amount instead, and the amount takes what is left. */
+.offer-row input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--cream);
+  font: inherit;
+  font-size: 14px;
+}
+.offer-row input:focus { outline: none; border-color: var(--emerald); }
+.offer-row input::placeholder { color: var(--muted); }
+.settled-by .offer-row button, .offer-row button { flex: 0 0 auto; width: auto; white-space: nowrap; }
 .my-offer { display: grid; gap: 4px; }
 .my-offer .ghost { justify-self: start; }
 .offers { display: grid; gap: 6px; margin: 10px 0; }
