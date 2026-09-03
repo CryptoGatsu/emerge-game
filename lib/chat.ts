@@ -15,6 +15,7 @@
  * survives a serverless deployment — which a long-lived connection does not.
  */
 
+import { withSession } from './net/session';
 import { clientKey } from './limits';
 
 const KEY = clientKey('chat.v1');
@@ -115,11 +116,17 @@ export async function send(
   lastSent = now;
 
   try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ channel, author: address ?? name, wallet: !!address, text: body }),
-    });
+    // Posting under a wallet needs the server to know it is yours, or the badge
+    // beside the name would mean nothing.
+    const response = await withSession(
+      address,
+      () => fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel, author: address ?? name, wallet: !!address, text: body }),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { message?: ChatMessage; error?: string };
     if (!response.ok || !json.message) {
       return { state, refused: json.error ?? 'The message did not go.' };

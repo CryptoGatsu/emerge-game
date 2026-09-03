@@ -10,18 +10,30 @@
  * put it into the settlement that actually persists, so the gift waits until
  * that client next asks.
  *
- * The $EMERGE side is the sender's own business and is burned in their ledger
- * before this is called. What crosses the wire is Gold, capped, so a client
- * that lied about paying can at most gift somebody a modest sum — and the cap
- * is what a contract will enforce properly once one exists.
+ * The $EMERGE side is the sender's own business and is burned in their wallet
+ * before this is called. What crosses the wire is Gold, and the server cannot
+ * see the burn — so a client that lied about paying could otherwise mint Gold
+ * into any world for nothing, as often as it liked.
+ *
+ * Three things bound that. The per-gift cap, the per-wallet daily cap below,
+ * and the fact that Gold has no exit: the only door out of the game is a
+ * withdrawal of principal, which is bounded by deposits the chain has
+ * confirmed. So a forged gift can unbalance a settlement and cannot take a
+ * token out of the vault. Said plainly because the difference matters.
  */
 
 import { NextResponse } from 'next/server';
 import { MAX_GIFT_GOLD, claimOf, collectGifts, leaveGift, type Gift } from '@/lib/server/registry';
+import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
+import { incrWindow } from '@/lib/server/kv';
+import { serverKey } from '@/lib/limits';
 
 export const dynamic = 'force-dynamic';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/** The most Gold one wallet may give away in a day, across every world. */
+const MAX_GIFT_GOLD_PER_DAY = 10_000;
 
 const clean = (value: string, limit: number) =>
   value
@@ -48,6 +60,9 @@ export async function POST(request: Request) {
   if (!ADDRESS.test(from)) {
     return NextResponse.json({ error: 'A gift comes from a wallet.' }, { status: 400 });
   }
+  if (sessionsAvailable() && !holdsAddress(request, from)) {
+    return NextResponse.json({ error: 'Sign in with this wallet first.', needsSession: true }, { status: 401 });
+  }
 
   /* The owner, taking what has been left for them. */
   if (body.collect) {
@@ -73,6 +88,15 @@ export async function POST(request: Request) {
       { error: `A single gift carries at most ${MAX_GIFT_GOLD.toLocaleString()} Gold.` },
       { status: 400 },
     );
+  }
+
+  // What one wallet may put into other people's worlds in a day. Far above
+  // generosity, far below what minting Gold for free would be worth.
+  const given = await incrWindow(serverKey(`gifts:from:${from.toLowerCase()}`), gold, 26 * 3600);
+  if (given > MAX_GIFT_GOLD_PER_DAY) {
+    return NextResponse.json({
+      error: `That is ${MAX_GIFT_GOLD_PER_DAY.toLocaleString()} Gold given today. Be generous again tomorrow.`,
+    }, { status: 429 });
   }
 
   try {

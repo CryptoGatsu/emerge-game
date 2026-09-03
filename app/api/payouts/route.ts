@@ -8,6 +8,11 @@
  * This route signs. There is no person in the loop and no queue to review, so
  * everything it needs in order to be safe is checked here rather than assumed:
  *
+ *  0. **The caller proves the wallet is theirs.** Without that, "pay this
+ *     address" is an instruction anybody can give for anybody — the tokens
+ *     would reach real players, which is not theft, and an attacker would still
+ *     be choosing when the day's emission budget empties and how much gas the
+ *     vault burns doing it. A signed cookie settles who is asking.
  *  1. **A shared store, or nothing.** The daily caps live in it. On serverless
  *     each request runs in a different instance, so caps held in process memory
  *     would reset per request — which is not a cap. Refuse rather than
@@ -34,8 +39,10 @@
 import { NextResponse } from 'next/server';
 import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor } from '@/lib/server/payouts';
 import {
-  debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission, settlementFor,
+  MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
+  settlementFor, takePayoutSlot,
 } from '@/lib/server/accounts';
+import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
@@ -89,6 +96,16 @@ export async function POST(request: Request) {
   if (!ADDRESS.test(address)) {
     return NextResponse.json({ error: 'A payout belongs to a wallet address.' }, { status: 400 });
   }
+  if (!sessionsAvailable()) {
+    return NextResponse.json({
+      error: 'This deployment cannot verify wallets, so it will not pay out. Nothing was taken.',
+    }, { status: 503 });
+  }
+  if (!holdsAddress(request, address)) {
+    return NextResponse.json({
+      error: 'Sign in with this wallet first. Nothing was taken.', needsSession: true,
+    }, { status: 401 });
+  }
   if (!tokenLive()) {
     return NextResponse.json({ error: 'No $EMERGE contract is configured.' }, { status: 503 });
   }
@@ -125,6 +142,11 @@ export async function POST(request: Request) {
 
   // Ours, from the amount asked for — never from figures the client sent.
   const money = settlementFor(kind, asked);
+  if (money.gross < MIN_PAYOUT_EMERGE) {
+    return NextResponse.json({
+      error: `The smallest withdrawal is ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE.`,
+    }, { status: 400 });
+  }
   if (money.gross > MAX_PAYOUT_EMERGE) {
     return NextResponse.json({
       error: `A single withdrawal is capped at ${MAX_PAYOUT_EMERGE.toLocaleString()} $EMERGE. Take it out in stages.`,
@@ -139,10 +161,23 @@ export async function POST(request: Request) {
     }, { status: 503 });
   }
 
-  /* ---------------- Reserve, then send ---------------- */
+  /* ---------------- Ration, reserve, then send ---------------- */
 
-  let give: () => Promise<void>;
-
+  /*
+   * Rationed here rather than at the door.
+   *
+   * What is being rationed is the vault signing and paying gas, so a request
+   * that was never going to reach that point — too small, more principal than
+   * standing, no land — should not spend somebody's allowance. Once past this
+   * line the vault is about to work, and a failed attempt costs it the same as
+   * a successful one, so the slot is not given back.
+   */
+  const gate = kind === 'earnings' && !(await holdsLand(address));
+  if (gate) {
+    return NextResponse.json({
+      error: 'Stewardship is paid to wallets that hold land. Claim a plot and the world you run starts paying.',
+    }, { status: 403 });
+  }
   if (kind === 'principal') {
     const standing = await principalOf(address);
     if (money.gross > standing) {
@@ -152,24 +187,28 @@ export async function POST(request: Request) {
           : `You have ${standing.toLocaleString()} $EMERGE of principal standing.`,
       }, { status: 400 });
     }
-    // Debit first: between a check and a transfer is exactly where the same
-    // principal gets withdrawn twice.
-    await debitPrincipal(address, money.gross);
+  }
+
+  const slot = await takePayoutSlot(address);
+  if (!slot.ok) return NextResponse.json({ error: slot.reason }, { status: 429 });
+
+  let give: () => Promise<void>;
+
+  if (kind === 'principal') {
+    /*
+     * Debit before sending, and re-read rather than trusting the check above:
+     * between a check and a transfer is exactly where the same principal gets
+     * withdrawn twice. The debit is the check that counts.
+     */
+    const left = await debitPrincipal(address, money.gross);
+    if (left < 0) {
+      await debitPrincipal(address, money.gross);
+      return NextResponse.json({
+        error: 'That is more principal than the chain shows you deposited.',
+      }, { status: 400 });
+    }
     give = async () => { await debitPrincipal(address, -money.gross); };
   } else {
-    /*
-     * Earnings only to an address that holds land.
-     *
-     * The one real defence against a wallet farm: this is the unverifiable half
-     * of the ledger, and requiring a plot means an identity has to buy one —
-     * burning two hundred thousand $EMERGE or more — before it can earn
-     * anything at all.
-     */
-    if (!(await holdsLand(address))) {
-      return NextResponse.json({
-        error: 'Stewardship is paid to wallets that hold land. Claim a plot and the world you run starts paying.',
-      }, { status: 403 });
-    }
     if (!(await reserveEmission(address, money.gross))) {
       const room = await emissionRoom(address);
       return NextResponse.json({

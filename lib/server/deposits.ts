@@ -37,6 +37,15 @@ const ERC20 = [
   },
 ] as const;
 
+/**
+ * How many blocks deep a deposit must be before it is credited.
+ *
+ * Robinhood Chain settles quickly, so this is a couple of seconds rather than a
+ * wait anybody notices. Raise it with `EMERGE_DEPOSIT_CONFIRMATIONS` if the
+ * network ever justifies it.
+ */
+const CONFIRMATIONS = Math.max(1, Number(process.env.EMERGE_DEPOSIT_CONFIRMATIONS) || 3);
+
 export type DepositCheck =
   | { ok: true; whole: number }
   | { ok: false; reason: string; retry: boolean };
@@ -81,6 +90,30 @@ export async function verifyDeposit(
   }
   if (receipt.status !== 'success') {
     return { ok: false, reason: 'That transaction failed on chain, so nothing was deposited.', retry: false };
+  }
+
+  /*
+   * Wait for the block to settle.
+   *
+   * A transaction in the newest block can still be undone by a short reorg, and
+   * crediting one that is later orphaned would hand out principal against a
+   * deposit that no longer exists. A handful of blocks costs a player a few
+   * seconds; the retry loop in the Bank covers the wait.
+   */
+  try {
+    const head = await client.getBlockNumber();
+    // A transaction in the newest block has one confirmation, not none, which
+    // is the usual reading and the one `CONFIRMATIONS` is written against.
+    const confirmations = head - receipt.blockNumber + 1n;
+    if (confirmations < BigInt(CONFIRMATIONS)) {
+      return {
+        ok: false,
+        reason: `Waiting for the deposit to settle — ${confirmations} of ${CONFIRMATIONS} confirmations.`,
+        retry: true,
+      };
+    }
+  } catch {
+    return { ok: false, reason: 'Could not reach the chain to confirm that deposit.', retry: true };
   }
 
   // Who sent it. A deposit belongs to the wallet that signed it, not to

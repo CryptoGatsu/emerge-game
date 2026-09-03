@@ -14,10 +14,13 @@ import 'server-only';
  * write a claim can also unlock earnings; `balanceOf` on the land registry
  * cannot be talked into a wrong answer.
  *
- * **Where there is no registry deployed** this answers true. That is
- * deliberate rather than an oversight: before the land contract exists there is
- * no on-chain fact to check, and refusing everybody would mean the game could
- * not pay anybody. The other caps still apply, and `docs/CONTRACTS.md` says so.
+ * **Where there is no registry deployed this answers false**, and stewardship
+ * is not paid at all. It used to answer true, on the reasoning that there was
+ * no on-chain fact to check yet — which was exactly backwards. A live token
+ * with no registry would have meant every wallet in the world could collect the
+ * daily ceiling having spent nothing, bounded only by the vault's global
+ * budget: a faucet, not a game. Deposits and principal withdrawals still work
+ * without a registry; only earnings wait for it.
  */
 
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
@@ -30,14 +33,20 @@ const chain = () => defineChain({
   rpcUrls: { default: { http: [ACTIVE_CHAIN.rpcUrl ?? ''] } },
 });
 
-const ERC721 = [{
-  type: 'function', name: 'balanceOf', stateMutability: 'view',
-  inputs: [{ name: 'who', type: 'address' }], outputs: [{ type: 'uint256' }],
-}] as const;
+const ERC721 = [
+  {
+    type: 'function', name: 'balanceOf', stateMutability: 'view',
+    inputs: [{ name: 'who', type: 'address' }], outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function', name: 'ownerOf', stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'address' }],
+  },
+] as const;
 
 export async function holdsLand(address: string): Promise<boolean> {
   const registry = ACTIVE_CHAIN.registryAddress;
-  if (!registry) return true;
+  if (!registry) return false;
   try {
     const client = createPublicClient({ chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
     const held = await client.readContract({
@@ -54,3 +63,37 @@ export async function holdsLand(address: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Who the chain says holds one plot, or null if nobody does.
+ *
+ * Used to stop the relay being squatted. The relay's claim rows are what the
+ * world map draws, and writing one costs nothing — so without this a single
+ * script could POST a claim for every seed on every chart and make the whole
+ * map read as taken, blocking real players who would have paid. Once a registry
+ * exists the relay may only record what the chain already agrees with.
+ *
+ * Throws rather than returning null on an unreachable chain, so the caller can
+ * tell "nobody owns it" from "we could not find out" — treating the second as
+ * the first is how an RPC outage becomes an open door.
+ */
+export async function ownerOnChain(seed: number): Promise<string | null> {
+  const registry = ACTIVE_CHAIN.registryAddress;
+  if (!registry) return null;
+  const client = createPublicClient({ chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+  try {
+    const owner = await client.readContract({
+      address: registry as Hex, abi: ERC721, functionName: 'ownerOf', args: [BigInt(seed)],
+    });
+    return /^0x0+$/.test(owner) ? null : owner.toLowerCase();
+  } catch (error) {
+    // `ownerOf` reverts for a plot nobody has claimed. That is an answer, not a
+    // failure — but a network error is a failure, and must not read as one.
+    const message = error instanceof Error ? error.message : '';
+    if (/revert|nonexistent|not a token|execution/i.test(message)) return null;
+    throw error;
+  }
+}
+
+/** True when this deployment has a land contract to check against. */
+export const registryConfigured = () => !!ACTIVE_CHAIN.registryAddress;

@@ -252,3 +252,27 @@ export async function releaseLock(key: string): Promise<void> {
   }
   await redis(['DEL', key]);
 }
+
+/**
+ * Add to a counter that expires.
+ *
+ * Rate limits and per-day tallies both want this: a counter that lives for
+ * exactly as long as the window it measures, so it cannot leak a key per
+ * address per day for ever. The expiry is set only when the counter is
+ * created, so a busy window does not keep pushing its own deadline back.
+ */
+export async function incrWindow(key: string, amount: number, ttlSeconds: number): Promise<number> {
+  const step = Math.round(amount);
+  if (!shared()) {
+    const store = memory().values;
+    const expiry = memory().values.get(`${key}:until`);
+    if (expiry && Number(expiry) < Date.now()) { store.delete(key); store.delete(`${key}:until`); }
+    const next = (Number(store.get(key) ?? '0') || 0) + step;
+    store.set(key, String(next));
+    if (!expiry || Number(expiry) < Date.now()) store.set(`${key}:until`, String(Date.now() + ttlSeconds * 1000));
+    return next;
+  }
+  const next = Number(await redis(['INCRBY', key, step])) || 0;
+  if (next === step) await redis(['EXPIRE', key, Math.max(1, Math.round(ttlSeconds))]);
+  return next;
+}

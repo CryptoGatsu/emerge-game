@@ -7,6 +7,8 @@
  * error where a settlement should be.
  */
 
+import { withSession } from './session';
+
 export interface Claim {
   seed: number;
   region: string;
@@ -91,11 +93,15 @@ export async function surveyPlot(input: {
   chart: number; capacity: number; owner: string; ownerName: string;
 }): Promise<SurveyResult> {
   try {
-    const response = await fetch('/api/plots', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...input, survey: true }),
-    });
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...input, survey: true }),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { find?: Find; error?: string };
     if (!response.ok || !json.find) {
       return { ok: false, reason: json.error ?? 'The registry refused the survey.' };
@@ -121,11 +127,15 @@ export async function takePlot(input: {
   seed: number; region: string; worldName: string; owner: string; ownerName: string; price: number;
 }): Promise<TakeResult> {
   try {
-    const response = await fetch('/api/plots', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { claim?: Claim; error?: string; taken?: Claim };
     if (!response.ok || !json.claim) {
       return { ok: false, reason: json.error ?? 'The registry refused the claim.', taken: json.taken };
@@ -139,11 +149,15 @@ export async function takePlot(input: {
 /** Give a plot up. */
 export async function releasePlot(seed: number, owner: string): Promise<boolean> {
   try {
-    const response = await fetch('/api/plots', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ seed, owner, release: true }),
-    });
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, release: true }),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { released?: boolean };
     return json.released === true;
   } catch {
@@ -192,11 +206,15 @@ export async function sendGift(input: {
   seed: number; gold: number; from: string; fromName: string;
 }): Promise<{ ok: true; to: string } | { ok: false; reason: string }> {
   try {
-    const response = await fetch('/api/gifts', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
+    const response = await withSession(
+      input.from,
+      () => fetch('/api/gifts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { gift?: Gift; to?: string; error?: string };
     if (!response.ok || !json.gift) {
       return { ok: false, reason: json.error ?? 'The gift did not go.' };
@@ -210,11 +228,15 @@ export async function sendGift(input: {
 /** Take whatever has been left for a world you own. */
 export async function collectGifts(seed: number, owner: string): Promise<Gift[]> {
   try {
-    const response = await fetch('/api/gifts', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ seed, from: owner, collect: true }),
-    });
+    const response = await withSession(
+      owner,
+      () => fetch('/api/gifts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, from: owner, collect: true }),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { gifts?: Gift[] };
     return json.gifts ?? [];
   } catch {

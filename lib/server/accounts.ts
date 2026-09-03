@@ -38,10 +38,60 @@
 
 import { DAILY_EARN_CEILING, EMERGE_PER_GOLD, WITHDRAW_BURN_RATE } from '../chain/vault';
 import { serverKey } from '../limits';
-import { counter, hget, hsetnx, incrBy } from './kv';
+import { counter, hget, hsetnx, incrBy, incrWindow } from './kv';
 
 /** Today, in UTC, as a plain key. The server's day, not the player's. */
 export const utcDay = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The smallest payout the vault will send.
+ *
+ * Two reasons, and the second is the one that matters. A collection of nine
+ * $EMERGE rounds its five per cent burn down to nothing, so dust withdrawals
+ * skip the burn entirely. Worse, every payout is a transaction the *vault*
+ * pays gas for — so without a floor, a wallet can spend its daily allowance a
+ * token at a time and make the vault sign a hundred thousand transfers to do
+ * it. The floor makes both pointless.
+ */
+export const MIN_PAYOUT_EMERGE = 1_000;
+
+/**
+ * How many payouts one wallet may ask for in a day, and how often.
+ *
+ * The floor above caps how cheap a single request can be; these cap how many
+ * there can be. Between them the vault signs at most a few dozen transfers per
+ * wallet per day, which is far more than playing the game generates and far
+ * less than an attacker needs.
+ */
+export const MAX_PAYOUTS_PER_DAY = 24;
+export const PAYOUT_COOLDOWN_SECONDS = 20;
+
+const payoutCountKey = (address: string, day: string) => serverKey(`payouts:${day}:${address.toLowerCase()}`);
+const cooldownKey = (address: string) => serverKey(`cooldown:${address.toLowerCase()}`);
+
+export type PayoutAllowance =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+/**
+ * May this wallet ask for a payout right now?
+ *
+ * Counted before the transfer and deliberately not given back on failure: the
+ * cost being rationed is the vault signing and paying gas, which a failed
+ * attempt still consumes.
+ */
+export async function takePayoutSlot(address: string): Promise<PayoutAllowance> {
+  const day = utcDay();
+  const recent = await incrWindow(cooldownKey(address), 1, PAYOUT_COOLDOWN_SECONDS);
+  if (recent > 1) {
+    return { ok: false, reason: `One withdrawal at a time — try again in ${PAYOUT_COOLDOWN_SECONDS} seconds.` };
+  }
+  const today = await incrWindow(payoutCountKey(address, day), 1, 26 * 3600);
+  if (today > MAX_PAYOUTS_PER_DAY) {
+    return { ok: false, reason: `That is ${MAX_PAYOUTS_PER_DAY} withdrawals today. Take the rest out tomorrow.` };
+  }
+  return { ok: true };
+}
 
 /* ------------------------------------------------------------------ *
  * Principal
@@ -140,12 +190,13 @@ export async function reserveEmission(address: string, whole: number): Promise<b
   const amount = Math.floor(whole);
   if (!(amount > 0)) return false;
 
-  const mine = await incrBy(earnedKey(address, day), amount);
+  // Expiring, so a day's tally does not become a key that lives for ever.
+  const mine = await incrWindow(earnedKey(address, day), amount, 26 * 3600);
   if (mine > DAILY_EARN_CEILING) {
     await incrBy(earnedKey(address, day), -amount);
     return false;
   }
-  const all = await incrBy(globalKey(day), amount);
+  const all = await incrWindow(globalKey(day), amount, 26 * 3600);
   if (all > dailyEmissionBudget()) {
     await incrBy(globalKey(day), -amount);
     await incrBy(earnedKey(address, day), -amount);

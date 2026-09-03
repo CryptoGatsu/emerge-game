@@ -90,6 +90,14 @@ const ERC20 = [
   },
 ] as const;
 
+/**
+ * Roughly what one ERC-20 transfer costs, with room to spare.
+ *
+ * Used as a floor rather than an estimate: the point is to notice an empty
+ * vault before signing, not to price the transaction.
+ */
+const MIN_GAS_WEI = 2_000_000_000_000_000n; // 0.002 native
+
 /** How long the nonce lock is held before it is assumed to have died. */
 const LOCK_SECONDS = 45;
 const NONCE_LOCK = serverKey('vault:nonce');
@@ -125,8 +133,15 @@ export async function vaultHealth(): Promise<VaultHealth> {
       client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' }),
     ]);
     const tokens = Number(units / 10n ** BigInt(decimals));
-    if (gas === 0n) {
-      return { ok: false, tokens, gas, problem: 'The vault has no gas to send with. This is ours to fix, not yours.' };
+    /*
+     * Enough gas for a transfer, not merely more than zero.
+     *
+     * A vault with a few wei left would pass a non-zero check and then fail
+     * every transaction, which reads to a player as the game refusing to pay.
+     * Better to say so before signing.
+     */
+    if (gas < MIN_GAS_WEI) {
+      return { ok: false, tokens, gas, problem: 'The vault is out of gas to send with. This is ours to fix, not yours.' };
     }
     return { ok: true, tokens, gas, problem: null };
   } catch {

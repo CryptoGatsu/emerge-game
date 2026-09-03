@@ -15,10 +15,19 @@
  * characters, the author is capped, and the timestamp is set here rather than
  * accepted from the caller — a client that could set `at` could bury every
  * other message in the channel forever.
+ *
+ * **A message badged with a wallet has to be from that wallet.** The interface
+ * shows a wallet-backed name differently from a chosen one, and marks the
+ * owner of the world a channel belongs to — so an unchecked badge is a way to
+ * pose as somebody, which around a token is a way to take money off people.
+ * The author of a badged message is therefore not read from the request at
+ * all: it is the address the session proved, whatever the client asked for.
+ * Anyone may still talk under a plain name; it simply does not carry a badge.
  */
 
 import { NextResponse } from 'next/server';
 import { append, relayShared, since, type RelayMessage } from '@/lib/chatStore';
+import { holdsAddress, sessionAddress, sessionsAvailable } from '@/lib/server/session';
 
 /** Never cached: the whole point is what arrived a second ago. */
 export const dynamic = 'force-dynamic';
@@ -79,9 +88,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unknown channel.' }, { status: 400 });
   }
   const text = clean(String(body.text ?? ''), MAX_TEXT);
-  const author = clean(String(body.author ?? ''), MAX_AUTHOR);
+  let author = clean(String(body.author ?? ''), MAX_AUTHOR);
   if (!text) return NextResponse.json({ error: 'Say something first.' }, { status: 400 });
   if (!author) return NextResponse.json({ error: 'Messages need a name.' }, { status: 400 });
+
+  /*
+   * A wallet badge is earned, not asserted.
+   *
+   * The address is taken from the session rather than the body, so a badged
+   * message is from that wallet by construction and cannot be aimed at
+   * somebody else's identity.
+   */
+  let badged = body.wallet === true;
+  if (badged) {
+    if (!sessionsAvailable()) {
+      badged = false;
+    } else {
+      const proved = sessionAddress(request);
+      if (!proved) {
+        return NextResponse.json({
+          error: 'Sign in with your wallet to post under it.', needsSession: true,
+        }, { status: 401 });
+      }
+      author = proved;
+    }
+  }
 
   const who = `${author}|${request.headers.get('x-forwarded-for') ?? ''}`;
   const now = Date.now();
@@ -100,7 +131,7 @@ export async function POST(request: Request) {
     id: `m${now}-${Math.random().toString(36).slice(2, 10)}`,
     channel,
     author,
-    wallet: body.wallet === true,
+    wallet: badged,
     text,
     at: now,
   };

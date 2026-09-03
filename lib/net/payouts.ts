@@ -9,6 +9,8 @@
  * Like the rest of `lib/net`, every call answers rather than throwing.
  */
 
+import { withSession } from './session';
+
 export interface Payout {
   id: string;
   address: string;
@@ -114,11 +116,15 @@ export type PayoutResult =
 /** Take money out of the vault. Resolves once the transfer has been sent. */
 export async function withdrawFromVault(request: WithdrawRequest): Promise<PayoutResult> {
   try {
-    const response = await fetch('/api/payouts', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-    });
+    const response = await withSession(
+      request.address,
+      () => fetch('/api/payouts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      }),
+      async (r) => r,
+    );
     const json = (await response.json()) as { payout?: Payout; txHash?: string; error?: string };
     if (!response.ok || !json.payout || !json.txHash) {
       return { ok: false, reason: json.error ?? 'The vault refused the withdrawal.' };

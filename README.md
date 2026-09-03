@@ -651,10 +651,19 @@ them in the browser bundle:
 
 ```
 EMERGE_VAULT_PRIVATE_KEY=                  # the vault's key, for automatic withdrawals
+EMERGE_SESSION_SECRET=                      # signs sign-in cookies; derived from the vault key if unset
 EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, vault-wide
+EMERGE_DEPOSIT_CONFIRMATIONS=              # default: 3
 KV_REST_API_URL=                           # required in production: the settlement ledger
 KV_REST_API_TOKEN=
 ```
+
+**Proving a wallet.** Paying out, gifting, claiming land and posting under a
+wallet all require one free signature on a plain sentence, good for a day and
+held in an `HttpOnly` cookie. Without it "pay this address" would be an
+instruction anybody could give for anybody — and a chat message could wear
+somebody else's address, which around a token is how people get robbed. A
+badged message now takes its author from the session, not the request.
 
 What is *not* built in, and cannot be, is the $EMERGE token address and the land
 registry: those are this game's own deployments. `tokenLive()` is the test the

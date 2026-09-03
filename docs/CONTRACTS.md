@@ -133,7 +133,23 @@ Without the key the game still runs and still takes deposits; withdrawals are
 refused with "the vault is not configured to pay out", and the Bank says so
 rather than pretending.
 
-### 5. Shared storage is not optional any more
+### 5. A session secret
+
+Every action that spends, earns or speaks for a wallet now needs that wallet to
+have proved itself with one free signature. That proof is a cookie signed with:
+
+```bash
+EMERGE_SESSION_SECRET=…        # any long random string
+```
+
+If it is unset, one is derived from the vault key instead, so a deployment that
+can pay people can always check them. Set it explicitly if you would rather the
+two were independent — rotating it signs everybody out and nothing else.
+
+Without either, the game refuses to pay out at all rather than paying on an
+unproved say-so.
+
+### 6. Shared storage is not optional any more
 
 The settlement ledger lives in the shared store, so `KV_REST_API_URL` and
 `KV_REST_API_TOKEN` must be set in production. On serverless each request runs
@@ -145,7 +161,7 @@ shared.
 For the test network, the same two variables with a `_TESTNET` suffix, plus
 `NEXT_PUBLIC_CHAIN_TARGET=testnet`.
 
-### 6. Check it
+### 7. Check it
 
 With the token set, the world map's balance comes from the wallet rather than
 reading 2,000,000, and the plot price comes from the contract. With the registry
@@ -224,6 +240,8 @@ cannot be verified. It is capped instead, in three ways at once:
 | Must hold land | `balanceOf` on the registry must be > 0 |
 | Whole vault, per UTC day | `EMERGE_DAILY_EMISSION`, default 1,000,000 |
 | Any single withdrawal | `MAX_PAYOUT_EMERGE` — 700,000 |
+| Smallest withdrawal | `MIN_PAYOUT_EMERGE` — 1,000 |
+| Withdrawals per wallet per day | `MAX_PAYOUTS_PER_DAY` — 24, one every 20 seconds |
 
 So the worst a dishonest client can take is what the game was going to pay an
 honest one, and only after buying a plot — which burns 212,000 $EMERGE or more
@@ -231,8 +249,19 @@ per identity. Set `EMERGE_DAILY_EMISSION` to something near your real player
 count once you know it; it is the backstop that stops any single day emptying
 the vault.
 
-The land gate answers *true* when no registry is deployed, because there is no
-on-chain fact to check yet. Deploy the registry and the gate starts biting.
+**The land gate answers false when no registry is deployed, and stewardship is
+not paid at all.** It used to answer true, on the reasoning that there was no
+on-chain fact to check — which was backwards: a live token with no registry
+would have let every wallet in the world collect the daily ceiling having spent
+nothing. Deposits and principal withdrawals work without a registry; only
+earnings wait for it.
+
+**The floor and the rate limits are not about the money, they are about the
+gas.** Every payout is a transaction the *vault* pays for. Without a floor, a
+wallet could spend its daily allowance one token at a time and make the vault
+sign a hundred thousand transfers — and a collection of nine $EMERGE rounds its
+five per cent burn down to nothing, so dust skipped the burn as well. Both are
+closed by the same number.
 
 ### Concurrency
 
@@ -243,6 +272,22 @@ withdrawals arriving together would otherwise read the same nonce, build two
 transactions on it, and the chain would keep one. Ten simultaneous withdrawals
 against one balance were tested; one succeeded, nine were refused, and the
 ledger landed on exactly zero.
+
+### Proving the wallet
+
+Before any of the above, the caller has to show the wallet is theirs. Without
+that, "pay this address" is an instruction anybody can give for anybody: the
+tokens would reach real players, which is not theft, and an attacker would
+still be choosing when the day's budget empties and how much gas the vault
+burns doing it.
+
+So a wallet signs one plain sentence — free, not a transaction — and gets an
+`HttpOnly`, `SameSite=Lax` cookie for a day. The sentence is composed by the
+server and carries the host and a timestamp, so a signature harvested elsewhere
+or an old one will not do. `POST /api/payouts`, `/api/gifts` and `/api/plots`
+all require it, and a chat message badged with a wallet takes its author from
+the session rather than the request — so the badge cannot be aimed at somebody
+else's identity, which around a token is how people get robbed.
 
 ### What the vault key can and cannot do
 
