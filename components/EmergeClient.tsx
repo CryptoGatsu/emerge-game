@@ -22,8 +22,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, pickUpCitizen,
-  renameCitizen, renameWorld,
+  demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
+  pickUpCitizen, renameCitizen, renameWorld, setWorldPrices,
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -38,6 +38,7 @@ import {
   GIFT_POLL, HEARTBEAT_INTERVAL, collectGifts, departWorld, fetchWorld, heartbeat, publishWorld,
   releasePlot, sendGift, visitorId,
 } from '@/lib/net/registry';
+import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import {
@@ -87,6 +88,16 @@ const PUBLISH_INTERVAL = 45_000;
  * read is an RPC call.
  */
 const BALANCE_POLL = 30_000;
+
+/**
+ * How often the settlement checks in with the world market, in milliseconds.
+ *
+ * The index moves in half-minute steps on the server, so asking much faster
+ * would be asking the same question twice. This is also the settlement's own
+ * report going out — one call carries both — and a world that stopped calling
+ * stops counting toward the world's prices within a few minutes.
+ */
+const MARKET_POLL = 40_000;
 
 /**
  * The speeds on offer.
@@ -618,6 +629,41 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       leaving();
     };
   }, [claimed.seed, wallet.address, hidden]);
+
+  /*
+   * Trade on the world's prices rather than our own.
+   *
+   * One call each way round: the settlement says what is in its stores, and
+   * reads back the prices every settlement is trading at. It runs while
+   * visiting somebody else's world too — the prices a visitor sees should be
+   * the prices that world's own baker sees — but only an owner's stores are
+   * reported, and the relay checks that against the registry rather than
+   * taking our word for it.
+   *
+   * A failed call is left alone rather than clearing the prices. They carry
+   * their own expiry, so a dropped request changes nothing and a relay that
+   * stays down puts every settlement back on its own stores after a few
+   * minutes, which is what the simulation does when it has never heard of a
+   * world market at all.
+   */
+  useEffect(() => {
+    const seed = claimed.seed;
+    const mine = !spectating;
+    let live = true;
+    const poll = async () => {
+      const world = worldRef.current;
+      const result = mine && world
+        ? await syncMarket(seed, marketReport(world))
+        : await fetchMarket();
+      if (live && result) setWorldPrices(result);
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, MARKET_POLL);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [claimed.seed, spectating]);
 
   /*
    * Put this settlement up so it can be visited.

@@ -154,6 +154,27 @@ export async function hsetnx(key: string, field: string, value: string): Promise
   return (await redis(['HSETNX', key, field, value])) === 1;
 }
 
+/**
+ * Write one field of a hash and push the whole hash's expiry back.
+ *
+ * For a hash that is a rolling window of live readings rather than a record:
+ * as long as somebody is writing to it, it stays; once everybody stops, it goes
+ * on its own rather than being a key nobody deletes. Individual stale fields
+ * are the reader's problem, since a hash cannot expire its fields separately.
+ */
+export async function hsetWindow(key: string, field: string, value: string, ttlSeconds: number): Promise<void> {
+  const ttl = Math.max(1, Math.round(ttlSeconds));
+  if (!shared()) {
+    const store = memory().hashes;
+    const hash = store.get(key) ?? new Map<string, string>();
+    hash.set(field, value);
+    store.set(key, hash);
+    return;
+  }
+  await redis(['HSET', key, field, value]);
+  await redis(['EXPIRE', key, ttl]);
+}
+
 /** Remove one field of a hash. */
 export async function hdel(key: string, field: string): Promise<void> {
   if (!shared()) {

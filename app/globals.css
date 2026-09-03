@@ -2464,3 +2464,20 @@ button.fold:hover { color: var(--emerald); }
   text-decoration: none;
 }
 .gate-guide:hover { text-decoration: underline; }
+
+/* Where the market panel's prices come from — one line, above the figures,
+   because "is this number mine or everybody's?" is the first thing worth
+   knowing about a price. */
+.market-source {
+  margin: 0 0 16px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.market-source b { color: var(--gold); }
+.market-source.live { border-color: var(--panel-edge); }
+.market-source.live b { color: var(--emerald); }

@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
-import { buildMaterials, maintenanceCost } from '@/lib/simulation';
+import { buildMaterials, maintenanceCost, worldMarketState } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
@@ -111,14 +111,34 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
   const [focus, setFocus] = useState(view.market[0]?.key ?? 'wheat');
   const row = view.market.find((m) => m.key === focus) ?? view.market[0];
   const store = (key: string) => Math.floor(view.resources.find((r) => r.key === key)?.amount ?? 0);
+  // Where the prices come from. The panel has always been called the world
+  // market; now it is one, and it should say so rather than leaving a player to
+  // guess whether the number is theirs or everybody's.
+  const world = worldMarketState();
 
   return (
     <Shell
       title="World Market"
-      subtitle="Households buy food, producers consume inputs, and the market moves to close the gaps."
+      subtitle={world.live
+        ? 'One market across every settlement. Prices are the same everywhere; what your town buys and sells is its own.'
+        : 'Households buy food, producers consume inputs, and the market moves to close the gaps.'}
       onClose={onClose}
       wide
     >
+      <p className={`market-source ${world.live ? 'live' : ''}`}>
+        {world.live ? (
+          <>
+            <b>Trading with {world.traders === 1 ? 'one settlement' : `${world.traders} settlements`}.</b>{' '}
+            Every price below is what the same good costs in every other world right now. Your
+            stores decide whether you are buying or selling at it.
+          </>
+        ) : (
+          <>
+            <b>Pricing your own stores.</b> The world market is out of reach, so this settlement is
+            quoting what it can see — the way it did before there were others to trade with.
+          </>
+        )}
+      </p>
       {row && (
         <div className="market-focus">
           <div>

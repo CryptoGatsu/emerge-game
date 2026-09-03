@@ -11,6 +11,10 @@
  * wants immutable snapshots.
  */
 
+import {
+  BASE_PRICES, MARKET_BUFFERS, RESOURCE_LABELS, RESOURCES, shortageOf, targetPrice,
+  type Resource,
+} from './world/goods';
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
 import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
 import { buildWater, type WaterField } from './world/water';
@@ -23,7 +27,8 @@ export type Phase = 'sleeping' | 'athome' | 'working' | 'eating' | 'socialising'
 export type Facing = 'n' | 's' | 'e' | 'w';
 export type Season = 'Spring' | 'Summer' | 'Autumn' | 'Winter';
 export type Weather = 'Clear' | 'Cloudy' | 'Rain' | 'Storm' | 'Fog' | 'Snow';
-export type Resource = 'wheat' | 'vegetables' | 'wood' | 'stone' | 'ironOre' | 'wool' | 'flour' | 'bread' | 'furniture' | 'tools' | 'clothing';
+export type { Resource };
+export { RESOURCES, RESOURCE_LABELS };
 
 /** Feed entries are typed so the UI can icon/colour them without parsing text. */
 export type FeedKind = 'world' | 'build' | 'social' | 'discovery' | 'project' | 'market' | 'weather' | 'work';
@@ -437,7 +442,6 @@ export function ledgerTotals(ledger: DayLedger) {
   return { earned: sum(ledger.in), spent: sum(ledger.out) };
 }
 
-export const RESOURCE_LABELS: Record<Resource, string> = { wheat: 'Wheat', vegetables: 'Vegetables', wood: 'Wood', stone: 'Stone', ironOre: 'Iron Ore', wool: 'Wool', flour: 'Flour', bread: 'Bread', furniture: 'Furniture', tools: 'Tools', clothing: 'Clothing' };
 export const JOB_LABELS: Record<Job, string> = { farmer: 'Farmer', woodcutter: 'Woodcutter', miner: 'Miner', quarry: 'Quarry worker', miller: 'Miller', baker: 'Baker', carpenter: 'Carpenter', blacksmith: 'Blacksmith', tailor: 'Tailor', unemployed: 'Unemployed' };
 export const ACTIVITY_LABELS: Record<Activity, string> = { walking: 'Walking', working: 'Working', resting: 'At home', trading: 'Socialising', eating: 'Eating', idle: 'Idle' };
 export const PHASE_LABELS: Record<Phase, string> = { sleeping: 'Asleep', athome: 'At home', working: 'At work', eating: 'Getting food', socialising: 'Socialising', wandering: 'Wandering' };
@@ -457,8 +461,8 @@ const jobs = JOBS;
 
 const names = ['Nova', 'Kai', 'Mira', 'Atlas', 'Luna', 'Theo', 'Iris', 'Miles', 'Lena', 'Jonah', 'Ruby', 'Owen', 'Nora', 'Eli', 'Clara', 'Finn', 'Milo', 'June', 'Ada', 'Leo', 'Mae', 'Sol', 'Wren', 'Rune', 'Rose', 'Jack', 'Lily', 'Ben', 'Anna', 'Vale'];
 const familyNames = ['Carter', 'Mason', 'Hayes', 'Bennett', 'Reed', 'Morgan', 'Brooks', 'Parker'];
-const marketPrices: Record<Resource, number> = { wheat: 2, vegetables: 2.5, wood: 3, stone: 4, ironOre: 7, wool: 6, flour: 5, bread: 7, furniture: 14, tools: 20, clothing: 18 };
-const marketBuffers: Record<Resource, number> = { wheat: 60, vegetables: 40, wood: 70, stone: 30, ironOre: 20, wool: 15, flour: 25, bread: 40, furniture: 10, tools: 8, clothing: 15 };
+const marketPrices = BASE_PRICES;
+const marketBuffers = MARKET_BUFFERS;
 const terrainBonuses: Record<Terrain, Partial<Record<WorkingJob, number>>> = { fertile: { farmer: 1.3 }, forest: { woodcutter: 1.3 }, mountain: { miner: 1.3 }, rocky: { quarry: 1.25 }, coastal: {}, river: { farmer: 1.15 } };
 
 /**
@@ -2489,6 +2493,142 @@ function householdTrade(world: World) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * The world market
+ *
+ * Prices are not a settlement's own opinion of its granary any more. They come
+ * from one index the server keeps across every world being played, so bread is
+ * dear everywhere at once when bread is short somewhere, and a valley with a
+ * full barn has something worth carting out rather than a number that only
+ * meant anything to itself.
+ *
+ * The settlement's own position has not gone anywhere — it is what the
+ * settlement reports into the index, and it is still what decides whether this
+ * town is buying or selling. What changed is the price it does that at.
+ *
+ * Kept in a module variable rather than on the world, and deliberately so:
+ * every world open in this browser trades at the same prices, including the
+ * ones being visited, and a saved world does not carry yesterday's quotes back
+ * with it. When there is no index to be had — the relay is down, or this is a
+ * lone development machine — everything below falls back to what it always
+ * did, and each settlement prices its own stores.
+ * ------------------------------------------------------------------ */
+
+interface WorldMarket {
+  /** The fixing `prices` belongs to. */
+  epoch: number;
+  /** How long a fixing stands, in milliseconds. */
+  epochMs: number;
+  prices: Record<Resource, number>;
+  /** The fixing after it, held ready so the changeover needs no round trip. */
+  next: Record<Resource, number>;
+  /** How far this browser's clock is ahead of the server's. */
+  skew: number;
+  /** When *this browser* received them, so a lost relay is noticed. */
+  received: number;
+  /** How many settlements the server read into them. */
+  traders: number;
+  /** True when the index is the shared one rather than a single instance's. */
+  shared: boolean;
+}
+
+let worldMarket: WorldMarket | null = null;
+
+/**
+ * How long prices are believed after they last arrived.
+ *
+ * Longer than the poll interval by a good margin, so an ordinary missed request
+ * changes nothing, and short enough that a settlement left running against a
+ * dead relay goes back to pricing what it can actually see rather than trading
+ * all night on figures from this morning.
+ */
+const WORLD_PRICE_TTL_MS = 5 * 60_000;
+
+/** Take delivery of the world's prices. `null` puts the settlement back on its own. */
+export function setWorldPrices(next: {
+  epoch: number; epochMs: number; skew: number; traders: number; shared: boolean;
+  prices: Record<Resource, number>; next: Record<Resource, number>;
+} | null): void {
+  if (!next) { worldMarket = null; return; }
+  const clean = (source: Record<Resource, number>, fallback: Record<Resource, number> | null) => {
+    const out = {} as Record<Resource, number>;
+    for (const r of RESOURCES) {
+      const value = Number(source?.[r]);
+      // A price the server could not give us is not guessed at: that good
+      // falls back to local pricing on its own while the rest trade globally.
+      if (Number.isFinite(value) && value > 0) out[r] = value;
+      else if (fallback && fallback[r] > 0) out[r] = fallback[r];
+    }
+    return out;
+  };
+  const prices = clean(next.prices, null);
+  worldMarket = {
+    epoch: next.epoch,
+    epochMs: next.epochMs > 0 ? next.epochMs : 120_000,
+    prices,
+    next: clean(next.next, prices),
+    skew: Number.isFinite(next.skew) ? next.skew : 0,
+    received: Date.now(),
+    traders: next.traders,
+    shared: next.shared,
+  };
+}
+
+/**
+ * Which set of prices is in force at this instant.
+ *
+ * The whole reason a fixing is handed out with the one after it. A settlement
+ * that last asked ninety seconds ago and one that asked five seconds ago are
+ * both holding the same two sets, and both work out the same answer from the
+ * server's clock rather than from when they happened to ask. Without this,
+ * every world quoted whatever the index said at the moment of its own last
+ * request, and two towns forty seconds out of step priced bread at 7.39 and
+ * 7.46 — which is not a shared market, it is two markets that nearly agree.
+ */
+function fixing(): Record<Resource, number> | null {
+  const m = worldMarket;
+  if (!m) return null;
+  if (Date.now() - m.received > WORLD_PRICE_TTL_MS) return null;
+  const epochNow = Math.floor((Date.now() - m.skew) / m.epochMs);
+  if (epochNow === m.epoch) return m.prices;
+  if (epochNow === m.epoch + 1) return m.next;
+  // Further ahead than the server told us about. The next poll will bring the
+  // fixing; until it does, hold the last one we were actually given rather
+  // than inventing one.
+  if (epochNow > m.epoch + 1) return m.next;
+  // Behind what we were told — a clock that jumped. Current is the best answer.
+  return m.prices;
+}
+
+/** Are we trading on the world's prices, or on our own? */
+export function worldPricesLive(): boolean {
+  return fixing() !== null;
+}
+
+/** What the world pays for a good, or `null` when nobody has said. */
+export function worldPriceOf(resource: Resource): number | null {
+  return fixing()?.[resource] ?? null;
+}
+
+/** Enough for the market panel to say where its figures come from. */
+export function worldMarketState(): { live: boolean; traders: number; shared: boolean } {
+  const live = worldPricesLive();
+  return { live, traders: live ? (worldMarket?.traders ?? 0) : 0, shared: live && !!worldMarket?.shared };
+}
+
+/**
+ * What this settlement would tell the index, if asked.
+ *
+ * Its stores, as they stand. The server turns them into a position on its own
+ * scale — nothing is normalised here, because a client that did the
+ * normalising would be a client that could choose the answer.
+ */
+export function marketReport(world: World): Partial<Record<Resource, number>> {
+  const stocks: Partial<Record<Resource, number>> = {};
+  for (const r of RESOURCES) stocks[r] = Math.max(0, Math.round(world.resources[r]));
+  return stocks;
+}
+
 /**
  * One hour of trade.
  *
@@ -2511,16 +2651,27 @@ function marketStep(world: World, hours: number) {
     for (const key of Object.keys(recipe.output) as Resource[]) localOutputs.add(key);
   }
 
-  for (const r of Object.keys(marketPrices) as Resource[]) {
+  for (const r of RESOURCES) {
     const q = world.market[r], stock = world.resources[r], buffer = marketBuffers[r];
-    const base = marketPrices[r];
-    const scarcity = clamp((buffer - stock) / Math.max(buffer, 1), -1, 1.5);
-    // Prices ease toward a scarcity-adjusted target rather than compounding a
-    // percentage every step. Compounding sends a persistently well-stocked good
-    // to the floor within a fortnight and takes the treasury down with it.
-    const target = clamp(base * (1 + scarcity * 0.8), base * 0.45, base * 3.5);
     const old = q.price;
-    q.price += (target - q.price) * Math.min(1, 0.06 * hours);
+
+    const abroad = worldPriceOf(r);
+    if (abroad !== null) {
+      // The world's price, taken as it stands rather than eased toward.
+      // Easing here would have meant every settlement quoting a slightly
+      // different figure depending on how long its tab had been open, which is
+      // the exact thing a shared market is for not doing. The index is already
+      // eased on the server, so the line on the chart stays a line.
+      q.price = abroad;
+    } else {
+      // No index to be had. Price what is in the barn, exactly as a settlement
+      // did before there was a wider world to ask.
+      q.price += (targetPrice(r, shortageOf(r, stock)) - q.price) * Math.min(1, 0.06 * hours);
+    }
+
+    // Supply and demand stay this settlement's own: they are what it has too
+    // much or too little of, which is what decides whether it is buying or
+    // selling and what the panel shows as pressure. Only the price is shared.
     q.supply = Math.max(0, stock - buffer); q.demand = Math.max(0, buffer - stock); q.volume = 0; q.trend = q.price - old;
     // The settlement imports what it cannot make for itself. For goods it does
     // produce, the market only steps in during a real shortage — otherwise it
@@ -2543,7 +2694,49 @@ function marketStep(world: World, hours: number) {
       }
     }
   }
+  worldNews(world);
   householdTrade(world);
+}
+
+/**
+ * What the other settlements are doing to the price of things.
+ *
+ * A shared market that nobody can see the working of is just a number that
+ * changes on its own. This is the line that makes it legible: once a day, if
+ * some good has gone notably dear or notably cheap across the worlds, the feed
+ * says so — and says it as news from elsewhere, because that is what it is.
+ *
+ * Deliberately separate from the trade line above and separately throttled. A
+ * settlement that happened to buy six wheat this morning should not lose the
+ * one piece of news it had that day to it.
+ */
+function worldNews(world: World) {
+  if (!worldPricesLive()) return;
+  if (world.feed.some((e) => e.kind === 'market' && e.day === world.day && e.text.startsWith('Word from'))) return;
+
+  let loudest: { r: Resource; ratio: number } | null = null;
+  for (const r of RESOURCES) {
+    const price = worldPriceOf(r);
+    if (price === null) continue;
+    const ratio = price / BASE_PRICES[r];
+    // How far from ordinary it is, in either direction.
+    const away = Math.abs(Math.log(ratio));
+    if (away < Math.log(1.45)) continue;
+    if (!loudest || away > Math.abs(Math.log(loudest.ratio))) loudest = { r, ratio };
+  }
+  if (!loudest) return;
+
+  const good = RESOURCE_LABELS[loudest.r].toLowerCase();
+  const stock = world.resources[loudest.r];
+  const plenty = stock > marketBuffers[loudest.r];
+  const text = loudest.ratio > 1
+    ? plenty
+      ? `Word from the other settlements: ${good} is scarce everywhere. Ours is worth carting out.`
+      : `Word from the other settlements: ${good} is scarce everywhere, and dear to buy.`
+    : plenty
+      ? `Word from the other settlements: nobody is short of ${good}. Ours will not fetch much.`
+      : `Word from the other settlements: ${good} is cheap everywhere. A good week to stock up.`;
+  pushFeed(world, 'market', text);
 }
 
 /** Run whole hours of trade out of the accumulator. */
@@ -2591,6 +2784,20 @@ function jobScore(world: World, j: WorkingJob) {
     // where the settlement is heading rather than where it has been.
     const drain = clamp((used - made) / buffer, -0.5, 1.5);
     demand += (stock + drain * 1.8) * 1.3;
+
+    // What the wider world will pay for it.
+    //
+    // This is how a global market reaches the people rather than stopping at
+    // the price panel. A settlement with a full barn used to have no reason to
+    // put anybody in the fields; if wheat is dear across every world, it now
+    // has one, and the trades people take up shift toward what is short
+    // somewhere else. Weighted below the settlement's own hunger on purpose —
+    // a town that cannot feed itself should feed itself first, whatever the
+    // price of tools is doing abroad.
+    const abroad = worldPriceOf(key);
+    if (abroad !== null) {
+      demand += clamp(abroad / BASE_PRICES[key] - 1, -0.55, 2.5) * 1.1;
+    }
   }
 
   let feasible = 1;
