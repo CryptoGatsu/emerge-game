@@ -465,7 +465,34 @@ export const vaultLive = (config: ChainConfig = ACTIVE_CHAIN) =>
  * transaction that reverts, and a charge that always fails is worse than one
  * that burns imperfectly.
  */
-export const tokenBurnable = () => process.env.NEXT_PUBLIC_TOKEN_BURNABLE === 'true';
+export const tokenBurnable = () => truthy(process.env.NEXT_PUBLIC_TOKEN_BURNABLE);
+
+/**
+ * An environment flag, read the way somebody setting it would expect.
+ *
+ * Deliberately forgiving. A strict `=== 'true'` turned `TRUE`, `True` and `1`
+ * into silent falses, and a silent false here is not a cosmetic difference —
+ * it sends every charge to the burn address instead of calling `burn`, which on
+ * an OpenZeppelin token with the zero address configured reverts every
+ * transaction in the game. A variable that has to be typed in exactly one
+ * casing to avoid that is a trap, not a setting.
+ */
+const truthy = (value: string | undefined) =>
+  ['true', '1', 'yes', 'on'].includes((value ?? '').trim().toLowerCase());
+
+/**
+ * True when this build's burn target cannot possibly work.
+ *
+ * The zero address is not a valid recipient for most ERC-20s — OpenZeppelin's
+ * `_transfer` reverts on it outright, and every Pons launch is an OpenZeppelin
+ * token. So "not burnable, burning to `0x0`" is a combination that fails every
+ * charge, and it fails in the worst way: a wallet error with no explanation,
+ * after the player has already agreed to pay.
+ *
+ * Caught here so it can be said out loud instead.
+ */
+export const burnTargetBroken = (config: ChainConfig = ACTIVE_CHAIN) =>
+  tokenLive(config) && !tokenBurnable() && /^0x0+$/.test(BURN_ADDRESS);
 
 /**
  * One JSON-RPC call against the configured node.
@@ -624,6 +651,20 @@ export async function burnTokens(
     const gone = await burnViaToken(from, whole, config);
     if (gone.ok) return { ...gone, message: `Burned ${whole.toLocaleString()} ${TOKEN.ticker}.` };
     return gone;
+  }
+  /*
+   * Refuse rather than send a transaction that cannot succeed.
+   *
+   * Asking somebody to sign a transfer to the zero address on a token that
+   * rejects them costs them gas and tells them nothing. This is a
+   * misconfiguration of ours and should read as one.
+   */
+  if (burnTargetBroken(config)) {
+    return {
+      ok: false,
+      txHash: null,
+      message: `This build cannot burn ${TOKEN.ticker}: it is set to send to the zero address, which the token refuses. Nothing was charged — this is ours to fix.`,
+    };
   }
   const sent = await transferTokens(from, BURN_ADDRESS, whole, config);
   return sent.ok
