@@ -7,7 +7,7 @@
  * running behind them, which is the whole point of the thing.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import { buildMaterials, maintenanceCost } from '@/lib/simulation';
 import type { Snapshot } from '@/lib/hud';
@@ -17,7 +17,8 @@ import {
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
-  claimEarnings, deposit, liveToken, quoteWithdraw, withdraw, type VaultLedger,
+  claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
+  type VaultLedger,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import {
@@ -26,7 +27,7 @@ import {
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
-import { fetchPayouts, type Payout } from '@/lib/net/payouts';
+import { fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
@@ -566,12 +567,19 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
               <p>
                 <b>Money in, money out.</b> Everything the game charges goes to the burn address and
                 is gone. A deposit is the exception: that is your own money, held in the vault so
-                the withdrawal door has something to give back. Taking it out again is the one
-                thing that is not instant — the vault is a wallet rather than a contract, so it
-                cannot pay you on its own. A withdrawal or a collection joins a settlement queue
-                and is paid from that wallet; the {Math.round(WITHDRAW_BURN_RATE * 100)}% share
-                stays behind to be burned. The Bank shows exactly where yours stands, and says
-                nothing has reached you until it has.
+                the withdrawal door has something to give back — and it goes back automatically.
+                Press withdraw and the vault signs a transfer to your wallet there and then; the
+                Bank hands you the transaction so you can check it on an explorer. Nobody approves
+                it and nobody can decide not to.
+              </p>
+              <p>
+                What you can take back out is what the chain says you put in. Deposits are read off
+                the chain rather than taken on trust, so your principal is the same number on every
+                device you connect this wallet to, and no one can withdraw more than they deposited.
+                Stewardship is capped instead: up to
+                {' '}{DAILY_EARN_CEILING.toLocaleString()} {TOKEN.ticker} a day per wallet, paid only
+                to wallets that hold land. The {Math.round(WITHDRAW_BURN_RATE * 100)}% taken off
+                either kind stays in the vault to be burned.
               </p>
             </>
           ) : (
@@ -1019,7 +1027,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
   const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | null>(null);
-  const [queue, setQueue] = useState<Payout[]>([]);
+  const [history, setHistory] = useState<PayoutHistory | null>(null);
   const { wallet } = useWallet();
   const ledger = player.ledger;
   const steward = view.stewardship;
@@ -1033,18 +1041,33 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
   };
 
   /*
-   * Where this wallet's requests stand.
+   * What the server says, which for money is the only thing that counts.
    *
-   * Read from the queue rather than from the ledger, because the ledger cannot
-   * know when somebody sent the tokens — the whole point of the queue is that
-   * a person settles it, and this is where the player finds out that they did.
+   * The principal figure here is the one withdrawals are actually checked
+   * against — it is built from deposits the server verified on chain, so it can
+   * differ from this browser's own record (a deposit made on another device, or
+   * one whose credit is still catching up). Showing the server's number means
+   * the Withdraw button and the ledger agree about what is possible.
    */
+  const refreshHistory = useCallback(async () => {
+    if (!liveToken() || !wallet.address) { setHistory(null); return; }
+    setHistory(await fetchPayouts(wallet.address));
+  }, [wallet.address]);
+
   useEffect(() => {
-    if (!liveToken() || !wallet.address) { setQueue([]); return; }
+    if (!liveToken() || !wallet.address) { setHistory(null); return; }
     let live = true;
-    fetchPayouts(wallet.address).then((rows) => { if (live) setQueue(rows); });
+    // Finish crediting anything a previous session could not, then read back.
+    creditPendingDeposits(wallet.address)
+      .then(() => fetchPayouts(wallet.address!))
+      .then((rows) => { if (live) setHistory(rows); });
     return () => { live = false; };
   }, [wallet.address]);
+
+  /** Principal the vault will actually honour, in Gold. */
+  const standingGold = history
+    ? Math.floor(history.principal / EMERGE_PER_GOLD)
+    : Math.floor(ledger.principalGold);
 
   const depositGold = Math.floor((Number(depositAmount) || 0) / EMERGE_PER_GOLD * 100) / 100;
   const quote = quoteWithdraw(Math.floor(Number(withdrawAmount) || 0));
@@ -1054,7 +1077,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
     const result = await deposit(ledger, Number(depositAmount) || 0, who);
     setBusy(null);
     setMessage(result.message);
-    if (result.ok) onVault(result.ledger, depositGold, `${depositGold} Gold arrived from the ${TOKEN.ticker} vault.`);
+    if (!result.ok) return;
+    onVault(result.ledger, depositGold, `${depositGold} Gold arrived from the ${TOKEN.ticker} vault.`);
+    void refreshHistory();
   };
 
   const netYesterday = view.earnedYesterday - view.spentYesterday;
@@ -1066,7 +1091,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
     setMessage(result.message);
     if (!result.ok) return;
     onVault(result.ledger, -quote.gold, `${quote.gold} Gold of principal was withdrawn to ${TOKEN.ticker}.`);
-    if (result.queued && wallet.address) fetchPayouts(wallet.address).then(setQueue);
+    void refreshHistory();
   };
 
   const doClaim = async () => {
@@ -1079,7 +1104,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
     // Collecting earnings does not touch the treasury: the settlement's Gold is
     // the settlement's, and what the player earned is for their work.
     onVault(result.ledger, 0, `${amount.toLocaleString()} ${TOKEN.ticker} of earnings was collected.`);
-    if (result.queued && wallet.address) fetchPayouts(wallet.address).then(setQueue);
+    void refreshHistory();
   };
 
   return (
@@ -1176,40 +1201,46 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
 
       {liveToken() && (
         <p className="muted small vault-note">
-          Money leaving your wallet is signed by you: a deposit is a real transfer into the vault at
-          {' '}<b>{shortAddress(VAULT_ADDRESS)}</b>, and everything the game charges is a real transfer to
-          the burn address. Money coming back is the other direction — the vault is a wallet rather
-          than a contract, so it cannot pay you on its own. A withdrawal or a collection is queued
-          below and paid out of that wallet, and the {Math.round(WITHDRAW_BURN_RATE * 100)}% burn share
-          stays behind in it to be burned. Nothing here says tokens have reached you until they have.
+          Both directions are real transfers. A deposit is signed by you and lands in the vault at
+          {' '}<b>{shortAddress(VAULT_ADDRESS)}</b>; a withdrawal is signed by the vault and lands in
+          your wallet, straight away and without anybody approving it. Everything the game
+          <em> charges</em> goes to the burn address instead and is gone. The
+          {' '}{Math.round(WITHDRAW_BURN_RATE * 100)}% taken off a withdrawal is the one thing that
+          stays put: it remains in the vault to be burned.
+          {history && !history.automatic && (
+            <> This build has no vault key configured, so withdrawals are refused rather than paid —
+            nothing here will pretend otherwise.</>
+          )}
         </p>
       )}
 
-      {liveToken() && (ledger.pendingEmerge > 0 || queue.length > 0) && (
+      {liveToken() && history && (history.payouts.length > 0 || ledger.pendingEmerge > 0) && (
         <div className="payout-queue">
-          <span className="eyebrow">SETTLEMENT QUEUE</span>
+          <span className="eyebrow">PAID OUT</span>
           {ledger.pendingEmerge > 0 && (
             <div className="vault-line">
-              <span>Waiting to be paid</span>
+              <span>Requested before payouts were automatic</span>
               <b>{Math.floor(ledger.pendingEmerge).toLocaleString()} {TOKEN.ticker}</b>
             </div>
           )}
-          {queue.slice(0, 6).map((row) => (
-            <div key={row.id} className={`payout-row ${row.paidAt ? 'paid' : ''}`}>
+          {history.payouts.slice(0, 6).map((row) => (
+            <div key={row.id} className="payout-row paid">
               <span>
                 {row.kind === 'principal' ? `${row.gold} Gold of principal` : 'Stewardship earnings'}
                 {' · '}{new Date(row.at).toLocaleDateString()}
               </span>
               <b>{row.net.toLocaleString()} {TOKEN.ticker}</b>
-              <em>{row.paidAt ? 'paid' : 'queued'}</em>
+              {/* The transaction, so a player can check the claim rather than
+                  take our word for it. */}
+              {ACTIVE_CHAIN.explorerUrl ? (
+                <a
+                  href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/tx/${row.txHash}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >sent</a>
+              ) : <em>sent</em>}
             </div>
           ))}
-          {queue.length === 0 && ledger.pendingEmerge > 0 && (
-            <p className="muted small">
-              This browser has requests recorded that the queue cannot see. Reconnect the wallet you
-              made them with, or check that the relay is reachable.
-            </p>
-          )}
         </div>
       )}
 
@@ -1226,8 +1257,14 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
         </label>
         <div className="vault-line"><span>Available</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
         <div className="vault-line burn"><span>Burn</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
+        {history?.room && (
+          <div className="vault-line">
+            <span>Collectable today</span>
+            <b>{Math.min(history.room.left, history.room.globalLeft).toLocaleString()} {TOKEN.ticker}</b>
+          </div>
+        )}
         <button onClick={doClaim} disabled={busy !== null || ledger.earnedEmerge < 1}>
-          {busy === 'collect' ? 'Collecting…' : liveToken() ? 'Request settlement' : 'Collect'}
+          {busy === 'collect' ? 'Sending…' : liveToken() ? 'Collect to wallet' : 'Collect'}
         </button>
       </div>
 
@@ -1238,6 +1275,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
         it mints nothing, which is why a deposit is the one movement in the game that is vaulted rather than
         burned. Withdrawals take {Math.round(WITHDRAW_BURN_RATE * 100)}%, and that share is burned. The
         settlement&rsquo;s own surplus is not withdrawable: it is what the town pays its people with.
+        {liveToken() && ' What you can take back out is what the chain shows you put in, so it is the same figure on any device you connect this wallet to.'}
       </p>
 
       <div className="vault-grid">
@@ -1265,15 +1303,18 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault }: {
           </label>
           <div className="vault-line"><span>You receive</span><b>{quote.received.toLocaleString()} {TOKEN.ticker}</b></div>
           <div className="vault-line burn">
-            <span>{liveToken() ? 'Held back to burn' : 'Burned'}</span>
+            <span>{liveToken() ? 'Stays in the vault to burn' : 'Burned'}</span>
             <b>{quote.burned.toLocaleString()} {TOKEN.ticker}</b>
           </div>
-          <div className="vault-line"><span>Principal standing</span><b>{Math.floor(ledger.principalGold).toLocaleString()} Gold</b></div>
+          <div className="vault-line">
+            <span>Principal standing</span>
+            <b>{standingGold.toLocaleString()} Gold</b>
+          </div>
           <button
             onClick={doWithdraw}
-            disabled={busy !== null || quote.gold < 1 || quote.gold > Math.floor(view.treasury) || quote.gold > Math.floor(ledger.principalGold)}
+            disabled={busy !== null || quote.gold < 1 || quote.gold > Math.floor(view.treasury) || quote.gold > standingGold}
           >
-            {busy === 'withdraw' ? 'Queueing…' : liveToken() ? 'Request withdrawal' : 'Withdraw'}
+            {busy === 'withdraw' ? 'Sending…' : liveToken() ? 'Withdraw to wallet' : 'Withdraw'}
           </button>
         </div>
       </div>

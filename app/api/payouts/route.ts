@@ -1,25 +1,45 @@
 /**
- * The settlement queue.
+ * Paying a player out.
  *
- * `GET  /api/payouts?address=0x…` — what one wallet has asked for, and where
- *   each request stands.
- * `POST /api/payouts` — ask to be paid out of the vault.
+ * `GET  /api/payouts?address=0x…` — what this wallet has been paid, and what
+ *   it may still be paid today.
+ * `POST /api/payouts` — take money out, and get the transaction that sent it.
  *
- * A request is a request. It is paid by hand from the vault wallet, because
- * the vault is a wallet and not a contract, and nothing here tells a player
- * their tokens have moved. Everything a client sends is treated as hostile:
- * the address is pattern-matched, names are cleaned and capped, the amounts
- * are recomputed from the Gold rather than believed, and the timestamp is set
- * here.
+ * This route signs. There is no person in the loop and no queue to review, so
+ * everything it needs in order to be safe is checked here rather than assumed:
  *
- * The full queue is deliberately not served to anybody who asks: it is a list
- * of wallets and the sums they are owed, which is nobody else's business.
+ *  1. **A shared store, or nothing.** The daily caps live in it. On serverless
+ *     each request runs in a different instance, so caps held in process memory
+ *     would reset per request — which is not a cap. Refuse rather than
+ *     half-work.
+ *  2. **Amounts are computed here.** The body says *how much Gold* or *how much
+ *     earnings*; the exchange rate, the burn share and the net all come from
+ *     `settlementFor`. A client sending its own figures gets ours.
+ *  3. **Principal is bounded by verified deposits.** `/api/deposits` only
+ *     credits transfers the chain confirms, so principal out can never exceed
+ *     principal in. This half cannot be forged at all.
+ *  4. **Earnings are bounded rather than verified.** The simulation runs in the
+ *     player's browser and no server can check it. So: only to an address that
+ *     holds land on chain, at most the game's own daily ceiling per address,
+ *     and under a global budget for the whole vault. The worst a dishonest
+ *     client can take is what the game was going to pay an honest one.
+ *  5. **The debit happens before the transfer**, and is given back if the
+ *     transfer does not happen. Reserving late is how the same balance gets
+ *     spent twice.
+ *
+ * The burn share never leaves the vault. It stays there and is burned
+ * deliberately, which is what the owner asked for and what every surface says.
  */
 
 import { NextResponse } from 'next/server';
-import { WITHDRAW_BURN_RATE, EMERGE_PER_GOLD } from '@/lib/chain/vault';
+import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor } from '@/lib/server/payouts';
+import {
+  debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission, settlementFor,
+} from '@/lib/server/accounts';
+import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
-import { payoutsFor, requestPayout } from '@/lib/server/payouts';
+import { VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
+import { holdsLand } from '@/lib/server/land';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,18 +57,27 @@ const clean = (value: string, limit: number) =>
 
 export async function GET(request: Request) {
   const address = new URL(request.url).searchParams.get('address') ?? '';
-  if (!ADDRESS.test(address)) return NextResponse.json({ payouts: [], shared: registryShared() });
+  if (!ADDRESS.test(address)) {
+    return NextResponse.json({ payouts: [], automatic: vaultCanSign(), shared: registryShared() });
+  }
   try {
-    return NextResponse.json({ payouts: await payoutsFor(address), shared: registryShared() });
+    const [payouts, principal, room] = await Promise.all([
+      payoutsFor(address), principalOf(address), emissionRoom(address),
+    ]);
+    return NextResponse.json({
+      payouts, principal, room,
+      automatic: vaultCanSign(),
+      shared: registryShared(),
+    });
   } catch {
-    return NextResponse.json({ payouts: [], shared: false, degraded: true });
+    return NextResponse.json({ payouts: [], automatic: vaultCanSign(), shared: false, degraded: true });
   }
 }
 
 export async function POST(request: Request) {
   let body: {
     address?: string; name?: string; seed?: number; worldName?: string;
-    kind?: string; gold?: number; gross?: number;
+    kind?: string; gold?: number; emerge?: number;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -60,38 +89,117 @@ export async function POST(request: Request) {
   if (!ADDRESS.test(address)) {
     return NextResponse.json({ error: 'A payout belongs to a wallet address.' }, { status: 400 });
   }
+  if (!tokenLive()) {
+    return NextResponse.json({ error: 'No $EMERGE contract is configured.' }, { status: 503 });
+  }
+  if (!registryShared()) {
+    return NextResponse.json({
+      error: 'This deployment has no shared store, so it will not pay out. Nothing was taken.',
+    }, { status: 503 });
+  }
+  if (!vaultCanSign()) {
+    return NextResponse.json({
+      error: 'The vault is not configured to pay out. Nothing was taken.',
+    }, { status: 503 });
+  }
+  /*
+   * The key must control the wallet deposits go to.
+   *
+   * A key for some other wallet would pass every other check here and then fail
+   * on an empty balance, which reads to a player as "the game owes me and will
+   * not pay". Caught at the door instead.
+   */
+  if (vaultAddress()?.toLowerCase() !== VAULT_ADDRESS.toLowerCase()) {
+    return NextResponse.json({
+      error: 'The vault key does not match the vault address. Nothing was taken.',
+    }, { status: 503 });
+  }
 
   const kind = body.kind === 'earnings' ? 'earnings' : 'principal';
-  const gold = Math.max(0, Math.floor(Number(body.gold) || 0));
-
-  /*
-   * The amounts are derived here, not accepted.
-   *
-   * A principal withdrawal is worth exactly the Gold it takes out at the fixed
-   * rate; an earnings collection is denominated in tokens to begin with. Either
-   * way the burn share is computed from the rate rather than sent, so a client
-   * cannot ask for a smaller burn than everybody else pays.
-   */
-  const gross = kind === 'principal'
-    ? gold * EMERGE_PER_GOLD
-    : Math.max(0, Math.floor(Number(body.gross) || 0));
-  const burned = Math.round(gross * WITHDRAW_BURN_RATE);
-
-  try {
-    const result = await requestPayout({
-      address,
-      name: clean(String(body.name ?? ''), MAX_NAME),
-      seed: Number.isInteger(Number(body.seed)) ? Number(body.seed) : 0,
-      worldName: clean(String(body.worldName ?? ''), MAX_NAME),
-      kind,
-      gold: kind === 'principal' ? gold : 0,
-      gross,
-      burned,
-      net: gross - burned,
-    });
-    if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 400 });
-    return NextResponse.json({ payout: result.payout, shared: registryShared() });
-  } catch {
-    return NextResponse.json({ error: 'The settlement queue is not reachable.' }, { status: 502 });
+  const asked = kind === 'principal'
+    ? Math.floor(Number(body.gold) || 0)
+    : Math.floor(Number(body.emerge) || 0);
+  if (!(asked > 0)) {
+    return NextResponse.json({ error: 'There is nothing to take out.' }, { status: 400 });
   }
+
+  // Ours, from the amount asked for — never from figures the client sent.
+  const money = settlementFor(kind, asked);
+  if (money.gross > MAX_PAYOUT_EMERGE) {
+    return NextResponse.json({
+      error: `A single withdrawal is capped at ${MAX_PAYOUT_EMERGE.toLocaleString()} $EMERGE. Take it out in stages.`,
+    }, { status: 400 });
+  }
+
+  const health = await vaultHealth();
+  if (!health.ok) return NextResponse.json({ error: health.problem }, { status: 503 });
+  if (health.tokens < money.net) {
+    return NextResponse.json({
+      error: 'The vault cannot cover that right now. Nothing has been taken from your balance.',
+    }, { status: 503 });
+  }
+
+  /* ---------------- Reserve, then send ---------------- */
+
+  let give: () => Promise<void>;
+
+  if (kind === 'principal') {
+    const standing = await principalOf(address);
+    if (money.gross > standing) {
+      return NextResponse.json({
+        error: standing < 1
+          ? 'This door returns $EMERGE you deposited, and the chain shows no deposits from this wallet.'
+          : `You have ${standing.toLocaleString()} $EMERGE of principal standing.`,
+      }, { status: 400 });
+    }
+    // Debit first: between a check and a transfer is exactly where the same
+    // principal gets withdrawn twice.
+    await debitPrincipal(address, money.gross);
+    give = async () => { await debitPrincipal(address, -money.gross); };
+  } else {
+    /*
+     * Earnings only to an address that holds land.
+     *
+     * The one real defence against a wallet farm: this is the unverifiable half
+     * of the ledger, and requiring a plot means an identity has to buy one —
+     * burning two hundred thousand $EMERGE or more — before it can earn
+     * anything at all.
+     */
+    if (!(await holdsLand(address))) {
+      return NextResponse.json({
+        error: 'Stewardship is paid to wallets that hold land. Claim a plot and the world you run starts paying.',
+      }, { status: 403 });
+    }
+    if (!(await reserveEmission(address, money.gross))) {
+      const room = await emissionRoom(address);
+      return NextResponse.json({
+        error: room.globalLeft <= 0
+          ? 'The vault has paid out everything it will today. Try again tomorrow.'
+          : `You can collect ${room.left.toLocaleString()} more $EMERGE today.`,
+      }, { status: 429 });
+    }
+    give = () => releaseEmission(address, money.gross);
+  }
+
+  const sent = await sendFromVault(address, money.net);
+  if (!sent.ok) {
+    // Put it back. A refusal must cost nothing.
+    await give().catch(() => {});
+    return NextResponse.json({ error: sent.problem }, { status: 502 });
+  }
+
+  const payout = await recordPayout({
+    address,
+    name: clean(String(body.name ?? ''), MAX_NAME),
+    seed: Number.isInteger(Number(body.seed)) ? Number(body.seed) : 0,
+    worldName: clean(String(body.worldName ?? ''), MAX_NAME),
+    kind,
+    gold: kind === 'principal' ? asked : 0,
+    gross: money.gross,
+    burned: money.burned,
+    net: money.net,
+    txHash: sent.txHash,
+  });
+
+  return NextResponse.json({ payout, txHash: sent.txHash });
 }

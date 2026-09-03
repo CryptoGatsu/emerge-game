@@ -1,27 +1,19 @@
 /**
- * The settlement queue.
+ * The record of what has been paid.
  *
- * $EMERGE spent in Emerge is burned by the player's own signature, which needs
- * nothing from us. Money coming *back* is the opposite problem: a withdrawal
- * or a collection has to send tokens the player does not hold yet, and the
- * vault is a wallet rather than a contract, so it cannot pay anybody on its
- * own. Somebody has to sign.
+ * This used to be a queue of requests waiting for somebody to sign them. It is
+ * not any more: `/api/payouts` signs, so by the time a row is written here the
+ * tokens have already left the vault and the row carries the transaction that
+ * sent them. It is history, not a to-do list — kept so a player can see what
+ * they have taken out and check every line of it on an explorer.
  *
- * So this is a queue of requests, not a promise of payment, and every surface
- * built on it says exactly that. A request records who asked, for how much, on
- * which world, and what the burn share was; it is paid from the vault wallet
- * and marked settled with the transaction hash that paid it.
- *
- * **What this cannot do.** The ledger a request is computed from lives in the
- * player's browser, so a forged request is a POST anybody can write. That is
- * why the queue is reviewed before it is paid rather than paid automatically,
- * and why nothing here is called a balance. The fix is a vault contract that
- * holds the tokens and enforces its own accounting — `docs/CONTRACTS.md` sets
- * out what that would take. Until then, a human reads the queue.
+ * Nothing in this file decides whether to pay. That lives in
+ * `lib/server/accounts.ts`, which is where the caps and the verified principal
+ * are, and in the route, which is where they are enforced.
  */
 
 import { serverKey } from '../limits';
-import { hdel, hget, hgetall, hset } from './kv';
+import { hdel, hgetall, hset } from './kv';
 
 export interface Payout {
   id: string;
@@ -43,53 +35,34 @@ export interface Payout {
   /** What the player should actually receive. */
   net: number;
   at: number;
-  /** Set once somebody has paid it from the vault. */
-  paidAt: number | null;
-  txHash: string | null;
+  /** The transfer that paid it. Always set: a row is only written after one. */
+  txHash: string;
 }
 
 const PAYOUTS = serverKey('payouts');
 
 /**
- * The most a single request may be for.
+ * The most one withdrawal may move.
  *
- * A day's ceiling across every plot a player can earn on, times a week — well
- * past anything a real session produces, and small enough that a forged
- * request is not worth writing. The real defence is that a person reads the
- * queue; this is the guard rail that keeps an obviously absurd row out of it.
+ * Not a security boundary — the daily caps and the verified principal are that
+ * — but a blast radius. A bug, or a key somebody else got hold of, drains the
+ * vault one capped transfer at a time rather than in a single call, which is
+ * the difference between noticing and not.
  */
 export const MAX_PAYOUT_EMERGE = 700_000;
 
-export type PayoutResult =
-  | { ok: true; payout: Payout }
-  | { ok: false; reason: string };
-
-/** Ask to be paid out of the vault. */
-export async function requestPayout(
-  request: Omit<Payout, 'id' | 'at' | 'paidAt' | 'txHash'>,
-): Promise<PayoutResult> {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(request.address)) {
-    return { ok: false, reason: 'A payout belongs to a wallet address.' };
-  }
-  if (!(request.net > 0) || !Number.isFinite(request.net)) {
-    return { ok: false, reason: 'There is nothing to pay out.' };
-  }
-  if (request.gross > MAX_PAYOUT_EMERGE) {
-    return {
-      ok: false,
-      reason: `A single request is capped at ${MAX_PAYOUT_EMERGE.toLocaleString()} $EMERGE. Take it out in stages.`,
-    };
-  }
+/** Write down a payout that has already been sent. */
+export async function recordPayout(
+  paid: Omit<Payout, 'id' | 'at'>,
+): Promise<Payout> {
   const payout: Payout = {
-    ...request,
-    address: request.address.toLowerCase(),
+    ...paid,
+    address: paid.address.toLowerCase(),
     id: `${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffff).toString(36)}`,
     at: Date.now(),
-    paidAt: null,
-    txHash: null,
   };
   await hset(PAYOUTS, payout.id, JSON.stringify(payout));
-  return { ok: true, payout };
+  return payout;
 }
 
 /** Every request on record, newest first. */
@@ -113,20 +86,7 @@ export async function payoutsFor(address: string): Promise<Payout[]> {
   return (await allPayouts()).filter((p) => p.address === want);
 }
 
-/** Mark a request paid, with the transaction that paid it. */
-export async function settlePayout(id: string, txHash: string): Promise<boolean> {
-  const raw = await hget(PAYOUTS, id);
-  if (!raw) return false;
-  try {
-    const payout = JSON.parse(raw) as Payout;
-    await hset(PAYOUTS, id, JSON.stringify({ ...payout, paidAt: Date.now(), txHash }));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Drop a request, for one that should never have been in the queue. */
+/** Drop a row, for one that should never have been written. */
 export async function dropPayout(id: string): Promise<void> {
   await hdel(PAYOUTS, id);
 }

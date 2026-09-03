@@ -9,11 +9,13 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "lucide-react": "0.468.0",
     "next": "15.5.24",
+    "pixi.js": "8.13.1",
     "react": "19.1.1",
     "react-dom": "19.1.1",
-    "pixi.js": "8.13.1",
-    "lucide-react": "0.468.0"
+    "server-only": "^0.0.1",
+    "viem": "2.56.3"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

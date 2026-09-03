@@ -375,12 +375,20 @@ door has to be able to give it back, so burning it would mean taking a deposit
 with nothing left to return. Deposits transfer to the vault wallet
 `0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062`.
 
-*Payouts come out of the vault by hand.* A wallet cannot pay anybody on its own —
-somebody has to sign — so a withdrawal or an earnings collection queues a request
-at `/api/payouts` and the panel says exactly that. The 5% share is not sent with
-the payout; it stays in the vault to be burned deliberately. Nothing on any
-surface says tokens have reached a player before they have. See
-[`docs/CONTRACTS.md`](docs/CONTRACTS.md).
+*Payouts are signed by the vault, automatically.* Press withdraw and the server
+signs a transfer back to the player's wallet there and then — no queue, no
+approval, nobody in the loop — and hands back the transaction hash. The 5% share
+is not sent; it stays in the vault to be burned deliberately.
+
+What makes that safe is that the server stopped believing the browser.
+**Principal is verified on chain**: a deposit is credited only after the server
+reads the transaction and confirms it went to the vault *from the wallet
+claiming it*, so principal out can never exceed principal in. **Earnings are
+capped** — 100,000 $EMERGE per wallet per UTC day, only to wallets that hold
+land, under a global daily budget — because the simulation runs in the browser
+and no server can verify it. Every payout debits before it sends and rolls back
+if the send fails, and signing is serialised by a lock so two withdrawals cannot
+share a nonce. See [`docs/CONTRACTS.md`](docs/CONTRACTS.md).
 
 Without a token deployed all of this is local and clearly labelled as such: a new
 world opens with a development allocation, and every message says the movement
@@ -523,14 +531,20 @@ plot an ERC-721 token in the player's wallet whose **token id is the plot seed**
   address and nothing else — there is no function to move, mint or seize a plot,
   or to touch a single $EMERGE.
 
-**What is still not automatic**, and what the Bank says plainly: **paying a
-player out.** The vault is a wallet rather than a contract, so it cannot send
-anything on its own. A withdrawal or an earnings collection books a request in
-the settlement queue, which is paid by hand from the vault; the burn share stays
-behind to be burned deliberately. The queue is a list of requests rather than a
-balance — the ledger behind it lives in the player's browser — so the server
-recomputes every amount from the Gold, caps a single request, and a person reads
-it before it is paid.
+**The third variable makes money flow both ways.** `EMERGE_VAULT_PRIVATE_KEY` —
+no `NEXT_PUBLIC_` prefix, so it never reaches the browser — lets the server sign
+transfers out of the vault. With it set, a withdrawal or an earnings collection
+lands in the player's wallet immediately and the Bank shows the transaction.
+Without it the game still takes deposits and refuses withdrawals in as many
+words.
+
+The safety of that rests on the server no longer trusting the client. Principal
+is credited only from deposits verified against the chain — including that the
+deposit came from the wallet claiming it — so it cannot be forged. Earnings
+cannot be verified at all, because the simulation runs in the browser, so they
+are capped instead: per wallet per day, gated on holding land, and under a
+global daily budget. `lib/server/signer.ts` can call exactly one function,
+`transfer`, on exactly one contract.
 
 **Clearing the world.** `DATA_EPOCH` in `lib/limits.ts` namespaces every key
 that holds game state, on the server and in the browser. Raising it by one
@@ -630,6 +644,16 @@ NEXT_PUBLIC_EMERGE_REGISTRY_TESTNET=
 NEXT_PUBLIC_EMERGE_VAULT=                  # default: 0x282f8A44…6062
 NEXT_PUBLIC_BURN_ADDRESS=                  # default: the zero address
 NEXT_PUBLIC_SITE_URL=                      # default: https://emergerh.world
+```
+
+Server-only, and deliberately without the `NEXT_PUBLIC_` prefix that would put
+them in the browser bundle:
+
+```
+EMERGE_VAULT_PRIVATE_KEY=                  # the vault's key, for automatic withdrawals
+EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, vault-wide
+KV_REST_API_URL=                           # required in production: the settlement ledger
+KV_REST_API_TOKEN=
 ```
 
 What is *not* built in, and cannot be, is the $EMERGE token address and the land

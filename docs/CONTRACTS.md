@@ -86,7 +86,7 @@ Solidity port of the game's own `biomeKindFor`, verified to agree with it across
 > one is deployed. The number on the button is always the number the transaction
 > enforces.
 
-### 3. Point the app at them
+### 3. Point the app at the contracts
 
 ```bash
 NEXT_PUBLIC_EMERGE_TOKEN=0x…      # the ERC-20
@@ -102,10 +102,50 @@ NEXT_PUBLIC_EMERGE_VAULT=0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062
 NEXT_PUBLIC_BURN_ADDRESS=0x0000000000000000000000000000000000000000
 ```
 
+### 4. Give the vault its key
+
+Automatic withdrawals need the vault to be able to sign, which means the server
+needs its private key:
+
+```bash
+EMERGE_VAULT_PRIVATE_KEY=0x…      # the key for NEXT_PUBLIC_EMERGE_VAULT
+```
+
+**Note the missing `NEXT_PUBLIC_` prefix.** That is what keeps the key out of
+the browser bundle, and `lib/server/signer.ts` opens with `import 'server-only'`
+so the build fails rather than succeeds if a client component ever imports it.
+Set it as an encrypted environment variable in your host (in Vercel: Project →
+Settings → Environment Variables, Production only, "Sensitive"). Never commit
+it, and never give it the `NEXT_PUBLIC_` prefix even by accident.
+
+Three things to check before this earns money:
+
+- **The key must control the vault address.** The payout route derives the
+  address from the key and refuses if it does not match
+  `NEXT_PUBLIC_EMERGE_VAULT` — a mismatch would otherwise look to players like
+  a game that owes them and will not pay.
+- **The vault needs gas.** It signs its own transfers, so it needs the chain's
+  native token. A vault with $EMERGE and no gas fails every withdrawal.
+- **The vault needs $EMERGE to pay out with.** Deposits fund it, but it should
+  be seeded so the first withdrawals do not wait on the first deposits.
+
+Without the key the game still runs and still takes deposits; withdrawals are
+refused with "the vault is not configured to pay out", and the Bank says so
+rather than pretending.
+
+### 5. Shared storage is not optional any more
+
+The settlement ledger lives in the shared store, so `KV_REST_API_URL` and
+`KV_REST_API_TOKEN` must be set in production. On serverless each request runs
+in a different instance, so a ledger in process memory would let every request
+see a fresh set of daily caps — which is not a cap. Both `/api/deposits` and
+`/api/payouts` refuse outright rather than half-work when the store is not
+shared.
+
 For the test network, the same two variables with a `_TESTNET` suffix, plus
 `NEXT_PUBLIC_CHAIN_TARGET=testnet`.
 
-### 4. Check it
+### 6. Check it
 
 With the token set, the world map's balance comes from the wallet rather than
 reading 2,000,000, and the plot price comes from the contract. With the registry
@@ -150,25 +190,66 @@ seed back on the market.
 
 ---
 
-## The settlement queue
+## The settlement ledger
 
-`/api/payouts` holds requests to be paid out of the vault. A row records the
-address, the amount, the world it came from, and the burn share left behind; it
-is marked settled with the transaction hash that paid it.
+The vault signs automatically, so nothing stands between a request and a
+transfer except what the server believes. This is how it decides.
 
-**It is a queue of requests, not a balance.** The ledger a request is computed
-from lives in the player's browser, so a forged request is a POST anybody can
-write. That is why it is reviewed before it is paid rather than paid
-automatically, why the server recomputes the amounts from the Gold rather than
-believing them, and why a single request is capped. A person reads the queue.
+Two kinds of money are owed, and they are on very different footings.
 
-The honest fix is a vault contract that holds the tokens and enforces its own
-accounting — earnings signed by a key the game controls, or a Merkle root
-published per epoch and claimed by each player. That is a larger piece of work
-than this round, and until it exists no surface in the game says a payout has
-arrived before it has.
+### Principal — cryptographically safe
 
----
+A deposit is an on-chain transfer to the vault, so the server verifies it
+against the chain rather than taking anybody's word. `POST /api/deposits`
+carries only a transaction hash; the server then checks that the transaction
+exists, succeeded, was a `transfer` to the vault, and **came from the wallet
+claiming it**. That last check is the easy one to leave out and the one that
+matters most — without it anybody could watch the chain and claim credit for
+somebody else's deposit.
+
+Each transaction hash is claimed with a set-if-absent write before it is
+credited, so a replay cannot double-credit. Withdrawals debit the same counter
+before the transfer is built, so **principal out can never exceed principal in.**
+This half cannot be forged at all.
+
+### Earnings — bounded, not verified
+
+Stewardship yield is produced by the simulation, which runs in the player's
+browser. No server can recompute it without running every world itself, so it
+cannot be verified. It is capped instead, in three ways at once:
+
+| Guard | Value |
+| --- | --- |
+| Per wallet, per UTC day | `DAILY_EARN_CEILING` — 100,000 $EMERGE |
+| Must hold land | `balanceOf` on the registry must be > 0 |
+| Whole vault, per UTC day | `EMERGE_DAILY_EMISSION`, default 1,000,000 |
+| Any single withdrawal | `MAX_PAYOUT_EMERGE` — 700,000 |
+
+So the worst a dishonest client can take is what the game was going to pay an
+honest one, and only after buying a plot — which burns 212,000 $EMERGE or more
+per identity. Set `EMERGE_DAILY_EMISSION` to something near your real player
+count once you know it; it is the backstop that stops any single day emptying
+the vault.
+
+The land gate answers *true* when no registry is deployed, because there is no
+on-chain fact to check yet. Deploy the registry and the gate starts biting.
+
+### Concurrency
+
+Every payout debits before it sends and gives the debit back if the send fails,
+so the window where the same balance could be spent twice does not exist. The
+signing itself is serialised by a short lock in the shared store: two
+withdrawals arriving together would otherwise read the same nonce, build two
+transactions on it, and the chain would keep one. Ten simultaneous withdrawals
+against one balance were tested; one succeeded, nine were refused, and the
+ledger landed on exactly zero.
+
+### What the vault key can and cannot do
+
+`lib/server/signer.ts` is the only code that can move money without somebody
+clicking something, and it is deliberately narrow: it sends `transfer(to,
+amount)` on the configured $EMERGE contract and nothing else. It cannot mint,
+approve, call an arbitrary contract, or send the chain's native token.
 
 ## Reading the registry without the game
 

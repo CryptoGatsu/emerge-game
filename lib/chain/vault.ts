@@ -21,21 +21,29 @@
  *   1,000,000 $EMERGE = 100 Gold        (10,000 $EMERGE per Gold)
  *   withdrawals burn 5%
  *
- * **Where the tokens actually are.** Money going out of a player's wallet is
- * signed by the player, so it needs nothing from us: a deposit is a real
- * transfer to the vault wallet and a charge is a real transfer to the burn
- * address. Money coming *back* is the hard direction — the vault is a wallet,
- * not a contract, so it cannot pay anybody on its own. A withdrawal therefore
- * books a request in the settlement queue and is paid from the vault by hand,
- * with the burn share left behind in the vault to be burned deliberately.
- * Nothing on any surface says a payout has arrived until it has.
+ * **Both directions are real transfers, and neither needs a person.**
+ *
+ * *Out of the player's wallet* is signed by the player: a deposit transfers to
+ * the vault wallet, a charge transfers to the burn address.
+ *
+ * *Back into it* is signed by the vault, server-side, the moment it is asked
+ * for. What makes that safe is that the server stopped believing this file.
+ * Principal is credited only from deposits it verifies against the chain, so
+ * principal out can never exceed principal in; earnings are capped per wallet
+ * per day, gated on holding land, and held under a global budget. The numbers
+ * below are what the player is shown — the numbers that move money are
+ * recomputed on the server from the amount asked for.
+ *
+ * The withdrawal burn share is the one thing that does not move: it stays in
+ * the vault, to be burned deliberately rather than sent anywhere.
  */
 
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, chainConfigured, tokenBalance, tokenLive, transferTokens,
   vaultLive, type ChainConfig,
 } from './emerge';
-import { askForPayout } from '../net/payouts';
+import { creditDeposit, withdrawFromVault } from '../net/payouts';
+import { clientKey } from '../limits';
 
 /** $EMERGE per unit of in-world Gold. */
 export const EMERGE_PER_GOLD = 10_000;
@@ -97,12 +105,12 @@ export interface VaultLedger {
    */
   burnedEmerge: number;
   /**
-   * $EMERGE asked for and not yet paid.
+   * $EMERGE asked for and never paid.
    *
-   * A payout leaves the vault when a person sends it, so between the request
-   * and the transfer there is a real sum that is neither in the player's wallet
-   * nor in their in-game balance. Counting it as either would be a lie, so it
-   * is counted as what it is.
+   * From the round when payouts waited for somebody to sign them. Nothing adds
+   * to it any more — a withdrawal now either sends or refuses — but a ledger
+   * saved back then may still carry a figure, and it is shown until it is
+   * settled rather than quietly dropped.
    */
   pendingEmerge: number;
   /**
@@ -234,12 +242,10 @@ export interface VaultResult {
   txHash: string | null;
   message: string;
   ledger: VaultLedger;
-  /** Set when the movement is queued for settlement out of the vault. */
-  queued: boolean;
 }
 
 const refuse = (ledger: VaultLedger, message: string): VaultResult =>
-  ({ ok: false, settled: false, queued: false, txHash: null, message, ledger });
+  ({ ok: false, settled: false, txHash: null, message, ledger });
 
 /**
  * Why a movement did not touch the chain.
@@ -296,7 +302,7 @@ export async function deposit(
 
   if (!tokenLive(config)) {
     return {
-      ok: true, settled: false, queued: false, txHash: null, ledger: banked,
+      ok: true, settled: false, txHash: null, ledger: banked,
       message: `Deposited ${amount.toLocaleString()} ${TOKEN.ticker} for ${gold} Gold. ${localNote(config)}`,
     };
   }
@@ -308,14 +314,116 @@ export async function deposit(
   const sent = await transferTokens(who.address, VAULT_ADDRESS, amount, config);
   if (!sent.ok) return refuse(ledger, sent.message);
 
+  /*
+   * Tell the server, so it can go and read the transfer off the chain.
+   *
+   * This is what makes the withdrawal door safe: the server credits principal
+   * only from deposits it has verified itself, so what it will pay back is
+   * bounded by what the chain says actually arrived. Until this lands, the
+   * tokens are in the vault and the server does not know they are the player's.
+   */
+  const credited = await settleDeposit(who.address, sent.txHash!);
+
   // The chain is the authority once it exists. The optimistic figure is only
   // used if the read fails, and the balance poll corrects it either way.
   const fresh = await tokenBalance(who.address, config);
+  const done: VaultLedger = { ...banked, balance: fresh ?? banked.balance };
+
+  if (!credited.ok) {
+    /*
+     * The tokens moved but the credit did not. The Gold is still granted —
+     * the player really did pay for it — and the transaction is kept so the
+     * Bank can finish crediting it next time it opens. Losing a deposit
+     * because a fetch failed after the transfer would be unforgivable.
+     */
+    rememberDeposit(who.address, sent.txHash!);
+    return {
+      ok: true, settled: true, txHash: sent.txHash, ledger: done,
+      message: `Deposited ${amount.toLocaleString()} ${TOKEN.ticker} for ${gold} Gold. ${credited.reason} Your deposit is safe and will be credited for withdrawal automatically.`,
+    };
+  }
+
   return {
-    ok: true, settled: true, queued: false, txHash: sent.txHash,
-    ledger: { ...banked, balance: fresh ?? banked.balance },
+    ok: true, settled: true, txHash: sent.txHash, ledger: done,
     message: `Deposited ${amount.toLocaleString()} ${TOKEN.ticker} into the vault for ${gold} Gold.`,
   };
+}
+
+/**
+ * How long to keep asking the server to credit a deposit.
+ *
+ * The first attempt almost always comes back "the chain has not seen that
+ * yet" — the node has the transaction but has not mined it. A handful of
+ * tries a couple of seconds apart covers an ordinary block; anything longer
+ * than that is not worth making somebody watch, and the retry on next open
+ * catches it.
+ */
+const CREDIT_TRIES = 6;
+const CREDIT_GAP_MS = 2_500;
+
+async function settleDeposit(address: string, txHash: string) {
+  for (let attempt = 0; attempt < CREDIT_TRIES; attempt++) {
+    const result = await creditDeposit(address, txHash);
+    // Already credited counts as credited: a retry finding its own earlier
+    // success is the expected end of the loop, not a failure.
+    if (result.ok || result.already) return { ok: true as const, reason: '' };
+    if (!result.retry) return { ok: false as const, reason: result.reason };
+    await new Promise((resolve) => setTimeout(resolve, CREDIT_GAP_MS));
+  }
+  return { ok: false as const, reason: 'The chain is taking a while to confirm it.' };
+}
+
+/* ------------------------------------------------------------------ *
+ * Deposits waiting to be credited
+ * ------------------------------------------------------------------ */
+
+const pendingKey = (address: string) => clientKey(`deposits.${address.toLowerCase()}`);
+
+/** Keep a deposit whose credit did not land, so it can be finished later. */
+export function rememberDeposit(address: string, txHash: string): void {
+  try {
+    const held = pendingDeposits(address);
+    if (held.includes(txHash)) return;
+    window.localStorage.setItem(pendingKey(address), JSON.stringify([...held, txHash].slice(-20)));
+  } catch { /* private browsing; the retry on next open is what is lost */ }
+}
+
+/** Deposits this browser knows about that the server has not confirmed. */
+export function pendingDeposits(address: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(pendingKey(address));
+    const list = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function forgetDeposit(address: string, txHash: string): void {
+  try {
+    const left = pendingDeposits(address).filter((h) => h !== txHash);
+    if (left.length) window.localStorage.setItem(pendingKey(address), JSON.stringify(left));
+    else window.localStorage.removeItem(pendingKey(address));
+  } catch { /* as above */ }
+}
+
+/**
+ * Finish crediting anything left over, and say how much landed.
+ *
+ * Called when the Bank opens. A deposit whose credit failed because the chain
+ * had not caught up is the common case, and it costs a player nothing as long
+ * as somebody eventually asks again — this is that.
+ */
+export async function creditPendingDeposits(address: string): Promise<number> {
+  let credited = 0;
+  for (const txHash of pendingDeposits(address)) {
+    const result = await creditDeposit(address, txHash);
+    if (result.ok) { credited += result.credited; forgetDeposit(address, txHash); }
+    // A deposit the server will never accept is not worth asking about for
+    // ever; only a "come back later" keeps its place in the queue.
+    else if (!result.retry) forgetDeposit(address, txHash);
+  }
+  return credited;
 }
 
 /**
@@ -354,7 +462,7 @@ export async function withdraw(
 
   if (!tokenLive(config)) {
     return {
-      ok: true, settled: false, queued: false, txHash: null,
+      ok: true, settled: false, txHash: null,
       message: `Withdrew ${amount} Gold of principal for ${quote.received.toLocaleString()} ${TOKEN.ticker}, burning ${quote.burned.toLocaleString()}. ${localNote(config)}`,
       ledger: {
         ...ledger,
@@ -367,22 +475,30 @@ export async function withdraw(
   }
 
   if (!who.address) return refuse(ledger, 'Connect a wallet to withdraw.');
-  const booked = await askForPayout({
+  const paid = await withdrawFromVault({
     address: who.address, name: who.name, seed: who.seed, worldName: who.worldName,
-    kind: 'principal', gold: amount, gross: quote.gross,
+    kind: 'principal', gold: amount, emerge: 0,
   });
-  // Nothing is taken when the queue refuses: the principal is still standing
+  // Nothing is taken when the vault refuses: the principal is still standing
   // and the treasury still holds its Gold.
-  if (!booked.ok) return refuse(ledger, booked.reason);
+  if (!paid.ok) return refuse(ledger, paid.reason);
 
+  /*
+   * The tokens are in the player's wallet now, so the balance is re-read from
+   * the chain rather than added to. `withdrawnEmerge` counts what was actually
+   * received; `vaultBurn` counts the share that stayed behind, which still
+   * exists and so is deliberately not called burned.
+   */
+  const fresh = await tokenBalance(who.address, config);
   return {
-    ok: true, settled: false, queued: true, txHash: null,
-    message: `Queued ${quote.received.toLocaleString()} ${TOKEN.ticker} for settlement from the vault. ${quote.burned.toLocaleString()} stays behind to be burned.`,
+    ok: true, settled: true, txHash: paid.txHash,
+    message: `Sent ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} to your wallet. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned.`,
     ledger: {
       ...ledger,
+      balance: fresh ?? ledger.balance + paid.payout.net,
       principalGold: ledger.principalGold - amount,
-      pendingEmerge: ledger.pendingEmerge + quote.received,
-      vaultBurn: ledger.vaultBurn + quote.burned,
+      withdrawnEmerge: ledger.withdrawnEmerge + paid.payout.net,
+      vaultBurn: ledger.vaultBurn + paid.payout.burned,
     },
   };
 }
@@ -414,7 +530,7 @@ export async function claimEarnings(
 
   if (!tokenLive(config)) {
     return {
-      ok: true, settled: false, queued: false, txHash: null,
+      ok: true, settled: false, txHash: null,
       message: `Collected ${received.toLocaleString()} ${TOKEN.ticker} of earnings, burning ${burned.toLocaleString()}. ${localNote(config)}`,
       ledger: {
         ...ledger,
@@ -427,20 +543,22 @@ export async function claimEarnings(
   }
 
   if (!who.address) return refuse(ledger, 'Connect a wallet to collect earnings.');
-  const booked = await askForPayout({
+  const paid = await withdrawFromVault({
     address: who.address, name: who.name, seed: who.seed, worldName: who.worldName,
-    kind: 'earnings', gold: 0, gross: amount,
+    kind: 'earnings', gold: 0, emerge: amount,
   });
-  if (!booked.ok) return refuse(ledger, booked.reason);
+  if (!paid.ok) return refuse(ledger, paid.reason);
 
+  const fresh = await tokenBalance(who.address, config);
   return {
-    ok: true, settled: false, queued: true, txHash: null,
-    message: `Queued ${received.toLocaleString()} ${TOKEN.ticker} of earnings for settlement from the vault. ${burned.toLocaleString()} stays behind to be burned.`,
+    ok: true, settled: true, txHash: paid.txHash,
+    message: `Sent ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned.`,
     ledger: {
       ...ledger,
+      balance: fresh ?? ledger.balance + paid.payout.net,
       earnedEmerge: ledger.earnedEmerge - amount,
-      pendingEmerge: ledger.pendingEmerge + received,
-      vaultBurn: ledger.vaultBurn + burned,
+      withdrawnEmerge: ledger.withdrawnEmerge + paid.payout.net,
+      vaultBurn: ledger.vaultBurn + paid.payout.burned,
     },
   };
 }

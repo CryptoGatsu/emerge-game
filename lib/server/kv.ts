@@ -134,6 +134,26 @@ export async function hgetall(key: string): Promise<Record<string, string>> {
   return {};
 }
 
+/**
+ * Write one field of a hash **only if it is not already there**, and say
+ * whether we were the one who wrote it.
+ *
+ * The whole point is that the check and the write are one operation. Used to
+ * make crediting a deposit idempotent: two requests replaying the same
+ * transaction hash both pass a separate read, and exactly one passes this.
+ */
+export async function hsetnx(key: string, field: string, value: string): Promise<boolean> {
+  if (!shared()) {
+    const store = memory().hashes;
+    const hash = store.get(key) ?? new Map<string, string>();
+    if (hash.has(field)) return false;
+    hash.set(field, value);
+    store.set(key, hash);
+    return true;
+  }
+  return (await redis(['HSETNX', key, field, value])) === 1;
+}
+
 /** Remove one field of a hash. */
 export async function hdel(key: string, field: string): Promise<void> {
   if (!shared()) {
@@ -161,4 +181,74 @@ export async function getValue(key: string): Promise<string | null> {
   if (!shared()) return memory().values.get(key) ?? null;
   const raw = await redis(['GET', key]);
   return typeof raw === 'string' ? raw : null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Counters and locks — the settlement ledger
+ *
+ * Everything above this line can tolerate a lost write. Nothing below it
+ * can: these are what stop the same payout being sent twice and what keeps
+ * a day's emission a day's emission, so they are the atomic operations
+ * rather than read-modify-write, which two concurrent requests interleave.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Add to a counter and return what it now holds.
+ *
+ * Counters here hold **whole tokens**, never base units. That is deliberate:
+ * INCRBY is a 64-bit integer operation, and a hundred thousand tokens at
+ * eighteen decimals is already past 2^63, so a base-unit counter would have to
+ * be a string moved by read-modify-write — which is exactly the race these
+ * exist to avoid. Whole tokens leave room for more of them than will ever be
+ * minted, and the conversion to base units happens once, at the moment of
+ * sending.
+ */
+export async function incrBy(key: string, amount: number): Promise<number> {
+  const step = Math.round(amount);
+  if (!shared()) {
+    const store = memory().values;
+    const next = (Number(store.get(key) ?? '0') || 0) + step;
+    store.set(key, String(next));
+    return next;
+  }
+  const raw = await redis(['INCRBY', key, step]);
+  return Number(raw) || 0;
+}
+
+/** What a counter holds, in whole tokens. */
+export async function counter(key: string): Promise<number> {
+  const raw = await getValue(key);
+  const value = Number(raw ?? '0');
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Take a lock, or find somebody else holding it.
+ *
+ * Held for as long as it takes to read a nonce, sign and broadcast — the one
+ * stretch where two concurrent payouts would otherwise build two transactions
+ * on the same nonce, and the chain would keep exactly one of them.
+ *
+ * The time to live is the safety net: a request that dies mid-payout must not
+ * wedge the vault for ever.
+ */
+export async function takeLock(key: string, ttlSeconds: number): Promise<boolean> {
+  if (!shared()) {
+    const store = memory().values;
+    const held = store.get(key);
+    if (held && Number(held) > Date.now()) return false;
+    store.set(key, String(Date.now() + ttlSeconds * 1000));
+    return true;
+  }
+  const got = await redis(['SET', key, String(Date.now()), 'NX', 'EX', Math.max(1, Math.round(ttlSeconds))]);
+  return got !== null;
+}
+
+/** Give a lock back. */
+export async function releaseLock(key: string): Promise<void> {
+  if (!shared()) {
+    memory().values.delete(key);
+    return;
+  }
+  await redis(['DEL', key]);
 }
