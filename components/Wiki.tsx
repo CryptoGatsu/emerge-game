@@ -23,8 +23,9 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  JOBS, LEDGER_LABELS, STEWARDSHIP_DAILY_CAP, WAGE_MAX, WAGE_MIN, WAGE_STANDARD,
-  maintenanceCost, wageEffort,
+  BUILD_MATERIALS, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, RESOURCE_LABELS,
+  STEWARDSHIP_DAILY_CAP, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
+  type HazardKind, type Resource,
 } from '@/lib/simulation';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
@@ -98,6 +99,70 @@ const WAGES = (Object.entries(JOBS) as [keyof typeof JOBS, { wage: number }][])
   .map(([job, recipe]) => ({ job, wage: recipe.wage }))
   .sort((a, b) => a.wage - b.wage);
 
+/**
+ * Every building, what it is for, and what it costs to raise and to keep.
+ *
+ * The trades come from the job recipes — so a building's output is literally
+ * what its workers make — and the rest are the ones that do something for the
+ * settlement without anybody being employed in them.
+ */
+const TRADE_BUILDINGS = (Object.entries(JOBS) as [keyof typeof JOBS, {
+  wage: number; building: string;
+  output: Partial<Record<Resource, number>>; input?: Partial<Record<Resource, number>>;
+}][]).map(([job, recipe]) => ({
+  job,
+  type: recipe.building,
+  wage: recipe.wage,
+  makes: Object.entries(recipe.output).map(([r, n]) => `${n} ${RESOURCE_LABELS[r as Resource].toLowerCase()}`).join(', '),
+  needs: Object.entries(recipe.input ?? {}).map(([r, n]) => `${n} ${RESOURCE_LABELS[r as Resource].toLowerCase()}`).join(', '),
+}));
+
+const CIVIC_BUILDINGS = [
+  ['House', 'Somewhere to live. A settlement with more people than beds has rough sleepers, who lose warmth faster and are unhappier for it.'],
+  ['Storage', 'Room for a surplus, and part of how ready the place is for a bad harvest.'],
+  ['Market', 'Where trade happens and where people go to eat. The settlement opens with one and it cannot be pulled down.'],
+  ['Tavern', 'Where the settlement gathers. Meetups and feasts happen here, and they are what turns neighbours into friends.'],
+  ['Bank', 'A counting house. Costs nothing to keep.'],
+  ['Town Hall', 'Where the settlement holds a meeting and resolves on something.'],
+] as const;
+
+/** What a plot's status figures mean, and what actually moves them. */
+const STATUS = [
+  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and falls in a hard winter or a bad hazard.',
+    'Build houses before you build anything else. A settlement with nowhere to put people stops growing whatever else you do.'],
+  ['Happiness', 'The average of six things each person carries: how fed, how rested, how sociable, how well clothed, how purposeful and how warm they are.',
+    'The quickest lever is wages. After that: a tavern and benches for company, clothing in the stores, and firewood through the winter.'],
+  ['Energy', 'How rested people are. It drains all day and comes back in a bed — faster in a real house than for somebody sleeping rough.',
+    'Houses. Somebody with a bed recovers more than twice as fast as somebody without one.'],
+  ['Temperature', 'The actual air temperature, which follows the season, the weather and the biome. Below about twelve degrees people start to lose warmth unless they are sheltered.',
+    'Keep wood in the store — a fire is what makes a house warm rather than merely indoors — and keep people in clothing.'],
+  ['Woodland', 'Trees standing, and how many are growing back. Woodcutters fell real trees and the forest really thins.',
+    'Nothing, if you can help it. A forest regrows on its own; the number to watch is whether it is falling faster than that.'],
+  ['Working / outdoors', 'How many people are at their trade right now, and how many are outside. Both move through the day: nobody works at night.',
+    'If the working figure is low in daylight, a trade is missing a building or the treasury cannot pay.'],
+] as const;
+
+/** What each building costs in Gold, as the Build panel charges it. */
+const BUILD_COSTS: Record<string, number> = {
+  House: 100, Farm: 150, Woodcutter: 125, Quarry: 175, Mine: 250, Mill: 250,
+  Bakery: 300, Carpenter: 275, Blacksmith: 400, Tailor: 325, Storage: 120,
+  Tavern: 350, Bank: 450,
+};
+
+/**
+ * What brings each kind of trouble.
+ *
+ * The answers come from `HAZARD_DEFENCE` in the simulation, so they cannot
+ * drift; the causes are written here because the code expresses them as
+ * conditions rather than sentences.
+ */
+const HAZARD_CAUSE: Record<HazardKind, string> = {
+  fire: 'Heat and dry air, with buildings close together.',
+  blight: 'A growing season, and fields to spoil.',
+  wolves: 'A cold night and woodland at the edge of the settlement.',
+  flood: 'A storm, and a river to rise.',
+};
+
 const SECTIONS = [
   ['start', 'Getting started'],
   ['land', 'Land and ownership'],
@@ -105,6 +170,9 @@ const SECTIONS = [
   ['earning', 'Earning $EMERGE'],
   ['economy', 'The settlement\u2019s own money'],
   ['vault', 'Deposits and withdrawals'],
+  ['buildings', 'Buildings'],
+  ['status', 'Reading your settlement'],
+  ['danger', 'What can go wrong'],
   ['world', 'The world itself'],
   ['together', 'Other players'],
   ['honest', 'What is settled, and what is not'],
@@ -468,6 +536,141 @@ export default function Wiki() {
             {' '}<a href="#economy">the settlement&rsquo;s own money</a> for what it is and what it
             does. What comes out of the vault is what you put in, plus stewardship yield when that
             opens.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="buildings">
+          <h2>Buildings</h2>
+          <p>
+            You cannot tell anybody what to do, so a building is how you say what the settlement
+            needs. Raise one and somebody will decide it is theirs — immediately, if it is standing
+            empty. Each holds <b>two workers</b>, except a mine, which holds three.
+          </p>
+          <p>
+            Everything costs Gold <em>and</em> materials out of the yard, so what you can raise
+            depends on what your woodcutters have felled and your quarry has cut. Every building
+            also costs Gold every day to keep standing, for as long as it stands.
+          </p>
+
+          <h3>The trades</h3>
+          <p>Nine of them turn land into goods, and each is a link in a chain:</p>
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>Building</th><th>To raise</th><th>Upkeep</th><th>Makes a day</th><th>Out of</th><th>Wage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {TRADE_BUILDINGS.map((b) => {
+                const need = BUILD_MATERIALS[b.type] ?? { wood: 10, stone: 4 };
+                return (
+                  <tr key={b.type}>
+                    <td>{b.type}</td>
+                    <td className="num">
+                      {(BUILD_COSTS[b.type] ?? 250).toLocaleString()}g
+                      <em className="matter"> · {need.wood}w {need.stone}s</em>
+                    </td>
+                    <td className="num">{maintenanceCost(b.type)}g</td>
+                    <td>{b.makes}</td>
+                    <td className="muted">{b.needs || '—'}</td>
+                    <td className="num">{b.wage}g</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            Per worker, per day, before the land, the season, the weather and what you pay have had
+            their say. A farm on fertile ground grows more than the same farm on sand; a farm in
+            winter grows less than the same farm in summer; and everything is multiplied by the
+            wage you set. &ldquo;Out of&rdquo; is what the trade consumes — a baker with no flour
+            bakes nothing, however many bakers you have.
+          </p>
+
+          <h3>Everything else</h3>
+          <table className="wiki-table">
+            <thead><tr><th>Building</th><th>Upkeep</th><th>What it is for</th></tr></thead>
+            <tbody>
+              {CIVIC_BUILDINGS.map(([type, what]) => (
+                <tr key={type}>
+                  <td>{type}</td>
+                  <td className="num">{maintenanceCost(type)}g</td>
+                  <td className="muted">{what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            Anything can be pulled down from its card except the market, the bank and the town hall
+            — those hold the settlement together — and any house somebody still lives in. Pulling
+            something down returns nothing; it stops the upkeep, and that is the point of doing it.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="status">
+          <h2>Reading your settlement</h2>
+          <p>
+            The panel in the corner is the settlement&rsquo;s vital signs. None of these is a score
+            you are given — each is measured from the people who live there, and each has something
+            you can actually do about it.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Figure</th><th>What it is</th><th>How to move it</th></tr></thead>
+            <tbody>
+              {STATUS.map(([label, what, how]) => (
+                <tr key={label}>
+                  <td>{label}</td>
+                  <td className="muted">{what}</td>
+                  <td>{how}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            <b>Happiness is the one that pays.</b> It is one fifth of the stewardship score, and it
+            is the fifth you have the most direct hold on — the other four are housing, food, work
+            and safety, which are all buildings and preparation.
+          </p>
+          <p className="wiki-note">
+            Everybody carries all six needs separately, and you can read any one person&rsquo;s by
+            tapping them. A settlement whose average happiness is fine can still contain somebody
+            cold, friendless and about to change trade.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="danger">
+          <h2>What can go wrong</h2>
+          <p>
+            Four things, and none of them is random punishment: each wants particular conditions,
+            and each has something that answers it. A hazard that arrives at a settlement which is
+            ready for it costs close to nothing. One that arrives at a settlement which is not can
+            take a building, a harvest, or somebody&rsquo;s life.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Trouble</th><th>What brings it</th><th>What answers it</th></tr></thead>
+            <tbody>
+              {(Object.keys(HAZARD_LABELS) as HazardKind[]).map((kind) => (
+                <tr key={kind}>
+                  <td>{HAZARD_LABELS[kind]}</td>
+                  <td className="muted">{HAZARD_CAUSE[kind]}</td>
+                  <td>{HAZARD_DEFENCE[kind]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            The <b>What could go wrong</b> panel shows how ready you are for each, as a percentage,
+            <em> before</em> anything happens. That is the whole point of it: readiness is something
+            to build in a quiet week, not something to read afterwards.
+          </p>
+          <p className="wiki-note">
+            Readiness is not a purchase. It is counted from what is actually there — wells within
+            reach and enough people awake nearby, food put by and somewhere to keep it, fires
+            burning through a cold night, buildings set back from the water. Safety is a tenth of
+            the stewardship score, so a settlement that is never ready is quietly paid less for it.
           </p>
         </section>
 

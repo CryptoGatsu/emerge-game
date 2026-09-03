@@ -3,9 +3,10 @@
 /**
  * Things that happened while you were looking at your settlement.
  *
- * Two kinds, and both are about other people: somebody said something, and
- * somebody took a plot. Neither is worth interrupting the world for, and both
- * are worth knowing, so they arrive as a short-lived card in the corner rather
+ * Three kinds. Two are about other people — somebody said something, somebody
+ * took a plot — and one is about your own settlement getting on with it: the
+ * market sold something. None is worth interrupting the world for, and all are
+ * worth knowing, so they arrive as a short-lived card in the corner rather
  * than a modal.
  *
  * The rule for whether a notice is shown at all is "would the player otherwise
@@ -20,7 +21,7 @@ import { shortAddress } from '@/lib/chain/emerge';
 
 export interface Notice {
   id: string;
-  kind: 'chat' | 'claim';
+  kind: 'chat' | 'claim' | 'sale';
   title: string;
   body: string;
   /** What tapping the card does, when there is something useful to do. */
@@ -192,6 +193,9 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
 const nameOf = (claim: Claim) =>
   claim.ownerName?.trim() ? claim.ownerName : shortAddress(claim.owner);
 
+/** One mark per kind, so a glance says what a card is before it is read. */
+const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎' };
+
 /** The cards themselves. */
 export function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: string) => void }) {
   if (!notices.length) return null;
@@ -200,7 +204,7 @@ export function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: 
       {notices.map((notice) => (
         <div key={notice.id} className={`notice ${notice.kind}`}>
           <div className="notice-body">
-            <b>{notice.kind === 'chat' ? '✎' : '◈'} {notice.title}</b>
+            <b>{NOTICE_ICON[notice.kind]} {notice.title}</b>
             <p>{notice.body}</p>
             {notice.action && (
               <button

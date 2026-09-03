@@ -47,6 +47,8 @@ interface HudProps {
   onCancelBuild: () => void;
   /** How many people have this world open, the player included. */
   watching: number;
+  /** People playing Emerge anywhere, or null when the relay has not said. */
+  online: number | null;
   /** Set when this is somebody else's settlement, being looked at. */
   visiting: { worldName: string; ownerName: string; owner: string; at: number } | null;
   /** Stop visiting and go back to the world map. */
@@ -605,7 +607,16 @@ export function Hud(props: HudProps) {
         <div className="beings-pill">
           <span className="spark">✦</span>
           <b>AI BEINGS</b>
-          <em>{view.population} online</em>
+          <em>{view.population} here</em>
+          {/* Two different populations, and they are easy to confuse, so they
+              are labelled rather than left as two numbers side by side: the
+              beings who live on this plot, and the people playing the game. */}
+          {props.online !== null && (
+            <span className="players-online" title="People playing Emerge right now">
+              <i aria-hidden>●</i>
+              {props.online.toLocaleString()} {props.online === 1 ? 'player' : 'players'}
+            </span>
+          )}
         </div>
         <div className="time-controls">
           <button className={paused ? 'live paused' : 'live'} onClick={props.onTogglePause}>

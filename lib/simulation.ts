@@ -318,6 +318,15 @@ export interface World {
    * money and gets a happier, more productive settlement for it.
    */
   wageRate: number;
+  /**
+   * What the market has sold since anybody last looked.
+   *
+   * Kept so the interface can tell a player their settlement is trading
+   * without making them read the feed for it. Emptied by `takeSales`, which
+   * the client calls when it raises a card, so nothing accumulates forever and
+   * a world nobody is watching does not build a backlog of good news.
+   */
+  sales: { gold: number; units: number; best: Resource | null; bestUnits: number };
   /** Accumulates game hours so the market trades on the clock, not per frame. */
   marketClock: number;
   /**
@@ -2218,6 +2227,7 @@ export function createWorld(seed = 481516, name?: string): World {
     resolution: null, artworks: [],
     unlockedAreas: ['Settlement'],
     wageRate: WAGE_STANDARD,
+    sales: { gold: 0, units: 0, best: null, bestUnits: 0 },
     marketClock: 0, flow: { produced: {}, consumed: {} },
     flowYesterday: { produced: {}, consumed: {} },
     ledger: emptyLedger(), ledgerYesterday: emptyLedger(),
@@ -2468,6 +2478,46 @@ function venueName(world: World, g: Gathering) {
  * when families buy what they need. Without it, citizens hoard gold forever and
  * the treasury drains to nothing no matter how productive the settlement is.
  */
+/**
+ * What a person keeps by them before they will spend freely.
+ *
+ * Above this, money in a purse is money doing nothing for anybody.
+ */
+const COMFORTABLE_SAVINGS = 110;
+
+/** How much of their spare money a comfortable household spends each day. */
+const SPEND_RATE = 0.14;
+
+/**
+ * Money going round, rather than piling up in purses.
+ *
+ * This is the leak that made a settlement structurally loss-making. Wages left
+ * the treasury every morning and came back only when somebody bought bread or
+ * happened to want a chair — about seven Gold a day against forty-eight paid
+ * out — so the difference sat in citizens' pockets forever. Measured over
+ * eight settlements: 147 Gold a day in, 158 out, a permanent deficit of ten
+ * that only looked survivable because half the payroll was already going
+ * unpaid. Any Gold a player deposited was absorbed within days, which is
+ * exactly what people were reporting.
+ *
+ * So people who have more than they need spend some of it, in the settlement,
+ * on whatever the settlement has going on. This cannot create Gold — every
+ * coin here came out of the treasury as wages — it only stops it falling down
+ * a hole.
+ */
+function householdSpending(world: World) {
+  for (const c of world.citizens) {
+    if (c.age < 16) continue;
+    const spare = c.wallet - COMFORTABLE_SAVINGS;
+    if (spare <= 0) continue;
+    const spent = spare * SPEND_RATE;
+    c.wallet -= spent;
+    earn(world, 'households', spent);
+    // An evening out is an evening out.
+    c.social = Math.min(100, c.social + 1.2);
+  }
+}
+
 function householdTrade(world: World) {
   for (const c of world.citizens) {
     if (c.age < 16 || c.wallet < 1) continue;
@@ -2747,12 +2797,26 @@ function marketStep(world: World, hours: number) {
     // produce, the market only steps in during a real shortage — otherwise it
     // spends the treasury buying back the bread its own bakery is making.
     const importer = !localOutputs.has(r);
+    // What this order would cost, and whether the settlement can responsibly
+    // afford it — see `importReserve`.
+    const essential = ESSENTIAL_IMPORTS.has(r);
+    // Never buy food the settlement effectively already has.
+    const wellStocked = FOOD.includes(r) && fedFromStores(world);
     // A market day is a market day: stock moves faster in both directions while
     // one is running, which is what makes it worth walking to.
     const pace = busy ? 1.8 : 1;
     if (stock < buffer * (importer ? 0.65 : 0.3)) {
       const qty = Math.min(Math.max(1, Math.round((buffer - stock) * .2 * pace * hours)), Math.max(0, buffer - stock)), cost = qty * q.price;
-      if (qty > 0 && world.treasury >= cost) {
+      // The market keeps something back. Without this it bought whenever it
+      // could afford that single order, which meant it bought until the
+      // treasury was empty and then kept it empty — a settlement measured over
+      // twenty-four days sat between 4 and 274 Gold the whole time, and every
+      // Gold a player put in was absorbed within days. Food and firewood may
+      // still be bought down to the last coin, because people have to eat and
+      // a cold night kills; everything else waits until the town can cover a
+      // couple of days of wages and upkeep first.
+      const floor = essential ? 0 : importReserve(world);
+      if (qty > 0 && !wellStocked && world.treasury - cost >= floor) {
         world.resources[r] += qty; spend(world, 'imports', cost); q.volume += qty;
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market bought ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${cost.toFixed(0)} Gold.`); }
       }
@@ -2760,6 +2824,12 @@ function marketStep(world: World, hours: number) {
       const qty = Math.min(Math.max(1, Math.round((stock - buffer) * .25 * pace * hours)), Math.floor(stock - buffer));
       if (qty > 0) {
         const revenue = qty * q.price; world.resources[r] -= qty; earn(world, 'exports', revenue); q.volume += qty;
+        // Tallied rather than announced one at a time: the market trades every
+        // game hour, and a card per sale would be a card every few seconds.
+        const tally = world.sales;
+        tally.gold += revenue;
+        tally.units += qty;
+        if (qty > tally.bestUnits) { tally.best = r; tally.bestUnits = qty; }
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market sold ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${revenue.toFixed(0)} Gold.`); }
       }
     }
@@ -2807,6 +2877,75 @@ function worldNews(world: World) {
       ? `Word from the other settlements: nobody is short of ${good}. Ours will not fetch much.`
       : `Word from the other settlements: ${good} is cheap everywhere. A good week to stock up.`;
   pushFeed(world, 'market', text);
+}
+
+/**
+ * What a settlement will buy in even when it is poor.
+ *
+ * People have to eat and a house has to be warm. Everything else — iron,
+ * cloth, furniture, tools — can wait for a better week, and waiting is what
+ * stops the market emptying the treasury on a settlement's behalf.
+ */
+const ESSENTIAL_IMPORTS = new Set<Resource>(['wheat', 'vegetables', 'bread', 'wood']);
+
+/**
+ * The things people eat, in the order they reach for them.
+ *
+ * Food is interchangeable at the table — a settlement out of bread eats grain,
+ * and out of grain eats vegetables — so what matters is whether there is food,
+ * not whether there is bread. The market did not know that. It read an empty
+ * bread shelf against a bread-sized buffer and bought bread, every day, in
+ * settlements sitting on fourteen surplus wheat a day because they had a mill
+ * and no bakery. That single line was most of the money: about sixty Gold a
+ * day of a settlement's eighty-six in imports, against eighty-eight in total
+ * export income. It is why treasuries sat at nothing and why Gold put in
+ * vanished.
+ */
+const FOOD: Resource[] = ['bread', 'wheat', 'vegetables'];
+
+/** How many portions a settlement likes to have in the larder per head. */
+const FOOD_PER_HEAD = 6;
+
+/** True when the settlement has enough to eat, whatever form it is in. */
+function fedFromStores(world: World): boolean {
+  const held = FOOD.reduce((sum, r) => sum + world.resources[r], 0);
+  return held >= world.citizens.length * FOOD_PER_HEAD;
+}
+
+/** How many days of wages and upkeep the market leaves untouched. */
+const IMPORT_RESERVE_DAYS = 2;
+
+/**
+ * The Gold the market will not spend.
+ *
+ * Read from what the settlement is actually committed to — its payroll at the
+ * wage it has chosen, and the upkeep on what it has built — rather than a flat
+ * number, so a village of eight and a town of forty are each left with a
+ * couple of days of their own running costs.
+ */
+function importReserve(world: World): number {
+  const rate = cleanWageRate(world.wageRate);
+  const payroll = world.citizens
+    .filter((c) => c.age >= 16 && c.job !== 'unemployed')
+    .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage * rate, 0);
+  const upkeep = world.buildings
+    .filter((b) => b.active)
+    .reduce((sum, b) => sum + maintenanceCost(b.type), 0);
+  return (payroll + upkeep) * IMPORT_RESERVE_DAYS;
+}
+
+/**
+ * What has been sold since this was last asked, and clear it.
+ *
+ * Deliberately destructive: the caller is announcing it, so leaving it in
+ * place would announce it again. A world carried over from a save without the
+ * field reads as nothing sold, which is right — it was sold before anybody was
+ * watching.
+ */
+export function takeSales(world: World): { gold: number; units: number; best: Resource | null; bestUnits: number } {
+  const held = world.sales ?? { gold: 0, units: 0, best: null, bestUnits: 0 };
+  world.sales = { gold: 0, units: 0, best: null, bestUnits: 0 };
+  return held;
 }
 
 /** Run whole hours of trade out of the accumulator. */
@@ -4300,6 +4439,9 @@ function daily(world: World) {
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep);
+  // Paid in the morning, spent through the day: what people do not need to
+  // keep by them goes back into the settlement rather than sitting in a purse.
+  householdSpending(world);
 
   for (const r of Object.keys(marketPrices) as Resource[]) {
     const q = world.market[r];

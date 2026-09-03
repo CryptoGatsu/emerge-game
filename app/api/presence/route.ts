@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { depart, heartbeat, watchers } from '@/lib/server/registry';
+import { depart, heartbeat, playersOnline, watchers } from '@/lib/server/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,8 +30,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unknown world.' }, { status: 400 });
   }
   try {
-    const here = await watchers(seed);
-    return NextResponse.json({ count: here.length });
+    const [here, online] = await Promise.all([watchers(seed), playersOnline()]);
+    return NextResponse.json({ count: here.length, online });
   } catch {
     return NextResponse.json({ count: 0, degraded: true });
   }
@@ -56,11 +56,11 @@ export async function POST(request: Request) {
       await depart(seed, who);
       return NextResponse.json({ count: (await watchers(seed)).length });
     }
-    const here = await heartbeat(seed, who);
+    const [here, online] = await Promise.all([heartbeat(seed, who), playersOnline()]);
     // The owner is never in this count. On your own world it reads as the
     // number of people who have come to look; on somebody else's, as how many
     // others are looking with you.
-    return NextResponse.json({ count: here.length });
+    return NextResponse.json({ count: here.length, online });
   } catch {
     return NextResponse.json({ count: 0, degraded: true });
   }

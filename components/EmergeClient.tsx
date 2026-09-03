@@ -23,10 +23,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
-  pickUpCitizen, renameCitizen, renameWorld, setWageRate, setWorldPrices,
+  RESOURCE_LABELS, pickUpCitizen, renameCitizen, renameWorld, setWageRate, setWorldPrices,
+  takeSales,
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
+import { GOODWILL, claimGoodwill } from '@/lib/world/grants';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
 import {
@@ -101,6 +103,24 @@ const BALANCE_POLL = 30_000;
 const MARKET_POLL = 40_000;
 
 /**
+ * How often the settlement's takings are totted up for a card, and the least
+ * they may come to before one is worth showing.
+ *
+ * Long enough that the cards are an occasional piece of good news rather than
+ * a ticker, and a floor so a settlement shifting two wheat does not interrupt
+ * anybody. A busy town trades a few hundred Gold in this window.
+ */
+const SALE_NOTICE_INTERVAL = 50_000;
+/*
+ * Set from what settlements actually take rather than by eye. A town's first
+ * days move twenty to twenty-five Gold in a window and a busy one a hundred
+ * and fifty, so a floor of sixty — which is where this started — said nothing
+ * at all for the first week, which is exactly when a new player most needs to
+ * see that their people are working.
+ */
+const SALE_NOTICE_GOLD = 20;
+
+/**
  * The speeds on offer.
  *
  * 6x is gone. Yield is paced by the wall clock, so a fast-forward never paid
@@ -129,6 +149,18 @@ export interface Visit {
   /** When the owner last published. Shown, because a stale world should say so. */
   at: number;
   save: SavedWorld;
+}
+
+/**
+ * Hand a settlement the goodwill Gold, once, if it has not had it.
+ *
+ * Called wherever a world of the player's own is opened — on first mount and
+ * on switching plots — and never on a visit, because a visitor's copy of
+ * somebody else's settlement is not a settlement to pay anything into.
+ */
+function makeGood(world: World, seed: number) {
+  const gold = claimGoodwill(seed);
+  if (gold > 0) fundTreasury(world, gold, `${gold.toLocaleString()} Gold arrived: ${GOODWILL.reason}`);
 }
 
 export default function EmergeClient() {
@@ -434,6 +466,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     worldRef.current = visit
       ? worldFromSave(visit.save, visit.seed, visit.worldName) ?? createWorld(visit.seed, visit.worldName)
       : loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
+    if (!visit) makeGood(worldRef.current, claimed.seed);
   }
 
   /* -------------------------------------------------------------- *
@@ -577,6 +610,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const scene = sceneRef.current;
     if (!scene) return;
     const next = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
+    makeGood(next, claimed.seed);
     worldRef.current = next;
     setSelected(null);
     setFollowing(null);
@@ -597,6 +631,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * -------------------------------------------------------------- */
 
   const [watching, setWatching] = useState(0);
+  /**
+   * How many people are playing Emerge at all.
+   *
+   * Null until the relay says, and never reset to nought by a failed beat: a
+   * game that briefly claims nobody is playing looks dead, and looking dead is
+   * worse than saying nothing.
+   */
+  const [online, setOnline] = useState<number | null>(null);
   const { wallet } = useWallet();
 
   /*
@@ -616,8 +658,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const who = wallet.address ?? visitorId();
     let live = true;
     const beat = async () => {
-      const count = await heartbeat(seed, who);
-      if (live) setWatching(count);
+      const here = await heartbeat(seed, who);
+      if (!live) return;
+      setWatching(here.watching);
+      // Left alone when the relay could not say, rather than reset to nothing:
+      // one missed beat should not make the game look empty.
+      if (here.online !== null) setOnline(here.online);
     };
     beat();
     const timer = window.setInterval(beat, HEARTBEAT_INTERVAL);
@@ -766,6 +812,42 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     mine: { address: wallet.address, name: player.name },
     onOpenChat: () => setPanel('chat'),
   });
+
+  /*
+   * "Your people sold something."
+   *
+   * The reason this exists is that a settlement trading well looks exactly
+   * like a settlement doing nothing: the goods leave the store, the Gold
+   * arrives, and unless somebody is reading the feed none of it is visible.
+   * A card every so often is the difference between a world that is running
+   * and a world that is running *for you*.
+   *
+   * Tallied by the market and drained here rather than announced per sale —
+   * trade happens every game hour, and a card each time would be a card every
+   * few seconds. Nothing is shown below a threshold worth reading, and a
+   * settlement with nothing to sell says nothing at all.
+   */
+  useEffect(() => {
+    if (spectating) return;
+    let live = true;
+    const tick = () => {
+      const world = worldRef.current;
+      if (!live || !world || pausedRef.current) return;
+      const sold = takeSales(world);
+      if (sold.gold < SALE_NOTICE_GOLD || !sold.best) return;
+      const good = RESOURCE_LABELS[sold.best].toLowerCase();
+      announce({
+        id: `sale-${world.day}-${Math.round(world.hour)}-${Math.round(sold.gold)}`,
+        kind: 'sale',
+        title: `${Math.round(sold.gold).toLocaleString()} Gold from the stalls`,
+        body: sold.units > sold.bestUnits
+          ? `Your people sold ${Math.round(sold.units)} goods, mostly ${good}.`
+          : `Your people sold ${Math.round(sold.bestUnits)} ${good}.`,
+      });
+    };
+    const timer = window.setInterval(tick, SALE_NOTICE_INTERVAL);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [announce, spectating]);
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { speedRef.current = speed; }, [speed]);
@@ -1035,6 +1117,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             drawMinimap={drawMinimap}
             onCancelBuild={cancelBuild}
             watching={watching}
+            online={online}
             visiting={visit ?? null}
             onEndVisit={onLeave}
           />

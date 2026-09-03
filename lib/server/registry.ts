@@ -444,6 +444,35 @@ const PRESENCE_TTL_MS = 50_000;
 const presenceKey = (seed: number) => serverKey(`seen:${seed}`);
 
 /**
+ * Everybody playing, anywhere.
+ *
+ * Kept beside the per-world rows rather than derived from them: working out
+ * how many people are in the game by reading the presence hash of every world
+ * anybody has ever claimed is a request that gets slower the more successful
+ * the game is.
+ */
+const EVERYONE = serverKey('seen:everyone');
+
+/**
+ * How many people are playing right now.
+ *
+ * Swept on read, like the per-world count, so somebody who closed their tab
+ * stops counting within the heartbeat window rather than for ever.
+ */
+export async function playersOnline(): Promise<number> {
+  const rows = await hgetall(EVERYONE);
+  const now = Date.now();
+  let live = 0;
+  const stale: string[] = [];
+  for (const [id, at] of Object.entries(rows)) {
+    if (now - Number(at) <= PRESENCE_TTL_MS) live += 1;
+    else stale.push(id);
+  }
+  for (const id of stale.slice(0, 64)) await hdel(EVERYONE, id);
+  return live;
+}
+
+/**
  * Say that somebody is looking at a world, and return who else is.
  *
  * The owner is recorded but never counted. "2 watching" on your own settlement
@@ -454,6 +483,10 @@ const presenceKey = (seed: number) => serverKey(`seen:${seed}`);
 export async function heartbeat(seed: number, who: string): Promise<string[]> {
   const key = presenceKey(seed);
   await hset(key, who, String(Date.now()));
+  // The same beat counts them as playing at all. One write rather than a
+  // second heartbeat from the client, because a player is present in the game
+  // exactly when they are present in a world.
+  await hset(EVERYONE, who, String(Date.now()));
   const rows = await hgetall(key);
   const now = Date.now();
   const live: string[] = [];
@@ -484,7 +517,13 @@ async function withoutOwner(seed: number, present: string[]): Promise<string[]> 
   return present.filter((id) => id.toLowerCase() !== owner);
 }
 
-/** Stop counting somebody as present, when they do leave politely. */
+/**
+ * Stop counting somebody as present, when they do leave politely.
+ *
+ * Only from the world, not from the game: leaving a settlement usually means
+ * walking into another one, and a player who steps between two of their own
+ * worlds should not blink out of the online count on the way.
+ */
 export async function depart(seed: number, who: string): Promise<void> {
   await hdel(presenceKey(seed), who);
 }

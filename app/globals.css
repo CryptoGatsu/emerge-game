@@ -2661,3 +2661,26 @@ button.fold:hover { color: var(--emerald); }
 .wage-effect b.up { color: var(--emerald); }
 .wage-effect b.down { color: #d98b6a; }
 .wages p { margin: 0; line-height: 1.6; }
+
+/* The market sold something. Gold, like everything else to do with takings. */
+.notice.sale b { color: var(--gold); }
+
+/* How many people are in the game, beside how many beings are in this world.
+   Dimmer than the settlement's own count: it is context, not a reading. */
+.players-online {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 9px;
+  padding-left: 10px;
+  border-left: 1px solid var(--panel-edge-soft);
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  font-style: normal;
+}
+.players-online i { font-size: 7px; color: var(--emerald); font-style: normal; }
+.region-legend b { color: var(--cream); font-weight: 600; }
+
+/* The materials beside a building's Gold cost — quieter than the price. */
+.wiki-table em.matter { font-style: normal; font-size: 11px; color: var(--muted); }

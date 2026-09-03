@@ -191,10 +191,12 @@ const MAX_MARKER_NUDGE = 0.09;
 /** Below this map width, in pixels, there is no room to lay names out at all. */
 const LABELS_NEED_WIDTH = 560;
 
-function RegionMap({ plots, selected, chart, owned, taken, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, onSelect }: {
   plots: Plot[];
   selected: Plot | null;
   chart: number;
+  /** How much land has been claimed across every chart in the game. */
+  claimedEverywhere: number;
   /** Seeds this player holds, so their own land is marked on the map. */
   owned: Set<number>;
   /** Seeds somebody else holds, by seed, so their land is marked as theirs. */
@@ -471,6 +473,12 @@ function RegionMap({ plots, selected, chart, owned, taken, onSelect }: {
       <div className="region-legend">
         <span>
           {plots.length} {plots.length === 1 ? 'plot' : 'plots'} surveyed on {islandsFor(chart).length} islands
+          {/* Across every chart, not just this one: the interesting number is
+              how much of the world is spoken for, and a per-chart figure reads
+              as "this island chain is empty" when the game is busy. */}
+          {claimedEverywhere > 0 && (
+            <> · <b>{claimedEverywhere.toLocaleString()}</b> claimed in all</>
+          )}
         </span>
         <span>{plots.length ? 'Tap a marker to inspect the land' : 'Nothing here has been surveyed yet'}</span>
       </div>
@@ -850,7 +858,10 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
         </nav>
 
         <div className="land-body">
-          <RegionMap plots={plots} selected={selected} chart={chart} owned={ownedSeeds} taken={takenByOthers} onSelect={choose} />
+          <RegionMap
+            plots={plots} selected={selected} chart={chart} owned={ownedSeeds}
+            taken={takenByOthers} claimedEverywhere={allClaims.length} onSelect={choose}
+          />
 
           {!selected ? (
             <aside className="land-claim empty">
