@@ -23,7 +23,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -619,6 +619,34 @@ export default function Wiki() {
             winter grows less than the same farm in summer; and everything is multiplied by the
             wage you set. &ldquo;Out of&rdquo; is what the trade consumes — a baker with no flour
             bakes nothing, however many bakers you have.
+          </p>
+
+          <h3>Fishing, hunting and foraging</h3>
+          <p>
+            Three trades work out of doors, and the settlement is a better thing to watch for it.
+            A <b>Fishery</b> puts fishers on the bank nearest the hut, rod out over the water.
+            Every fisher goes through <b>{BAIT_GOLD} Gold</b> of bait a day, booked under
+            &ldquo;Bait and arrows&rdquo; in the Bank, and about one day in seven a rod snaps and
+            <b>{ROD_WOOD} timber</b> goes to a new one. No Gold for bait or no timber for a rod
+            halves the catch until there is. Winter and storms slow it; a coast or a river
+            speeds it.
+          </p>
+          <p>
+            A <b>Lodge</b> sends hunters after the animals that actually live on the plot. Every
+            land has its own &mdash; deer, boar and fox under trees; goats and elk on the
+            shelf; antelope on the steppe; gazelle on the dunes; ducks on the fen; boar and a
+            gator in the swamp &mdash; and they graze, wander and bolt from anybody who walks
+            too close. A hunter picks one, closes on it, brings it down and carries it back to
+            the store: the kill is credited the moment it happens, game and hides both, scaled
+            by skill. Each hunter uses <b>{ARROW_WOOD} timber</b> of arrows a day, and a short
+            quiver means lighter kills. The herd comes back a head or two a day up to what the
+            land carries, so a lodge that hunts faster than that empties its own wood. Hunters
+            also count toward readiness for wolves.
+          </p>
+          <p>
+            A <b>Forager</b> camp sends people onto the open ground for berries and herbs, heavy
+            in autumn and thin under snow. Fish, game and berries are eaten alongside bread;
+            hides and herbs are sold, and herbs are the dearest thing a small settlement makes.
           </p>
 
           <h3>Everything else</h3>

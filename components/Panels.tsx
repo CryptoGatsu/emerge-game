@@ -97,6 +97,9 @@ const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] =
   { type: 'House', cost: BUILD_COSTS['House'], icon: '⌂', blurb: 'Homes for a growing settlement.' },
   { type: 'Farm', cost: BUILD_COSTS['Farm'], icon: '✣', blurb: 'Wheat and vegetables from the fields.' },
   { type: 'Woodcutter', cost: BUILD_COSTS['Woodcutter'], icon: '♣', blurb: 'Timber from the surrounding forest.' },
+  { type: 'Fishery', cost: BUILD_COSTS['Fishery'], icon: '≋', blurb: 'Fish from the shore, so build it by the water. Bait costs Gold, and a snapped rod costs timber.' },
+  { type: 'Lodge', cost: BUILD_COSTS['Lodge'], icon: '➶', blurb: 'Hunters stalk the wild ground for game and hides. Arrows cost timber.' },
+  { type: 'Forager', cost: BUILD_COSTS['Forager'], icon: '❀', blurb: 'Berries and herbs gathered from the wild ground.' },
   { type: 'Quarry', cost: BUILD_COSTS['Quarry'], icon: '◇', blurb: 'Cut stone from the highland.' },
   { type: 'Mine', cost: BUILD_COSTS['Mine'], icon: '◆', blurb: 'Iron ore from deep in the ridge.' },
   { type: 'Mill', cost: BUILD_COSTS['Mill'], icon: '◫', blurb: 'Turns wheat into flour.' },
@@ -342,11 +345,21 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         <section>
           <h4>Work and the market</h4>
           <p>
-            Nine trades turn the land into goods: farmers and woodcutters and miners take raw
-            material, millers and bakers and carpenters and smiths and tailors turn it into
-            something better. Each trade needs its building, and a building supports two workers
-            (three down a mine). People change trade on their own when they are unhappy or their
-            trade is overfull — and immediately when you raise a building nobody is working in.
+            Twelve trades turn the land into goods: farmers, woodcutters, miners, fishers,
+            hunters and foragers take raw material, millers and bakers and carpenters and smiths
+            and tailors turn it into something better. Each trade needs its building, and a
+            building supports two workers (three down a mine). People change trade on their own
+            when they are unhappy or their trade is overfull — and immediately when you raise a
+            building nobody is working in.
+          </p>
+          <p>
+            Three of them work out of doors, where you can watch. Fishers stand on the bank with
+            a rod: bait costs the treasury a little Gold every day, and a rod that snaps costs
+            timber from the yard. Hunters go into the wild ground after the animals that live
+            there — deer and boar under the trees, goats on the shelf, gazelle on the dunes — and
+            carry the kill home; arrows cost timber, and a herd hunted faster than it recovers
+            leaves them coming back empty-handed. Foragers pick berries and herbs. Fish, game and
+            berries are eaten like bread; hides and herbs sell dear at the market.
           </p>
           <p>
             The market buys what the settlement cannot make and sells what it has too much of, at

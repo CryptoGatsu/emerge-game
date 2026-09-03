@@ -15,7 +15,7 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type World, adviseBuild, type Advice } from './simulation';
+  type WorkingJob, type World, adviseBuild, foodInStore, type Advice } from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -141,7 +141,7 @@ export interface Snapshot {
   focus: Focus | null;
 }
 
-const MARKET_ORDER: Resource[] = ['wheat', 'vegetables', 'wood', 'stone', 'ironOre', 'wool', 'flour', 'bread', 'furniture', 'tools', 'clothing'];
+const MARKET_ORDER: Resource[] = ['wheat', 'vegetables', 'fish', 'game', 'berries', 'wood', 'stone', 'ironOre', 'wool', 'hides', 'herbs', 'flour', 'bread', 'furniture', 'tools', 'clothing'];
 
 export function formatClock(hour: number) {
   const h = Math.floor(hour) % 24;
@@ -287,7 +287,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       .reduce((sum, c) => sum + JOBS[c.job as WorkingJob].wage, 0) * world.wageRate),
     happiness: Math.round(avg((c) => c.happiness)),
     energy: Math.round(avg((c) => c.rest)),
-    food: Math.round(world.resources.bread + world.resources.wheat + world.resources.vegetables),
+    food: Math.round(foodInStore(world)),
     employed: people.filter((c) => c.job !== 'unemployed').length,
     outdoors: people.filter((c) => !c.inside).length,
     socialising: people.filter((c) => c.activity === 'trading').length,

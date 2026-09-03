@@ -25,6 +25,8 @@ import {
 } from './character';
 import { buildBuildings, type BuildingArt } from './buildings';
 import { buildProps } from './props';
+import { animalFrame, fishingRod, huntingBow } from './wildlifeArt';
+import { ANIMAL_KINDS } from '../world/wildlife';
 import { buildTiles, canopyPattern } from './tiles';
 import { BLOOM, BUILD, FOLIAGE, UI, WATER } from './palette';
 import { glow, outline, rect, rng, surface, type Pixels } from './pixelCanvas';
@@ -172,7 +174,7 @@ function activityIcon(kind: 'work' | 'eat' | 'social' | 'sleep' | 'trade'): Pixe
 }
 
 /** Something a citizen is carrying, held in front of them as they walk. */
-function carried(kind: 'crate' | 'sack' | 'log' | 'loaf' | 'cloth'): Pixels {
+function carried(kind: 'crate' | 'sack' | 'log' | 'loaf' | 'cloth' | 'fish' | 'game' | 'basket'): Pixels {
   const p = surface(12, 10);
   // Drawn small and outlined: a carried thing has to read against a body of
   // roughly the same size without swallowing it.
@@ -202,6 +204,30 @@ function carried(kind: 'crate' | 'sack' | 'log' | 'loaf' | 'cloth'): Pixels {
       rect(p, 2, 2, 8, 7, '#a86a8f');
       rect(p, 2, 4, 8, 1, '#d8a8c4');
       rect(p, 2, 7, 8, 1, '#7a4a68');
+      break;
+    case 'fish':
+      // A brace of fish on a string.
+      rect(p, 1, 3, 7, 3, '#b8c8cf');
+      rect(p, 8, 2, 2, 5, '#8fa4ac');
+      rect(p, 2, 4, 5, 1, '#e4eef0');
+      rect(p, 3, 6, 6, 3, '#9db3bb');
+      rect(p, 9, 6, 2, 3, '#7c929a');
+      rect(p, 2, 3, 1, 1, '#1c2a1a');
+      break;
+    case 'game':
+      // A hare slung over the shoulder, or the haunch of something bigger.
+      rect(p, 1, 3, 9, 5, '#8c6640');
+      rect(p, 2, 2, 4, 2, '#a07a4c');
+      rect(p, 9, 5, 2, 3, '#6b4a2e');
+      rect(p, 1, 7, 9, 1, '#5a3d24');
+      rect(p, 3, 4, 2, 1, '#c8a878');
+      break;
+    case 'basket':
+      rect(p, 2, 4, 8, 5, '#b08a4c');
+      rect(p, 2, 4, 8, 1, '#c9a566');
+      rect(p, 4, 1, 4, 3, '#6f4a9a');
+      rect(p, 5, 2, 2, 1, '#c93a2f');
+      rect(p, 2, 8, 8, 1, '#7d5f2e');
       break;
   }
   outline(p, '#1c2a1a', 0.9);
@@ -344,7 +370,13 @@ export function loadAssets(): AssetLibrary {
   put('fx.select', selectionRing(UI.emerald, 2));
   put('fx.hover', selectionRing(UI.cream, 1));
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
-  for (const kind of ['crate', 'sack', 'log', 'loaf', 'cloth'] as const) put(`fx.carry.${kind}`, carried(kind));
+  for (const kind of ['crate', 'sack', 'log', 'loaf', 'cloth', 'fish', 'game', 'basket'] as const) put(`fx.carry.${kind}`, carried(kind));
+  put('fx.rod', fishingRod());
+  put('fx.bow', huntingBow());
+  for (const kind of ANIMAL_KINDS) {
+    put(`wild.${kind}.0`, animalFrame(kind, 0));
+    put(`wild.${kind}.1`, animalFrame(kind, 1));
+  }
   put('fx.vignette', vignette());
   put('fx.bird.0', bird(0));
   put('fx.bird.1', bird(1));

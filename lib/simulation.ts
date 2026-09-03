@@ -19,9 +19,13 @@ import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
 import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
 import { buildWater, type WaterField } from './world/water';
+import {
+  ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
+  type Animal, type AnimalKind,
+} from './world/wildlife';
 
 export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 'river';
-export type Job = 'farmer' | 'woodcutter' | 'miner' | 'quarry' | 'miller' | 'baker' | 'carpenter' | 'blacksmith' | 'tailor' | 'unemployed';
+export type Job = 'farmer' | 'woodcutter' | 'fisher' | 'hunter' | 'forager' | 'miner' | 'quarry' | 'miller' | 'baker' | 'carpenter' | 'blacksmith' | 'tailor' | 'unemployed';
 export type WorkingJob = Exclude<Job, 'unemployed'>;
 export type Activity = 'walking' | 'working' | 'resting' | 'trading' | 'eating' | 'idle';
 export type Phase = 'sleeping' | 'athome' | 'working' | 'eating' | 'socialising' | 'wandering';
@@ -30,6 +34,8 @@ export type Season = 'Spring' | 'Summer' | 'Autumn' | 'Winter';
 export type Weather = 'Clear' | 'Cloudy' | 'Rain' | 'Storm' | 'Fog' | 'Snow';
 export type { Resource };
 export { RESOURCES, RESOURCE_LABELS };
+export type { Animal, AnimalKind };
+export { ANIMAL_LABELS };
 
 /** Feed entries are typed so the UI can icon/colour them without parsing text. */
 export type FeedKind = 'world' | 'build' | 'social' | 'discovery' | 'project' | 'market' | 'weather' | 'work';
@@ -233,6 +239,10 @@ export interface Citizen {
   calledTo?: string;
   /** Held by the player right now: they go where the pointer goes. */
   carried?: boolean;
+  /** The animal this hunter is closing on. */
+  hunting?: string;
+  /** Carrying a kill back to the store, which is the next place they go. */
+  hauling?: boolean;
   /**
    * Swimming back to shore after being set down in the water.
    *
@@ -341,6 +351,10 @@ export interface World {
   conversations: Conversation[];
   /** Whatever is currently going wrong. */
   hazards: Hazard[];
+  /** The animals on the land, which the hunters go after. */
+  wildlife: Animal[];
+  /** The day's hunting so far: kills, how many the feed has told of, and whether the quiver is full. */
+  hunt: { today: number; lines: number; arrows: boolean };
   /** The standing decision of the last town meeting, if it is still in force. */
   resolution: Resolution | null;
   /** Everything the settlement's showcases have produced, newest first. */
@@ -456,7 +470,7 @@ export interface Stewardship {
 
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
-  | 'wages' | 'upkeep' | 'imports' | 'building' | 'works'
+  | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
   | 'exports' | 'households' | 'food' | 'vault' | 'arena';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
@@ -465,6 +479,7 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
   imports: 'Imports',
   building: 'Building',
   works: 'Public works',
+  gear: 'Bait and arrows',
   exports: 'Exports',
   households: 'Household spending',
   food: 'Food sales',
@@ -510,13 +525,16 @@ export function ledgerTotals(ledger: DayLedger) {
   return { earned: sum(ledger.in), spent: sum(ledger.out) };
 }
 
-export const JOB_LABELS: Record<Job, string> = { farmer: 'Farmer', woodcutter: 'Woodcutter', miner: 'Miner', quarry: 'Quarry worker', miller: 'Miller', baker: 'Baker', carpenter: 'Carpenter', blacksmith: 'Blacksmith', tailor: 'Tailor', unemployed: 'Unemployed' };
+export const JOB_LABELS: Record<Job, string> = { farmer: 'Farmer', woodcutter: 'Woodcutter', fisher: 'Fisher', hunter: 'Hunter', forager: 'Forager', miner: 'Miner', quarry: 'Quarry worker', miller: 'Miller', baker: 'Baker', carpenter: 'Carpenter', blacksmith: 'Blacksmith', tailor: 'Tailor', unemployed: 'Unemployed' };
 export const ACTIVITY_LABELS: Record<Activity, string> = { walking: 'Walking', working: 'Working', resting: 'At home', trading: 'Socialising', eating: 'Eating', idle: 'Idle' };
 export const PHASE_LABELS: Record<Phase, string> = { sleeping: 'Asleep', athome: 'At home', working: 'At work', eating: 'Getting food', socialising: 'Socialising', wandering: 'Wandering' };
 
 export const JOBS: Record<WorkingJob, { wage: number; output: Partial<Record<Resource, number>>; input?: Partial<Record<Resource, number>>; building: string }> = {
   farmer: { wage: 10, output: { wheat: 10, vegetables: 5 }, building: 'Farm' },
   woodcutter: { wage: 11, output: { wood: 12.5 }, building: 'Woodcutter' },
+  fisher: { wage: 11, output: { fish: 9 }, building: 'Fishery' },
+  hunter: { wage: 13, output: { game: 5, hides: 2 }, building: 'Lodge' },
+  forager: { wage: 9, output: { berries: 8, herbs: 2 }, building: 'Forager' },
   miner: { wage: 14, output: { ironOre: 3.33 }, building: 'Mine' },
   quarry: { wage: 12, output: { stone: 9 }, building: 'Quarry' },
   miller: { wage: 13, output: { flour: 10 }, input: { wheat: 10 }, building: 'Mill' },
@@ -531,7 +549,24 @@ const names = ['Nova', 'Kai', 'Mira', 'Atlas', 'Luna', 'Theo', 'Iris', 'Miles', 
 const familyNames = ['Carter', 'Mason', 'Hayes', 'Bennett', 'Reed', 'Morgan', 'Brooks', 'Parker'];
 const marketPrices = BASE_PRICES;
 const marketBuffers = MARKET_BUFFERS;
-const terrainBonuses: Record<Terrain, Partial<Record<WorkingJob, number>>> = { fertile: { farmer: 1.3 }, forest: { woodcutter: 1.3 }, mountain: { miner: 1.3 }, rocky: { quarry: 1.25 }, coastal: {}, river: { farmer: 1.15 } };
+const terrainBonuses: Record<Terrain, Partial<Record<WorkingJob, number>>> = {
+  fertile: { farmer: 1.3, forager: 1.1 }, forest: { woodcutter: 1.3, hunter: 1.3, forager: 1.3 }, mountain: { miner: 1.3, hunter: 1.1 },
+  rocky: { quarry: 1.25 }, coastal: { fisher: 1.35 }, river: { farmer: 1.15, fisher: 1.2 },
+};
+
+/**
+ * What the fishing and the hunting cost, on top of wages.
+ *
+ * Bait is bought: every fisher goes through `BAIT_GOLD` a day, booked under
+ * gear. Rods snap — about one day in seven — and a new one is `ROD_WOOD` out
+ * of the yard; a fisher whose rod cannot be replaced fishes at half the rate
+ * until it can. Hunters go through `ARROW_WOOD` a day, and a quiver the yard
+ * cannot fill means lighter kills.
+ */
+export const BAIT_GOLD = 2;
+export const ROD_WOOD = 3;
+export const ROD_BREAK_CHANCE = 0.15;
+export const ARROW_WOOD = 1;
 
 /**
  * The water for a world.
@@ -729,9 +764,13 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   c.phase = phase;
   let target: { x: number; y: number; id?: string } | undefined;
   let spread = 2.4;
+  // A spot chosen for what it is — a bank to cast from, an animal — rather
+  // than a building to stand near, so no ring is scattered round it.
+  let exact = false;
 
   // A new destination means giving up the bench.
   releaseAmenity(world, c);
+  if (c.hunting && !(phase === 'working' && c.job === 'hunter')) releasePrey(world, c);
 
   if (phase === 'sleeping' || phase === 'athome') {
     // A bed if they have one, a bench at the tavern if not, and the square if
@@ -755,10 +794,58 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     // people read as a crowd of far more.
     const workplace = jobBuilding(world, c);
     const depot = findBuilding(world, 'Storage') ?? findBuilding(world, 'Market');
-    const runErrand = (c.wanderIdx + c.hash) % 3 === 0;
+    // The outdoor trades run their errand only after a spell at work: a
+    // fisher whose first trip of the morning was to the store spent the day
+    // on the road and cast for an hour.
+    const outdoors = c.job === 'fisher' || c.job === 'hunter' || c.job === 'forager';
+    const runErrand = (c.wanderIdx + c.hash) % 3 === 0 && (!outdoors || (c.activity === 'working' && !c.errand));
     target = runErrand ? depot ?? workplace : workplace ?? depot;
     c.errand = runErrand;
     c.wanderIdx = (c.wanderIdx + 1) % Math.max(1, world.layout.wanderSpots.length);
+
+    /*
+     * The trades that work out of doors.
+     *
+     * A fisher's day is spent on the bank, not in the hut; a hunter's in the
+     * wood, after something; a forager's out on the wild ground. Sending them
+     * indoors made the three most watchable trades in the settlement
+     * invisible. They still run the same errand to the store every third trip,
+     * which is when the fish, the kill and the basket are seen going in.
+     */
+    if (c.job === 'fisher' && !runErrand) {
+      // The nearest few spots to the hut, not any of them: the far ones are
+      // a three-hour walk on a big lake, and a fisher who alternated between
+      // ends of the shore spent the afternoon on the road.
+      const spots = fishingSpotsOf(world).slice(0, 3);
+      if (spots.length) {
+        const [sx, sy] = spots[(c.hash + c.wanderIdx) % spots.length];
+        target = { x: sx, y: sy };
+        exact = true;
+      }
+    } else if (c.job === 'hunter') {
+      releasePrey(world, c);
+      if (c.hauling) {
+        // Back to the store with the kill, whatever the errand roll said.
+        target = depot ?? workplace;
+        c.errand = true;
+        c.hauling = false;
+      } else if (!runErrand) {
+        const prey = pickPrey(world, c, workplace);
+        if (prey) {
+          prey.stalkedBy = c.id;
+          c.hunting = prey.id;
+          target = { x: prey.x, y: prey.y };
+          exact = true;
+        }
+      }
+    } else if (c.job === 'forager' && !runErrand) {
+      const spots = forageSpotsOf(world).slice(0, 4);
+      if (spots.length) {
+        const [sx, sy] = spots[(c.hash + c.wanderIdx) % spots.length];
+        target = { x: sx, y: sy };
+        exact = true;
+      }
+    }
   } else if (phase === 'eating') {
     // A market stall to buy at, if one is free, rather than the doorway.
     const stall = claimAmenity(world, c, ['stall'], 60);
@@ -844,7 +931,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     spread = 1.2;
   }
 
-  const [ox, oy] = standingOffset(c.hash + c.wanderIdx, spread);
+  const [ox, oy] = exact ? [0, 0] : standingOffset(c.hash + c.wanderIdx, spread);
   c.destX = clamp(target.x + ox, 3, 97);
   c.destY = clamp(target.y + oy, 5, 95);
   c.destId = target.id;
@@ -920,6 +1007,7 @@ function footprintRadius(b: Building) {
 }
 const FOOTPRINTS: Record<string, number> = {
   Market: 4.2, 'Town Hall': 4.2, House: 2.6, School: 3.8, Library: 3.6, Lab: 3.7, Cafe: 3.5,
+  Fishery: 3.0, Forager: 2.6,
 };
 
 function buildObstacles(world: World): Obstacle[] {
@@ -1255,6 +1343,8 @@ function moveCitizens(world: World, hours: number) {
     if (phase !== c.phase) {
       assignDestination(world, c, phase);
     } else if (hasArrived(c)) {
+      // A hunter who has got to where the animal was.
+      if (c.hunting && phase === 'working') huntArrival(world, c);
       // Only re-roll a destination after dwelling, never mid-journey.
       if (phase === 'wandering' || phase === 'socialising' || phase === 'working') {
         c.dwell -= hours;
@@ -1820,6 +1910,9 @@ export function plannedDay(world: World, c: Citizen): { work: string; today: str
   const work: Record<WorkingJob, string> = {
     farmer: short('wheat', 2) ? 'The stores are low — everything I cut today goes straight to the mill.' : 'The far field wants turning today.',
     woodcutter: short('wood', 1.5) ? 'The yard is nearly bare. Timber all day.' : 'A dozen loads and I can call it done.',
+    fisher: world.treasury < BAIT_GOLD * 4 ? 'No Gold for bait. I will try the shallows with what I have.' : world.weather === 'Storm' ? 'Nothing bites in this. I will cast anyway.' : 'Down to the water before the light is on it.',
+    hunter: world.wildlife.length === 0 ? 'The wood has gone quiet. I will walk the far side and see.' : `There is ${ANIMAL_LABELS[world.wildlife[0].kind]} in the wood. I mean to have one.`,
+    forager: world.season === 'Winter' ? 'Nothing under the snow but roots. A thin basket today.' : 'The hedges are full. I will be back with a basket by noon.',
     miner: 'Down the shaft again. There is a seam worth following.',
     quarry: short('stone', 1) ? 'They want stone faster than I can cut it.' : 'Blocks for the square today.',
     miller: res.wheat < 8 ? 'No wheat in yet. I am waiting on the fields.' : 'Wheat in, flour out, all morning.',
@@ -2111,7 +2204,7 @@ export const OPENING_TREASURY = 400;
  */
 const HOURS_PER_SECOND_BASE = 0.15;
 
-function starterBuildings(seed: number, layout: WorldLayout, population: number): Building[] {
+function starterBuildings(seed: number, layout: WorldLayout, population: number, water: WaterField): Building[] {
   const make = (id: string, type: string, x: number, y: number): Building => ({ id, type, x, y, workers: [], active: true });
   const civic = layout.civic;
   // A market to trade at, somewhere to keep the surplus, and nothing else given.
@@ -2167,8 +2260,19 @@ function starterBuildings(seed: number, layout: WorldLayout, population: number)
     if (farm) trades[trades.length - 1] = farm;
   }
 
+  // A fishery goes on whichever site is nearest the water. Left to the
+  // list's order it landed on the far side of the town, and the fishers
+  // walked twenty-eight units to the bank and back and fished for an hour.
+  const order = sites.map((_, i) => i);
+  const fishery = trades.indexOf('Fishery');
+  if (fishery >= 0 && sites.length > 1) {
+    const nearest = order.reduce((best, i) =>
+      water.distanceToWater(sites[i][0], sites[i][1]) < water.distanceToWater(sites[best][0], sites[best][1]) ? i : best, 0);
+    order.splice(order.indexOf(nearest), 1);
+    order.splice(fishery % sites.length, 0, nearest);
+  }
   trades.forEach((type, i) => {
-    const [x, y] = sites[i % sites.length];
+    const [x, y] = sites[order[i % sites.length]];
     buildings.push(make(`w${i}`, type, x, y));
   });
   return buildings;
@@ -2439,7 +2543,7 @@ export function createWorld(seed = 481516, name?: string): World {
     citizens.push(citizen);
     family.members.push(citizen.id);
   }
-  const buildings = starterBuildings(seed, layout, count);
+  const buildings = starterBuildings(seed, layout, count, water);
   // The same guard as the trades: a plan without house plots puts the homes
   // round the plaza rather than failing to open.
   const homes: [number, number][] = layout.housePlots.length ? layout.housePlots
@@ -2463,7 +2567,10 @@ export function createWorld(seed = 481516, name?: string): World {
     bridgeWorks: null,
     connectedIslands: [],
     families, citizens, buildings,
-    resources: { wheat: 60, vegetables: 30, wood: 50, stone: 20, ironOre: 10, wool: 8, flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10 },
+    resources: {
+      wheat: 60, vegetables: 30, fish: 0, game: 0, berries: 0, wood: 50, stone: 20, ironOre: 10, wool: 8, hides: 0, herbs: 0,
+      flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10,
+    },
     market: createMarket(),
     feed: [], gatherings: [], bonds: {}, projects: [], conversations: [], hazards: [],
     resolution: null, artworks: [],
@@ -2479,8 +2586,12 @@ export function createWorld(seed = 481516, name?: string): World {
     },
     grants: [],
     clearings: [],
+    wildlife: [],
+    hunt: { today: 0, lines: 0, arrows: true },
     counter: 0,
   };
+  // The land has its animals before it has its people.
+  for (let i = 0; i < Math.round(HERD_CAP[world.biome] * 0.7); i++) spawnAnimal(world, rand);
   pushFeed(world, 'world', `${world.name} has emerged.`);
   pushFeed(world, 'world', 'Families are settling into their homes.');
   pushFeed(world, 'market', 'The market is open and trade has begun.');
@@ -2557,7 +2668,7 @@ function meetingBusiness(world: World): { text: string; want: string | null } {
       text: `to raise more housing — ${homeless} ${homeless === 1 ? 'person has' : 'people have'} nowhere to live`,
     };
   }
-  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+  const food = foodInStore(world);
   if (food < world.citizens.length * 2.5) {
     return { want: 'Farm', text: 'to break more ground for crops, with the stores this low' };
   }
@@ -3215,7 +3326,12 @@ const ESSENTIAL_IMPORTS = new Set<Resource>(['wheat', 'vegetables', 'bread', 'wo
  * export income. It is why treasuries sat at nothing and why Gold put in
  * vanished.
  */
-const FOOD: Resource[] = ['bread', 'wheat', 'vegetables'];
+const FOOD: Resource[] = ['bread', 'fish', 'game', 'vegetables', 'berries', 'wheat'];
+
+/** Everything in store that people can eat, in portions. */
+export function foodInStore(world: { resources: Record<Resource, number> }): number {
+  return FOOD.reduce((sum, r) => sum + (world.resources[r] ?? 0), 0);
+}
 
 /** How many portions a settlement likes to have in the larder per head. */
 const FOOD_PER_HEAD = 6;
@@ -3432,11 +3548,27 @@ export function adviseBuild(world: World): Advice[] {
       gain: 'Room for the next family to arrive. An improved house sleeps more, too.' });
   }
 
-  const food = r.bread + r.wheat + r.vegetables;
+  const food = foodInStore(world);
   if (food < people * 2.5) {
     out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
       why: `${Math.round(food)} food in store is about ${(food / Math.max(1, people)).toFixed(1)} days for ${people} people.`,
       gain: 'Fed people are a quarter of stewardship, and the market stops buying bread at a premium.' });
+  }
+  if (food < people * 4 && supported.has('Fishery') && !has('Fishery')) {
+    out.push({ kind: 'build', type: 'Fishery', title: 'Cast from the shore',
+      why: `${Math.round(food)} food in store, and water at the edge of the settlement nobody fishes.`,
+      gain: 'Fish feeds people and sells at the market. Bait costs a little Gold, rods a little timber.' });
+  }
+  const herd = world.wildlife.filter((a) => a.state !== 'down').length;
+  if (herd >= 5 && supported.has('Lodge') && !has('Lodge') && people >= 8) {
+    out.push({ kind: 'build', type: 'Lodge', title: 'Open a hunting lodge',
+      why: `${herd} animals on the land and nobody hunting them.`,
+      gain: 'Game is a meal and hides sell dear. Hunters also keep the wolves further off.' });
+  }
+  if (supported.has('Forager') && !has('Forager') && people >= 10 && food < people * 5) {
+    out.push({ kind: 'build', type: 'Forager', title: 'Send foragers out',
+      why: 'The wild ground round the settlement goes unpicked.',
+      gain: 'Berries feed people for nothing but a wage, and herbs are the dearest thing a small town sells.' });
   }
   if (r.wood < 22 && !has('Woodcutter')) {
     out.push({ kind: 'build', type: 'Woodcutter', title: 'Put hands to the timber',
@@ -3649,7 +3781,19 @@ function produce(world: World) {
   for (const [job, count] of Object.entries(counts)) {
     if (!job || job === 'unemployed' || !count) continue;
     const wj = job as WorkingJob, recipe = jobs[wj], workers = Math.min(count, jobCapacity(world, wj));
-    const seasonal = world.season === 'Winter' && wj === 'farmer' ? .65 : world.season === 'Summer' && wj === 'farmer' ? 1.15 : 1;
+    let seasonal = world.season === 'Winter' && wj === 'farmer' ? .65 : world.season === 'Summer' && wj === 'farmer' ? 1.15 : 1;
+    // Nothing to pick under snow; the hedges are heavy in autumn.
+    if (wj === 'forager') seasonal = world.season === 'Winter' ? 0.35 : world.season === 'Autumn' ? 1.3 : 1;
+    if (wj === 'fisher' && world.season === 'Winter') seasonal = 0.7;
+    // What the day's fishing and hunting cost, and what it did to the catch.
+    let gear = 1;
+    if (wj === 'fisher') gear = outfitFishers(world, workers);
+    if (wj === 'hunter') {
+      // Kills are credited as they happen, out in the wood, so the day's
+      // production is what the hunters actually brought down.
+      outfitHunters(world, workers);
+      continue;
+    }
     // Blight is in the fields, not in the mine: it costs the farmers and only
     // the farmers, which is what makes a granary the answer to it.
     const blighted = wj === 'farmer' && hazardActive(world, 'blight') ? 0.45 : 1;
@@ -3671,7 +3815,7 @@ function produce(world: World) {
       ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
       : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world);
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -3680,6 +3824,338 @@ function produce(world: World) {
   if (counts.woodcutter) pushFeed(world, 'work', `${counts.woodcutter} woodcutters worked the forest.`);
   if (world.weather === 'Storm') pushFeed(world, 'weather', 'A storm slowed outdoor work today.');
   if (world.weather === 'Snow') pushFeed(world, 'weather', 'Snow settled over the settlement.');
+}
+
+/* ------------------------------------------------------------------ *
+ * The shore, the wood and the wild ground
+ * ------------------------------------------------------------------ */
+
+const spotCache = new Map<string, [number, number][]>();
+
+/**
+ * Where the fishers stand.
+ *
+ * A band of dry ground along the water — close enough to cast, far enough
+ * that the walking rules allow standing there — nearest the hut, half a dozen
+ * spots spread out so two fishers are not on the same pixel. Recomputed when
+ * the hut moves or a bridge opens new bank, and cached because the scan is a
+ * few thousand samples.
+ */
+export function fishingSpotsOf(world: World): [number, number][] {
+  const hut = findBuilding(world, 'Fishery');
+  const key = `${world.seed}:fish:${hut ? `${hut.x.toFixed(1)},${hut.y.toFixed(1)}` : 'none'}:${world.layout.bridges.length}:${world.buildings.length}`;
+  const held = spotCache.get(key);
+  if (held) return held;
+  const water = waterOf(world);
+  const ax = hut?.x ?? world.layout.plaza.x, ay = hut?.y ?? world.layout.plaza.y;
+  const found: { x: number; y: number; d: number }[] = [];
+  for (let py = 6; py <= 94; py += 1.5) {
+    for (let px = 6; px <= 94; px += 1.5) {
+      if (water.blocks(px, py)) continue;
+      const dw = water.distanceToWater(px, py);
+      if (dw > 2.6) continue;
+      const land = water.landAt(px, py);
+      if (land !== water.mainland && !world.connectedIslands.includes(land)) continue;
+      if (world.buildings.some((b) => Math.hypot(b.x - px, b.y - py) < footprintRadius(b) + 1.6)) continue;
+      found.push({ x: px, y: py, d: Math.hypot(px - ax, py - ay) });
+    }
+  }
+  found.sort((a, b) => a.d - b.d);
+  const spots: [number, number][] = [];
+  for (const f of found) {
+    if (spots.some(([sx, sy]) => Math.hypot(sx - f.x, sy - f.y) < 3)) continue;
+    spots.push([f.x, f.y]);
+    if (spots.length >= 6) break;
+  }
+  if (spotCache.size > 40) spotCache.clear();
+  spotCache.set(key, spots);
+  return spots;
+}
+
+/**
+ * Where the foragers pick: open ground well clear of the houses and the
+ * water, within a walk of the camp.
+ */
+export function forageSpotsOf(world: World): [number, number][] {
+  const camp = findBuilding(world, 'Forager');
+  const key = `${world.seed}:forage:${camp ? `${camp.x.toFixed(1)},${camp.y.toFixed(1)}` : 'none'}:${world.buildings.length}`;
+  const held = spotCache.get(key);
+  if (held) return held;
+  const water = waterOf(world);
+  const ax = camp?.x ?? world.layout.plaza.x, ay = camp?.y ?? world.layout.plaza.y;
+  const found: { x: number; y: number; d: number }[] = [];
+  for (let py = 8; py <= 92; py += 3) {
+    for (let px = 8; px <= 92; px += 3) {
+      if (water.blocks(px, py) || water.distanceToWater(px, py) < 3) continue;
+      const land = water.landAt(px, py);
+      if (land !== water.mainland && !world.connectedIslands.includes(land)) continue;
+      if (world.buildings.some((b) => Math.hypot(b.x - px, b.y - py) < footprintRadius(b) + 5)) continue;
+      const d = Math.hypot(px - ax, py - ay);
+      if (d < 6 || d > 34) continue;
+      found.push({ x: px, y: py, d });
+    }
+  }
+  found.sort((a, b) => a.d - b.d);
+  const spots: [number, number][] = [];
+  for (const f of found) {
+    if (spots.some(([sx, sy]) => Math.hypot(sx - f.x, sy - f.y) < 5)) continue;
+    spots.push([f.x, f.y]);
+    if (spots.length >= 6) break;
+  }
+  if (spotCache.size > 40) spotCache.clear();
+  spotCache.set(key, spots);
+  return spots;
+}
+
+/** A small, stable random stream for one animal at one moment. */
+function animalRand(world: World, a: Animal) {
+  let h = world.seed ^ (world.day * 7919) ^ Math.floor(world.hour * 97);
+  for (let i = 0; i < a.id.length; i++) h = Math.imul(h ^ a.id.charCodeAt(i), 16777619);
+  return mulberry32(h >>> 0);
+}
+
+/** Whether an animal can stand here: dry, on land people can reach, and out of the village. */
+function wildGround(world: World, water: WaterField, kind: AnimalKind, x: number, y: number, clearance = 4): boolean {
+  if (x < 6 || x > 94 || y < 8 || y > 92) return false;
+  if (water.blocks(x, y)) return false;
+  const land = water.landAt(x, y);
+  if (land !== water.mainland && !world.connectedIslands.includes(land)) return false;
+  const dw = water.distanceToWater(x, y);
+  if (WATERSIDE.includes(kind) ? dw > 6 : dw < 2.4) return false;
+  for (const b of world.buildings) if (Math.hypot(b.x - x, b.y - y) < footprintRadius(b) + clearance) return false;
+  return true;
+}
+
+/** Put one more animal on the land, somewhere out of the way. */
+function spawnAnimal(world: World, rand: () => number): Animal | null {
+  const water = waterOf(world);
+  const kinds = WILDLIFE[world.biome];
+  const kind = kinds[Math.floor(rand() * kinds.length)];
+  for (let i = 0; i < 60; i++) {
+    const x = 8 + rand() * 84, y = 10 + rand() * 80;
+    if (!wildGround(world, water, kind, x, y, 9)) continue;
+    if (Math.hypot(x - world.layout.plaza.x, y - world.layout.plaza.y) < 16) continue;
+    const a: Animal = {
+      id: `a${world.counter++}`, kind, x, y, homeX: x, homeY: y, destX: x, destY: y,
+      state: 'grazing', timer: 0.3 + rand() * 1.2, facing: rand() < 0.5 ? 1 : -1,
+    };
+    world.wildlife.push(a);
+    return a;
+  }
+  return null;
+}
+
+/**
+ * The herd comes back.
+ *
+ * One animal a day while the land is below what it carries, two while it is
+ * badly thinned, and a third in spring. Hunting faster than this is what
+ * empties a wood, which is the hunters' problem to notice.
+ */
+function replenishWildlife(world: World) {
+  const rand = mulberry32(world.seed + world.day * 6091);
+  const cap = HERD_CAP[world.biome];
+  const alive = world.wildlife.filter((a) => a.state !== 'down').length;
+  if (alive >= cap) return;
+  let more = alive < cap / 2 ? 2 : 1;
+  if (world.season === 'Spring') more++;
+  for (let i = 0; i < more && world.wildlife.length < cap; i++) spawnAnimal(world, rand);
+}
+
+/**
+ * The animals go about their day.
+ *
+ * Grazing, then a short move within reach of home, then grazing again; a
+ * bolt away from anybody who comes too close. An animal a hunter is stalking
+ * has not seen them and stays put, which is the whole difference between a
+ * hunt that ends in a kill and one that ends in a chase.
+ */
+function moveWildlife(world: World, hours: number) {
+  if (!world.wildlife.length) return;
+  const water = waterOf(world);
+  const people = world.citizens;
+  for (const a of world.wildlife) {
+    if (a.state === 'down') { a.timer -= hours; continue; }
+    if (a.stalkedBy) {
+      const stalker = people.find((c) => c.id === a.stalkedBy);
+      if (!stalker || stalker.hunting !== a.id || stalker.phase !== 'working') a.stalkedBy = undefined;
+      else { a.state = 'grazing'; continue; }
+    }
+    // Anybody too close, and it bolts the other way.
+    let nearest: Citizen | undefined;
+    let nd = FLEE_RANGE;
+    for (const c of people) {
+      if (c.inside) continue;
+      const d = Math.hypot(c.x - a.x, c.y - a.y);
+      if (d < nd) { nd = d; nearest = c; }
+    }
+    if (nearest && a.state !== 'fleeing') {
+      const dx = a.x - nearest.x, dy = a.y - nearest.y;
+      const d = Math.max(0.01, Math.hypot(dx, dy));
+      const rand = animalRand(world, a);
+      // Straight away, or off to one side if that runs into water or a wall.
+      const angles = [0, 0.7, -0.7, 1.4, -1.4];
+      for (const turn of angles) {
+        const ang = Math.atan2(dy, dx) + turn;
+        const tx = a.x + Math.cos(ang) * (6 + rand() * 3), ty = a.y + Math.sin(ang) * (6 + rand() * 3);
+        if (!wildGround(world, water, a.kind, tx, ty, 2)) continue;
+        a.destX = tx; a.destY = ty; a.state = 'fleeing'; a.timer = 0;
+        break;
+      }
+      if (a.state !== 'fleeing') { a.state = 'grazing'; a.timer = 0.2; }
+    }
+    if (a.state === 'grazing') {
+      a.timer -= hours;
+      if (a.timer > 0) continue;
+      const rand = animalRand(world, a);
+      for (let i = 0; i < 6; i++) {
+        const ang = rand() * Math.PI * 2, r = 2 + rand() * 5;
+        const tx = a.homeX + Math.cos(ang) * r, ty = a.homeY + Math.sin(ang) * r;
+        if (!wildGround(world, water, a.kind, tx, ty, 3)) continue;
+        a.destX = tx; a.destY = ty; a.state = 'moving';
+        break;
+      }
+      if (a.state === 'grazing') a.timer = 0.5 + rand() * 1.5;
+      continue;
+    }
+    // Moving or fleeing: step toward the spot, and never into the water.
+    const pace = a.state === 'fleeing' ? ANIMAL_PACE[a.kind].flee : ANIMAL_PACE[a.kind].graze;
+    const dx = a.destX - a.x, dy = a.destY - a.y, d = Math.hypot(dx, dy);
+    const step = Math.min(d, pace * hours);
+    if (Math.abs(dx) > 0.05) a.facing = dx > 0 ? 1 : -1;
+    const nx = a.x + (dx / Math.max(0.001, d)) * step, ny = a.y + (dy / Math.max(0.001, d)) * step;
+    const arrived = d - step < 0.15;
+    if (water.blocks(nx, ny) || arrived) {
+      if (!water.blocks(nx, ny)) { a.x = nx; a.y = ny; }
+      a.state = 'grazing';
+      a.timer = 0.4 + (animalRand(world, a)() * 1.4);
+      // Somewhere it has fled to becomes home, so a herd pushed off its ground
+      // does not walk straight back into the village.
+      if (Math.hypot(a.x - a.homeX, a.y - a.homeY) > 8) { a.homeX = a.x; a.homeY = a.y; }
+      continue;
+    }
+    a.x = nx; a.y = ny;
+  }
+  world.wildlife = world.wildlife.filter((a) => a.state !== 'down' || a.timer > 0);
+}
+
+/** The nearest animal a hunter can go after, or nothing worth the walk. */
+function pickPrey(world: World, c: Citizen, lodge: Building | undefined): Animal | undefined {
+  const water = waterOf(world);
+  const fromX = lodge?.x ?? c.x, fromY = lodge?.y ?? c.y;
+  let best: Animal | undefined;
+  let bestD = Infinity;
+  for (const a of world.wildlife) {
+    if (a.state === 'down') continue;
+    if (a.stalkedBy && a.stalkedBy !== c.id && world.citizens.some((o) => o.id === a.stalkedBy && o.hunting === a.id)) continue;
+    const land = water.landAt(a.x, a.y);
+    if (land !== water.mainland && !world.connectedIslands.includes(land)) continue;
+    if (Math.hypot(a.x - fromX, a.y - fromY) > HUNT_RANGE) continue;
+    const d = Math.hypot(a.x - c.x, a.y - c.y);
+    if (d < bestD) { bestD = d; best = a; }
+  }
+  return best;
+}
+
+/** Let go of whatever this hunter was closing on. */
+function releasePrey(world: World, c: Citizen) {
+  if (!c.hunting) return;
+  const prey = world.wildlife.find((a) => a.id === c.hunting);
+  if (prey && prey.stalkedBy === c.id) prey.stalkedBy = undefined;
+  c.hunting = undefined;
+}
+
+/** The hunter has reached where the animal was. Take it, or go again. */
+function huntArrival(world: World, c: Citizen) {
+  const prey = world.wildlife.find((a) => a.id === c.hunting);
+  if (!prey || prey.state === 'down') {
+    c.hunting = undefined;
+    c.dwell = 0;
+    return;
+  }
+  if (Math.hypot(prey.x - c.x, prey.y - c.y) <= HUNT_REACH) {
+    takeAnimal(world, c, prey);
+    return;
+  }
+  // It has moved on. Stand a moment, then go after it again.
+  c.dwell = Math.min(c.dwell, 0.2);
+}
+
+/** Bring an animal down, and book what it was worth. */
+function takeAnimal(world: World, c: Citizen, prey: Animal) {
+  prey.state = 'down';
+  prey.timer = 0.5;
+  prey.stalkedBy = undefined;
+  c.hunting = undefined;
+  c.hauling = true;
+  // Stand over it briefly, then carry it in.
+  c.dwell = 0.3;
+  const yields = ANIMAL_YIELD[prey.kind];
+  const quality = skillOutput(c) * methodBonus(world) * (world.hunt.arrows ? 1 : 0.6);
+  const game = yields.game * quality;
+  const hides = yields.hides * quality;
+  world.resources.game += game;
+  world.resources.hides += hides;
+  note(world, 'produced', 'game', game);
+  note(world, 'produced', 'hides', hides);
+  world.hunt.today++;
+  c.purpose = Math.min(100, c.purpose + 2);
+  if (world.hunt.lines < 3) {
+    world.hunt.lines++;
+    pushFeed(world, 'work', `${c.name} brought down a ${ANIMAL_LABELS[prey.kind]}.`);
+  }
+}
+
+/**
+ * The fishers' day: bait out of the treasury, rods out of the yard.
+ *
+ * Returns the multiplier on the catch — one when everything was paid for,
+ * less when the bait could not be bought or a snapped rod could not be
+ * replaced.
+ */
+function outfitFishers(world: World, workers: number): number {
+  let gear = 1;
+  const bait = BAIT_GOLD * workers;
+  const paid = spend(world, 'gear', bait);
+  if (paid < bait) gear *= 0.5;
+  const rand = mulberry32(world.seed + world.day * 977);
+  let broken = 0;
+  for (let i = 0; i < workers; i++) if (rand() < ROD_BREAK_CHANCE) broken++;
+  let remade = 0;
+  if (broken) {
+    remade = Math.min(broken, Math.floor(world.resources.wood / ROD_WOOD));
+    if (remade) {
+      world.resources.wood -= remade * ROD_WOOD;
+      note(world, 'consumed', 'wood', remade * ROD_WOOD);
+    }
+    if (remade < broken) gear *= 1 - (broken - remade) / (workers * 2);
+    pushFeed(world, 'work', broken === 1
+      ? `A rod snapped on the shore. ${remade ? `${ROD_WOOD} timber went to a new one.` : 'There was no timber for a new one.'}`
+      : `${broken} rods snapped on the shore. ${remade ? `${remade * ROD_WOOD} timber went to new ones.` : 'There was no timber for new ones.'}`);
+  }
+  pushFeed(world, 'work', `${workers} ${workers === 1 ? 'fisher' : 'fishers'} cast from the shore. Bait cost ${Math.round(paid)} Gold.`);
+  return gear;
+}
+
+/** The hunters' day: arrows out of the yard, and the tally of what they brought in. */
+function outfitHunters(world: World, workers: number) {
+  const arrows = ARROW_WOOD * workers;
+  const had = Math.min(world.resources.wood, arrows);
+  world.resources.wood -= had;
+  note(world, 'consumed', 'wood', had);
+  world.hunt.arrows = had >= arrows;
+  const took = world.hunt.today;
+  const herd = world.wildlife.filter((a) => a.state !== 'down').length;
+  if (took > 0) {
+    pushFeed(world, 'work', `${workers} ${workers === 1 ? 'hunter' : 'hunters'} took ${took} ${took === 1 ? 'animal' : 'animals'} from the wild ground.`);
+  } else if (herd === 0) {
+    pushFeed(world, 'work', 'The hunters found nothing. The land needs time for the herd to come back.');
+  } else {
+    pushFeed(world, 'work', 'The hunters came back empty-handed.');
+  }
+  if (!world.hunt.arrows) pushFeed(world, 'work', 'The hunters are short of arrows. Timber in the yard would fix it.');
+  world.hunt.today = 0;
+  world.hunt.lines = 0;
 }
 
 /** Extraction jobs occasionally turn up something rare, credited to a real worker. */
@@ -3708,7 +4184,7 @@ export function readiness(world: World): Record<HazardKind, number> {
   const wells = world.amenities.filter((a) => a.kind === 'well').length;
   const fires = world.amenities.filter((a) => a.kind === 'campfire').length;
   const stores = world.buildings.filter((b) => b.type === 'Storage' && b.active).length;
-  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+  const food = foodInStore(world);
   const mouths = Math.max(1, world.citizens.length);
   const water = waterOf(world);
   const buildings = world.buildings.length || 1;
@@ -3723,7 +4199,8 @@ export function readiness(world: World): Record<HazardKind, number> {
   return {
     fire: clamp(wells / (1 + buildings / 8) + warned, 0, 1),
     blight: clamp(food / (mouths * 9) * 0.7 + stores * 0.3 + warned + cared, 0, 1),
-    wolves: clamp(fires / (1 + mouths / 14) + warned, 0, 1),
+    // Hunters know the wood, and a lodge with people in it is a lodge wolves keep clear of.
+    wolves: clamp(fires / (1 + mouths / 14) + warned + world.citizens.filter((c) => c.job === 'hunter').length * 0.2, 0, 1),
     flood: clamp(backFromBank, 0, 1),
   };
 }
@@ -3958,7 +4435,7 @@ function checkUnlocks(world: World) {
  */
 function consume(world: World) {
   const queue = [...world.citizens].sort((a, b) => a.hunger - b.hunger);
-  const larder: Resource[] = ['bread', 'wheat', 'vegetables'];
+  const larder: Resource[] = FOOD;
   let unfed = 0;
 
   for (const c of queue) {
@@ -3974,8 +4451,9 @@ function consume(world: World) {
       note(world, 'consumed', r, take);
       wanted -= take;
       bill += take * world.market[r].price;
-      // Bread goes further than raw grain, which is the point of the bakery.
-      eaten += take * (r === 'bread' ? 1.15 : 1);
+      // Bread goes further than raw grain, which is the point of the bakery;
+      // a fish or a cut of game is a proper meal too.
+      eaten += take * (r === 'bread' ? 1.15 : r === 'fish' || r === 'game' ? 1.1 : 1);
     }
     if (eaten <= 0) { unfed++; continue; }
     c.hunger = Math.min(100, c.hunger + (eaten / portion) * 26);
@@ -4338,6 +4816,7 @@ function completeBridge(world: World, works: BridgeWorks) {
 /** What a settlement pays to raise a building for itself. Mirrors the build menu. */
 const SELF_BUILD_COST: Record<string, number> = { House: 100, Woodcutter: 125, Farm: 150 };
 const TRADE_BUILD_COST: Record<string, number> = {
+  Fishery: 140, Lodge: 180, Forager: 90,
   Quarry: 175, Mine: 250, Mill: 250, Bakery: 300, Carpenter: 275, Blacksmith: 400, Tailor: 325,
   Storage: 120, Tavern: 350, Bank: 450,
   // The civic buildings. None employs anybody; each changes how the town lives.
@@ -4365,6 +4844,9 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   House: { wood: 14, stone: 4 },
   Farm: { wood: 12, stone: 2 },
   Woodcutter: { wood: 8, stone: 2 },
+  Fishery: { wood: 10, stone: 2 },
+  Lodge: { wood: 14, stone: 4 },
+  Forager: { wood: 6, stone: 0 },
   Storage: { wood: 12, stone: 3 },
   Quarry: { wood: 10, stone: 0 },
   Mine: { wood: 16, stone: 6 },
@@ -4426,7 +4908,12 @@ function settlementBuilds(world: World) {
   let needSaid: string | null = null;
   if (homeless > 0 || crowded) ownChoice = 'House';
   else if (world.resources.wood < 22 && !world.buildings.some((b) => b.type === 'Woodcutter')) ownChoice = 'Woodcutter';
-  else if (world.resources.wheat + world.resources.bread < world.citizens.length * 2.5) ownChoice = 'Farm';
+  else if (foodInStore(world) < world.citizens.length * 2.5) {
+    // A shore town feeds itself from the water first, if the land is that kind of land.
+    const shore = biomeProfile(world.biome).trades.indexOf('Fishery');
+    const farm = biomeProfile(world.biome).trades.indexOf('Farm');
+    ownChoice = shore >= 0 && shore < farm && !world.buildings.some((b) => b.type === 'Fishery') ? 'Fishery' : 'Farm';
+  }
   else {
     /*
      * With the roof, the hearth and the larder seen to, the settlement reads
@@ -4534,9 +5021,15 @@ function fillEmptyTrades(world: World, tally: Partial<Record<Job, number>>) {
     let surplus = 0;
     for (const other of Object.keys(jobs) as WorkingJob[]) {
       const have = tally[other] ?? 0;
-      if (have < 2) continue;
-      const over = have - jobCapacity(world, other);
-      const score = over > 0 ? over + 10 : have;
+      if (!have) continue;
+      const room = jobCapacity(world, other);
+      // A trade with no building at all is a trade in name only: its one
+      // worker is the first to move. A coast opened with a fishery and nobody
+      // in it for weeks, because every founder was the sole carpenter or
+      // smith of a workshop that did not exist.
+      if (have < 2 && room > 0) continue;
+      const over = have - room;
+      const score = room === 0 ? have + 20 : over > 0 ? over + 10 : have;
       if (score > surplus) { surplus = score; from = other; }
     }
     const mover = from
@@ -4675,7 +5168,7 @@ function births(world: World, rand: () => number) {
   const housed = world.buildings.filter((b) => b.type === 'House').length;
   // Room to grow, food to do it on, and not a settlement already starving.
   if (world.citizens.length >= housed * 4 + 4) return;
-  if (world.resources.bread + world.resources.wheat + world.resources.vegetables < world.citizens.length * 2) return;
+  if (foodInStore(world) < world.citizens.length * 2) return;
 
   for (const family of world.families) {
     const members = family.members
@@ -4765,7 +5258,7 @@ export const MAX_ARRIVALS_PER_DAY = 3;
 function migration(world: World, rand: () => number) {
   const roomFor = () => world.citizens.length < housingRoom(world);
   const fedFor = () => {
-    const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+    const food = foodInStore(world);
     return food >= Math.max(12, world.citizens.length * 4);
   };
   // A spare roof and a full store. Nobody moves to a place they would have
@@ -4956,7 +5449,7 @@ export function upkeepOf(b: Building) {
 
 export function maintenanceCost(type: string) {
   return ({
-    Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
+    Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Fishery: 2, Lodge: 3, Forager: 1, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
     Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
     Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9,
   } as Record<string, number>)[type] ?? 2;
@@ -5223,6 +5716,7 @@ function daily(world: World) {
 
   heatTheHomes(world);
   produce(world);
+  replenishWildlife(world);
   consume(world);
   lifeAndDeath(world);
   migration(world, mulberry32(world.seed + world.day * 4111));
@@ -5249,6 +5743,7 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
   world.hour += hours;
   swimmers(world, hours);
   moveCitizens(world, hours);
+  moveWildlife(world, hours);
   runMarket(world, hours);
   let guard = 0;
   while (world.hour >= 24 && guard++ < 8) {

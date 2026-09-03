@@ -17,7 +17,7 @@ import {
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
   BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
-  MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
+  ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
 } from '@/lib/simulation';
@@ -356,6 +356,11 @@ export function WikiZh() {
             </tbody>
           </table>
           <p className="wiki-note">每名工人每天，尚未计入土地、季节、天气和你付的工资。肥沃土地上的农场比沙地上的同一座农场长得多；冬天的农场比夏天少；一切都乘以你设定的工资。“消耗”是这个行当吃掉的东西——没有面粉的面包师什么也烤不出来，不管你有多少面包师。</p>
+          <h3>捕鱼、狩猎与采集</h3>
+          <p>三种手艺在户外干活，聚落也因此更好看。<b>渔屋</b>让渔夫站到离渔屋最近的岸边，把钓竿伸到水面上。每位渔夫每天用掉 <b>{BAIT_GOLD} 金币</b>的鱼饵，记在银行的"鱼饵与箭矢"名下；大约七天里有一天钓竿会断，<b>{ROD_WOOD} 木料</b>换一根新的。没金币买饵或没木料换竿，渔获减半，直到有为止。冬天和暴风雨会拖慢它；海岸或河流会加快它。</p>
+          <p><b>猎人小屋</b>派猎人去追真正生活在这块地上的动物。每片土地各有其兽——林下的鹿、野猪和狐狸；高地的山羊和麋鹿；草原的羚羊；沙丘的瞪羚；湿地的野鸭；泥沼的野猪和鳄鱼——它们吃草、游荡，谁走得太近就逃开。猎人挑一只，靠近，猎倒，扛回仓库：猎物在猎到的那一刻就记入库存，野味和兽皮都有，按技艺折算。每位猎人每天用掉 <b>{ARROW_WOOD} 木料</b>的箭矢，箭不够则猎物变轻。兽群每天回来一两头，直到土地承载的上限，所以猎得比恢复得快的小屋会把自家的林子猎空。猎人也算进对狼群的防备。</p>
+          <p><b>采集营地</b>派人到开阔地采浆果和草药，秋天丰盛，雪下稀薄。鱼、野味和浆果与面包一起被吃掉；兽皮和草药拿去卖，草药是小聚落能造出的最贵的东西。</p>
+
           <h3>其他建筑</h3>
           <table className="wiki-table">
             <thead><tr><th>建筑</th><th>建造</th><th>维护</th><th>用途</th></tr></thead>

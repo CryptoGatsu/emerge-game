@@ -98,7 +98,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     layout: 'hub', populationScale: 1,
     baseTemp: 12, seasonSwing: 12, diurnalSwing: 8,
     trees: ['oak', 'birch', 'pine'],
-    trades: ['Farm', 'Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Blacksmith', 'Tailor', 'Quarry', 'Mine'],
+    trades: ['Farm', 'Farm', 'Woodcutter', 'Fishery', 'Mill', 'Bakery', 'Carpenter', 'Lodge', 'Blacksmith', 'Tailor', 'Forager', 'Quarry', 'Mine'],
   },
   woodland: {
     label: 'Deep Woodland',
@@ -110,7 +110,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     // Under a canopy the air moves less and the day swings less.
     baseTemp: 10, seasonSwing: 11, diurnalSwing: 6,
     trees: ['pine', 'oak', 'pine'],
-    trades: ['Woodcutter', 'Woodcutter', 'Carpenter', 'Carpenter', 'Farm', 'Mill', 'Bakery', 'Tailor'],
+    trades: ['Woodcutter', 'Woodcutter', 'Lodge', 'Carpenter', 'Carpenter', 'Forager', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Fishery'],
   },
   highland: {
     label: 'Highland Shelf',
@@ -121,7 +121,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     layout: 'terrace', populationScale: 0.8,
     baseTemp: 5, seasonSwing: 12, diurnalSwing: 9,
     trees: ['pine', 'pine', 'birch'],
-    trades: ['Mine', 'Mine', 'Quarry', 'Quarry', 'Blacksmith', 'Woodcutter', 'Farm', 'Mill', 'Bakery'],
+    trades: ['Mine', 'Mine', 'Quarry', 'Quarry', 'Blacksmith', 'Lodge', 'Woodcutter', 'Farm', 'Mill', 'Bakery', 'Forager'],
   },
   wetland: {
     label: 'Wetland Fen',
@@ -132,7 +132,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     layout: 'causeway', populationScale: 1.05,
     baseTemp: 12, seasonSwing: 10, diurnalSwing: 6,
     trees: ['birch', 'oak', 'birch'],
-    trades: ['Farm', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Woodcutter', 'Carpenter'],
+    trades: ['Farm', 'Farm', 'Fishery', 'Mill', 'Bakery', 'Forager', 'Tailor', 'Woodcutter', 'Carpenter', 'Lodge'],
   },
   steppe: {
     label: 'Open Steppe',
@@ -144,7 +144,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     // Nothing to hold the heat in: a continental swing, hot and cold.
     baseTemp: 13, seasonSwing: 16, diurnalSwing: 12,
     trees: ['oak', 'birch', 'acacia'],
-    trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Bakery', 'Tailor', 'Quarry', 'Woodcutter'],
+    trades: ['Farm', 'Farm', 'Farm', 'Lodge', 'Mill', 'Bakery', 'Tailor', 'Quarry', 'Woodcutter', 'Forager'],
   },
   coast: {
     label: 'Coastal Shallows',
@@ -156,7 +156,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     // A body of water is a flywheel for temperature.
     baseTemp: 13, seasonSwing: 8, diurnalSwing: 5,
     trees: ['pine', 'birch', 'oak'],
-    trades: ['Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Tailor', 'Quarry'],
+    trades: ['Fishery', 'Farm', 'Woodcutter', 'Mill', 'Bakery', 'Carpenter', 'Tailor', 'Quarry', 'Lodge', 'Forager'],
   },
   desert: {
     label: 'Red Desert',
@@ -168,7 +168,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     // Fierce by day, bitter after dark. The widest daily swing of any biome.
     baseTemp: 27, seasonSwing: 11, diurnalSwing: 17,
     trees: ['palm', 'acacia', 'palm'],
-    trades: ['Quarry', 'Quarry', 'Mine', 'Mine', 'Blacksmith', 'Tailor', 'Farm', 'Bakery'],
+    trades: ['Quarry', 'Quarry', 'Mine', 'Mine', 'Blacksmith', 'Lodge', 'Tailor', 'Farm', 'Bakery', 'Fishery'],
   },
   swamp: {
     label: 'Blackwater Swamp',
@@ -179,7 +179,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     layout: 'scatter', populationScale: 0.75,
     baseTemp: 21, seasonSwing: 7, diurnalSwing: 5,
     trees: ['mangrove', 'mangrove', 'birch'],
-    trades: ['Woodcutter', 'Woodcutter', 'Carpenter', 'Tailor', 'Farm', 'Mill', 'Bakery'],
+    trades: ['Woodcutter', 'Woodcutter', 'Fishery', 'Lodge', 'Carpenter', 'Forager', 'Tailor', 'Farm', 'Mill', 'Bakery'],
   },
   grassland: {
     label: 'Green Grassland',
@@ -190,7 +190,7 @@ const BIOMES: Record<BiomeKind, Omit<BiomeProfile, 'kind'>> = {
     layout: 'ring', populationScale: 1.15,
     baseTemp: 14, seasonSwing: 12, diurnalSwing: 8,
     trees: ['oak', 'oak', 'birch'],
-    trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Mill', 'Bakery', 'Tailor', 'Carpenter', 'Woodcutter', 'Quarry'],
+    trades: ['Farm', 'Farm', 'Farm', 'Mill', 'Mill', 'Bakery', 'Lodge', 'Tailor', 'Carpenter', 'Woodcutter', 'Quarry', 'Forager', 'Fishery'],
   },
 };
 

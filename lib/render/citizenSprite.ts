@@ -33,7 +33,12 @@ const STRIDE = 2.6;
 const CARRIED: Record<string, string> = {
   farmer: 'sack', woodcutter: 'log', miner: 'crate', quarry: 'crate',
   miller: 'sack', baker: 'loaf', carpenter: 'crate', blacksmith: 'crate', tailor: 'cloth',
+  fisher: 'fish', hunter: 'game', forager: 'basket',
 };
+/** Trades whose load only exists on the way back: nobody walks *to* the water with a fish. */
+const CARRY_ON_ERRAND = new Set(['fisher', 'hunter', 'forager']);
+/** What the outdoor trades hold while they work. */
+const TOOLS: Record<string, string> = { fisher: 'fx.rod', hunter: 'fx.bow' };
 
 export interface CitizenView {
   /** Interpolated world position used for depth sorting and label anchoring. */
@@ -52,9 +57,13 @@ export class CitizenSprite {
   private readonly hat: Sprite;
   private readonly carry: Sprite;
   private carryKind: string | null = null;
+  /** A rod or a bow, held while working out of doors. */
+  private readonly tool: Sprite;
+  /** The trade the load, the tool and the hat were last set for. */
+  private jobShown = '';
   private readonly stack = new Container();
   private readonly appearance: Appearance;
-  private readonly hatKind: HatKind;
+  private hatKind: HatKind;
   /** Last applied `dir|state|frame|flip`, so textures are only swapped on change. */
   private appliedKey = '';
 
@@ -97,19 +106,42 @@ export class CitizenSprite {
     this.carry = new Sprite();
     this.carry.anchor.set(0.5, 0.5);
     this.carry.visible = false;
-    const load = CARRIED[citizen.job];
-    if (load) this.carry.texture = assets.get(`fx.carry.${load}`);
-    this.carryKind = load ?? null;
+
+    this.tool = new Sprite();
+    this.tool.anchor.set(0.2, 0.9);
+    this.tool.visible = false;
 
     this.hat = new Sprite();
     this.hat.anchor.set(0.5, CHAR_GROUND / CHAR_H);
-    this.hat.visible = this.hatKind !== 'none';
-    if (this.hatKind !== 'none') this.hat.tint = HAT_TINTS[this.hatKind];
     stack.addChild(this.hat);
     stack.addChild(this.carry);
+    stack.addChild(this.tool);
 
     this.container.addChild(stack);
+    this.dressFor(citizen);
     this.applyFrame();
+  }
+
+  /**
+   * The load, the tool and the hat for the trade this person is in now.
+   *
+   * People change trade, and a sprite dressed once at birth kept carrying a
+   * log to the fishing hut for the rest of its life. Cheap to re-run, so it
+   * runs whenever the job changes.
+   */
+  private dressFor(citizen: Citizen) {
+    if (this.jobShown === citizen.job) return;
+    this.jobShown = citizen.job;
+    const load = CARRIED[citizen.job];
+    if (load) this.carry.texture = this.assets.get(`fx.carry.${load}`);
+    this.carryKind = load ?? null;
+    const tool = TOOLS[citizen.job];
+    if (tool) this.tool.texture = this.assets.get(tool);
+    this.tool.visible = false;
+    this.hatKind = hatForJob(citizen.job, citizen.look);
+    this.hat.visible = this.hatKind !== 'none';
+    if (this.hatKind !== 'none') this.hat.tint = HAT_TINTS[this.hatKind];
+    this.appliedKey = '';
   }
 
   private tintFor(layer: LayerName): number {
@@ -131,6 +163,13 @@ export class CitizenSprite {
     if (moving) return 'walk';
     // Actually sat down: on a bench in the square, or crouched at a fire.
     if (citizen.seated) return 'sit';
+    // The outdoor trades: a fisher stands with the rod, a hunter with the
+    // bow, a forager crouches over the ground. The swing of an axe is wrong
+    // for all three.
+    if (citizen.activity === 'working' && !citizen.inside) {
+      if (citizen.job === 'fisher' || citizen.job === 'hunter') return 'idle';
+      if (citizen.job === 'forager') return 'sit';
+    }
     switch (citizen.activity) {
       case 'working': return 'work';
       case 'resting': return citizen.phase === 'sleeping' ? 'sleep' : 'sit';
@@ -162,7 +201,8 @@ export class CitizenSprite {
    * state. `doorPoint` is supplied when the citizen is inside a building, so
    * they walk to the doorway before fading out of sight indoors.
    */
-  update(citizen: Citizen, dt: number, height: number, doorPoint?: { x: number; y: number }): CitizenView {
+  update(citizen: Citizen, dt: number, height: number, doorPoint?: { x: number; y: number }, face?: { dir: Dir; flipped: boolean }): CitizenView {
+    this.dressFor(citizen);
     const targetX = doorPoint ? doorPoint.x : citizen.x;
     const targetY = doorPoint ? doorPoint.y : citizen.y;
 
@@ -187,6 +227,10 @@ export class CitizenSprite {
     if (moving) {
       if (Math.abs(dx) > Math.abs(dy)) { this.dir = 'e'; this.flipped = dx < 0; }
       else { this.dir = dy > 0 ? 's' : 'n'; this.flipped = false; }
+    } else if (face) {
+      // Told which way to look: a fisher faces the water, not the way they came.
+      this.dir = face.dir;
+      this.flipped = face.flipped;
     }
 
     const nextState = this.stateFor(citizen, moving);
@@ -207,8 +251,21 @@ export class CitizenSprite {
     // front of them so it reads at a glance which trade is on the move.
     // Held at waist height in front of them, and out of sight when their back
     // is turned. Centred on the chest it just covers the character up.
-    const hauling = this.carryKind !== null && moving && citizen.phase === 'working' && this.dir !== 'n';
+    const hauling = this.carryKind !== null && moving && citizen.phase === 'working' && this.dir !== 'n'
+      && (!CARRY_ON_ERRAND.has(citizen.job) || citizen.errand);
     this.carry.visible = hauling;
+    // The rod is out while the fisher stands at the water; the bow is up
+    // while the hunter has something in sight.
+    const working = citizen.activity === 'working' && !citizen.inside && !citizen.errand;
+    const holding = citizen.job === 'fisher' ? working && !moving : citizen.job === 'hunter' ? !!citizen.hunting && !citizen.inside : false;
+    this.tool.visible = holding;
+    if (holding) {
+      const scale = 0.9;
+      this.tool.scale.set(scale, scale);
+      if (this.dir === 'e') this.tool.position.set(6, -9);
+      else if (this.dir === 's') this.tool.position.set(4, -8);
+      else this.tool.position.set(3, -14);
+    }
     if (hauling) {
       const scale = 0.8;
       this.carry.scale.set(this.flipped ? -scale : scale, scale);

@@ -1,5 +1,5 @@
 /**
- * The eleven things a settlement makes, needs and trades.
+ * The sixteen things a settlement makes, needs and trades.
  *
  * Pulled out of the simulation so the server can read the same tables. The
  * global market lives on the server and the settlements live in the browser,
@@ -13,19 +13,21 @@
  */
 
 export type Resource =
-  | 'wheat' | 'vegetables' | 'wood' | 'stone' | 'ironOre' | 'wool'
+  | 'wheat' | 'vegetables' | 'fish' | 'game' | 'berries'
+  | 'wood' | 'stone' | 'ironOre' | 'wool' | 'hides' | 'herbs'
   | 'flour' | 'bread' | 'furniture' | 'tools' | 'clothing';
 
 /** Every resource, in the order the market panel lists them. */
 export const RESOURCES: Resource[] = [
-  'wheat', 'vegetables', 'wood', 'stone', 'ironOre', 'wool',
+  'wheat', 'vegetables', 'fish', 'game', 'berries',
+  'wood', 'stone', 'ironOre', 'wool', 'hides', 'herbs',
   'flour', 'bread', 'furniture', 'tools', 'clothing',
 ];
 
 export const RESOURCE_LABELS: Record<Resource, string> = {
-  wheat: 'Wheat', vegetables: 'Vegetables', wood: 'Wood', stone: 'Stone',
-  ironOre: 'Iron Ore', wool: 'Wool', flour: 'Flour', bread: 'Bread',
-  furniture: 'Furniture', tools: 'Tools', clothing: 'Clothing',
+  wheat: 'Wheat', vegetables: 'Vegetables', fish: 'Fish', game: 'Game', berries: 'Berries',
+  wood: 'Wood', stone: 'Stone', ironOre: 'Iron Ore', wool: 'Wool', hides: 'Hides', herbs: 'Herbs',
+  flour: 'Flour', bread: 'Bread', furniture: 'Furniture', tools: 'Tools', clothing: 'Clothing',
 };
 
 /**
@@ -36,13 +38,15 @@ export const RESOURCE_LABELS: Record<Resource, string> = {
  * economy was balanced in however the world's mood goes.
  */
 export const BASE_PRICES: Record<Resource, number> = {
-  wheat: 2, vegetables: 2.5, wood: 3, stone: 4, ironOre: 7, wool: 6,
+  wheat: 2, vegetables: 2.5, fish: 4, game: 6, berries: 2.5,
+  wood: 3, stone: 4, ironOre: 7, wool: 6, hides: 9, herbs: 8,
   flour: 5, bread: 7, furniture: 14, tools: 20, clothing: 18,
 };
 
 /** How much of each a settlement wants in store. Shortage is measured against this. */
 export const MARKET_BUFFERS: Record<Resource, number> = {
-  wheat: 60, vegetables: 40, wood: 70, stone: 30, ironOre: 20, wool: 15,
+  wheat: 60, vegetables: 40, fish: 30, game: 20, berries: 25,
+  wood: 70, stone: 30, ironOre: 20, wool: 15, hides: 6, herbs: 6,
   flour: 25, bread: 40, furniture: 10, tools: 8, clothing: 15,
 };
 

@@ -21,6 +21,7 @@
  */
 
 import { createWorld, type World } from '../simulation';
+import { RESOURCES } from './goods';
 import { clientKey } from '../limits';
 
 /**
@@ -52,7 +53,7 @@ const KEEP = [
   'families', 'citizens', 'buildings', 'resources', 'market',
   'feed', 'gatherings', 'bonds', 'projects', 'hazards', 'resolution',
   'artworks', 'unlockedAreas', 'wageRate', 'marketClock', 'flow', 'flowYesterday', 'ledger',
-  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'counter',
+  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'wildlife', 'hunt', 'counter',
 ] as const;
 
 /**
@@ -117,9 +118,17 @@ export function worldFromSave(parsed: SavedWorld | null, seed: number, name: str
   // it. Anything a future version adds that this save predates keeps the
   // value a new world would have given it, rather than arriving undefined.
   const world = createWorld(seed, name);
+  const freshMarket = world.market;
   for (const field of KEEP) {
     const value = (saved as Record<string, unknown>)[field];
     if (value !== undefined) (world as unknown as Record<string, unknown>)[field] = value;
+  }
+  // Goods that did not exist when the save was written: the store holds none
+  // and the market quotes them as a new world would, rather than a reader
+  // meeting `undefined` where a number should be.
+  for (const r of RESOURCES) {
+    if (!Number.isFinite(world.resources[r])) world.resources[r] = 0;
+    if (!world.market[r]) world.market[r] = freshMarket[r];
   }
   // Never revived: see above.
   world.conversations = [];

@@ -205,7 +205,17 @@ Things that happen because the simulation made them happen, not because a timer 
   the tavern if not, and the open ground if there is neither — recovering less rest for
   it, staying visible, and the feed reporting how many had nowhere to go.
 - **Workers carry what they are hauling** between their workplace and the store: a sack
-  of grain, a log, a bolt of cloth.
+  of grain, a log, a bolt of cloth, a brace of fish, a kill.
+- **Fishers fish where you can see them.** A Fishery sends its workers to the bank nearest
+  the hut, rod out, the float twitching on the water. Bait costs the treasury Gold every
+  day and a snapped rod costs timber, both booked in the Bank under bait and arrows.
+- **The land has animals, and hunters hunt them.** Each biome carries its own herd — deer,
+  boar, hare, fox, goat, elk, antelope, gazelle, duck, gator — that grazes, wanders, and
+  bolts from anyone who comes close. A Lodge's hunters pick one, stalk it, bring it down
+  and carry it home; game and hides are credited the moment it falls. Arrows cost timber.
+  The herd comes back a head or two a day, so overhunting empties a wood.
+- **Foragers pick the wild ground** for berries and herbs. Fish, game and berries are
+  eaten like bread; hides and herbs sell at the market like anything else.
 
 ### Keeping citizens out of walls
 

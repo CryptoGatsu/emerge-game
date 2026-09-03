@@ -83,6 +83,9 @@ const BY_MASTERY: Line[] = [
 const BY_JOB: Partial<Record<string, Line[]>> = {
   farmer: ['The fields are coming along.', 'Rain would help right now.'],
   woodcutter: ['This grove keeps giving.', 'Careful where that one falls.'],
+  fisher: ['Something is nibbling.', 'The light is right on the water today.'],
+  hunter: ['Fresh tracks by the bank.', 'Quiet now. It has not seen me.'],
+  forager: ['The hedges are heavy this week.', 'Mind the nettles.'],
   miner: ['Something is glinting down there.', 'Deeper than I thought.'],
   quarry: ['Good clean stone today.', 'This block is for the square.'],
   miller: ['Wheat in, flour out.', 'The wheel is running sweet.'],

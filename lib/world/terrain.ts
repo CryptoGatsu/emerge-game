@@ -565,6 +565,25 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
     tuck(wood.x + 2.5, wood.y + 5, 'prop.stump');
   }
 
+  const fishery = at('Fishery');
+  if (fishery) {
+    tuck(fishery.x + 5.5, fishery.y + 2.5, 'prop.barrel');
+    tuck(fishery.x - 5, fishery.y + 2.5, 'prop.crates');
+  }
+
+  const lodge = at('Lodge');
+  if (lodge) {
+    tuck(lodge.x + 6, lodge.y + 3, 'prop.campfire.0', 0, true);
+    tuck(lodge.x - 5.5, lodge.y + 2.5, 'prop.stump');
+  }
+
+  const forager = at('Forager');
+  if (forager) {
+    tuck(forager.x + 5, forager.y + 2.5, 'prop.bush.1');
+    tuck(forager.x - 5, forager.y + 2, 'prop.bush.1');
+    tuck(forager.x + 2, forager.y + 5, 'prop.crates');
+  }
+
   const smith = at('Blacksmith');
   if (smith) {
     tuck(smith.x + 5.5, smith.y + 2.5, 'prop.barrel');

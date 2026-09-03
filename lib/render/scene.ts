@@ -17,7 +17,8 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
-import { spokenLine } from '../simulation';
+import { spokenLine, waterOf, type Animal } from '../simulation';
+import type { Dir } from './character';
 import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
@@ -96,6 +97,29 @@ interface TreeEntry {
   state: 'standing' | 'falling' | 'stump' | 'sapling';
   /** Seconds of fall animation left, or game days until the next growth stage. */
   timer: number;
+}
+
+/** An animal on the ground, drawn. */
+interface WildSprite {
+  sprite: Sprite;
+  shadow: Sprite;
+  wx: number;
+  wy: number;
+  /** Distance walked, for the two-frame gait. */
+  clock: number;
+  /** Seconds since it went down, or -1 while it is up. */
+  down: number;
+}
+
+/** What a fisher standing on the bank is looking at, and when the float last twitched. */
+interface Casting {
+  key: string;
+  face: { dir: Dir; flipped: boolean } | null;
+  /** Where the float sits, in world units. */
+  fx: number;
+  fy: number;
+  /** Seconds until the next ripple. */
+  next: number;
 }
 
 /** Foliage colour through the year. Autumn turns the woods; winter greys them. */
@@ -449,6 +473,8 @@ export class EmergeScene {
   }
 
   private lampGlows: Sprite[] = [];
+  private wildlife = new Map<string, WildSprite>();
+  private casting = new Map<string, Casting>();
   private trees: TreeEntry[] = [];
   private foliage: { sprite: Sprite; baseTint: number }[] = [];
   private birds: Particle[] = [];
@@ -1067,6 +1093,8 @@ export class EmergeScene {
     }
 
     this.citizens.clear();
+    this.wildlife.clear();
+    this.casting.clear();
     this.buildings.clear();
     this.propSprites = [];
     this.swaying = [];
@@ -1162,6 +1190,7 @@ export class EmergeScene {
     this.updateProps(clamped);
     this.updateBuildings(clamped);
     this.updateCitizens(clamped);
+    this.updateWildlife(clamped);
     this.updateRings();
     this.updateLighting();
     this.updateSmoke(clamped);
@@ -1253,8 +1282,129 @@ export class EmergeScene {
         door = this.buildings.get(citizen.targetBuildingId)?.door;
       }
       const height = this.map.heightAt(sprite.wx, sprite.wy);
-      sprite.update(citizen, dt, height, door);
+      const face = this.castingFor(citizen, dt);
+      sprite.update(citizen, dt, height, door, face ?? undefined);
       sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
+    }
+  }
+
+  /**
+   * A fisher on the bank faces the water, and the float twitches.
+   *
+   * Which way the water is gets looked up once per standing spot — eight
+   * samples a couple of units out — and a ripple is dropped where the line
+   * meets it every few seconds, so the shore reads as fished rather than
+   * stood on.
+   */
+  private castingFor(citizen: Citizen, dt: number): { dir: Dir; flipped: boolean } | null {
+    const fishing = citizen.job === 'fisher' && citizen.activity === 'working' && !citizen.inside && !citizen.errand
+      && Math.hypot(citizen.destX - citizen.x, citizen.destY - citizen.y) < 0.6;
+    if (!fishing) {
+      this.casting.delete(citizen.id);
+      return null;
+    }
+    const key = `${citizen.x.toFixed(0)},${citizen.y.toFixed(0)}`;
+    let cast = this.casting.get(citizen.id);
+    if (!cast || cast.key !== key) {
+      const water = waterOf(this.world);
+      let face: Casting['face'] = null;
+      let fx = citizen.x, fy = citizen.y;
+      for (const reach of [2.2, 3.2, 1.6]) {
+        for (let i = 0; i < 8 && !face; i++) {
+          const ang = (i / 8) * Math.PI * 2;
+          const sx = citizen.x + Math.cos(ang) * reach, sy = citizen.y + Math.sin(ang) * reach;
+          if (!water.isWater(sx, sy)) continue;
+          const dx = Math.cos(ang), dy = Math.sin(ang);
+          face = Math.abs(dx) > Math.abs(dy) ? { dir: 'e', flipped: dx < 0 } : { dir: dy > 0 ? 's' : 'n', flipped: false };
+          fx = citizen.x + dx * (reach + 0.6);
+          fy = citizen.y + dy * (reach + 0.6);
+        }
+        if (face) break;
+      }
+      cast = { key, face, fx, fy, next: 1 + Math.random() * 2 };
+      this.casting.set(citizen.id, cast);
+    }
+    cast.next -= dt;
+    if (cast.next <= 0 && cast.face) {
+      cast.next = 2 + Math.random() * 3;
+      const p = this.splashes.find((m) => m.life <= 0);
+      if (p) {
+        const pos = worldToScreen(cast.fx, cast.fy, this.map.heightAt(cast.fx, cast.fy));
+        p.sprite.visible = true;
+        p.sprite.position.set(pos.x, pos.y);
+        p.max = 0.9;
+        p.life = p.max;
+      }
+    }
+    return cast.face;
+  }
+
+  /**
+   * The animals.
+   *
+   * Sprites are made and dropped to match the simulation's list each frame —
+   * there are never more than a dozen — eased toward their positions the way
+   * citizens are, mirrored to face the way they are going, and an animal a
+   * hunter has taken keels over and fades where it fell.
+   */
+  private updateWildlife(dt: number) {
+    const seen = new Set<string>();
+    for (const a of this.world.wildlife ?? []) {
+      seen.add(a.id);
+      let view = this.wildlife.get(a.id);
+      if (!view) {
+        const sprite = new Sprite(this.assets.get(`wild.${a.kind}.0`));
+        sprite.anchor.set(0.5, 1);
+        const shadow = new Sprite(this.assets.get('fx.shadow'));
+        shadow.anchor.set(0.5, 0.5);
+        shadow.alpha = 0.4;
+        this.objectLayer.addChild(shadow, sprite);
+        view = { sprite, shadow, wx: a.x, wy: a.y, clock: 0, down: -1 };
+        this.wildlife.set(a.id, view);
+      }
+      this.animateAnimal(view, a, dt);
+    }
+    for (const [id, view] of this.wildlife) {
+      if (seen.has(id)) continue;
+      view.sprite.destroy();
+      view.shadow.destroy();
+      this.wildlife.delete(id);
+    }
+  }
+
+  private animateAnimal(view: WildSprite, a: Animal, dt: number) {
+    const k = Math.min(1, dt * 8);
+    const prevX = view.wx, prevY = view.wy;
+    view.wx += (a.x - view.wx) * k;
+    view.wy += (a.y - view.wy) * k;
+    const travelled = Math.hypot(view.wx - prevX, view.wy - prevY);
+    view.clock += travelled;
+    const moving = travelled > 0.003;
+    const frame = moving ? Math.floor(view.clock / 0.9) % 2 : 0;
+    const { sprite, shadow } = view;
+    sprite.texture = this.assets.get(`wild.${a.kind}.${frame}`);
+    sprite.scale.x = a.facing;
+    const height = this.map.heightAt(view.wx, view.wy);
+    const pos = worldToScreen(view.wx, view.wy, height);
+    sprite.position.set(pos.x, pos.y);
+    shadow.position.set(pos.x, pos.y - 1);
+    shadow.scale.set(0.5 + sprite.width / 40, 0.6);
+    sprite.zIndex = depthOf(view.wx, view.wy, 0.05);
+    shadow.zIndex = depthOf(view.wx, view.wy, 0.04);
+    if (a.state === 'down') {
+      if (view.down < 0) {
+        view.down = 0;
+        this.burstLeaves(view.wx, view.wy);
+      }
+      view.down += dt;
+      // Over on its side, then gone with the hunter.
+      const fall = Math.min(1, view.down / 0.35);
+      sprite.rotation = a.facing * fall * (Math.PI / 2) * 0.9;
+      sprite.alpha = Math.max(0, 1 - Math.max(0, view.down - 1.2) / 1.2);
+      shadow.alpha = 0.4 * sprite.alpha;
+    } else {
+      sprite.rotation = 0;
+      sprite.alpha = 1;
     }
   }
 

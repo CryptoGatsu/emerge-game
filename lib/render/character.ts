@@ -418,6 +418,9 @@ export function hatForJob(job: string, look: number): HatKind {
     case 'baker': return 'cap';
     case 'blacksmith': return 'cap';
     case 'woodcutter': return look % 2 ? 'cap' : 'none';
+    case 'fisher': return look % 3 ? 'cap' : 'hood';
+    case 'hunter': return 'hood';
+    case 'forager': return look % 2 ? 'straw' : 'none';
     default: return look % 5 === 0 ? 'hood' : 'none';
   }
 }

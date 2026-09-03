@@ -666,6 +666,62 @@ const RECIPES: Record<string, Recipe> = {
       }
     },
   },
+  Fishery: {
+    bw: 72, wallH: 22, roofH: 18, roof: 'gable', wall: 'log', roofColor: 'thatch',
+    windows: [['left', 0.64, 0.3]],
+    door: ['right', 0.36], sign: 'FISH',
+    extras: (p, _lit, g) => {
+      // A net hung to dry across the left wall: a dark mesh with a pale cord grid.
+      const netH = Math.round(g.wallH * 0.66);
+      wallPatch(p, g, 'left', 0.06, 0.12, 24, netH, '#324744');
+      for (let i = 0; i <= 6; i++) wallPatch(p, g, 'left', 0.06 + i * 0.048, 0.12, 1, netH, '#9db8b0');
+      for (let i = 0; i <= 5; i++) wallPatch(p, g, 'left', 0.06, 0.12 + i * 0.13, 24, 1, '#9db8b0');
+      // The catch on a line under the eave of the right wall.
+      for (let i = 0; i < 4; i++) {
+        wallPatch(p, g, 'right', 0.58 + i * 0.09, 0.06, 3, 7, '#bccbd0');
+        wallPatch(p, g, 'right', 0.59 + i * 0.09, 0.08, 1, 4, '#7c929a');
+      }
+      // Cork floats and a coil of rope by the door.
+      wallPatch(p, g, 'right', 0.14, 0.78, 7, 6, '#c9a15a');
+      wallPatch(p, g, 'right', 0.16, 0.8, 3, 2, '#e0bd78');
+    },
+  },
+  Lodge: {
+    bw: 80, wallH: 26, roofH: 22, roof: 'gable', wall: 'log', roofColor: 'green',
+    windows: [['left', 0.66, 0.26], ['right', 0.72, 0.26]],
+    door: ['right', 0.3], chimneyAt: 20, chimneyH: 16, sign: 'GAME',
+    extras: (p, _lit, g) => {
+      // A rack of antlers over the door.
+      for (let i = 0; i < 4; i++) {
+        wallPatch(p, g, 'right', 0.25 + i * 0.045, 0.04 + (i % 2) * 0.06, 2, 4, '#e6dcc4');
+        wallPatch(p, g, 'right', 0.255 + i * 0.045, 0.02 + (i % 2) * 0.06, 1, 2, '#f4eedc');
+      }
+      // Pelts stretched to cure on the left wall.
+      wallPatch(p, g, 'left', 0.08, 0.16, 15, 13, '#7c4f2c');
+      wallPatch(p, g, 'left', 0.1, 0.2, 11, 9, '#a3703f');
+      wallPatch(p, g, 'left', 0.42, 0.18, 13, 12, '#5f4129');
+      wallPatch(p, g, 'left', 0.44, 0.22, 9, 8, '#8a613a');
+      // Split firewood and a quiver by the step.
+      wallPatch(p, g, 'right', 0.6, 0.78, 12, 6, FOLIAGE.trunkDark);
+      wallPatch(p, g, 'right', 0.62, 0.8, 2, 2, FOLIAGE.trunkLight);
+      wallPatch(p, g, 'right', 0.82, 0.64, 3, 9, '#8f6b3c');
+    },
+  },
+  Forager: {
+    bw: 62, wallH: 18, roofH: 16, roof: 'hip', wall: 'timber', roofColor: 'thatch',
+    windows: [],
+    door: ['right', 0.4], sign: 'FORAGE',
+    extras: (p, _lit, g) => {
+      // Baskets of the day's picking along the left wall.
+      for (let i = 0; i < 3; i++) {
+        wallPatch(p, g, 'left', 0.1 + i * 0.24, 0.7, 10, 8, '#b08a4c');
+        wallPatch(p, g, 'left', 0.1 + i * 0.24, 0.7, 10, 2, '#c9a566');
+        wallPatch(p, g, 'left', 0.13 + i * 0.24, 0.64, 6, 3, i === 1 ? '#6f4a9a' : BLOOM.red);
+      }
+      // Bunches of herbs drying under the eave.
+      for (let i = 0; i < 5; i++) wallPatch(p, g, 'right', 0.56 + i * 0.07, 0.05, 2, 7, FOLIAGE.bush);
+    },
+  },
   Mine: {
     bw: 76, wallH: 24, roofH: 16, roof: 'flat', wall: 'stone', roofColor: 'slate',
     windows: [],
