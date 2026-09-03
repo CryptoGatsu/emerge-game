@@ -46,7 +46,7 @@ import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { holdsLand } from '@/lib/server/land';
+import { landCheck } from '@/lib/server/land';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,11 +68,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ payouts: [], automatic: vaultCanSign(), shared: registryShared() });
   }
   try {
-    const [payouts, principal, room] = await Promise.all([
-      payoutsFor(address), principalOf(address), emissionRoom(address),
+    const [payouts, principal, room, land] = await Promise.all([
+      payoutsFor(address), principalOf(address), emissionRoom(address), landCheck(address),
     ]);
     return NextResponse.json({
       payouts, principal, room,
+      // Whether stewardship can be collected at all, and if not, why — so the
+      // Bank can say so before somebody presses the button.
+      land,
       automatic: vaultCanSign(),
       shared: registryShared(),
     });
@@ -172,11 +175,18 @@ export async function POST(request: Request) {
    * line the vault is about to work, and a failed attempt costs it the same as
    * a successful one, so the slot is not given back.
    */
-  const gate = kind === 'earnings' && !(await holdsLand(address));
-  if (gate) {
-    return NextResponse.json({
-      error: 'Stewardship is paid to wallets that hold land. Claim a plot and the world you run starts paying.',
-    }, { status: 403 });
+  if (kind === 'earnings') {
+    const land = await landCheck(address);
+    if (land !== 'holds') {
+      // Same refusal in every case — the difference is what the player is told,
+      // because "you hold no land" is false for two of the three.
+      const said = land === 'no-registry'
+        ? 'The land registry is not live on this deployment yet, so stewardship cannot be paid. Your balance is safe and nothing was taken.'
+        : land === 'unreachable'
+          ? 'The land registry could not be reached to check this wallet. Nothing was taken — try again in a minute.'
+          : 'Stewardship is paid to wallets that hold land on chain. If you claimed this plot before the registry went live, claim it on chain from the world map and it will start paying.';
+      return NextResponse.json({ error: said, land }, { status: 403 });
+    }
   }
   if (kind === 'principal') {
     const standing = await principalOf(address);

@@ -1451,6 +1451,15 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
             <b>{Math.min(history.room.left, history.room.globalLeft).toLocaleString()} {TOKEN.ticker}</b>
           </div>
         )}
+        {history?.land && history.land !== 'holds' && (
+          <p className="warn">
+            {history.land === 'no-registry'
+              ? 'The land registry is not live on this deployment yet, so stewardship cannot be collected. Your balance keeps accruing and is safe.'
+              : history.land === 'unreachable'
+                ? 'The land registry cannot be reached from the server right now, so this wallet cannot be checked. Your balance is safe — try again shortly.'
+                : 'The chain does not show land against this wallet. Stewardship is paid on plots held on chain, so if you claimed this one before the registry went live, claim it on chain from the world map.'}
+          </p>
+        )}
         <button onClick={doClaim} disabled={busy !== null || ledger.earnedEmerge < 1}>
           {busy === 'collect' ? 'Sending…' : liveToken() ? 'Collect to wallet' : 'Collect'}
         </button>

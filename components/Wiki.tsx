@@ -177,6 +177,7 @@ const SECTIONS = [
   ['status', 'Reading your settlement'],
   ['danger', 'What can go wrong'],
   ['world', 'The world itself'],
+  ['arena', 'The colosseum'],
   ['together', 'Other players'],
   ['honest', 'What is settled, and what is not'],
 ] as const;
@@ -714,6 +715,51 @@ export default function Wiki() {
             Seasons turn, weather lands, food runs short in a bad winter, and a settlement with no
             farm in a desert will struggle exactly as much as you would expect. Nine biomes, each
             supporting different trades — which is why they are priced differently.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="arena">
+          <h2>The colosseum</h2>
+          <p>
+            An island nobody owns and anybody can walk into, whether or not they hold land. Players
+            enter a citizen; the arena pairs two of them and runs a bout every three minutes, and
+            everybody watching sees the same fight at the same moment.
+          </p>
+          <h3>Sending somebody</h3>
+          <p>
+            The Arena panel lists the five people in your settlement most fit to fight. Fitness is
+            not a hidden combat stat — it is rest, food, warmth and clothing, so the way to a good
+            fighter is to run a good settlement. Skill is the trade they have spent their life at.
+            Strength decides only <em>how often somebody lands a blow</em>, never how hard, which is
+            why even a lopsided pairing is worth watching.
+          </p>
+          <p>
+            <b>An entry is good for one bout.</b> Whoever is drawn comes off the roster the moment
+            the pairing is made and goes home when the bell goes. Sending them back out is a
+            decision you make again each time, not something that keeps happening to them.
+          </p>
+          <h3>Betting</h3>
+          <p>
+            Two minutes of each bout are open for betting; the last minute is the fight. Stakes come
+            out of the settlement&rsquo;s treasury and wins go back into it, booked in the Bank&rsquo;s
+            daily accounts so you can see exactly what the arena has cost you. Bets settle against
+            the house at the odds shown, which are measured from the fight itself — several thousand
+            simulated bouts of that exact pairing — so the price you are offered cannot drift from
+            what actually happens. The house keeps a margin, and over time the arena takes more than
+            it pays.
+          </p>
+          <p className="wiki-note">
+            <b>The result cannot be known early and cannot be rigged.</b> The arena draws a secret
+            when it makes a bout and publishes only its hash. Betting runs against that hash; the
+            secret is released the moment betting closes, and the fight is computed from it. Nobody,
+            the house included, can know the winner while money is going on — and afterwards anybody
+            can check that the secret matches the hash published beforehand. The Arena panel does
+            that check itself, in your browser, and says either way.
+          </p>
+          <p className="wiki-note">
+            Arena Gold is Gold, not {TOKEN.ticker}. Winning at the colosseum makes your settlement
+            richer; it does not mint anything and cannot be withdrawn as a token.
           </p>
         </section>
 

@@ -350,15 +350,29 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
                 Fitness is the person as your settlement made them — rested, fed, warm and clothed.
                 Skill is the trade they have spent their life at. Neither is a hidden number.
               </p>
+              <p className="muted small">
+                An entry is good for <b>one bout</b>. Whoever is drawn comes straight off the
+                roster and goes home afterwards, so sending somebody back out is your call every
+                time rather than something that happens to them.
+              </p>
               <div className="arena-bench">
                 {candidates.map((c) => {
                   const level = c.job === 'unemployed' ? 0 : skillLevel(skillDays(c, c.job as WorkingJob));
-                  const already = mine.some((f) => f.id === `${seed}:${c.id}`);
+                  const id = `${seed}:${c.id}`;
+                  const already = mine.some((f) => f.id === id);
+                  // Somebody in the bout on now is not available to be sent
+                  // anywhere: they are busy.
+                  const fighting = !!bout && now < bout.endsAt && (bout.red.id === id || bout.blue.id === id);
                   return (
-                    <button key={c.id} className="bench-card" disabled={entering || already} onClick={() => void send(c)}>
+                    <button
+                      key={c.id}
+                      className="bench-card"
+                      disabled={entering || already || fighting}
+                      onClick={() => void send(c)}
+                    >
                       <b>{c.name}</b>
                       <span>level {level} · vigour {vigourOf(c)}</span>
-                      <em>{already ? 'on the roster' : 'send'}</em>
+                      <em>{fighting ? 'in the ring' : already ? 'on the roster' : 'send'}</em>
                     </button>
                   );
                 })}

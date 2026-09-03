@@ -41,6 +41,12 @@ export interface PayoutHistory {
   /** True when the vault can sign for itself. */
   automatic: boolean;
   shared: boolean;
+  /**
+   * Whether this wallet can collect stewardship, and if not, why. `none` is
+   * the only one of these that means "you hold no land"; the other two are the
+   * deployment's problem, not the player's, and are worth saying out loud.
+   */
+  land: 'holds' | 'none' | 'no-registry' | 'unreachable' | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -137,7 +143,9 @@ export async function withdrawFromVault(request: WithdrawRequest): Promise<Payou
 
 /** What a wallet has been paid, and what it may still be paid today. */
 export async function fetchPayouts(address: string): Promise<PayoutHistory> {
-  const empty: PayoutHistory = { payouts: [], principal: 0, room: null, automatic: false, shared: false };
+  const empty: PayoutHistory = {
+    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null,
+  };
   try {
     const response = await fetch(`/api/payouts?address=${encodeURIComponent(address)}`, { cache: 'no-store' });
     if (!response.ok) return empty;
@@ -148,6 +156,7 @@ export async function fetchPayouts(address: string): Promise<PayoutHistory> {
       room: json.room ?? null,
       automatic: json.automatic === true,
       shared: json.shared === true,
+      land: json.land ?? null,
     };
   } catch {
     return empty;

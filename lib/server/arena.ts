@@ -20,7 +20,7 @@ import 'server-only';
  */
 
 import { createHash, createHmac, randomBytes } from 'crypto';
-import { getValue, hgetall, hsetWindow, setValue, shared, takeLock } from './kv';
+import { getValue, hdel, hgetall, hsetWindow, releaseLock, setValue, shared, takeLock } from './kv';
 import { serverKey } from '../limits';
 
 /** How long one bout lasts, start to finish, in milliseconds. */
@@ -163,6 +163,20 @@ export async function enter(fighter: Fighter): Promise<void> {
   await hsetWindow(ROSTER, fighter.id, JSON.stringify(fighter), ROSTER_TTL_SECONDS);
 }
 
+/**
+ * Take fighters off the roster.
+ *
+ * Called the moment a bout is drawn, which is what makes an entry good for one
+ * fight and no more. Without it a citizen entered once was eligible for every
+ * bout until the roster row expired — and with only a couple of entrants the
+ * pairing kept drawing the same two, over and over, so the same people appeared
+ * to be locked in a fight that never ended. Going back out is now the player's
+ * decision every single time.
+ */
+export async function withdraw(...ids: string[]): Promise<void> {
+  for (const id of ids) await hdel(ROSTER, id);
+}
+
 /** Everybody currently on the roster, freshest first. */
 export async function roster(): Promise<Fighter[]> {
   const rows = await hgetall(ROSTER);
@@ -287,7 +301,19 @@ export async function currentBout(): Promise<Bout | null> {
 
   const entrants = await roster();
   const drawn = pair(entrants, id);
-  if (!drawn) return null;
+  if (!drawn) {
+    // Nothing to run, so hand the lock straight back. It used to be held for
+    // its full twenty seconds on this path, which barely mattered while the
+    // roster was always full — now that an entry is spent on one bout the
+    // roster empties after every fight, and holding the lock meant somebody
+    // sending a fighter in could be told there was no bout for another twenty
+    // seconds after there was one to make.
+    await releaseLock(LOCK);
+    return null;
+  }
+  // Their turn has come, so their entry is spent. Whoever sent them has to send
+  // them again if they want another fight.
+  await withdraw(drawn[0].id, drawn[1].id);
 
   const secret = randomBytes(24).toString('hex');
   const bout: Bout = {

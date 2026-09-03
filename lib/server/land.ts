@@ -44,15 +44,26 @@ const ERC721 = [
   },
 ] as const;
 
-export async function holdsLand(address: string): Promise<boolean> {
+export type LandCheck = 'holds' | 'none' | 'no-registry' | 'unreachable';
+
+/**
+ * The same question, answered in a way the caller can explain to a player.
+ *
+ * All three refusals used to be one `false`, and the player was told the same
+ * thing every time: that they hold no land. Somebody standing in a settlement
+ * they own reads that as the game lying to them — and where the registry is
+ * unreachable or not deployed, it was. Failing closed is right; saying the
+ * wrong reason is not.
+ */
+export async function landCheck(address: string): Promise<LandCheck> {
   const registry = ACTIVE_CHAIN.registryAddress;
-  if (!registry) return false;
+  if (!registry) return 'no-registry';
   try {
     const client = createPublicClient({ chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
     const held = await client.readContract({
       address: registry as Hex, abi: ERC721, functionName: 'balanceOf', args: [address as Hex],
     });
-    return held > 0n;
+    return held > 0n ? 'holds' : 'none';
   } catch {
     /*
      * A chain we cannot reach must not become a way to be paid.
@@ -60,8 +71,12 @@ export async function holdsLand(address: string): Promise<boolean> {
      * Failing closed here costs an honest player a retry; failing open would
      * mean an RPC outage is an open door.
      */
-    return false;
+    return 'unreachable';
   }
+}
+
+export async function holdsLand(address: string): Promise<boolean> {
+  return (await landCheck(address)) === 'holds';
 }
 
 /**

@@ -94,10 +94,19 @@ export async function POST(request: Request) {
       }, { status: 403 });
     }
 
+    // Nobody is in the ring and queuing for it at the same time. An entry is
+    // spent the moment a bout is drawn, so re-entering is allowed and expected
+    // — but not until the bell has gone on the fight they are already in.
+    const id = `${seed}:${citizenId}`;
+    const running = await currentBout();
+    if (running && Date.now() < running.endsAt && (running.red.id === id || running.blue.id === id)) {
+      return NextResponse.json({ error: 'They are in the ring. Wait for the bell.' }, { status: 409 });
+    }
+
     const fighter: Fighter = {
       // Ours, from the plot and the citizen, so one person cannot be entered
       // twice over and nobody can claim somebody else's fighter id.
-      id: `${seed}:${citizenId}`,
+      id,
       name,
       worldName: clean(String(body.worldName ?? claim.worldName ?? 'Somewhere'), MAX_NAME),
       seed,
