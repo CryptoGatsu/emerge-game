@@ -3021,3 +3021,46 @@ button.fold:hover { color: var(--emerald); }
 .pay-offer { margin-top: 4px; }
 .idle-plot.accepted { color: #f0d05e; }
 .listing-row.held b { color: #f0d05e; }
+
+/* ---- danger ---- */
+.danger-banner {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 6px; padding: 8px 12px; max-width: 560px;
+  border-radius: 12px;
+  border: 1px solid rgba(232, 84, 60, 0.55);
+  background: rgba(120, 22, 14, 0.82);
+  color: #ffe9e2;
+  box-shadow: 0 0 0 0 rgba(232, 84, 60, 0.4);
+  animation: danger-pulse 1.6s ease-in-out infinite;
+  pointer-events: auto;
+}
+.danger-banner.rogue { border-color: rgba(240, 160, 60, 0.6); background: rgba(110, 60, 12, 0.85); animation: none; }
+.danger-mark { font-size: 18px; color: #ffb4a0; }
+.danger-text { display: grid; gap: 2px; min-width: 0; }
+.danger-text b { font-size: 12px; letter-spacing: 1.6px; text-transform: uppercase; color: #fff; }
+.danger-text span { font-size: 11.5px; line-height: 1.35; color: #ffd9cf; }
+.danger-banner em { font-size: 11px; font-style: normal; color: #ffd9cf; white-space: nowrap; }
+.fight {
+  flex: 0 0 auto; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 210, 120, 0.8);
+  background: rgba(240, 160, 60, 0.22); color: #ffe6b0;
+  font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.fight:hover:not(:disabled) { background: rgba(240, 160, 60, 0.4); }
+.fight:disabled { opacity: 0.5; cursor: default; }
+.hazard .fight { margin-top: 8px; width: 100%; }
+.hazard.dire { border-color: rgba(232, 84, 60, 0.5); background: rgba(232, 84, 60, 0.1); }
+.hazard em.wrecked { color: #ff9f8a; }
+.hazard em.fought { color: var(--emerald); }
+.ruined-line { margin: 4px 0 0; font-size: 12px; color: #ff9f8a; }
+.improve.rebuild { border-color: rgba(255, 210, 120, 0.8); }
+.trouble { display: block; margin-top: 4px; font-size: 12px; color: #ffb4a0; }
+.notice.danger { border-color: rgba(232, 84, 60, 0.6); background: rgba(80, 18, 12, 0.92); }
+@keyframes danger-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 84, 60, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(232, 84, 60, 0); }
+}
+@media (max-width: 760px) {
+  .danger-banner { max-width: 96vw; padding: 6px 10px; }
+  .danger-text span { display: none; }
+}

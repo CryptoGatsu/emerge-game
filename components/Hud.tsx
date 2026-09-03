@@ -41,6 +41,10 @@ interface HudProps {
   onRenameCitizen: (id: string, name: string) => void;
   /** Pull a building down for half its materials. */
   onDemolish: (id: string) => void;
+  /** Raise a ruin again, for Gold and materials. */
+  onRebuild: (id: string) => void;
+  /** Spend Gold against a hazard. */
+  onFight: (id: string) => void;
   /** Which building the player is placing, if any. */
   movingBuilding: string | null;
   onUpgradeBuilding: (id: string) => void;
@@ -160,13 +164,14 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onUpgrade, onMove }: {
+function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onRebuild, onUpgrade, onMove }: {
   focus: Focus; following: string | null; player: PlayerRecord;
   /** True on somebody else's world: you can look and follow, not change. */
   readOnly: boolean;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
   onDemolish: (id: string) => void;
+  onRebuild: (id: string) => void;
   /** What the settlement has to spend, so the buttons can refuse honestly. */
   treasury: number;
   /** The building the player is currently placing, if any. */
@@ -186,8 +191,10 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
         <div className="being-head">
           <div className="being-portrait building">⌂</div>
           <div>
-            <div className="being-eyebrow">{t('PLACE')}</div>
+            <div className="being-eyebrow">{focus.ruined ? t('IN RUINS') : t('PLACE')}</div>
             <h2>{tn(focus.type)}</h2>
+            {focus.ruined && <p className="ruined-line">{t('Wrecked. Nobody can use it until it is rebuilt.')}</p>}
+            {!focus.ruined && focus.damage > 0 && <p className="muted small">{t('{n}% damaged. The carpenters are patching it.', { n: focus.damage })}</p>}
             <p>{focus.production ? t('Producing · {what}', { what: tx(focus.production) }) : focus.occupants ? t('{n} inside', { n: focus.occupants }) : t('Quiet right now')}</p>
             {/* What it has been improved to, and what that is costing every
                 day — the second half matters, because upkeep is what makes
@@ -205,7 +212,22 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             </button>
           ))}
         </div>
-        {!readOnly && (
+        {!readOnly && focus.ruined && (
+          <div className="building-work">
+            <button
+              className="improve rebuild"
+              disabled={treasury < focus.rebuild.gold || !focus.rebuild.stocked}
+              onClick={() => onRebuild(focus.id)}
+            >
+              {t('Rebuild · {gold} Gold', { gold: focus.rebuild.gold })}
+              <em>
+                {t('{wood} timber · {stone} stone', { wood: focus.rebuild.wood, stone: focus.rebuild.stone })}
+                {focus.rebuild.stocked ? '' : t(' — not in the yard')}
+              </em>
+            </button>
+          </div>
+        )}
+        {!readOnly && !focus.ruined && (
           <div className="building-work">
             {focus.upgrade ? (
               <button
@@ -231,7 +253,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             </button>
           </div>
         )}
-        {focus.upgrade && !readOnly && (
+        {focus.upgrade && !readOnly && !focus.ruined && (
           <p className="muted small">
             {t('An improved building gets about a fifth more done — and costs half again in upkeep for as long as it stands.')}
           </p>
@@ -322,6 +344,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
       <div className="being-status">
         <span className="pulse" />
         {tx(focus.status)}
+        {focus.trouble && <b className="trouble">{tx(focus.trouble)}</b>}
         <button
           className={`follow-toggle ${following === focus.id ? 'on' : ''}`}
           onClick={onToggleFollow}
@@ -360,6 +383,9 @@ function Folding({ id, title, badge, children, defaultOpen = true }: {
 }) {
   const key = `emerge.panel.${id}`;
   const [open, setOpen] = useState(defaultOpen);
+  // A panel that asks to be open — the danger panel while something is
+  // wrong — opens whatever the player folded it to last week.
+  useEffect(() => { if (defaultOpen) setOpen(true); }, [defaultOpen]);
   // Read the stored state after mount: the server render has no localStorage,
   // and reading it during the first render makes the markup disagree.
   useEffect(() => {
@@ -428,7 +454,7 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
  * asking for it and what it will do, because "build a mill" on its own is an
  * instruction and not a reason.
  */
-function HelperPanel({ view, onPanel }: { view: Snapshot; onPanel: (panel: PanelKey) => void }) {
+function HelperPanel({ view, onPanel, onRebuild }: { view: Snapshot; onPanel: (panel: PanelKey) => void; onRebuild: (id: string) => void }) {
   return (
     <Folding id="helper" title={t('PLOT HELPER')} badge={view.advice.length ? <span>{view.advice.length}</span> : undefined}>
       {view.advice.length === 0 && (
@@ -439,12 +465,46 @@ function HelperPanel({ view, onPanel }: { view: Snapshot; onPanel: (panel: Panel
           <div className="advice-head">
             <b>{tx(a.title)}</b>
             {a.kind === 'build' && <button className="ghost small" onClick={() => onPanel('build')}>{t('Build')}</button>}
+            {a.kind === 'rebuild' && a.buildingId && <button className="ghost small rebuild" onClick={() => onRebuild(a.buildingId!)}>{t('Rebuild')}</button>}
           </div>
           <span>{tx(a.why)}</span>
           <em>{tx(a.gain)}</em>
         </div>
       ))}
     </Folding>
+  );
+}
+
+/** The kinds that put the whole settlement in danger, and earn the banner. */
+const DIRE = new Set(['earthquake', 'tornado', 'flood', 'plague', 'fire']);
+
+/**
+ * The red bar under the clock while the settlement is in danger.
+ *
+ * A disaster in a folded panel is a line of text; one across the top of the
+ * screen, with the one thing the player can do about it next to it, is a
+ * settlement in danger.
+ */
+function DangerBanner({ view, onFight, readOnly }: { view: Snapshot; onFight: (id: string) => void; readOnly: boolean }) {
+  useLocale();
+  // A hazard at nought severity is one the settlement was ready for: news, not danger.
+  const h = view.hazards.find((x) => DIRE.has(x.kind) && x.severity > 0) ?? null;
+  const rogue = view.rogue;
+  if (!h && !rogue) return null;
+  return (
+    <div className={`danger-banner ${h ? h.kind : 'rogue'}`} role="status">
+      <span className="danger-mark" aria-hidden>⚠</span>
+      <div className="danger-text">
+        <b>{h ? tn(h.label) : t('Somebody has turned on the settlement')}</b>
+        <span>{h ? tx(h.effect) : rogue ?? ''}</span>
+      </div>
+      {h && !readOnly && !h.fought && (
+        <button className="fight" disabled={view.treasury < h.fight.gold} onClick={() => onFight(h.id)} title={tx(h.fight.blurb)}>
+          {t('{what} · {gold} Gold', { what: tn(h.fight.title), gold: h.fight.gold.toLocaleString() })}
+        </button>
+      )}
+      {h && h.fought && <em>{t('{what} — done.', { what: tn(h.fight.title) })}</em>}
+    </div>
   );
 }
 
@@ -455,18 +515,28 @@ function HelperPanel({ view, onPanel }: { view: Snapshot; onPanel: (panel: Panel
  * the whole point of them is that they are something to act on before the fire
  * rather than a post-mortem after it.
  */
-function DangerPanel({ view }: { view: Snapshot }) {
+function DangerPanel({ view, onFight, readOnly }: { view: Snapshot; onFight: (id: string) => void; readOnly: boolean }) {
   useLocale();
   const worst = view.readiness[0];
   return (
-    <Folding id="danger" title={t('WHAT COULD GO WRONG')} defaultOpen={false}>
+    <Folding id="danger" title={t('WHAT COULD GO WRONG')} defaultOpen={view.hazards.length > 0}>
       {view.hazards.map((h) => (
-        <div key={h.id} className={`hazard ${h.kind}`}>
+        <div key={h.id} className={`hazard ${h.kind} ${DIRE.has(h.kind) ? 'dire' : ''}`}>
           <div className="hazard-head">
             <span>{tn(h.label)}</span>
-            <b>{h.days === 1 ? t('today') : t('{n} days', { n: h.days })}</b>
+            <b>{h.hours ? t('{n}h more', { n: h.hours }) : h.days === 1 ? t('today') : t('{n} days', { n: h.days })}</b>
           </div>
           <em>{tx(h.effect)}</em>
+          {h.wrecked > 0 && <em className="wrecked">{t('{n} in ruins — rebuild from the building card.', { n: h.wrecked })}</em>}
+          {!readOnly && h.severity > 0 && (
+            h.fought ? (
+              <em className="fought">{t('{what} — done.', { what: tn(h.fight.title) })}</em>
+            ) : (
+              <button className="fight" disabled={view.treasury < h.fight.gold} onClick={() => onFight(h.id)} title={tx(h.fight.blurb)}>
+                {t('{what} · {gold} Gold', { what: tn(h.fight.title), gold: h.fight.gold.toLocaleString() })}
+              </button>
+            )
+          )}
         </div>
       ))}
       {view.hazards.length === 0 && (
@@ -738,6 +808,7 @@ export function Hud(props: HudProps) {
             {props.sound ? '♪' : '♪̸'}
           </button>
         </div>
+        <DangerBanner view={view} onFight={props.onFight} readOnly={!!props.visiting} />
         <Purse view={view} player={props.player} visiting={!!props.visiting} onPanel={props.onPanel} />
         {/* Who is looking, not counting you: the count arrives with the owner
             already taken out, so one is one visitor and nothing is nobody. */}
@@ -784,10 +855,10 @@ export function Hud(props: HudProps) {
             <aside className={`phone-sheet ${railOpen ? 'open' : ''}`} aria-hidden={!railOpen}>
               <div className="sheet-grip" />
               <StatusPanel view={view} woodland={props.woodland} />
-              {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} />}
+              {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} onRebuild={props.onRebuild} />}
               <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
               <EventsPanel view={view} />
-              <DangerPanel view={view} />
+              <DangerPanel view={view} onFight={props.onFight} readOnly={!!props.visiting} />
               <FeedPanel view={view} />
             </aside>
           </>
@@ -795,9 +866,9 @@ export function Hud(props: HudProps) {
         : (
           <aside className="right-rail">
             <StatusPanel view={view} woodland={props.woodland} />
-            {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} />}
+            {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} onRebuild={props.onRebuild} />}
             <EventsPanel view={view} />
-            <DangerPanel view={view} />
+            <DangerPanel view={view} onFight={props.onFight} readOnly={!!props.visiting} />
             <FeedPanel view={view} />
           </aside>
         )}
@@ -815,6 +886,7 @@ export function Hud(props: HudProps) {
               onToggleFollow={props.onToggleFollow}
               onRenameCitizen={props.onRenameCitizen}
               onDemolish={props.onDemolish}
+              onRebuild={props.onRebuild}
               treasury={view.treasury}
               moving={props.movingBuilding}
               onUpgrade={props.onUpgradeBuilding}

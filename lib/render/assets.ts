@@ -26,6 +26,7 @@ import {
 import { buildBuildings, type BuildingArt } from './buildings';
 import { buildProps } from './props';
 import { animalFrame, fishingRod, huntingBow } from './wildlifeArt';
+import { clash, funnel, rubble, torch } from './dangerArt';
 import { ANIMAL_KINDS } from '../world/wildlife';
 import { buildTiles, canopyPattern } from './tiles';
 import { BLOOM, BUILD, FOLIAGE, UI, WATER } from './palette';
@@ -372,6 +373,11 @@ export function loadAssets(): AssetLibrary {
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
   for (const kind of ['crate', 'sack', 'log', 'loaf', 'cloth', 'fish', 'game', 'basket'] as const) put(`fx.carry.${kind}`, carried(kind));
   put('fx.rod', fishingRod());
+  for (let f = 0; f < 4; f++) put(`fx.funnel.${f}`, funnel(f));
+  put('fx.torch.0', torch(0));
+  put('fx.torch.1', torch(1));
+  put('fx.clash', clash());
+  put('overlay.rubble', rubble());
   put('fx.bow', huntingBow());
   for (const kind of ANIMAL_KINDS) {
     put(`wild.${kind}.0`, animalFrame(kind, 0));

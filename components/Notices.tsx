@@ -22,7 +22,7 @@ import { t } from '@/lib/i18n';
 
 export interface Notice {
   id: string;
-  kind: 'chat' | 'claim' | 'sale' | 'sync';
+  kind: 'chat' | 'claim' | 'sale' | 'sync' | 'danger';
   title: string;
   body: string;
   /** What tapping the card does, when there is something useful to do. */
@@ -250,7 +250,7 @@ const nameOf = (claim: Claim) =>
   claim.ownerName?.trim() ? claim.ownerName : shortAddress(claim.owner);
 
 /** One mark per kind, so a glance says what a card is before it is read. */
-const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎', sync: '⇄' };
+const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎', sync: '⇄', danger: '⚠' };
 
 /** The cards themselves. */
 export function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: string) => void }) {

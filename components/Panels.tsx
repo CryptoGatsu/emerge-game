@@ -115,6 +115,7 @@ const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] =
   { type: 'Studio', cost: BUILD_COSTS['Studio'], icon: '✎', blurb: 'Somewhere to make things. Purpose, and showcases.' },
   { type: 'Lab', cost: BUILD_COSTS['Lab'], icon: '⚗', blurb: 'Better methods for every trade, and warning of trouble.' },
   { type: 'Clinic', cost: BUILD_COSTS['Clinic'], icon: '✚', blurb: 'People survive what would have killed them.' },
+  { type: 'Jail', cost: BUILD_COSTS['Jail'], icon: '▦', blurb: 'Somewhere to hold anyone who turns on the settlement. Fewer do, with one standing.' },
   { type: 'Bank', cost: BUILD_COSTS['Bank'], icon: '◈', blurb: 'A counting house for the treasury.' },
 ];
 
@@ -453,15 +454,32 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         <section>
           <h4>Danger</h4>
           <p>
-            Four things can go wrong, each out of the world&rsquo;s own state, and each with a defence
+            Seven things can go wrong, each out of the world&rsquo;s own state, and each with a defence
             you can build. One at a time, never in the first five days.
           </p>
           <ul>
             <li><b>Fire</b> — dry heat and hearths. Answered by wells and by having enough people about.</li>
             <li><b>Blight</b> — a growing season and fields. Answered by a granary and food put by.</li>
             <li><b>Wolves</b> — a cold night near woodland. Answered by fires burning and by numbers.</li>
-            <li><b>Flood</b> — a storm on a river. Answered by building back from the bank.</li>
+            <li><b>Flood</b> — a storm on a river. The water rises for days and takes the buildings on the bank. Answered by building back from it.</li>
+            <li><b>Earthquake</b> — hard ground, a shelf or a plateau. The ground shakes for hours, walls crack, some come down, and aftershocks follow. Answered by stone in the yard and a lab.</li>
+            <li><b>Tornado</b> — a storm over open country. A funnel crosses the map and wrecks what it passes over. Answered by a storehouse, sturdy improved buildings and a lab.</li>
+            <li><b>Plague</b> — a big settlement in a cold season. It passes between people standing together, and it kills. Answered by a clinic and herbs in store.</li>
           </ul>
+          <p>
+            While a disaster runs, a red bar sits under the clock with the one thing you can do:
+            <b> spend Gold against it</b>, once — bucket chains, sandbags, storm crews, a
+            quarantine. It does exactly what it says. Buildings the disaster wrecks are <b>ruins</b>
+            until you rebuild them from the building card, for Gold and about half the materials.
+            The carpenters patch lesser damage on their own.
+          </p>
+          <p>
+            <b>People turn, too.</b> Somebody miserable, purposeless or nursing a grudge can turn on
+            the settlement and set about wrecking it, torch in hand. You cannot lift them away or
+            step in: the others go after them, there is a scuffle, and they are thrown in the jail
+            — or killed, if they have already brought two buildings down. A Jail halves how often
+            it happens and gives the settlement somewhere to hold them.
+          </p>
           <p>
             Readiness decides what a hazard <em>costs</em>, not whether it happens. At full readiness a
             fire is out the same day and the wolves turn back at the treeline. Readiness is measured

@@ -17,7 +17,7 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
-import { spokenLine, waterOf, type Animal } from '../simulation';
+import { spokenLine, waterOf, type Animal, type Hazard } from '../simulation';
 import type { Dir } from './character';
 import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
@@ -25,7 +25,7 @@ import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
 import { CLEARING_DAYS, CLEAR_RADIUS } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
-import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, worldToScreen } from '../world/iso';
+import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, tileToWorld, worldToScreen } from '../world/iso';
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
 import type { ShoreEdge } from './tiles';
 import type { BiomeKind } from '../world/biomes';
@@ -59,6 +59,8 @@ interface BuildingView {
   badgeIcon: Sprite;
   badgeText: Text;
   wheel?: Sprite;
+  /** The heap it becomes when it is wrecked. */
+  rubble?: Sprite;
   artKey: string;
   door: { x: number; y: number };
   chimney?: { x: number; y: number };
@@ -488,6 +490,21 @@ export class EmergeScene {
    * a day, and a plot that keeps building does not slowly lose its wood.
    */
   private treeCapacity = 0;
+  /** The funnel cloud, while there is one. */
+  private funnel: Sprite | null = null;
+  /** Standing water drawn over the flooded ground, redrawn as the level changes. */
+  private flood: Graphics | null = null;
+  private floodLevel = -1;
+  /** Screen pixels of shake left in the ground. */
+  private shake = 0;
+  private cameraPx = 0;
+  private cameraPy = 0;
+  /** The burst over a scuffle. */
+  private clash: Sprite | null = null;
+  /** People who died where the settlement could see it, falling and fading. */
+  private dying: { container: Container; timer: number; facing: number }[] = [];
+  /** Who was a rogue last frame, so a rogue who vanishes is seen to fall. */
+  private lastRogue = new Set<string>();
   /** Saplings the wood put out on its own: not props, so cleared by hand when the ground is rebuilt. */
   private planted: Sprite[] = [];
   private wildlife = new Map<string, WildSprite>();
@@ -513,6 +530,7 @@ export class EmergeScene {
   /** Create sprites for any building that does not have one yet. */
   /** Take a building's sprites out of the scene and forget it. */
   private dropBuilding(id: string) {
+    this.buildings.get(id)?.rubble?.destroy();
     const view = this.buildings.get(id);
     if (!view) return;
     view.base.destroy();
@@ -706,6 +724,15 @@ export class EmergeScene {
     }
     for (const [id, sprite] of this.citizens) {
       if (seen.has(id)) continue;
+      if (this.lastRogue.has(id)) {
+        // Killed by the settlement: they go down where they stood, and stay
+        // down long enough to be seen before they are gone.
+        this.dying.push({ container: sprite.container, timer: 0, facing: sprite.wx % 2 < 1 ? 1 : -1 });
+        sprite.container.eventMode = 'none';
+        this.lastRogue.delete(id);
+        this.citizens.delete(id);
+        continue;
+      }
       sprite.destroy();
       this.citizens.delete(id);
     }
@@ -804,6 +831,8 @@ export class EmergeScene {
     const snap = (v: number) => Math.round(v * res) / res;
     const px = snap(w / 2 - this.camera.x * zoom);
     const py = snap(h / 2 - this.camera.y * zoom);
+    this.cameraPx = px;
+    this.cameraPy = py;
     for (const root of [this.worldRoot, this.lightsRoot]) {
       root.position.set(px, py);
       root.scale.set(zoom);
@@ -1123,6 +1152,13 @@ export class EmergeScene {
     this.citizens.clear();
     this.wildlife.clear();
     this.casting.clear();
+    this.funnel = null;
+    this.flood = null;
+    this.floodLevel = -1;
+    this.clash = null;
+    this.dying = [];
+    this.lastRogue.clear();
+    this.shake = 0;
     this.buildings.clear();
     this.propSprites = [];
     this.planted = [];
@@ -1229,6 +1265,7 @@ export class EmergeScene {
     this.updateBuildings(clamped);
     this.updateCitizens(clamped);
     this.updateWildlife(clamped);
+    this.updateDanger(clamped);
     this.updateRings();
     this.updateLighting();
     this.updateSmoke(clamped);
@@ -1308,11 +1345,175 @@ export class EmergeScene {
         view.badge.visible = false;
       }
       if (view.wheel) view.wheel.texture = this.assets.get(`overlay.mill.wheel.${wheelFrame}`);
+      this.dressDamage(view);
+    }
+  }
+
+  /**
+   * What trouble has done to a building: the walls darken with damage, a
+   * building being wrecked shakes, and a ruin is a heap with the shell of
+   * the building greyed behind it.
+   */
+  private dressDamage(view: BuildingView) {
+    const b = view.building;
+    const damage = b.damage ?? 0;
+    const ruined = !!b.ruined;
+    // Tint from clean toward soot and broken plaster.
+    const k = ruined ? 1 : Math.min(1, damage);
+    const shade = Math.round(255 - k * 110);
+    view.base.tint = (shade << 16) | (Math.round(255 - k * 118) << 8) | Math.round(255 - k * 126);
+    view.base.alpha = ruined ? 0.8 : 1;
+    if (ruined && !view.rubble) {
+      const heap = new Sprite(this.assets.get('overlay.rubble'));
+      heap.anchor.set(0.5, 1);
+      const pos = worldToScreen(view.at.x, view.at.y, view.height);
+      heap.position.set(pos.x, pos.y + 4);
+      heap.zIndex = depthOf(view.at.x, view.at.y, -0.3);
+      this.objectLayer.addChild(heap);
+      view.rubble = heap;
+    } else if (!ruined && view.rubble) {
+      view.rubble.destroy();
+      view.rubble = undefined;
+    }
+    // Shaking: the ground is moving, or somebody is at the wall with intent.
+    const quake = this.world.hazards.some((h) => h.kind === 'earthquake' && (h.hours ?? 0) > 0);
+    const attacked = !ruined && this.world.citizens.some((c) => c.rogue?.targetId === b.id && Math.hypot(c.x - b.x, c.y - b.y) < 6);
+    const pos = worldToScreen(view.at.x, view.at.y, view.height);
+    if (quake || attacked) {
+      const amp = quake ? 2.5 : 1.2;
+      view.base.position.set(pos.x + (Math.random() - 0.5) * amp * 2, pos.y + (Math.random() - 0.5) * amp);
+      view.lit.position.copyFrom(view.base.position);
+    } else if (view.base.x !== pos.x || view.base.y !== pos.y) {
+      view.base.position.set(pos.x, pos.y);
+      view.lit.position.set(pos.x, pos.y);
+    }
+  }
+
+  /**
+   * The disasters, drawn: the ground shaking under the camera, the funnel
+   * crossing the map with debris around it, water standing over the flooded
+   * bank, the burst of a scuffle, and a rogue going down.
+   */
+  private updateDanger(dt: number) {
+    const hazards = this.world.hazards;
+    // Earthquake: the whole view shakes for as long as the ground does.
+    const quake = hazards.find((h) => h.kind === 'earthquake' && (h.hours ?? 0) > 0);
+    const wanted = quake ? 3 + (quake.severity ?? 0.5) * 6 : 0;
+    this.shake += (wanted - this.shake) * Math.min(1, dt * 4);
+    if (this.shake > 0.05) {
+      const jx = (Math.random() - 0.5) * this.shake * 2, jy = (Math.random() - 0.5) * this.shake * 2;
+      for (const root of [this.worldRoot, this.lightsRoot]) root.position.set(this.cameraPx + jx, this.cameraPy + jy);
+    } else if (this.worldRoot.x !== this.cameraPx || this.worldRoot.y !== this.cameraPy) {
+      for (const root of [this.worldRoot, this.lightsRoot]) root.position.set(this.cameraPx, this.cameraPy);
+    }
+
+    // Tornado.
+    const twister = hazards.find((h) => h.kind === 'tornado' && h.x !== undefined && h.y !== undefined);
+    if (twister) this.drawFunnel(twister, dt);
+    else if (this.funnel) { this.funnel.destroy(); this.funnel = null; }
+
+    // Flood.
+    const flood = hazards.find((h) => h.kind === 'flood' && h.level !== undefined);
+    const level = flood ? Math.round((flood.level ?? 0) * 10) / 10 : 0;
+    if (level !== this.floodLevel) this.drawFlood(level);
+
+    // A scuffle.
+    const brawl = this.world.citizens.find((c) => c.rogue && c.scuffle && c.scuffle > 0);
+    if (brawl) {
+      if (!this.clash) {
+        this.clash = new Sprite(this.assets.get('fx.clash'));
+        this.clash.anchor.set(0.5, 1);
+        this.objectLayer.addChild(this.clash);
+      }
+      const pos = worldToScreen(brawl.x, brawl.y, this.map.heightAt(brawl.x, brawl.y));
+      this.clash.position.set(pos.x + (Math.random() - 0.5) * 6, pos.y - 26 + (Math.random() - 0.5) * 4);
+      this.clash.zIndex = depthOf(brawl.x, brawl.y, 0.5);
+      this.clash.scale.set(0.9 + Math.random() * 0.3);
+      this.clash.visible = Math.random() > 0.15;
+    } else if (this.clash) { this.clash.destroy(); this.clash = null; }
+
+    // The fallen.
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const d = this.dying[i];
+      d.timer += dt;
+      const fall = Math.min(1, d.timer / 0.5);
+      d.container.rotation = d.facing * fall * (Math.PI / 2) * 0.85;
+      d.container.alpha = Math.max(0, 1 - Math.max(0, d.timer - 2.5) / 1.5);
+      if (d.timer > 4) { d.container.destroy({ children: true }); this.dying.splice(i, 1); }
+    }
+  }
+
+  private drawFunnel(h: Hazard, dt: number) {
+    if (!this.funnel) {
+      this.funnel = new Sprite(this.assets.get('fx.funnel.0'));
+      this.funnel.anchor.set(0.5, 0.92);
+      this.objectLayer.addChild(this.funnel);
+    }
+    const x = h.x ?? 50, y = h.y ?? 50;
+    const pos = worldToScreen(x, y, this.map.heightAt(x, y));
+    this.funnel.position.set(pos.x, pos.y);
+    this.funnel.zIndex = depthOf(x, y, 1.5);
+    this.funnel.texture = this.assets.get(`fx.funnel.${Math.floor(this.time * 10) % 4}`);
+    const size = 1.6 + (h.severity ?? 0.5) * 1.2 + Math.sin(this.time * 3) * 0.08;
+    this.funnel.scale.set(size, size);
+    this.funnel.alpha = 0.92;
+    // Debris flung round the foot of it: leaves and dust from the pools.
+    for (let i = 0; i < 3; i++) {
+      if (Math.random() > dt * 18) continue;
+      const p = this.motes.find((m) => m.life <= 0);
+      if (!p) break;
+      const ang = Math.random() * Math.PI * 2;
+      p.sprite.texture = this.assets.get(`fx.leaf.${i % 3}`);
+      p.sprite.visible = true;
+      p.sprite.position.set(pos.x + Math.cos(ang) * 30, pos.y - 10 + Math.sin(ang) * 12);
+      p.vx = Math.cos(ang + 1.2) * (90 + Math.random() * 80);
+      p.vy = -60 - Math.random() * 120;
+      p.max = 0.8 + Math.random() * 0.6;
+      p.life = p.max;
+    }
+    for (let i = 0; i < 2; i++) {
+      if (Math.random() > dt * 10) continue;
+      const puff = this.smoke.find((m) => m.life <= 0);
+      if (!puff) break;
+      puff.sprite.visible = true;
+      puff.sprite.position.set(pos.x + (Math.random() - 0.5) * 40, pos.y - 4);
+      puff.sprite.scale.set(0.6);
+      puff.sprite.tint = 0xb9a98a;
+      puff.vx = (Math.random() - 0.5) * 60;
+      puff.vy = -30 - Math.random() * 30;
+      puff.max = 1.2 + Math.random() * 0.8;
+      puff.life = puff.max;
+    }
+  }
+
+  /** Standing water over the ground the flood has reached. */
+  private drawFlood(level: number) {
+    this.floodLevel = level;
+    if (!this.flood) {
+      this.flood = new Graphics();
+      this.waterLayer.addChild(this.flood);
+    }
+    this.flood.clear();
+    if (level <= 0) return;
+    const water = waterOf(this.world);
+    const reach = 2.5 + level * 5;
+    for (let ty = 0; ty < GRID; ty++) {
+      for (let tx = 0; tx < GRID; tx++) {
+        const wx = tileToWorld(tx + 0.5), wy = tileToWorld(ty + 0.5);
+        if (water.isWater(wx, wy)) continue;
+        const d = water.distanceToWater(wx, wy);
+        if (d > reach) continue;
+        const pos = tileToScreen(tx, ty, this.map.heightAt(wx, wy));
+        const alpha = 0.22 + 0.3 * (1 - d / reach);
+        this.flood.poly([pos.x + TILE_W / 2, pos.y, pos.x + TILE_W, pos.y + TILE_H / 2, pos.x + TILE_W / 2, pos.y + TILE_H, pos.x, pos.y + TILE_H / 2])
+          .fill({ color: 0x3f7f9f, alpha });
+      }
     }
   }
 
   private updateCitizens(dt: number) {
     for (const citizen of this.world.citizens) {
+      if (citizen.rogue) this.lastRogue.add(citizen.id); else this.lastRogue.delete(citizen.id);
       const sprite = this.citizens.get(citizen.id);
       if (!sprite) continue;
       let door: { x: number; y: number } | undefined;
@@ -1513,6 +1714,21 @@ export class EmergeScene {
   private updateSmoke(dt: number) {
     // Emit from any chimney whose building is actively producing.
     for (const view of this.buildings.values()) {
+      // Knocked-about walls smoulder; a ruin smokes for as long as it stands.
+      const hurt = (view.building.damage ?? 0) > 0.35 || view.building.ruined;
+      if (hurt && Math.random() < dt * (view.building.ruined ? 1.2 : 2)) {
+        const particle = this.smoke.find((p) => p.life <= 0);
+        if (particle) {
+          particle.sprite.visible = true;
+          particle.sprite.position.set(view.base.x + (Math.random() - 0.5) * 30, view.base.y - view.base.height * 0.55);
+          particle.sprite.scale.set(0.4);
+          particle.sprite.tint = 0x3c3a36;
+          particle.vx = (Math.random() - 0.5) * 8;
+          particle.vy = -10 - Math.random() * 8;
+          particle.max = 2 + Math.random();
+          particle.life = particle.max;
+        }
+      }
       if (!view.chimney || !view.building.production) continue;
       if (Math.random() > dt * 3.2) continue;
       const particle = this.smoke.find((p) => p.life <= 0);
@@ -1520,6 +1736,7 @@ export class EmergeScene {
       particle.sprite.visible = true;
       particle.sprite.position.set(view.base.x + view.chimney.x, view.base.y + view.chimney.y);
       particle.sprite.scale.set(0.35);
+      particle.sprite.tint = 0xffffff;
       particle.vx = 6 + Math.random() * 8;
       particle.vy = -16 - Math.random() * 8;
       particle.max = 2.6 + Math.random();

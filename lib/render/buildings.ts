@@ -722,6 +722,22 @@ const RECIPES: Record<string, Recipe> = {
       for (let i = 0; i < 5; i++) wallPatch(p, g, 'right', 0.56 + i * 0.07, 0.05, 2, 7, FOLIAGE.bush);
     },
   },
+  Jail: {
+    bw: 66, wallH: 24, roofH: 12, roof: 'flat', wall: 'stone', roofColor: 'slate',
+    windows: [],
+    door: ['right', 0.34], sign: 'JAIL',
+    extras: (p, _lit, g) => {
+      // Two barred windows, small and high, and a heavy door.
+      for (const side of ['left', 'right'] as const) {
+        const t = side === 'left' ? 0.5 : 0.72;
+        wallPatch(p, g, side, t, 0.18, 12, 9, '#0f1512');
+        for (let i = 0; i < 3; i++) wallPatch(p, g, side, t + 0.015 + i * 0.045, 0.18, 1, 9, '#9aa0a6');
+        wallPatch(p, g, side, t, 0.34, 12, 1, '#9aa0a6');
+      }
+      wallPatch(p, g, 'right', 0.3, 0.3, 4, Math.round(g.wallH * 0.62), '#3a2e22');
+      wallPatch(p, g, 'right', 0.31, 0.5, 2, 2, '#aeb5ba');
+    },
+  },
   Mine: {
     bw: 76, wallH: 24, roofH: 16, roof: 'flat', wall: 'stone', roofColor: 'slate',
     windows: [],

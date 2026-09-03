@@ -29,7 +29,7 @@ export type Terrain = 'fertile' | 'forest' | 'mountain' | 'rocky' | 'coastal' | 
 export type Job = 'farmer' | 'woodcutter' | 'fisher' | 'hunter' | 'forager' | 'miner' | 'quarry' | 'miller' | 'baker' | 'carpenter' | 'blacksmith' | 'tailor' | 'unemployed';
 export type WorkingJob = Exclude<Job, 'unemployed'>;
 export type Activity = 'walking' | 'working' | 'resting' | 'trading' | 'eating' | 'idle';
-export type Phase = 'sleeping' | 'athome' | 'working' | 'eating' | 'socialising' | 'wandering';
+export type Phase = 'sleeping' | 'athome' | 'working' | 'eating' | 'socialising' | 'wandering' | 'rogue' | 'pursuit' | 'jailed' | 'fleeing';
 export type Facing = 'n' | 's' | 'e' | 'w';
 export type Season = 'Spring' | 'Summer' | 'Autumn' | 'Winter';
 export type Weather = 'Clear' | 'Cloudy' | 'Rain' | 'Storm' | 'Fog' | 'Snow';
@@ -79,7 +79,7 @@ export interface Resolution {
 /** A work made at a showcase, kept so the settlement has a body of work. */
 export interface Artwork { id: string; title: string; maker: string; day: number; subject: string }
 
-export type HazardKind = 'fire' | 'blight' | 'wolves' | 'flood';
+export type HazardKind = 'fire' | 'blight' | 'wolves' | 'flood' | 'earthquake' | 'tornado' | 'plague';
 
 /**
  * Something going wrong.
@@ -104,6 +104,23 @@ export interface Hazard {
   days: number;
   /** A building it has taken out of use, restored when it passes. */
   buildingId?: string;
+  /** How hard it landed, from a little over nothing to one. */
+  severity: number;
+  /** Game hours left for a hazard that runs by the hour: the shaking, the funnel. */
+  hours?: number;
+  /** Where a moving hazard is, and which way it is going. The tornado. */
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  /** How high the water stands, nought to one. The flood. */
+  level?: number;
+  /** Buildings it has left in ruins, by id. */
+  wrecked: string[];
+  /** The player has spent Gold against it. */
+  fought?: boolean;
+  /** Feed lines it has been allowed so far, so a long one does not flood the feed. */
+  told?: number;
 }
 
 /**
@@ -242,6 +259,22 @@ export interface Citizen {
   carried?: boolean;
   /** The animal this hunter is closing on. */
   hunting?: string;
+  /**
+   * Turned on the settlement: wrecking what they can until the others stop
+   * them. `damage` counts the buildings they have brought down, which is what
+   * decides whether they are jailed or killed when they are caught.
+   */
+  rogue?: { since: number; damage: number; targetId?: string; escapes: number; caught?: boolean };
+  /** Days left in the jail. */
+  jailed?: number;
+  /** The rogue this person is going after. */
+  chasing?: string;
+  /** Hours left in a scuffle, during which nobody moves. */
+  scuffle?: number;
+  /** Days sick with the plague, from one. */
+  sick?: number;
+  /** Hours left running for open ground, from an earthquake or a funnel. */
+  fleeing?: number;
   /** Carrying a kill back to the store, which is the next place they go. */
   hauling?: boolean;
   /**
@@ -304,6 +337,10 @@ export interface Family { id: string; name: string; members: string[]; homeId: s
 export interface Building {
   id: string; type: string; x: number; y: number; workers: string[]; active: boolean;
   production?: string;
+  /** How badly it is knocked about, nought to one. At one it is a ruin. */
+  damage?: number;
+  /** Wrecked: out of use until the player rebuilds it. */
+  ruined?: boolean;
   /**
    * How far this building has been improved, 1 to `MAX_BUILDING_LEVEL`.
    *
@@ -528,7 +565,7 @@ export function ledgerTotals(ledger: DayLedger) {
 
 export const JOB_LABELS: Record<Job, string> = { farmer: 'Farmer', woodcutter: 'Woodcutter', fisher: 'Fisher', hunter: 'Hunter', forager: 'Forager', miner: 'Miner', quarry: 'Quarry worker', miller: 'Miller', baker: 'Baker', carpenter: 'Carpenter', blacksmith: 'Blacksmith', tailor: 'Tailor', unemployed: 'Unemployed' };
 export const ACTIVITY_LABELS: Record<Activity, string> = { walking: 'Walking', working: 'Working', resting: 'At home', trading: 'Socialising', eating: 'Eating', idle: 'Idle' };
-export const PHASE_LABELS: Record<Phase, string> = { sleeping: 'Asleep', athome: 'At home', working: 'At work', eating: 'Getting food', socialising: 'Socialising', wandering: 'Wandering' };
+export const PHASE_LABELS: Record<Phase, string> = { sleeping: 'Asleep', athome: 'At home', working: 'At work', eating: 'Getting food', socialising: 'Socialising', wandering: 'Wandering', rogue: 'Turned on the settlement', pursuit: 'Giving chase', jailed: 'In the jail', fleeing: 'Running for open ground' };
 
 export const JOBS: Record<WorkingJob, { wage: number; output: Partial<Record<Resource, number>>; input?: Partial<Record<Resource, number>>; building: string }> = {
   farmer: { wage: 10, output: { wheat: 10, vegetables: 5 }, building: 'Farm' },
@@ -650,7 +687,15 @@ function phaseFor(c: Citizen, hour: number): Phase {
 }
 
 function activityFor(phase: Phase): Activity {
-  return phase === 'working' ? 'working' : phase === 'eating' ? 'eating' : phase === 'socialising' ? 'trading' : phase === 'wandering' ? 'idle' : 'resting';
+  switch (phase) {
+    case 'working': return 'working';
+    // A rogue at a wall is swinging at it; that is the working animation.
+    case 'rogue': return 'working';
+    case 'eating': return 'eating';
+    case 'socialising': return 'trading';
+    case 'wandering': case 'pursuit': case 'fleeing': return 'idle';
+    default: return 'resting';
+  }
 }
 
 // Routing runs on the world's own plan, not on a shared one. Every helper here
@@ -847,6 +892,21 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
         exact = true;
       }
     }
+  } else if (phase === 'rogue') {
+    // At the wall of whatever they mean to wreck, in the open where the
+    // settlement can see them and get to them.
+    const mark = world.buildings.find((b) => b.id === c.rogue?.targetId);
+    if (mark) { target = { x: mark.x, y: mark.y }; spread = 1.0; }
+  } else if (phase === 'pursuit') {
+    const quarry = world.citizens.find((x) => x.id === c.chasing);
+    if (quarry) { target = { x: quarry.x, y: quarry.y }; exact = true; }
+  } else if (phase === 'jailed') {
+    const cell = findBuilding(world, 'Jail') ?? findBuilding(world, 'Market');
+    if (cell) { target = cell; spread = 1.2; }
+  } else if (phase === 'fleeing') {
+    // The square: open ground, away from walls that might come down.
+    target = { x: world.layout.plaza.x, y: world.layout.plaza.y };
+    spread = 3.5;
   } else if (phase === 'eating') {
     // A market stall to buy at, if one is free, rather than the doorway.
     const stall = claimAmenity(world, c, ['stall'], 60);
@@ -1149,7 +1209,7 @@ function onBridge(layout: WorldLayout, x: number, y: number) {
 
 function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: WorldLayout, water: WaterField) {
   let blocked = false;
-  let budget = (c.age < 16 ? 9 : 12.5) * hours;
+  let budget = (c.age < 16 ? 9 : 12.5) * hours * (c.sick ? 0.65 : 1);
   const startX = c.x, startY = c.y;
   c.moving = false;
   let guard = 0;
@@ -1330,8 +1390,17 @@ function moveCitizens(world: World, hours: number) {
     // and every rule below is about walking on land.
     if (c.carried || c.swimming) continue;
     if (c.age < 16) c.job = 'unemployed';
+    // Nobody in a scuffle moves.
+    if (c.scuffle && c.scuffle > 0) { c.moving = false; c.activity = 'idle'; continue; }
     let phase = phaseFor(c, world.hour);
     if (c.hunger < 35 && phase !== 'sleeping') phase = 'eating';
+    // Trouble outranks the day's routine: the jailed stay in, a rogue is at
+    // the walls whatever the hour, their pursuers are after them, and a
+    // settlement with the ground moving under it is out in the square.
+    if (c.jailed) phase = 'jailed';
+    else if (c.rogue) phase = 'rogue';
+    else if (c.chasing) phase = 'pursuit';
+    else if (c.fleeing && c.fleeing > 0) phase = 'fleeing';
     // Anyone genuinely freezing goes in out of it, and stays in until they have
     // properly warmed up. People do not stand in a blizzard until they drop,
     // and children — who wander all day by definition and are never counted as
@@ -3517,7 +3586,7 @@ export function rehouse(world: World): number {
 
 export interface Advice {
   /** What to do: raise a building, improve one, or move a lever. */
-  kind: 'build' | 'improve' | 'wages';
+  kind: 'build' | 'improve' | 'wages' | 'rebuild';
   /** The building type, where there is one. */
   type?: string;
   /** For an improvement, which building. */
@@ -3538,6 +3607,14 @@ export function adviseBuild(world: World): Advice[] {
   const r = world.resources;
   const supported = new Set(biomeProfile(world.biome).trades);
 
+  // Ruins first: nothing else on the list matters as much as a building the
+  // settlement already paid for lying in a heap.
+  for (const b of world.buildings.filter((x) => x.ruined)) {
+    const cost = rebuildCost(b);
+    out.push({ kind: 'rebuild', type: b.type, buildingId: b.id, title: `Rebuild the ${b.type.toLowerCase()}`,
+      why: b.type === 'House' ? 'It is a ruin, and the family that lived there has no roof.' : 'It is a ruin: out of use until it is raised again.',
+      gain: `${cost.gold} Gold, ${cost.wood} timber and ${cost.stone} stone, about six tenths of new.` });
+  }
   const homeless = adults.filter((c) => !homeOf(world, c)).length;
   if (homeless > 0) {
     out.push({ kind: 'build', type: 'House', title: 'Raise a house',
@@ -4212,9 +4289,16 @@ export function readiness(world: World): Record<HazardKind, number> {
   // sickness the town gets over rather than one it does not.
   const warned = hasCivic(world, 'Lab') ? LAB_WARNING : 0;
   const cared = hasCivic(world, 'Clinic') ? CLINIC_CARE : 0;
+  const improved = world.buildings.filter((b) => levelOf(b) > 1).length / buildings;
   return {
     fire: clamp(wells / (1 + buildings / 8) + warned, 0, 1),
     blight: clamp(food / (mouths * 9) * 0.7 + stores * 0.3 + warned + cared, 0, 1),
+    // Stone in the yard is what shores a wall up; a storehouse is somewhere
+    // to shelter; a clinic and herbs are what stands between a sickness and
+    // a burial.
+    earthquake: clamp(Math.min(1, world.resources.stone / 40) * 0.6 + warned + (stores ? 0.15 : 0), 0, 1),
+    tornado: clamp((stores ? 0.3 : 0) + improved * 0.45 + warned, 0, 1),
+    plague: clamp((hasCivic(world, 'Clinic') ? 0.45 : 0) + Math.min(1, world.resources.herbs / 12) * 0.35 + warned, 0, 1),
     // Hunters know the wood, and a lodge with people in it is a lodge wolves keep clear of.
     wolves: clamp(fires / (1 + mouths / 14) + warned + world.citizens.filter((c) => c.job === 'hunter').length * 0.2, 0, 1),
     flood: clamp(backFromBank, 0, 1),
@@ -4227,6 +4311,9 @@ export const HAZARD_LABELS: Record<HazardKind, string> = {
   blight: 'Blight',
   wolves: 'Wolves',
   flood: 'Flood',
+  earthquake: 'Earthquake',
+  tornado: 'Tornado',
+  plague: 'Plague',
 };
 
 export const HAZARD_DEFENCE: Record<HazardKind, string> = {
@@ -4234,7 +4321,174 @@ export const HAZARD_DEFENCE: Record<HazardKind, string> = {
   blight: 'A granary and a season of food put by.',
   wolves: 'Fires burning through the night, and numbers.',
   flood: 'Buildings set back from the bank.',
+  earthquake: 'Stone in the yard to shore walls up with, a storehouse, and a lab to read the ground.',
+  tornado: 'A storehouse to shelter in, sturdy improved buildings, and a lab to see it coming.',
+  plague: 'A clinic, herbs in store, and a lab to catch it early.',
 };
+
+/**
+ * What the player can spend against each kind of trouble, and what it does.
+ *
+ * This is the one place a player's hand reaches into a disaster. It costs
+ * Gold, once, scaled by how bad the thing is and how much town there is to
+ * save, and it is always worth less than losing a building — which is what
+ * keeps it a decision rather than a tax.
+ */
+export const HAZARD_FIGHT: Record<HazardKind, { gold: number; title: string; blurb: string }> = {
+  fire: { gold: 60, title: 'Bucket chains', blurb: 'Every hand to the wells. The fire is out by nightfall and the building is back in use.' },
+  blight: { gold: 90, title: 'Burn the blighted rows', blurb: 'Lose a little more of the crop now, and the rest of the harvest is saved.' },
+  wolves: { gold: 70, title: 'A night watch', blurb: 'Torches and people up all night. The wolves do not come back.' },
+  flood: { gold: 160, title: 'Sandbags along the bank', blurb: 'The water stops where it stands, and the buildings on the bank are spared.' },
+  earthquake: { gold: 220, title: 'Shore up the walls', blurb: 'Props and braces on every damaged wall. The aftershocks take nothing more, and the worst of the damage is patched.' },
+  tornado: { gold: 200, title: 'Storm crews', blurb: 'Shutters up and everyone in the cellars. The funnel takes far less, and breaks up sooner.' },
+  plague: { gold: 180, title: 'Quarantine and physic', blurb: 'The sick are kept apart and dosed with what herbs there are. It spreads far less and kills fewer.' },
+};
+
+/** What fighting this hazard costs, here and now. */
+export function fightCost(world: World, h: Hazard): number {
+  return Math.round(HAZARD_FIGHT[h.kind].gold * (0.6 + (h.severity ?? 0.5)) * (1 + world.buildings.length / 24));
+}
+
+/** Say something on a hazard's behalf, a few times at most. */
+function hazardSays(world: World, h: Hazard, text: string, limit = 4) {
+  h.told = (h.told ?? 0) + 1;
+  if (h.told <= limit) pushFeed(world, 'world', text);
+}
+
+/**
+ * Knock a building about. Returns true if this is what brought it down.
+ *
+ * The market, the bank and the town hall can be battered but never wrecked:
+ * losing them strands everybody at once, which is a dead plot rather than a
+ * damaged one.
+ */
+function damageBuilding(world: World, b: Building, amount: number, cause: string, h?: Hazard): boolean {
+  if (b.ruined || amount <= 0) return false;
+  const cap = UNDEMOLISHABLE.includes(b.type) ? 0.9 : 1;
+  b.damage = Math.min(cap, (b.damage ?? 0) + amount);
+  if (b.damage < 1) return false;
+  b.ruined = true;
+  b.active = false;
+  b.workers = [];
+  b.production = undefined;
+  // A ruined house is nobody's home: the family lodges until it is rebuilt
+  // or another roof goes up.
+  for (const f of world.families) if (f.homeId === b.id) f.homeId = '';
+  for (const c of world.citizens) {
+    if (c.destId === b.id) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; c.inside = false; }
+  }
+  h?.wrecked.push(b.id);
+  pushFeed(world, 'world', `${cause} left the ${b.type.toLowerCase()} in ruins.`);
+  return true;
+}
+
+/** What raising a ruin again costs: less than new, since the ground and the footings are there. */
+export function rebuildCost(b: Building): { gold: number; wood: number; stone: number } {
+  const need = buildMaterials(b.type);
+  return {
+    gold: Math.round((BUILD_COSTS[b.type] ?? 250) * 0.6),
+    wood: Math.ceil(need.wood * 0.6),
+    stone: Math.ceil(need.stone * 0.6),
+  };
+}
+
+/** The player raises a ruin again, for Gold and materials. */
+export function rebuildBuilding(world: World, id: string): { ok: boolean; message: string } {
+  const b = world.buildings.find((x) => x.id === id);
+  if (!b) return { ok: false, message: 'That building is not there.' };
+  if (!b.ruined) return { ok: false, message: 'It is standing. Nothing to rebuild.' };
+  const cost = rebuildCost(b);
+  if (world.treasury < cost.gold) return { ok: false, message: `Rebuilding takes ${cost.gold} Gold. The treasury holds ${Math.floor(world.treasury)}.` };
+  if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) {
+    return { ok: false, message: `Rebuilding takes ${cost.wood} timber and ${cost.stone} stone, and the yard is short.` };
+  }
+  spend(world, 'building', cost.gold);
+  world.resources.wood -= cost.wood;
+  world.resources.stone -= cost.stone;
+  note(world, 'consumed', 'wood', cost.wood);
+  note(world, 'consumed', 'stone', cost.stone);
+  b.ruined = false;
+  b.damage = 0;
+  b.active = true;
+  noteAttention(world);
+  pushFeed(world, 'build', `The ${b.type.toLowerCase()} was rebuilt for ${cost.gold} Gold, ${cost.wood} timber and ${cost.stone} stone.`);
+  staffNow(world);
+  if (b.type === 'House') rehouse(world);
+  return { ok: true, message: `The ${b.type.toLowerCase()} stands again.` };
+}
+
+/**
+ * The carpenters patch what is knocked about but still standing, a little a
+ * day, out of the yard. A ruin they cannot touch: that is the player's.
+ */
+function repairs(world: World) {
+  let said = false;
+  for (const b of world.buildings) {
+    if (b.ruined || !(b.damage && b.damage > 0)) continue;
+    if (world.resources.wood < 2) break;
+    world.resources.wood -= 2;
+    note(world, 'consumed', 'wood', 2);
+    b.damage = Math.max(0, b.damage - 0.2);
+    if (!said) { said = true; pushFeed(world, 'build', `The carpenters patched up the ${b.type.toLowerCase()}.`); }
+  }
+}
+
+/**
+ * The player spends Gold against a hazard. Once per hazard.
+ *
+ * Each kind answers differently, and the answer is written in `HAZARD_FIGHT`
+ * so the panel promises exactly what happens here.
+ */
+export function fightHazard(world: World, id: string): { ok: boolean; message: string } {
+  const h = world.hazards.find((x) => x.id === id);
+  if (!h) return { ok: false, message: 'That has passed.' };
+  if (h.fought) return { ok: false, message: 'Everything that can be done is being done.' };
+  const gold = fightCost(world, h);
+  if (world.treasury < gold) return { ok: false, message: `That takes ${gold} Gold. The treasury holds ${Math.floor(world.treasury)}.` };
+  spend(world, 'works', gold);
+  noteAttention(world);
+  h.fought = true;
+  const fight = HAZARD_FIGHT[h.kind];
+  switch (h.kind) {
+    case 'fire': {
+      const b = world.buildings.find((x) => x.id === h.buildingId);
+      if (b && !b.ruined) b.active = true;
+      h.days = 0;
+      h.effect = 'Out. The bucket chains did it.';
+      break;
+    }
+    case 'blight': {
+      const lost = Math.min(world.resources.wheat, 6);
+      world.resources.wheat -= lost;
+      note(world, 'consumed', 'wheat', lost);
+      h.days = 0;
+      h.effect = 'The blighted rows were burned. The rest of the harvest is safe.';
+      break;
+    }
+    case 'wolves':
+      for (const c of world.citizens) c.warmth = Math.min(100, c.warmth + 10);
+      h.days = 0;
+      h.effect = 'A watch is up all night. The wolves have gone back to the trees.';
+      break;
+    case 'flood':
+      h.effect = 'Sandbags hold the water where it stands. The bank is safe.';
+      break;
+    case 'earthquake':
+      h.hours = Math.min(h.hours ?? 0, 0.5);
+      for (const b of world.buildings) if (!b.ruined && b.damage) b.damage = Math.max(0, b.damage - 0.3);
+      h.effect = 'Every damaged wall is braced. The aftershocks will take nothing more.';
+      break;
+    case 'tornado':
+      h.hours = (h.hours ?? 0) * 0.6;
+      h.effect = 'Shutters are up and everyone is in the cellars. The funnel is taking far less.';
+      break;
+    case 'plague':
+      h.effect = 'The sick are kept apart and dosed. It is spreading far less.';
+      break;
+  }
+  pushFeed(world, 'world', `${gold.toLocaleString()} Gold went on ${fight.title.toLowerCase()}.`);
+  return { ok: true, message: fight.blurb };
+}
 
 /**
  * Whether a hazard of this kind is plausible today, given the world.
@@ -4261,6 +4515,21 @@ function hazardChance(world: World, kind: HazardKind): number {
     const woods = world.biome === 'woodland' || world.biome === 'valley' || world.biome === 'swamp' ? 1.5 : 1;
     return 0.035 * woods;
   }
+  if (kind === 'earthquake') {
+    // Hard ground moves. A shelf or a desert plateau more than a fen.
+    if (world.day < 8) return 0;
+    return 0.004 + biomeProfile(world.biome).plateau * 0.005;
+  }
+  if (kind === 'tornado') {
+    if (world.weather !== 'Storm' && world.weather !== 'Cloudy') return 0;
+    const open = world.biome === 'steppe' || world.biome === 'grassland' || world.biome === 'desert' ? 0.028 : 0.006;
+    return open * (world.season === 'Summer' || world.season === 'Autumn' ? 1.5 : 1);
+  }
+  if (kind === 'plague') {
+    if (world.citizens.length < 9) return 0;
+    const season = world.season === 'Autumn' || world.season === 'Winter' ? 0.018 : 0.007;
+    return season * (hasCivic(world, 'Clinic') ? 0.45 : 1);
+  }
   // Flood: a storm, on a settlement that has water in it at all.
   if (world.weather !== 'Storm') return 0;
   return water.mainland >= 0 ? 0.16 : 0;
@@ -4277,15 +4546,22 @@ function hazards(world: World) {
   // Retire what has run its course, and give back what it took.
   for (let i = world.hazards.length - 1; i >= 0; i--) {
     const h = world.hazards[i];
+    h.wrecked ??= [];
+    if (h.kind === 'plague') plagueDay(world, h);
     h.days -= 1;
     if (h.days > 0) continue;
     if (h.buildingId) {
       const b = world.buildings.find((x) => x.id === h.buildingId);
-      if (b) {
+      if (b && !b.ruined) {
         b.active = true;
         pushFeed(world, 'build', `The ${b.type.toLowerCase()} is back in use.`);
       }
     }
+    if (h.kind === 'plague') {
+      for (const c of world.citizens) c.sick = undefined;
+      pushFeed(world, 'world', 'The sickness has run its course.');
+    }
+    if (h.kind === 'flood') pushFeed(world, 'world', 'The water has gone down.');
     world.hazards.splice(i, 1);
   }
   if (world.hazards.length) return;
@@ -4295,7 +4571,7 @@ function hazards(world: World) {
 
   const rand = mulberry32(world.seed + world.day * 3319);
   const ready = readiness(world);
-  const kinds: HazardKind[] = ['fire', 'blight', 'wolves', 'flood'];
+  const kinds: HazardKind[] = ['fire', 'blight', 'wolves', 'flood', 'earthquake', 'tornado', 'plague'];
   for (const kind of kinds) {
     const chance = hazardChance(world, kind);
     if (chance <= 0 || rand() > chance) continue;
@@ -4309,9 +4585,60 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
   // between a bad afternoon and a bad month.
   const severity = Math.max(0.12, 1 - ready);
   const days = Math.max(1, Math.round(1 + severity * 4));
-  const add = (effect: string, buildingId?: string) => {
-    world.hazards.push({ id: `h${world.counter++}`, kind, label: HAZARD_LABELS[kind], effect, day: world.day, days, buildingId });
+  const add = (effect: string, buildingId?: string): Hazard => {
+    const h: Hazard = { id: `h${world.counter++}`, kind, label: HAZARD_LABELS[kind], effect, day: world.day, days, buildingId, severity, wrecked: [] };
+    world.hazards.push(h);
+    return h;
   };
+  const scatter = (hours: number) => { for (const c of world.citizens) if (!c.jailed) c.fleeing = hours; };
+
+  if (kind === 'earthquake') {
+    const h = add('The ground is moving. Walls are cracking across the settlement.');
+    h.days = 2;
+    h.hours = 2 + severity * 4;
+    let damaged = 0, wrecked = 0;
+    for (const b of world.buildings) {
+      if (b.ruined || rand() > 0.4 + severity * 0.35) continue;
+      const before = b.ruined;
+      damageBuilding(world, b, (0.2 + rand() * 0.7) * severity * 1.6, 'The earthquake', h);
+      damaged++;
+      if (b.ruined && !before) wrecked++;
+    }
+    scatter(h.hours + 1);
+    pushFeed(world, 'world', `The ground heaved under ${world.name}. ${damaged} ${damaged === 1 ? 'building is' : 'buildings are'} damaged and ${wrecked} ${wrecked === 1 ? 'lies' : 'lie'} in ruins.`);
+    return;
+  }
+
+  if (kind === 'tornado') {
+    const plaza = world.layout.plaza;
+    // In from an edge, aimed roughly at the square.
+    const side = Math.floor(rand() * 4);
+    const x = side === 0 ? 4 : side === 1 ? 96 : 8 + rand() * 84;
+    const y = side === 2 ? 4 : side === 3 ? 96 : 8 + rand() * 84;
+    const dx = plaza.x - x, dy = plaza.y - y, d = Math.max(1, Math.hypot(dx, dy));
+    const pace = 7;
+    const h = add('A funnel cloud is down and moving on the settlement.');
+    h.days = 1;
+    h.hours = 6 + severity * 5;
+    h.x = x; h.y = y; h.vx = (dx / d) * pace; h.vy = (dy / d) * pace;
+    scatter(h.hours);
+    const from = side === 0 ? 'west' : side === 1 ? 'east' : side === 2 ? 'north' : 'south';
+    pushFeed(world, 'world', `A funnel cloud has come down to the ${from} of ${world.name} and is moving on the settlement.`);
+    return;
+  }
+
+  if (kind === 'plague') {
+    const adults = world.citizens.filter((c) => c.age >= 16 && !c.sick);
+    const first = 2 + Math.round(severity * 3);
+    for (let i = 0; i < first && adults.length; i++) {
+      const c = adults.splice(Math.floor(rand() * adults.length), 1)[0];
+      c.sick = 1;
+    }
+    const h = add('Sickness is spreading from person to person.');
+    h.days = 6 + Math.round(severity * 6);
+    pushFeed(world, 'world', `Sickness is in ${world.name}. ${first} people are down with it, and it is catching.`);
+    return;
+  }
 
   if (kind === 'fire') {
     const candidates = world.buildings.filter((b) => b.active && b.type !== 'Market');
@@ -4319,11 +4646,13 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     if (!hit) return;
     if (ready > 0.75) {
       pushFeed(world, 'world', `A fire started at the ${hit.type.toLowerCase()} and was put out before it spread. The wells did their job.`);
-      add('Put out the same day. No lasting damage.');
-      world.hazards[world.hazards.length - 1].days = 1;
+      const h = add('Put out the same day. No lasting damage.');
+      h.days = 1;
+      h.severity = 0;
       return;
     }
     hit.active = false;
+    hit.damage = Math.min(0.9, (hit.damage ?? 0) + 0.5 * severity);
     const wood = Math.min(world.resources.wood, Math.round(12 * severity));
     world.resources.wood -= wood;
     note(world, 'consumed', 'wood', wood);
@@ -4351,8 +4680,9 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     const outdoors = world.citizens.filter((c) => !c.inside && c.age >= 16);
     if (ready > 0.7 || !outdoors.length) {
       pushFeed(world, 'world', 'Wolves came down to the edge of the settlement in the night and turned back at the fires.');
-      add('Kept at the treeline by the fires.');
-      world.hazards[world.hazards.length - 1].days = 1;
+      const h = add('Kept at the treeline by the fires.');
+      h.days = 1;
+      h.severity = 0;
       return;
     }
     const wool = Math.min(world.resources.wool, Math.round(6 * severity));
@@ -4367,21 +4697,357 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     return;
   }
 
-  // Flood.
-  const bank = world.buildings.filter((b) => b.active && waterOf(world).distanceToWater(b.x, b.y) < 6);
+  // Flood: the water comes up over days, and takes the buildings on the bank
+  // with it unless the player sandbags it.
+  const bank = world.buildings.filter((b) => b.active && waterOf(world).distanceToWater(b.x, b.y) < 8);
   if (!bank.length || ready > 0.85) {
     pushFeed(world, 'world', 'The river came up in the storm and went down again. The settlement is built well back from it.');
-    add('The water stayed in its channel.');
-    world.hazards[world.hazards.length - 1].days = 1;
+    const h = add('The water stayed in its channel.');
+    h.days = 1;
+    h.severity = 0;
     return;
   }
-  const hit = bank[Math.floor(rand() * bank.length)];
-  hit.active = false;
-  const stone = Math.min(world.resources.stone, Math.round(8 * severity));
-  world.resources.stone -= stone;
-  note(world, 'consumed', 'stone', stone);
-  pushFeed(world, 'world', `The river came over its bank and into the ${hit.type.toLowerCase()}. It is out of use until the ground dries.`);
-  add(`The ${hit.type.toLowerCase()} is flooded out.`, hit.id);
+  const h = add('The water is rising along the bank.');
+  h.days = 2 + Math.round(severity * 3);
+  h.level = 0.15;
+  pushFeed(world, 'world', `The river is over its banks and rising through ${world.name}. ${bank.length} ${bank.length === 1 ? 'building stands' : 'buildings stand'} in its way.`);
+}
+
+/**
+ * The hour-by-hour of a disaster: the funnel moves, the ground shakes, the
+ * water climbs, the sickness passes between people standing together.
+ */
+function hazardStep(world: World, hours: number) {
+  for (const c of world.citizens) if (c.fleeing && c.fleeing > 0) c.fleeing -= hours;
+  if (!world.hazards.length) return;
+  const water = waterOf(world);
+  for (let i = world.hazards.length - 1; i >= 0; i--) {
+    const h = world.hazards[i];
+    h.wrecked ??= [];
+    const severity = h.severity ?? 0.5;
+    if (h.kind === 'earthquake' && (h.hours ?? 0) > 0) {
+      h.hours = (h.hours ?? 0) - hours;
+      const rand = mulberry32(world.seed + Math.floor(world.hour * 60) + world.day * 1440);
+      if (!h.fought && rand() < 0.12 * hours) {
+        const standing = world.buildings.filter((b) => !b.ruined);
+        const hit = standing[Math.floor(rand() * standing.length)];
+        if (hit) {
+          damageBuilding(world, hit, (0.1 + rand() * 0.15) * severity, 'An aftershock', h);
+          hazardSays(world, h, `An aftershock rattled the ${hit.type.toLowerCase()}.`, 3);
+        }
+      }
+      if (h.hours <= 0) h.effect = h.fought ? 'Braced and still. It is over.' : 'The ground is still. It may move again before it settles.';
+    }
+    if (h.kind === 'tornado') {
+      h.hours = (h.hours ?? 0) - hours;
+      if (h.hours <= 0 || h.x === undefined || h.y === undefined) {
+        pushFeed(world, 'world', h.wrecked.length
+          ? `The funnel lifted and broke up. It left ${h.wrecked.length} ${h.wrecked.length === 1 ? 'building' : 'buildings'} in ruins.`
+          : 'The funnel lifted and broke up. The settlement was spared the worst of it.');
+        world.hazards.splice(i, 1);
+        continue;
+      }
+      const rand = mulberry32(world.seed + Math.floor(world.hour * 30) + world.day * 720);
+      // Wander a little, and turn back at the map's edge. Until it has
+      // crossed the square it keeps bending back toward it: a funnel that
+      // came down on the settlement is a funnel that goes through it.
+      const turn = (rand() - 0.5) * 1.2 * hours;
+      const vx = h.vx ?? 0, vy = h.vy ?? 0;
+      const cos = Math.cos(turn), sin = Math.sin(turn);
+      h.vx = vx * cos - vy * sin; h.vy = vx * sin + vy * cos;
+      const square = world.layout.plaza;
+      const toSquare = Math.hypot(square.x - h.x, square.y - h.y);
+      if (toSquare < 6) h.level = 1;
+      if (!h.level && toSquare > 0.5) {
+        const speed = Math.hypot(h.vx, h.vy) || 7;
+        const k = Math.min(1, 0.6 * hours);
+        h.vx += ((square.x - h.x) / toSquare * speed - h.vx) * k;
+        h.vy += ((square.y - h.y) / toSquare * speed - h.vy) * k;
+      }
+      h.x += h.vx * hours; h.y += h.vy * hours;
+      if (h.x < 4 || h.x > 96) { h.vx = -h.vx; h.x = clamp(h.x, 4, 96); }
+      if (h.y < 4 || h.y > 96) { h.vy = -h.vy; h.y = clamp(h.y, 4, 96); }
+      // Hard enough that a building the funnel passes straight over comes down
+      // in the hour or so it is overhead, and one it only brushes is knocked about.
+      const rate = 1.05 * severity * hours * (h.fought ? 0.35 : 1);
+      for (const b of world.buildings) {
+        if (b.ruined) continue;
+        const d = Math.hypot(b.x - h.x, b.y - h.y);
+        if (d > 5.5) continue;
+        damageBuilding(world, b, rate * (1 - d / 7), 'The tornado', h);
+      }
+      for (const c of world.citizens) {
+        if (c.inside || Math.hypot(c.x - h.x, c.y - h.y) > 4) continue;
+        c.happiness = Math.max(0, c.happiness - 6 * hours);
+        c.rest = Math.max(0, c.rest - 6 * hours);
+        c.fleeing = Math.max(c.fleeing ?? 0, 2);
+      }
+      const plaza = world.layout.plaza;
+      const where = Math.hypot(h.x - plaza.x, h.y - plaza.y) < 10 ? 'over the square'
+        : h.x < plaza.x - 8 ? 'over the west side' : h.x > plaza.x + 8 ? 'over the east side' : h.y < plaza.y ? 'to the north' : 'to the south';
+      h.effect = `The funnel is ${where}${h.wrecked.length ? `. ${h.wrecked.length} ${h.wrecked.length === 1 ? 'building is' : 'buildings are'} gone` : ''}.`;
+    }
+    if (h.kind === 'flood' && h.level !== undefined) {
+      if (!h.fought) h.level = Math.min(1, h.level + hours / 36);
+      const reach = 2.5 + h.level * 5;
+      if (!h.fought) {
+        for (const b of world.buildings) {
+          if (b.ruined || water.distanceToWater(b.x, b.y) > reach) continue;
+          damageBuilding(world, b, 0.011 * severity * hours * 1.3, 'The flood', h);
+        }
+        h.effect = h.level >= 1 ? `The water is as high as it will go. ${h.wrecked.length} ${h.wrecked.length === 1 ? 'building has' : 'buildings have'} gone under.` : 'The water is rising along the bank.';
+      }
+    }
+    if (h.kind === 'plague') {
+      const sick = world.citizens.filter((c) => c.sick && !c.inside);
+      if (!sick.length) continue;
+      const rate = 0.05 * hours * (hasCivic(world, 'Clinic') ? 0.6 : 1) * (h.fought ? 0.25 : 1);
+      const rand = mulberry32(world.seed + Math.floor(world.hour * 20) + world.day * 480);
+      for (const c of world.citizens) {
+        if (c.sick || c.inside || c.age < 4) continue;
+        for (const s of sick) {
+          if (Math.hypot(c.x - s.x, c.y - s.y) > 2.6) continue;
+          if (rand() < rate) { c.sick = 1; break; }
+        }
+      }
+      const down = world.citizens.filter((c) => c.sick).length;
+      h.effect = `${down} ${down === 1 ? 'person is' : 'people are'} down with it${h.fought ? ', kept apart and dosed' : ''}.`;
+    }
+  }
+}
+
+/** A day of the plague: who gets better, who does not. */
+function plagueDay(world: World, h: Hazard) {
+  const rand = mulberry32(world.seed + world.day * 4441);
+  const severity = h.severity ?? 0.5;
+  let recovered = 0;
+  const dead: Citizen[] = [];
+  for (const c of world.citizens) {
+    if (!c.sick) continue;
+    c.sick += 1;
+    c.happiness = Math.max(0, c.happiness - 3);
+    c.rest = Math.max(0, c.rest - 4);
+    // Herbs are the physic: one a day per patient, while there are any.
+    let risk = 0.05 * severity;
+    if (hasCivic(world, 'Clinic')) risk *= 0.5;
+    if (h.fought) risk *= 0.5;
+    if (world.resources.herbs >= 1) { world.resources.herbs -= 1; note(world, 'consumed', 'herbs', 1); risk *= 0.5; }
+    if (c.sick > 4 && rand() < 0.35) { c.sick = undefined; recovered++; continue; }
+    if (rand() < risk) dead.push(c);
+  }
+  for (const c of dead) bury(world, c, `${c.name} died of the sickness. The settlement is smaller today.`);
+  if (recovered) pushFeed(world, 'world', `${recovered} ${recovered === 1 ? 'person is' : 'people are'} over the sickness.`);
+  if (!world.citizens.some((c) => c.sick)) h.days = Math.min(h.days, 1);
+}
+
+/** Take somebody out of the world, and tidy everything that pointed at them. */
+function bury(world: World, c: Citizen, line: string) {
+  world.citizens = world.citizens.filter((x) => x.id !== c.id);
+  for (const f of world.families) f.members = f.members.filter((id) => id !== c.id);
+  for (const [key, bond] of Object.entries(world.bonds)) {
+    if (bond.a === c.id || bond.b === c.id) delete world.bonds[key];
+  }
+  world.projects = world.projects.filter((p) => p.ownerId !== c.id);
+  for (const a of world.amenities) a.users = a.users.filter((id) => id !== c.id);
+  for (const o of world.citizens) if (o.chasing === c.id) o.chasing = undefined;
+  for (const a of world.wildlife) if (a.stalkedBy === c.id) a.stalkedBy = undefined;
+  world.deaths += 1;
+  world.population = world.citizens.length;
+  pushFeed(world, 'social', line);
+}
+
+/* ------------------------------------------------------------------ *
+ * Unrest: the rogue, and the people who stop them
+ * ------------------------------------------------------------------ */
+
+/** A rogue who has brought down this many buildings is not taken alive. */
+export const ROGUE_KILL_AT = 2;
+/** How close a pursuer has to get. */
+const CATCH_REACH = 1.8;
+/** How long a scuffle lasts, in game hours. */
+const SCUFFLE_HOURS = 0.35;
+
+/**
+ * Once a day, somebody may turn.
+ *
+ * Not out of nowhere: the miserable, the purposeless, and people with a
+ * real enemy in the settlement. A jail halves it — a place with somewhere
+ * to put people is a place fewer people test. Never in the first days, and
+ * never two at once.
+ */
+function unrest(world: World) {
+  for (const c of world.citizens) {
+    if (!c.jailed) continue;
+    c.jailed -= 1;
+    if (c.jailed > 0) continue;
+    c.jailed = undefined;
+    c.happiness = Math.max(c.happiness, 55);
+    c.purpose = Math.max(c.purpose, 40);
+    c.dwell = 0;
+    pushFeed(world, 'social', `${c.name} was let out of the jail, quieter than they went in.`);
+  }
+  if (world.day < 6 || world.citizens.some((c) => c.rogue)) return;
+  const rand = mulberry32(world.seed + world.day * 5573);
+  const chance = 0.05 * (hasCivic(world, 'Jail') ? 0.5 : 1);
+  for (const c of world.citizens) {
+    if (c.age < 16 || c.jailed || c.sick || c.carried) continue;
+    const enemy = rivalsOf(world, c.id).some((r) => r.strength < -65);
+    const bitter = c.happiness < 32 || c.purpose < 12 || enemy;
+    if (!bitter || rand() > chance) continue;
+    turnRogue(world, c, enemy ? 'a grudge that has been building for days' : c.happiness < 32 ? 'misery' : 'having nothing to live for');
+    return;
+  }
+}
+
+/** Somebody turns on the settlement. */
+function turnRogue(world: World, c: Citizen, why: string) {
+  releaseAmenity(world, c);
+  releasePrey(world, c);
+  c.rogue = { since: world.day, damage: 0, escapes: 0 };
+  c.chasing = undefined;
+  c.inside = false;
+  c.dwell = 0;
+  pickRogueTarget(world, c);
+  pushFeed(world, 'social', `${c.name} has turned on the settlement, out of ${why}. Whatever stands nearest is in danger.`);
+}
+
+/** The nearest thing worth wrecking, or nothing, in which case the rogue gives up. */
+function pickRogueTarget(world: World, c: Citizen): Building | undefined {
+  if (!c.rogue) return undefined;
+  let best: Building | undefined;
+  let bestD = Infinity;
+  for (const b of world.buildings) {
+    if (b.ruined || !b.active || UNDEMOLISHABLE.includes(b.type) || b.type === 'Jail') continue;
+    const d = Math.hypot(b.x - c.x, b.y - c.y);
+    if (d < bestD) { bestD = d; best = b; }
+  }
+  c.rogue.targetId = best?.id;
+  if (!best) {
+    pushFeed(world, 'social', `${c.name} ran out of things to wreck and slunk off home.`);
+    c.rogue = undefined;
+    c.happiness = Math.max(c.happiness, 40);
+  }
+  assignDestination(world, c, c.rogue ? 'rogue' : phaseFor(c, world.hour));
+  return best;
+}
+
+/**
+ * The rogue at the walls, and the chase.
+ *
+ * A rogue walks to the nearest building and sets about it; it comes down in
+ * a few hours. The nearest three adults awake drop what they are doing and
+ * go after them, and when one gets within arm's reach there is a scuffle
+ * that nobody moves during. It ends with the rogue caught, or — twice at
+ * most — broken free and off after the next building. The player has no
+ * hand in any of it.
+ */
+function unrestStep(world: World, hours: number) {
+  const rogues = world.citizens.filter((c) => c.rogue);
+  // Pursuers whose quarry is gone go back to their day.
+  for (const c of world.citizens) {
+    if (c.chasing && !rogues.some((r) => r.id === c.chasing)) { c.chasing = undefined; c.scuffle = 0; c.dwell = 0; }
+  }
+  for (const r of rogues) {
+    if (!r.rogue) continue;
+    if (r.scuffle && r.scuffle > 0) {
+      r.scuffle -= hours;
+      if (r.scuffle <= 0) resolveScuffle(world, r);
+      continue;
+    }
+    // At the walls.
+    let mark = world.buildings.find((b) => b.id === r.rogue?.targetId);
+    if (!mark || mark.ruined || !mark.active) mark = pickRogueTarget(world, r);
+    if (!r.rogue || !mark) continue;
+    if (Math.hypot(mark.x - r.x, mark.y - r.y) <= footprintRadius(mark) + 2.6) {
+      r.activity = 'working';
+      if (damageBuilding(world, mark, 0.25 * hours, r.name)) {
+        r.rogue.damage += 1;
+        r.rogue.targetId = undefined;
+      }
+    }
+    // The chase.
+    const chasers = world.citizens.filter((c) => c.chasing === r.id);
+    if (chasers.length < 3) {
+      const recruits = world.citizens
+        .filter((c) => c.id !== r.id && c.age >= 16 && !c.rogue && !c.chasing && !c.jailed && !c.sick && !c.carried && !c.swimming
+          && phaseFor(c, world.hour) !== 'sleeping' && Math.hypot(c.x - r.x, c.y - r.y) < 45)
+        .sort((a, b) => Math.hypot(a.x - r.x, a.y - r.y) - Math.hypot(b.x - r.x, b.y - r.y))
+        .slice(0, 3 - chasers.length);
+      for (const c of recruits) {
+        releaseAmenity(world, c);
+        c.chasing = r.id;
+        c.inside = false;
+        assignDestination(world, c, 'pursuit');
+        chasers.push(c);
+      }
+      if (recruits.length && !r.rogue.caught) {
+        r.rogue.caught = true;
+        pushFeed(world, 'social', `${recruits.map((c) => c.name).join(' and ')} ${recruits.length === 1 ? 'has' : 'have'} gone after ${r.name}.`);
+      }
+    }
+    for (const c of chasers) {
+      if (c.scuffle && c.scuffle > 0) { c.scuffle -= hours; continue; }
+      const d = Math.hypot(c.x - r.x, c.y - r.y);
+      if (d <= CATCH_REACH) {
+        r.scuffle = SCUFFLE_HOURS;
+        for (const o of chasers) if (Math.hypot(o.x - r.x, o.y - r.y) <= 3.5) o.scuffle = SCUFFLE_HOURS;
+        pushFeed(world, 'social', `${c.name} has caught up with ${r.name}. There is a scuffle at the ${mark.type.toLowerCase()}.`);
+        break;
+      }
+      // Keep the chase pointed at where the rogue is now, not where they were.
+      c.dwell -= hours;
+      if (c.dwell <= 0 || Math.hypot(c.destX - r.x, c.destY - r.y) > 2.5) {
+        assignDestination(world, c, 'pursuit');
+        c.dwell = 0.2;
+      }
+    }
+  }
+}
+
+/** The scuffle ends: broken free, jailed, or killed. */
+function resolveScuffle(world: World, r: Citizen) {
+  if (!r.rogue) return;
+  const chasers = world.citizens.filter((c) => c.chasing === r.id && Math.hypot(c.x - r.x, c.y - r.y) <= 4);
+  const rand = mulberry32(world.seed + world.day * 811 + Math.floor(world.hour * 100));
+  r.scuffle = 0;
+  for (const c of chasers) c.scuffle = 0;
+  if (!chasers.length || (r.rogue.escapes < 2 && rand() < 0.3)) {
+    r.rogue.escapes += 1;
+    r.rogue.targetId = undefined;
+    pushFeed(world, 'social', `${r.name} broke free and ran.`);
+    pickRogueTarget(world, r);
+    return;
+  }
+  const names = chasers.slice(0, 2).map((c) => c.name).join(' and ');
+  const wrecked = r.rogue.damage;
+  for (const c of chasers) { c.chasing = undefined; c.dwell = 0; c.purpose = Math.min(100, c.purpose + 6); }
+  if (wrecked >= ROGUE_KILL_AT) {
+    bury(world, r, `${r.name} was killed by ${names} after wrecking ${wrecked} buildings. The settlement will not forget it.`);
+    return;
+  }
+  const cell = findBuilding(world, 'Jail');
+  r.rogue = undefined;
+  r.jailed = 4 + wrecked * 3;
+  r.happiness = 30;
+  r.chasing = undefined;
+  assignDestination(world, r, 'jailed');
+  pushFeed(world, 'social', `${names} threw ${r.name} in the ${cell ? 'jail' : 'market cellar'}${wrecked ? ` for wrecking the ${wrecked === 1 ? 'building' : 'buildings'}` : ''}. ${r.jailed} days.`);
+}
+
+/**
+ * Bring trouble on, for a test or a demonstration. Not reachable from play.
+ *
+ * Starts the named hazard at a stated severity whatever the weather, or turns
+ * the unhappiest adult rogue.
+ */
+export function trial(world: World, what: HazardKind | 'rogue', severity = 0.8) {
+  if (what === 'rogue') {
+    const c = [...world.citizens].filter((x) => x.age >= 16 && !x.rogue && !x.jailed).sort((a, b) => a.happiness - b.happiness)[0];
+    if (c) turnRogue(world, c, 'misery');
+    return;
+  }
+  world.hazards = [];
+  startHazard(world, what, 1 - severity, mulberry32(world.seed + world.day * 97 + 5));
 }
 
 /** Whether a hazard of this kind is running. Production and needs both ask. */
@@ -4535,20 +5201,11 @@ function lifeAndDeath(world: World) {
   }
 
   for (const c of dead) {
-    world.citizens = world.citizens.filter((x) => x.id !== c.id);
-    for (const f of world.families) f.members = f.members.filter((id) => id !== c.id);
-    // Their bonds go with them, or the friend list fills with the departed.
-    for (const [key, bond] of Object.entries(world.bonds)) {
-      if (bond.a === c.id || bond.b === c.id) delete world.bonds[key];
-    }
-    world.projects = world.projects.filter((p) => p.ownerId !== c.id);
-    for (const a of world.amenities) a.users = a.users.filter((id) => id !== c.id);
-    world.deaths += 1;
     const cause = c.hunger <= 4 ? 'went hungry'
       : c.warmth <= 6 ? (c.chilled ? 'could not keep warm' : 'could not escape the heat')
         : c.age >= c.lifespan ? `died at ${Math.floor(c.age)}, of old age`
           : `died at ${Math.floor(c.age)}`;
-    pushFeed(world, 'social', c.age >= c.lifespan && c.hunger > 4 && c.warmth > 6
+    bury(world, c, c.age >= c.lifespan && c.hunger > 4 && c.warmth > 6
       ? `${c.name} ${cause}.`
       : `${c.name} ${cause}. The settlement is smaller today.`);
   }
@@ -4837,6 +5494,7 @@ const TRADE_BUILD_COST: Record<string, number> = {
   Storage: 120, Tavern: 350, Bank: 450,
   // The civic buildings. None employs anybody; each changes how the town lives.
   Cafe: 300, School: 380, Library: 360, Studio: 340, Clinic: 420, Lab: 520,
+  Jail: 220,
 };
 
 /** What a building costs to raise, by type. Everything the panel shows comes from here. */
@@ -4879,6 +5537,7 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Studio: { wood: 20, stone: 8 },
   Clinic: { wood: 12, stone: 24 },
   Lab: { wood: 14, stone: 30 },
+  Jail: { wood: 8, stone: 22 },
 };
 
 /** What this kind of building takes to raise. Anything unlisted is a modest shed. */
@@ -5481,7 +6140,7 @@ export function maintenanceCost(type: string) {
   return ({
     Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Fishery: 2, Lodge: 3, Forager: 1, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
     Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
-    Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9,
+    Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9, Jail: 3,
   } as Record<string, number>)[type] ?? 2;
 }
 
@@ -5751,6 +6410,8 @@ function daily(world: World) {
   lifeAndDeath(world);
   migration(world, mulberry32(world.seed + world.day * 4111));
   hazards(world);
+  repairs(world);
+  unrest(world);
   discoveries(world);
   projects(world);
   decayBonds(world);
@@ -5774,6 +6435,8 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
   swimmers(world, hours);
   moveCitizens(world, hours);
   moveWildlife(world, hours);
+  hazardStep(world, hours);
+  unrestStep(world, hours);
   runMarket(world, hours);
   let guard = 0;
   while (world.hour >= 24 && guard++ < 8) {
@@ -5839,6 +6502,9 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
 export function pickUpCitizen(world: World, id: string) {
   const c = world.citizens.find((x) => x.id === id);
   if (!c) return false;
+  // The settlement deals with its own rogues: nobody lifts one out of a
+  // chase, or carries a pursuer off it, or lets somebody out of the jail.
+  if (c.rogue || c.chasing || c.jailed || (c.scuffle && c.scuffle > 0)) return false;
   releaseAmenity(world, c);
   c.carried = true;
   c.swimming = false;

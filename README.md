@@ -832,6 +832,34 @@ at once, and none ended with a building permanently out of use. Against the same
 with hazards switched off, deaths rose by nought to four in eight of the nine biomes,
 and the largest cost was one woodland ending fifteen people smaller. Nothing collapsed.
 
+### Disasters you can watch, and fight
+
+Three more, since v1.2, that run by the hour rather than the day. An **earthquake**
+shakes the whole plot for hours (the camera too), cracks walls, brings some down and
+rattles the rest with aftershocks. A **tornado** comes down at an edge of the map and
+crosses it, a funnel with debris flying round its foot, wrecking what it passes over
+until it lifts. A **flood** climbs the bank over days, drawn as standing water over
+the ground it has reached, and takes the buildings in it. A **plague** passes between
+people standing together, turns the sick a bad colour and slows them, and kills some;
+herbs in store are the physic.
+
+A red bar sits under the clock while any of it runs, with the one thing the player
+can do: **spend Gold against it, once** — bucket chains, sandbags, storm crews, a
+quarantine, shoring up the walls. Each does exactly what it says. Wrecked buildings
+are **ruins**: out of use, smoking, a heap of stone, until the player rebuilds them
+from the building card for about six tenths of the Gold and materials. Lesser damage
+the carpenters patch on their own.
+
+### People who turn
+
+Somebody miserable, purposeless or nursing a grudge can **turn on the settlement**:
+red trim, torch in hand, wrecking the nearest building in a few hours. The player has
+no hand in it — a rogue cannot be picked up, and neither can the people chasing them.
+The three nearest adults awake give chase; when one gets within reach there is a
+scuffle, animated, and it ends with the rogue thrown in the **Jail** (or the market
+cellar) — or killed on the spot if they have already brought two buildings down. A
+Jail halves how often anybody turns.
+
 ## Your world is saved
 
 The settlement is written to `localStorage` every fifteen seconds and again the

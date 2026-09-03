@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
+  demolishBuilding, dropCitizen, drawFromTreasury, fightHazard, fundTreasury, grantResource, marketReport, rebuildBuilding, trial,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees,
@@ -45,7 +45,7 @@ import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
 import { useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
-import { t, tn } from '@/lib/i18n';
+import { t, tn, tx } from '@/lib/i18n';
 import {
   EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger,
@@ -1042,6 +1042,88 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     setView(snapshot(world, null));
   }, []);
 
+  /** Raise a ruin again. Gold and materials, less than new. */
+  const rebuild = useCallback((id: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = rebuildBuilding(world, id);
+    announce({ id: `rebuild-${id}-${Date.now()}`, kind: 'danger', title: result.ok ? t('Rebuilt') : t('Not yet'), body: tx(result.message), lifetime: 7000 });
+    if (!result.ok) return;
+    sceneRef.current?.syncBuildings();
+    setView(snapshot(world, selectedRef.current));
+  }, []);
+
+  /** Spend Gold against whatever is going wrong. */
+  const fight = useCallback((id: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = fightHazard(world, id);
+    announce({ id: `fight-${id}-${Date.now()}`, kind: 'danger', title: result.ok ? t('Gold well spent') : t('Not yet'), body: tx(result.message), lifetime: 9000 });
+    if (result.ok) setView(snapshot(world, selectedRef.current));
+  }, []);
+
+  /**
+   * Trouble on demand, for a test build only.
+   *
+   * `?trial=tornado` (or earthquake, flood, plague, fire, rogue) brings the
+   * named thing on as soon as the world opens. Compiled out of the real
+   * build: the flag is read at build time and is not set in production.
+   */
+  useEffect(() => {
+    if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
+    const what = new URLSearchParams(window.location.search).get('trial');
+    if (!what) return;
+    const timer = window.setTimeout(() => {
+      const world = worldRef.current;
+      if (!world) return;
+      trial(world, what as Parameters<typeof trial>[1]);
+      setView(snapshot(world, selectedRef.current));
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
+
+  /* Cards when trouble starts: a disaster, or somebody turning rogue. */
+  useEffect(() => {
+    if (spectating) return;
+    let live = true;
+    const seen = new Set<string>();
+    let rogueSeen: string | null = null;
+    let primed = false;
+    const tick = () => {
+      const world = worldRef.current;
+      if (!live || !world) return;
+      for (const h of world.hazards) {
+        if (seen.has(h.id)) continue;
+        seen.add(h.id);
+        if (!primed) continue;
+        announce({
+          id: `danger-${h.id}`,
+          kind: 'danger',
+          title: t('{what} — the settlement is in danger', { what: tn(h.label) }),
+          body: tx(h.effect),
+          lifetime: 16_000,
+        });
+      }
+      const rogue = world.citizens.find((c) => c.rogue);
+      if (rogue && rogue.id !== rogueSeen) {
+        rogueSeen = rogue.id;
+        if (primed) {
+          announce({
+            id: `rogue-${rogue.id}-${world.day}`,
+            kind: 'danger',
+            title: t('{name} has turned on the settlement', { name: rogue.name }),
+            body: t('The others will have to stop them. You cannot.'),
+            lifetime: 16_000,
+          });
+        }
+      } else if (!rogue) rogueSeen = null;
+      primed = true;
+    };
+    tick();
+    const timer = window.setInterval(tick, 3000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [announce, spectating]);
+
   /** Which building is being carried to a new site, if any. */
   const [movingBuilding, setMovingBuilding] = useState<string | null>(null);
 
@@ -1310,6 +1392,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             player={player}
             onRenameCitizen={renameCitizenFor}
             onDemolish={demolish}
+            onRebuild={rebuild}
+            onFight={fight}
             hover={hoverInfo}
             activePanel={panel}
             onTogglePause={() => setPaused((p) => !p)}

@@ -8,7 +8,7 @@
  */
 
 import {
-  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS,
+  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
   skillLevel, skillOutput, upgradeCost, upkeepOf,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
@@ -30,7 +30,8 @@ export interface FocusCitizen {
   mood: number; energy: number; purpose: number; hunger: number; social: number;
   wallet: number; wage: number;
   friends: { id: string; name: string }[];
-  project: string | null;
+  trouble: string | null;
+    project: string | null;
 }
 
 export interface FocusBuilding {
@@ -39,7 +40,10 @@ export interface FocusBuilding {
   x: number; y: number; upkeep: number; active: boolean;
   people: { id: string; name: string; doing: string }[];
   /** Whether it can be pulled down, and what comes back if it is. */
-  demolishable: boolean;
+  ruined: boolean;
+    damage: number;
+    rebuild: { gold: number; wood: number; stone: number; stocked: boolean };
+    demolishable: boolean;
   salvage: { wood: number; stone: number };
   /** How far it has been improved, and what the next step would take. */
   level: number;
@@ -122,7 +126,9 @@ export interface Snapshot {
     cap: number;
   };
   /** What is going wrong right now, and what it is doing. */
-  hazards: { id: string; kind: HazardKind; label: string; effect: string; days: number }[];
+  /** A line about the rogue at large, or null when the settlement is at peace with itself. */
+  rogue: string | null;
+  hazards: { id: string; kind: HazardKind; label: string; effect: string; days: number; hours: number | null; severity: number; fought: boolean; wrecked: number; fight: { gold: number; title: string; blurb: string } }[];
   /**
    * How ready the settlement is for each kind of trouble, as a percentage, with
    * the thing that would improve it. Shown whether or not anything is
@@ -207,6 +213,11 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       wallet: c.wallet, wage: c.wage,
       friends: friendsOf(world, c.id).slice(0, 4).map((f) => ({ id: f.citizen.id, name: f.citizen.name })),
       project: project?.name ?? null,
+      trouble: c.jailed ? `In the jail, ${c.jailed} ${c.jailed === 1 ? 'day' : 'days'} to go`
+        : c.rogue ? `Turned on the settlement${c.rogue.damage ? `, ${c.rogue.damage} ${c.rogue.damage === 1 ? 'building' : 'buildings'} wrecked` : ''}`
+          : c.chasing ? 'Going after the rogue'
+            : c.sick ? `Sick, day ${c.sick}`
+              : c.fleeing && c.fleeing > 0 ? 'Running for open ground' : null,
     };
   }
   const b = world.buildings.find((x) => x.id === target.id);
@@ -241,7 +252,13 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     }),
     // The market is the settlement's heart and a lived-in house is somebody's
     // home; neither offers the button.
-    demolishable: !UNDEMOLISHABLE.includes(b.type) && !(family && family.members.length > 0),
+    ruined: !!b.ruined,
+    damage: Math.round((b.damage ?? 0) * 100),
+    rebuild: (() => {
+      const cost = rebuildCost(b);
+      return { ...cost, stocked: world.resources.wood >= cost.wood && world.resources.stone >= cost.stone };
+    })(),
+    demolishable: !b.ruined && !UNDEMOLISHABLE.includes(b.type) && !(family && family.members.length > 0),
     salvage: (() => {
       const need = buildMaterials(b.type);
       return { wood: Math.floor(need.wood / 2), stone: Math.floor(need.stone / 2) };
@@ -314,7 +331,19 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       idleHours: Math.max(0, (Date.now() - world.stewardship.lastActionAt) / 3_600_000),
       cap: STEWARDSHIP_DAILY_CAP,
     },
-    hazards: world.hazards.map((h) => ({ id: h.id, kind: h.kind, label: h.label, effect: h.effect, days: h.days })),
+    rogue: (() => {
+      const r = world.citizens.find((c) => c.rogue);
+      if (!r) return null;
+      const mark = world.buildings.find((b) => b.id === r.rogue?.targetId);
+      const after = world.citizens.filter((c) => c.chasing === r.id).map((c) => c.name);
+      return `${r.name} is wrecking ${mark ? `the ${mark.type.toLowerCase()}` : 'what they can'}${after.length ? `. ${after.join(' and ')} ${after.length === 1 ? 'is' : 'are'} after them` : ''}.`;
+    })(),
+    hazards: world.hazards.map((h) => ({
+      id: h.id, kind: h.kind, label: h.label, effect: h.effect, days: h.days,
+      hours: h.hours !== undefined && h.hours > 0 ? Math.ceil(h.hours) : null,
+      severity: h.severity ?? 0.5, fought: !!h.fought, wrecked: (h.wrecked ?? []).length,
+      fight: { gold: fightCost(world, h), title: HAZARD_FIGHT[h.kind].title, blurb: HAZARD_FIGHT[h.kind].blurb },
+    })),
     readiness: (Object.entries(ready) as [HazardKind, number][])
       .map(([kind, value]) => ({
         kind,

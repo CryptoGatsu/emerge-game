@@ -166,6 +166,9 @@ const HAZARD_CAUSE: Record<HazardKind, string> = {
   blight: 'A growing season, and fields to spoil.',
   wolves: 'A cold night and woodland at the edge of the settlement.',
   flood: 'A storm, and a river to rise.',
+  earthquake: 'Hard ground: a shelf or a desert plateau. Rare, and never in the first week.',
+  tornado: 'A storm or a heavy sky over open country: steppe, grassland, desert.',
+  plague: 'A settlement of nine or more in autumn or winter, with no clinic.',
 };
 
 const SECTIONS = [
@@ -740,10 +743,30 @@ export default function Wiki() {
         <section id="danger">
           <h2>What can go wrong</h2>
           <p>
-            Four things, and none of them is random punishment: each wants particular conditions,
+            Seven things, and none of them is random punishment: each wants particular conditions,
             and each has something that answers it. A hazard that arrives at a settlement which is
             ready for it costs close to nothing. One that arrives at a settlement which is not can
             take a building, a harvest, or somebody&rsquo;s life.
+          </p>
+          <p>
+            Three of them are disasters that run by the hour and can be watched. An <b>earthquake</b>
+            shakes the whole plot for hours, cracks walls, brings some down and rattles the rest
+            with aftershocks. A <b>tornado</b> comes down at the edge of the map and crosses it,
+            wrecking whatever it passes over, until it lifts. A <b>flood</b> climbs the bank over
+            days and takes the buildings standing in the water. A <b>plague</b> passes between
+            people standing together, slows the sick, and kills some of them; herbs in store are
+            the physic, one a day per patient.
+          </p>
+          <p>
+            <b>You can spend Gold against any of them, once.</b> The red bar under the clock, and
+            the What could go wrong panel, offer the one thing that answers each: bucket chains,
+            burning the blighted rows, a night watch, sandbags along the bank, shoring up the
+            walls, storm crews, a quarantine. The price scales with how bad it is and how much
+            town there is to save, and each does exactly what the panel says. Buildings a disaster
+            wrecks are <b>ruins</b> &mdash; out of use, smoking, a heap of stone &mdash; until you
+            rebuild them from the building card for about six tenths of the Gold and materials
+            they cost new. Damage short of a ruin the carpenters patch on their own, two timber a
+            day.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Trouble</th><th>What brings it</th><th>What answers it</th></tr></thead>
@@ -761,6 +784,18 @@ export default function Wiki() {
             The <b>What could go wrong</b> panel shows how ready you are for each, as a percentage,
             <em> before</em> anything happens. That is the whole point of it: readiness is something
             to build in a quiet week, not something to read afterwards.
+          </p>
+          <h3>People who turn</h3>
+          <p>
+            Once in a while somebody turns on the settlement: the miserable, the purposeless, or
+            somebody with a real enemy in the town. They take up a torch and set about the nearest
+            building, and it comes down in a few hours. <b>You have no hand in it.</b> You cannot
+            lift them away, and you cannot lift away the people who go after them. The three
+            nearest adults awake drop what they are doing and give chase; when one gets within
+            arm&rsquo;s reach there is a scuffle, and it ends with the rogue thrown in the jail, or
+            &mdash; twice at most &mdash; broken free and off after the next building. Somebody
+            who has already brought two buildings down is not taken alive. A <b>Jail</b> halves
+            how often anybody turns, and holds them; without one, the market cellar does.
           </p>
           <p className="wiki-note">
             Readiness is not a purchase. It is counted from what is actually there — wells within

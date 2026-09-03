@@ -224,6 +224,16 @@ export function statusLine(c: Citizen, world?: World): string {
 }
 
 function statusText(c: Citizen, world?: World): string {
+  // Trouble first: it is the one thing about a person worth reading.
+  if (c.jailed) return `In the jail, ${c.jailed} ${c.jailed === 1 ? 'day' : 'days'} to go`;
+  if (c.scuffle && c.scuffle > 0) return 'In a scuffle';
+  if (c.rogue) return 'Turned on the settlement';
+  if (c.chasing && world) {
+    const quarry = world.citizens.find((other) => other.id === c.chasing);
+    if (quarry) return `Going after ${quarry.name}`;
+  }
+  if (c.fleeing && c.fleeing > 0) return 'Running for open ground';
+  if (c.sick) return 'Sick, and still on their feet';
   if (c.age < 16) return c.activity === 'walking' ? 'Exploring the settlement' : 'Playing outside';
   // Crossing the settlement to find somebody is the most interesting thing a
   // person can be doing, so it outranks the generic reading of their activity.

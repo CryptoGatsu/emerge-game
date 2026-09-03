@@ -59,6 +59,10 @@ export class CitizenSprite {
   private carryKind: string | null = null;
   /** A rod or a bow, held while working out of doors. */
   private readonly tool: Sprite;
+  /** A torch, carried by somebody who has turned on the settlement. */
+  private readonly torch: Sprite;
+  /** The look last applied for trouble: rogue, sick, or neither. */
+  private moodShown = '';
   /** The trade the load, the tool and the hat were last set for. */
   private jobShown = '';
   private readonly stack = new Container();
@@ -111,11 +115,16 @@ export class CitizenSprite {
     this.tool.anchor.set(0.2, 0.9);
     this.tool.visible = false;
 
+    this.torch = new Sprite(assets.get('fx.torch.0'));
+    this.torch.anchor.set(0.5, 0.95);
+    this.torch.visible = false;
+
     this.hat = new Sprite();
     this.hat.anchor.set(0.5, CHAR_GROUND / CHAR_H);
     stack.addChild(this.hat);
     stack.addChild(this.carry);
     stack.addChild(this.tool);
+    stack.addChild(this.torch);
 
     this.container.addChild(stack);
     this.dressFor(citizen);
@@ -142,6 +151,22 @@ export class CitizenSprite {
     this.hat.visible = this.hatKind !== 'none';
     if (this.hatKind !== 'none') this.hat.tint = HAT_TINTS[this.hatKind];
     this.appliedKey = '';
+  }
+
+  /**
+   * Trouble shows on a person: a rogue wears their trim red and carries a
+   * torch; somebody sick has gone a bad colour.
+   */
+  private moodFor(citizen: Citizen) {
+    const mood = citizen.rogue ? 'rogue' : citizen.sick ? 'sick' : '';
+    if (mood === this.moodShown) return;
+    this.moodShown = mood;
+    const trim = this.body.trim, head = this.body.head, hands = this.body.hands, body = this.body.body;
+    if (trim) trim.tint = mood === 'rogue' ? 0xe0402a : this.appearance.accent;
+    const skin = mood === 'sick' ? 0xb8d8a8 : this.appearance.skin;
+    if (head) head.tint = skin;
+    if (hands) hands.tint = skin;
+    if (body) body.tint = mood === 'rogue' ? 0x4a2a28 : this.appearance.shirt;
   }
 
   private tintFor(layer: LayerName): number {
@@ -203,6 +228,7 @@ export class CitizenSprite {
    */
   update(citizen: Citizen, dt: number, height: number, doorPoint?: { x: number; y: number }, face?: { dir: Dir; flipped: boolean }): CitizenView {
     this.dressFor(citizen);
+    this.moodFor(citizen);
     const targetX = doorPoint ? doorPoint.x : citizen.x;
     const targetY = doorPoint ? doorPoint.y : citizen.y;
 
@@ -233,7 +259,8 @@ export class CitizenSprite {
       this.flipped = face.flipped;
     }
 
-    const nextState = this.stateFor(citizen, moving);
+    const scuffling = !!citizen.scuffle && citizen.scuffle > 0;
+    const nextState = scuffling ? 'work' : this.stateFor(citizen, moving);
     if (nextState !== this.state) { this.state = nextState; this.clock = 0; }
 
     // Walk cadence comes from distance travelled; everything else runs on time.
@@ -243,7 +270,10 @@ export class CitizenSprite {
     this.applyFrame();
 
     const screen = worldToScreen(this.wx, this.wy, height);
-    this.container.position.set(screen.x, screen.y);
+    // A scuffle is people thrown about: the body jitters off its spot.
+    const jx = scuffling ? (Math.random() - 0.5) * 5 : 0;
+    const jy = scuffling ? (Math.random() - 0.5) * 3 : 0;
+    this.container.position.set(screen.x + jx, screen.y + jy);
     this.shadow.position.set(0, -1);
     this.shadow.scale.set(this.appearance.scale * (this.state === 'sleep' ? 1.2 : 1));
 
@@ -259,6 +289,13 @@ export class CitizenSprite {
     const working = citizen.activity === 'working' && !citizen.inside && !citizen.errand;
     const holding = citizen.job === 'fisher' ? working && !moving : citizen.job === 'hunter' ? !!citizen.hunting && !citizen.inside : false;
     this.tool.visible = holding;
+    // The torch: out whenever the rogue is in view, flickering.
+    const torching = !!citizen.rogue && !citizen.inside;
+    this.torch.visible = torching;
+    if (torching) {
+      this.torch.texture = this.assets.get(`fx.torch.${Math.floor(this.clock * 6 + this.wx) % 2}`);
+      this.torch.position.set(this.dir === 'e' ? 8 : 6, -12);
+    }
     if (holding) {
       const scale = 0.9;
       this.tool.scale.set(scale, scale);
