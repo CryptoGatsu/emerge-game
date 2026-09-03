@@ -22,7 +22,7 @@ import {
   RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
-import { STEWARDSHIP_DAILY_CAP } from '@/lib/simulation';
+import { JOBS, LEDGER_LABELS, STEWARDSHIP_DAILY_CAP, maintenanceCost } from '@/lib/simulation';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { BrandLine } from './Brand';
@@ -61,11 +61,46 @@ const EXAMPLES = [
   { how: 'Struggling and neglected', score: 0.4, attention: 0.08 },
 ];
 
+/**
+ * The settlement's books, taken from the ledger the simulation actually keeps.
+ *
+ * Split into what comes in and what goes out, in the order a player meets
+ * them, with the headings read from `LEDGER_LABELS` so a line renamed in the
+ * game is renamed here.
+ */
+const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
+  ['exports', 'Selling what the town has too much of, at the world market\u2019s price, plus the takings from market day.'],
+  ['households', 'Wages coming back. People buy clothing, furniture and tools from the stalls with money they were paid.'],
+  ['food', 'Meals. Everybody eats, and everybody pays for it out of their own purse.'],
+  ['vault', 'What you put in yourself, and Gold other players gift your settlement.'],
+];
+
+/*
+ * Only the lines the ledger actually books on this side. "Food sales" reads
+ * like a cost and is not one: the town's food money moves from a citizen's
+ * purse into the treasury, and what the settlement pays to bring food in is
+ * booked under imports like everything else it buys.
+ */
+const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
+  ['wages', 'Everyone who works is paid, every day. It is the largest line in most settlements.'],
+  ['imports', 'Buying what the town cannot make for itself, at the world market\u2019s price.'],
+  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market.`],
+  ['building', 'What you raise, in Gold and in materials out of the yard.'],
+  ['works', 'Bridges to land nobody can walk to, and the roads that follow.'],
+  ['vault', 'The other half of the vault door: Gold leaving the treasury when you take a deposit back out.'],
+];
+
+/** What each trade is paid a day, straight from the recipes the game runs. */
+const WAGES = (Object.entries(JOBS) as [keyof typeof JOBS, { wage: number }][])
+  .map(([job, recipe]) => ({ job, wage: recipe.wage }))
+  .sort((a, b) => a.wage - b.wage);
+
 const SECTIONS = [
   ['start', 'Getting started'],
   ['land', 'Land and ownership'],
   ['costs', 'What things cost'],
-  ['earning', 'Earning'],
+  ['earning', 'Earning $EMERGE'],
+  ['economy', 'The settlement\u2019s own money'],
   ['vault', 'Deposits and withdrawals'],
   ['world', 'The world itself'],
   ['together', 'Other players'],
@@ -208,7 +243,9 @@ export default function Wiki() {
           <h2>Earning</h2>
           <p>
             You are not paid for holding land. You are paid for running it well, and the rate is
-            worked out fresh every day from the state of your settlement.
+            worked out fresh every day from the state of your settlement. This section is about
+            {' '}{TOKEN.ticker} coming to <em>your wallet</em>; the Gold your citizens earn is a
+            separate thing and has <a href="#economy">its own section below</a>.
           </p>
           <div className="wiki-formula">
             <code>daily yield = {n(STEWARDSHIP_DAILY_CAP)} × quality × attention</code>
@@ -268,6 +305,104 @@ export default function Wiki() {
         </section>
 
         {/* ---------------------------------------------------------- */}
+        <section id="economy">
+          <h2>The settlement&rsquo;s own money</h2>
+          <p>
+            There are two moneys in Emerge and they do different jobs.
+            {' '}<b>{TOKEN.ticker}</b> is yours: it lives in your wallet, it buys land, and every
+            charge burns it. <b>Gold</b> is the town&rsquo;s: it pays the people who live there and
+            buys the things they cannot make. Your citizens earn it, spend it and are paid it all
+            day, whether or not you are watching.
+          </p>
+
+          <h3>How a settlement makes money</h3>
+          <p>
+            Four ways, and three of them are the townspeople rather than you:
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Coming in</th><th /></tr></thead>
+            <tbody>
+              {INCOME.map(([line, what]) => (
+                <tr key={`in-${line}`}>
+                  <td className="ledger">{LEDGER_LABELS[line]}</td>
+                  <td className="muted">{what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            <b>It is a circle, not a tap.</b> The treasury pays wages in the morning; the people
+            who were paid buy bread, clothes and furniture from the stalls during the day; most of
+            that money comes back to the treasury as household spending and food sales. A
+            settlement that produces more than it consumes ends the day up. One that does not ends
+            it down, and you will see it in the Bank the same evening.
+          </p>
+
+          <h3>What it pays out</h3>
+          <table className="wiki-table">
+            <thead><tr><th>Going out</th><th /></tr></thead>
+            <tbody>
+              {SPENDING.map(([line, what]) => (
+                <tr key={`out-${line}`}>
+                  <td className="ledger">{LEDGER_LABELS[line]}</td>
+                  <td className="muted">{what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            Wages are the big one, and they are per person per day:
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Trade</th><th>A day&rsquo;s wage</th></tr></thead>
+            <tbody>
+              {WAGES.map(({ job, wage }) => (
+                <tr key={job}>
+                  <td style={{ textTransform: 'capitalize' }}>{job}</td>
+                  <td className="num">{wage} Gold</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            If the treasury cannot cover the payroll, everybody is paid a share of what there is
+            and the feed says so. Nobody is sacked for it, but people get poorer, and poorer people
+            buy less, which is how a settlement talks itself into a slump.
+          </p>
+
+          <h3>Why the world market matters to your books</h3>
+          <p>
+            Exports and imports are both priced by the shared market, so what your land is
+            <em> good at</em> is now worth real money. A settlement sitting on a surplus of
+            something scarce across every world sells it dearly; one that has to buy in what
+            everybody else is also short of pays dearly for it. Nine biomes support different
+            trades, which is what makes a plot&rsquo;s biome an economic decision rather than a
+            colour.
+          </p>
+          <p>
+            Your citizens read this too. When the world pays well for metal, more of them take up
+            mining and smithing — unless the town is hungry, in which case they farm, because
+            feeding themselves comes first.
+          </p>
+
+          <div className="wiki-callout">
+            <b>Gold is not a second withdrawal door.</b>
+            <p>
+              This is the honest part, and it is the reason the game has an economy at all. Gold
+              your settlement earns stays in the settlement. It is not convertible to
+              {' '}{TOKEN.ticker}: what the vault will send you is capped by what the chain shows
+              you deposited, so a rich treasury does not become tokens, however well the town is
+              run.
+            </p>
+            <p>
+              Letting Gold out was tried and it broke everything — a world became a machine for
+              printing tokens and nothing else about it mattered. The reward for running a place
+              well is stewardship yield, which is capped, and the place itself getting bigger.
+            </p>
+          </div>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
         <section id="vault">
           <h2>Deposits and withdrawals</h2>
           <p>
@@ -296,9 +431,10 @@ export default function Wiki() {
             than they deposited.
           </p>
           <p className="wiki-note">
-            Gold your settlement earns on its own is not withdrawable. That is the town&rsquo;s
-            money — what it pays its people and buys its grain with — and letting it out of the
-            world was the thing that broke the economy the first time.
+            Gold your settlement earns on its own is not withdrawable — see
+            {' '}<a href="#economy">the settlement&rsquo;s own money</a> for what it is and what it
+            does. What comes out of the vault is what you put in, plus stewardship yield when that
+            opens.
           </p>
         </section>
 

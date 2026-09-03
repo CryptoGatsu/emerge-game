@@ -2526,3 +2526,9 @@ button.fold:hover { color: var(--emerald); }
 .region-pins.compact .region-pin.owned .pin-label { display: flex; }
 .region-pins.compact .region-pin.selected { z-index: 4; }
 .region-pins.compact .pin-dot { width: 10px; height: 10px; }
+
+/* The ledger headings in the guide, named as the Bank names them. */
+.wiki-table td.ledger { color: var(--cream); white-space: nowrap; font-weight: 650; }
+@media (max-width: 720px) {
+  .wiki-table td.ledger { min-width: 14ch; }
+}
