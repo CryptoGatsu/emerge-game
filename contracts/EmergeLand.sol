@@ -62,6 +62,17 @@ contract EmergeLand {
     /** Every seed ever claimed, so the whole registry can be read back. */
     uint256[] public claimed;
 
+    /**
+     * Whether a seed is already in `claimed`.
+     *
+     * `claimed` is an index for reading the registry back, not a record of
+     * ownership — `_owners` is that. A plot given up and taken again would
+     * otherwise be pushed twice, so `claimedCount` would over-report and a page
+     * of `registry` would carry the same seed at two positions. Both harmless
+     * to a caller that keys by seed, and both wrong to one that counts.
+     */
+    mapping(uint256 => bool) private _indexed;
+
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
     event Approval(address indexed owner, address indexed approved, uint256 indexed tokenId);
     event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
@@ -205,7 +216,10 @@ contract EmergeLand {
         _owners[seed] = msg.sender;
         _balances[msg.sender] += 1;
         worldName[seed] = worldName_;
-        claimed.push(seed);
+        if (!_indexed[seed]) {
+            _indexed[seed] = true;
+            claimed.push(seed);
+        }
 
         emit Transfer(address(0), msg.sender, seed);
         emit Claimed(seed, msg.sender, price, worldName_);
