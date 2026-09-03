@@ -420,7 +420,8 @@ export class EmergeScene {
       base.cursor = 'pointer';
       base.on('pointerover', () => this.setHover({ kind: 'building', id: building.id }));
       base.on('pointerout', () => this.setHover(null));
-      base.on('pointertap', () => this.tap({ kind: 'building', id: building.id }));
+      base.on('pointertap', (e: FederatedPointerEvent) =>
+        this.tap({ kind: 'building', id: building.id }, e.nativeEvent));
       this.objectLayer.addChild(base);
 
       const lit = new Sprite(this.assets.get(`building.${artKey}.lit`));
@@ -507,7 +508,8 @@ export class EmergeScene {
       });
       sprite.container.on('pointerover', () => this.setHover({ kind: 'citizen', id: citizen.id }));
       sprite.container.on('pointerout', () => this.setHover(null));
-      sprite.container.on('pointertap', () => this.tap({ kind: 'citizen', id: citizen.id }));
+      sprite.container.on('pointertap', (e: FederatedPointerEvent) =>
+        this.tap({ kind: 'citizen', id: citizen.id }, e.nativeEvent));
       this.objectLayer.addChild(sprite.container);
       this.citizens.set(citizen.id, sprite);
     }
@@ -773,14 +775,29 @@ export class EmergeScene {
         // open until something else was tapped, with no way to dismiss it but
         // the small × in its corner.
         //
-        // Whether the tap hit anything is decided by *when* a real selection
-        // last happened, not by a flag: Pixi's own listeners are registered on
-        // this canvas before these ones, so a sprite's handlers have already
-        // run by the time this does, and a flag set here would be re-armed
-        // after the sprite had cleared it — which is exactly what stopped
-        // buildings being selectable at all.
-        const justSelected = performance.now() - this.lastRealTap < 120;
-        if (!justSelected && this.dragMoved <= 6) this.tap(null);
+        // Whether the tap hit anything cannot be read off a flag set here:
+        // Pixi dispatches a sprite's tap from its own listener, which may run
+        // before or after this one. It used to be judged on a 120ms window,
+        // which quietly broke on a loaded machine — selecting a building
+        // re-renders the whole interface, and that work happens *between* the
+        // two handlers, so they drifted three quarters of a second apart and a
+        // building the player had just picked was deselected again.
+        //
+        // So no clock. If a sprite has already claimed this very pointer event
+        // the ground keeps its hands off. If the sprite has yet to be heard
+        // from, wait a turn of the event loop and check whether a real
+        // selection landed in the meantime before putting the panel away.
+        if (this.dragMoved <= 6) {
+          if (this.tapEvent === e) {
+            this.tapEvent = null;
+          } else {
+            const mark = this.taps;
+            window.clearTimeout(this.groundClear);
+            this.groundClear = window.setTimeout(() => {
+              if (this.taps === mark) this.tap(null);
+            }, 0);
+          }
+        }
       }
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     };
@@ -814,7 +831,12 @@ export class EmergeScene {
    * ---------------------------------------------------------------- */
 
   /** When a sprite was last actually selected, so a tap on nothing can clear. */
-  private lastRealTap = -1e9;
+  /** How many taps have actually landed on something, ever. */
+  private taps = 0;
+  /** The pending "the tap missed everything" clear, if one is waiting. */
+  private groundClear = 0;
+  /** The browser event a sprite last claimed, so the ground can stand down. */
+  private tapEvent: unknown = null;
 
   /** Whoever the player currently has hold of, and whether they have moved. */
   private carrying: string | null = null;
@@ -851,10 +873,10 @@ export class EmergeScene {
     this.callbacks.onHover?.(target);
   }
 
-  private tap(target: PickTarget) {
+  private tap(target: PickTarget, native?: unknown) {
     // A tap that ended a pan is a camera move, not a selection.
     if (this.dragMoved > 6) return;
-    if (target) this.lastRealTap = performance.now();
+    if (target) { this.taps++; this.tapEvent = native ?? null; }
     this.selected = target;
     this.callbacks.onSelect?.(target);
   }
@@ -1767,6 +1789,7 @@ export class EmergeScene {
   destroy() {
     this.disposed = true;
     this.cancelPlacement();
+    window.clearTimeout(this.groundClear);
     // Drop our own references but do not destroy the display objects here: the
     // application owns the scene graph and destroying it twice throws on the
     // second pass, which is what used to crash the app on leaving a world.

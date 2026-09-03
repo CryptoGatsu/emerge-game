@@ -23,8 +23,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   demolishBuilding, dropCitizen, drawFromTreasury, fundTreasury, grantResource, marketReport,
-  RESOURCE_LABELS, pickUpCitizen, renameCitizen, renameWorld, setWageRate, setWorldPrices,
-  settleBout, stakeOnBout, takeSales,
+  RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -913,6 +913,50 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     setView(snapshot(world, null));
   }, []);
 
+  /** Which building is being carried to a new site, if any. */
+  const [movingBuilding, setMovingBuilding] = useState<string | null>(null);
+
+  /**
+   * Pick a building up, or put it back down.
+   *
+   * This reuses the placement cursor the Build panel already has: the player
+   * taps the ground and the building goes there, which is the same gesture as
+   * raising a new one and so needs no explaining.
+   */
+  const moveBuildingTo = useCallback((id: string | null) => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    if (!id) {
+      scene.cancelPlacement();
+      setMovingBuilding(null);
+      return;
+    }
+    const building = world.buildings.find((b) => b.id === id);
+    if (!building) return;
+    setPanel(null);
+    setMovingBuilding(id);
+    scene.startPlacement(building.type, (x, y) => {
+      setMovingBuilding(null);
+      const result = moveBuilding(world, id, x, y);
+      if (!result.ok) { soundRef.current?.tick('deny'); return; }
+      scene.syncBuildings();
+      soundRef.current?.cue('hammer');
+      setView(snapshot(world, selectedRef.current));
+    });
+  }, []);
+
+  /** Spend Gold and materials to make a building better at its job. */
+  const improveBuilding = useCallback((id: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = upgradeBuilding(world, id);
+    if (!result.ok) { soundRef.current?.tick('deny'); return; }
+    sceneRef.current?.syncBuildings();
+    soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+  }, []);
+
   const cancelBuild = useCallback(() => {
     sceneRef.current?.cancelPlacement();
     setPlacing(null);
@@ -1140,6 +1184,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onMinimapJump={minimapJump}
             drawMinimap={drawMinimap}
             onCancelBuild={cancelBuild}
+            movingBuilding={movingBuilding}
+            onUpgradeBuilding={improveBuilding}
+            onMoveBuilding={moveBuildingTo}
             watching={watching}
             online={online}
             visiting={visit ?? null}
@@ -1155,6 +1202,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
               address={wallet.address}
               treasury={view.treasury}
               onStake={stakeAtArena}
+              onCue={(kind) => soundRef.current?.cue(kind)}
               onClose={() => setPanel(null)}
             />
           )}

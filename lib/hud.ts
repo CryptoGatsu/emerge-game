@@ -8,8 +8,9 @@
  */
 
 import {
-  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, PHASE_LABELS,
-  SKILL_TITLES, daysToNextLevel, skillDays, skillLevel, skillOutput,
+  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS,
+  MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
+  skillLevel, skillOutput, upgradeCost, upkeepOf,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
@@ -41,6 +42,12 @@ export interface FocusBuilding {
   /** Whether it can be pulled down, and what comes back if it is. */
   demolishable: boolean;
   salvage: { wood: number; stone: number };
+  /** How far it has been improved, and what the next step would take. */
+  level: number;
+  maxLevel: number;
+  upgrade: { gold: number; wood: number; stone: number; stocked: boolean } | null;
+  /** What moving it costs, in Gold. */
+  moveGold: number;
 }
 
 export type Focus = FocusCitizen | FocusBuilding;
@@ -191,7 +198,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       // of an actual conversation with somebody they can name.
       status: (() => {
         const with_ = talkingWith(world, c.id);
-        return with_ ? `Talking with ${with_.name}` : statusLine(c);
+        return with_ ? `Talking with ${with_.name}` : statusLine(c, world);
       })(),
       family: family?.name ?? 'Unknown',
       home: home ? `${family?.name} House` : null,
@@ -211,7 +218,21 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     occupants: b.workers.length,
     production: b.production ? JOB_LABELS[b.production as keyof typeof JOB_LABELS] ?? b.production : null,
     x: b.x, y: b.y,
-    upkeep: 0,
+    upkeep: Math.round(upkeepOf(b)),
+    level: levelOf(b),
+    maxLevel: MAX_BUILDING_LEVEL,
+    // `stocked` is what lets the button refuse out loud: Gold alone is not
+    // enough to improve a building, and a button that looks live and then does
+    // nothing is worse than one that says it cannot yet.
+    upgrade: (() => {
+      const next = upgradeCost(b);
+      if (!next) return null;
+      return {
+        ...next,
+        stocked: world.resources.wood >= next.wood && world.resources.stone >= next.stone,
+      };
+    })(),
+    moveGold: moveCost(b.type),
     active: b.active,
     people: b.workers.map((id) => {
       const c = world.citizens.find((x) => x.id === id);

@@ -23,8 +23,9 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_MATERIALS, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, RESOURCE_LABELS,
-  STEWARDSHIP_DAILY_CAP, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
+  BUILD_MATERIALS, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
+  UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
 } from '@/lib/simulation';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
@@ -603,10 +604,29 @@ export default function Wiki() {
               ))}
             </tbody>
           </table>
+          <h3>Moving and improving</h3>
+          <p>
+            A building&rsquo;s card has two buttons besides the trade it does. <b>Move</b> picks it
+            up and arms the placing cursor: tap the ground and it goes there, for{' '}
+            <b>{Math.round(MOVE_SHARE * 100)}% of what it cost to raise</b>. Roads are cut to the
+            new spot and anybody who was walking to the old one is given somewhere else to be.
+            Nothing is lost by moving except the Gold.
+          </p>
+          <p>
+            <b>Improve</b> spends Gold and materials to take a building up a level, to a maximum of{' '}
+            <b>{MAX_BUILDING_LEVEL}</b>. The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
+            of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, in Gold and in
+            timber and stone both — so the top level is a decision, not a formality. Each level adds
+            about <b>{Math.round(OUTPUT_PER_LEVEL * 100)}% to what the building produces</b> and{' '}
+            <b>{Math.round(UPKEEP_PER_LEVEL * 100)}% to its upkeep</b>. It does not hold more workers. An improved workshop
+            earns its keep if it is staffed and supplied; an improved one standing idle is simply a
+            larger bill every day.
+          </p>
           <p className="wiki-note">
             Anything can be pulled down from its card except the market, the bank and the town hall
             — those hold the settlement together — and any house somebody still lives in. Pulling
-            something down returns nothing; it stops the upkeep, and that is the point of doing it.
+            something down salvages <b>half the timber and stone</b> back into the yard. The Gold is
+            gone; what you get is the upkeep stopped, and that is usually the point of doing it.
           </p>
         </section>
 

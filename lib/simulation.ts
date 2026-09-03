@@ -210,6 +210,14 @@ export interface Citizen {
   /** Amenity they are currently occupying, if any: a bench, a fire, the well. */
   usingId?: string;
   /**
+   * Who they are crossing the settlement to find.
+   *
+   * Set when somebody short of company sets off toward a friend, so the
+   * interface can say "going to find Mira" rather than "wandering", which is
+   * the difference between a crowd and a set of people.
+   */
+  seeking?: string;
+  /**
    * The last gathering this person was called to, so the bell rings once.
    * Without it, someone settled at a fire before the meeting was called never
    * re-picks a destination and never goes.
@@ -274,7 +282,17 @@ export interface Amenity {
   users: string[];
 }
 export interface Family { id: string; name: string; members: string[]; homeId: string; wealth: number }
-export interface Building { id: string; type: string; x: number; y: number; workers: string[]; active: boolean; production?: string }
+export interface Building {
+  id: string; type: string; x: number; y: number; workers: string[]; active: boolean;
+  production?: string;
+  /**
+   * How far this building has been improved, 1 to `MAX_BUILDING_LEVEL`.
+   *
+   * Absent on anything raised before improvement existed, which is why every
+   * reader goes through `levelOf` rather than touching it.
+   */
+  level?: number;
+}
 export interface MarketQuote {
   price: number; supply: number; demand: number; volume: number; trend: number;
   /** Recent prices, oldest first, sampled once per game day. */
@@ -735,6 +753,40 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
       target = options[c.wanderIdx % options.length];
       spread = 3.0;
     }
+  }
+
+  /*
+   * Going to find somebody.
+   *
+   * The one thing a settlement of strangers was missing. People had friends —
+   * the bonds were there, and they changed how a conversation went — but
+   * nobody ever *went anywhere* because of one. Everybody wandered the same
+   * circuit of spots and became friends with whoever happened to be standing
+   * on the same one.
+   *
+   * Now somebody who is short of company and off the clock walks toward their
+   * closest friend, if that friend is out of doors and within reach. It costs
+   * one lookup, it is the reason two particular people keep ending up in the
+   * same corner of the square, and it is what makes a friendship something you
+   * can watch rather than read about.
+   *
+   * Placed above the benches and fires deliberately: somebody who wants company
+   * should walk over to their friend rather than sit down on the way. It is
+   * also why the threshold is generous — the median citizen sits at ninety-five
+   * for company, so a cut-off low enough to mean "lonely" fired for nobody at
+   * all, and the behaviour existed without ever once happening.
+   */
+  if (!target && (phase === 'wandering' || phase === 'socialising') && c.social < 88 && !c.inside) {
+    const friend = companionFor(world, c);
+    if (friend) {
+      target = { x: friend.x, y: friend.y };
+      spread = 1.6;
+      c.seeking = friend.id;
+    } else {
+      c.seeking = undefined;
+    }
+  } else if (phase !== 'socialising') {
+    c.seeking = undefined;
   }
 
   // Cold, dark or simply idle: the settlement's furniture is somewhere to be.
@@ -1767,6 +1819,45 @@ export function rivalsOf(world: World, id: string): { citizen: Citizen; strength
 }
 
 /** Friends of a citizen, most-bonded first. Used by the inspector panel. */
+/**
+ * Somebody worth crossing the settlement for.
+ *
+ * Not `friendsOf`, deliberately. That returns bonds the simulation has marked
+ * as friendships, and those are rare on purpose — five out of a hundred and
+ * fifty-eight bonds in a town of forty-eight over two months. A behaviour
+ * keyed on them fired for nobody at all, which I only found by counting.
+ *
+ * People do not only seek out their closest friend. They drift toward whoever
+ * they are on decent terms with, and toward their own household. So this takes
+ * the warmest positive bond available and falls back to family, which
+ * everybody has.
+ */
+export function companionFor(world: World, c: Citizen): Citizen | null {
+  const reachable = (other: Citizen | undefined): other is Citizen =>
+    !!other && other.id !== c.id && !other.inside && !other.carried && !other.swimming
+    && other.age >= 12 && Math.hypot(other.x - c.x, other.y - c.y) < 34;
+
+  let best: { citizen: Citizen; strength: number } | null = null;
+  for (const bond of Object.values(world.bonds)) {
+    if (bond.rivals || bond.strength <= 0) continue;
+    const otherId = bond.a === c.id ? bond.b : bond.b === c.id ? bond.a : undefined;
+    if (!otherId) continue;
+    const other = world.citizens.find((x) => x.id === otherId);
+    if (!reachable(other)) continue;
+    // A marked friendship counts for more than an acquaintance of the same
+    // nominal strength, which is what keeps real friends the usual answer.
+    const weight = bond.strength * (bond.friends ? 2 : 1);
+    if (!best || weight > best.strength) best = { citizen: other, strength: weight };
+  }
+  if (best) return best.citizen;
+
+  const family = world.families.find((f) => f.id === c.familyId);
+  const kin = family?.members
+    .map((id) => world.citizens.find((x) => x.id === id))
+    .find(reachable);
+  return kin ?? null;
+}
+
 export function friendsOf(world: World, id: string): { citizen: Citizen; strength: number }[] {
   const out: { citizen: Citizen; strength: number }[] = [];
   for (const bond of Object.values(world.bonds)) {
@@ -3011,7 +3102,7 @@ function importReserve(world: World): number {
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage * rate, 0);
   const upkeep = world.buildings
     .filter((b) => b.active)
-    .reduce((sum, b) => sum + maintenanceCost(b.type), 0);
+    .reduce((sum, b) => sum + upkeepOf(b), 0);
   return (payroll + upkeep) * IMPORT_RESERVE_DAYS;
 }
 
@@ -3150,8 +3241,12 @@ function jobScore(world: World, j: WorkingJob) {
 
 /** How many workers a job can usefully employ, given the buildings that exist. */
 function jobCapacity(world: World, j: WorkingJob) {
-  const sites = world.buildings.filter((b) => b.type === jobs[j].building && b.active).length;
-  return sites * (j === 'miner' ? 3 : 2);
+  const base = j === 'miner' ? 3 : 2;
+  // Summed per building rather than multiplied by a count, because two sheds
+  // and one improved workshop are no longer the same thing.
+  return world.buildings
+    .filter((b) => b.type === jobs[j].building && b.active)
+    .reduce((room, b) => room + buildingCapacity(b, base), 0);
 }
 
 /**
@@ -3207,8 +3302,14 @@ function produce(world: World) {
     // What the people doing it are actually worth. Averaged over the hands at
     // the trade, so one master among four novices lifts it a little.
     const craft = tradeSkill(world, wj);
+    // And the state of the places they work in. Averaged over the sites, so
+    // improving one of three workshops lifts the trade by a third of a step.
+    const sites = world.buildings.filter((b) => b.type === recipe.building && b.active);
+    const premises = sites.length
+      ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
+      : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft;
+      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises;
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -3935,7 +4036,7 @@ function settlementBuilds(world: World) {
   const payroll = world.citizens
     .filter((c) => c.age >= 16 && c.job !== 'unemployed')
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
-  const upkeep = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + maintenanceCost(b.type), 0);
+  const upkeep = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + upkeepOf(b), 0);
   // Three times over, and a fortnight of running costs left standing — unless
   // the town resolved on this in front of everybody, in which case it will
   // accept a thinner cushion for it. That is what a vote is worth: the same
@@ -4357,6 +4458,18 @@ export function grantResource(world: World, key: Resource, amount: number) {
   note(world, 'produced', key, amount);
 }
 
+/**
+ * What one building costs to keep standing, as it actually stands.
+ *
+ * The counterweight to improving things: a level-three workshop costs twice
+ * the upkeep, every day, whether or not anybody is working in it. It is meant
+ * to be an investment that pays back rather than one that pays back many times
+ * over — see `buildingCapacity` for what happened when it did.
+ */
+export function upkeepOf(b: Building) {
+  return maintenanceCost(b.type) * (1 + (levelOf(b) - 1) * UPKEEP_PER_LEVEL);
+}
+
 export function maintenanceCost(type: string) {
   return ({ Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6, Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10 } as Record<string, number>)[type] ?? 2;
 }
@@ -4519,7 +4632,7 @@ function daily(world: World) {
   world.ledgerYesterday = world.ledger;
   world.ledger = emptyLedger();
   const workers = world.citizens.filter((c) => c.age >= 16);
-  const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + maintenanceCost(b.type), 0);
+  const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + upkeepOf(b), 0);
 
   // Assign jobs first, tracking the running tally so each choice sees the
   // settlement as it is being staffed rather than as it was yesterday.
@@ -4964,6 +5077,149 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   noteAttention(world);
   pushFeed(world, 'build', `The ${building.type.toLowerCase()} was pulled down. ${wood} timber and ${stone} stone were salvaged.`);
   return { ok: true, message: `Salvaged ${wood} timber and ${stone} stone. The Gold is gone.` };
+}
+
+/* ------------------------------------------------------------------ *
+ * Moving and improving
+ * ------------------------------------------------------------------ */
+
+/** The most a building can be improved. */
+export const MAX_BUILDING_LEVEL = 3;
+
+/** What level a building is, whatever version of the game raised it. */
+export const levelOf = (b: Building) => Math.max(1, Math.min(MAX_BUILDING_LEVEL, Math.round(b.level ?? 1)));
+
+/**
+ * What an improved building is worth, as a multiple.
+ *
+ * Deliberately modest per level and paid for twice — once in Gold and timber to
+ * raise, and again in upkeep every day after. A settlement that improves
+ * everything it owns and cannot feed the bill will find out.
+ */
+/** What one level of improvement adds to a building's output, and to its bill. */
+export const OUTPUT_PER_LEVEL = 0.22;
+export const UPKEEP_PER_LEVEL = 0.5;
+
+export const buildingOutput = (b: Building) => 1 + (levelOf(b) - 1) * OUTPUT_PER_LEVEL;
+
+/**
+ * How many people an improved building can hold.
+ *
+ * It does not hold more, and that is the result of measuring rather than a
+ * decision made up front. An extra worker per level doubled what a trade could
+ * absorb by level three, so a settlement that improved everything ended two
+ * hundred days with 30,694 Gold against 2,962 for one that improved nothing —
+ * ten times richer, for a cost it earned back many times over. Improvement is
+ * meant to be worth doing, not the only thing worth doing.
+ *
+ * Room for more hands comes from raising another building, which costs
+ * materials and carries its own upkeep for ever. What Gold buys here is a
+ * better place to work, not a bigger one.
+ */
+export const buildingCapacity = (b: Building, base: number) => { void b; return base; };
+
+/** What it costs to move a building: a share of raising it, and no materials. */
+/** Moving a building costs this share of what it cost to raise. */
+export const MOVE_SHARE = 0.35;
+
+export function moveCost(type: string): number {
+  return Math.round((SELF_BUILD_COST[type] ?? TRADE_BUILD_COST[type] ?? 250) * MOVE_SHARE);
+}
+
+/**
+ * What each improvement costs, as a share of the original price — in Gold and
+ * in materials alike. The second step is nearly twice the first, so the top
+ * level is something a settlement grows into rather than buys on day one.
+ */
+export const UPGRADE_STEPS = [0.8, 1.4];
+
+/** What the next improvement costs, in Gold and in the yard. */
+export function upgradeCost(b: Building): { gold: number; wood: number; stone: number } | null {
+  const level = levelOf(b);
+  if (level >= MAX_BUILDING_LEVEL) return null;
+  const base = SELF_BUILD_COST[b.type] ?? TRADE_BUILD_COST[b.type] ?? 250;
+  const need = buildMaterials(b.type);
+  // Each step costs more than the last, so the third level is a decision.
+  const step = UPGRADE_STEPS[level - 1];
+  return {
+    gold: Math.round(base * step),
+    wood: Math.round(need.wood * step),
+    stone: Math.round(need.stone * step),
+  };
+}
+
+/**
+ * Pick a building up and put it down somewhere else.
+ *
+ * The same placement rules as raising one — not on water, inside the map — and
+ * the same consequences: roads are cut to it, the amenities around it are
+ * rebuilt, and anybody who was walking to it is given somewhere else to be
+ * rather than continuing toward a patch of ground where it used to stand.
+ */
+export function moveBuilding(world: World, id: string, x: number, y: number): { ok: boolean; message: string } {
+  const building = world.buildings.find((b) => b.id === id);
+  if (!building) return { ok: false, message: 'That building is not there.' };
+  const cost = moveCost(building.type);
+  if (world.treasury < cost) {
+    return { ok: false, message: `Moving the ${building.type.toLowerCase()} costs ${cost} Gold.` };
+  }
+  if (waterOf(world).blocks(x, y)) {
+    return { ok: false, message: 'Nothing can stand on the water.' };
+  }
+  const to = { x: clamp(x, 6, 94), y: clamp(y, 8, 92) };
+  if (Math.hypot(to.x - building.x, to.y - building.y) < 2) {
+    return { ok: false, message: 'That is where it already is.' };
+  }
+
+  spend(world, 'building', cost);
+  building.x = to.x;
+  building.y = to.y;
+  linkToRoads(world, building);
+  world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  // Everybody heading for the old spot re-picks, or they walk to bare ground.
+  for (const c of world.citizens) {
+    if (c.destId === id || c.targetBuildingId === id) {
+      c.destId = undefined;
+      c.targetBuildingId = undefined;
+      c.path = [];
+      c.dwell = 0;
+    }
+  }
+  noteAttention(world);
+  pushFeed(world, 'build', `The ${building.type.toLowerCase()} was moved, at a cost of ${cost} Gold.`);
+  return { ok: true, message: `Moved for ${cost} Gold.` };
+}
+
+/**
+ * Improve a building.
+ *
+ * More room and more output, paid for in Gold, in timber and stone out of the
+ * yard, and in upkeep for as long as it stands. The upkeep is the part that
+ * makes this a decision: a settlement that improves everything is a settlement
+ * with a daily bill it may not be able to meet.
+ */
+export function upgradeBuilding(world: World, id: string): { ok: boolean; message: string } {
+  const building = world.buildings.find((b) => b.id === id);
+  if (!building) return { ok: false, message: 'That building is not there.' };
+  const cost = upgradeCost(building);
+  if (!cost) return { ok: false, message: 'That is as good as it gets.' };
+  if (world.treasury < cost.gold) {
+    return { ok: false, message: `That costs ${cost.gold} Gold and the treasury cannot cover it.` };
+  }
+  if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) {
+    return { ok: false, message: `The yard is short: ${cost.wood} timber and ${cost.stone} stone are needed.` };
+  }
+
+  spend(world, 'building', cost.gold);
+  world.resources.wood -= cost.wood;
+  world.resources.stone -= cost.stone;
+  note(world, 'consumed', 'wood', cost.wood);
+  note(world, 'consumed', 'stone', cost.stone);
+  building.level = levelOf(building) + 1;
+  staffNow(world);
+  noteAttention(world);
+  pushFeed(world, 'build', `The ${building.type.toLowerCase()} was improved to level ${building.level}.`);
+  return { ok: true, message: `Improved to level ${building.level}.` };
 }
 
 /** Add Gold to the treasury from outside the settlement's own economy. */

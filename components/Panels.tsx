@@ -354,6 +354,13 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             placed across water will have a bridge started toward it.
           </p>
           <p>
+            A building&rsquo;s card also offers <b>Move</b> and <b>Improve</b>. Moving arms the
+            placing cursor and puts it down wherever you tap, for a third of what it cost to raise.
+            Improving takes it up a level — three at most — for Gold and materials, and each level
+            gets about a fifth more work out of it for half again in daily upkeep. It does not hold
+            more people; an improved building nobody works in is only a bigger bill.
+          </p>
+          <p>
             Anything can be <b>pulled down</b> from its card except the market, the bank and the town
             hall — those hold the settlement together — and any house somebody still lives in,
             which has to be emptied first. You get half the timber and stone back. The Gold does

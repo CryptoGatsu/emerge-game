@@ -39,6 +39,10 @@ interface HudProps {
   onRenameCitizen: (id: string, name: string) => void;
   /** Pull a building down for half its materials. */
   onDemolish: (id: string) => void;
+  /** Which building the player is placing, if any. */
+  movingBuilding: string | null;
+  onUpgradeBuilding: (id: string) => void;
+  onMoveBuilding: (id: string | null) => void;
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
   onResetView: () => void;
@@ -154,13 +158,19 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, readOnly, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish }: {
+function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onUpgrade, onMove }: {
   focus: Focus; following: string | null; player: PlayerRecord;
   /** True on somebody else's world: you can look and follow, not change. */
   readOnly: boolean;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
   onDemolish: (id: string) => void;
+  /** What the settlement has to spend, so the buttons can refuse honestly. */
+  treasury: number;
+  /** The building the player is currently placing, if any. */
+  moving: string | null;
+  onUpgrade: (id: string) => void;
+  onMove: (id: string | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
@@ -176,6 +186,12 @@ function BeingCard({ focus, following, player, readOnly, onClear, onFocus, onTog
             <div className="being-eyebrow">PLACE</div>
             <h2>{focus.type}</h2>
             <p>{focus.production ? `Producing · ${focus.production}` : focus.occupants ? `${focus.occupants} inside` : 'Quiet right now'}</p>
+            {/* What it has been improved to, and what that is costing every
+                day — the second half matters, because upkeep is what makes
+                improving everything a decision rather than a free win. */}
+            <p className="muted small building-level">
+              Level {focus.level} of {focus.maxLevel} · {focus.upkeep} Gold a day to keep
+            </p>
           </div>
         </div>
         <div className="being-people">
@@ -186,6 +202,38 @@ function BeingCard({ focus, following, player, readOnly, onClear, onFocus, onTog
             </button>
           ))}
         </div>
+        {!readOnly && (
+          <div className="building-work">
+            {focus.upgrade ? (
+              <button
+                className="improve"
+                disabled={treasury < focus.upgrade.gold || !focus.upgrade.stocked}
+                onClick={() => onUpgrade(focus.id)}
+              >
+                Improve · {focus.upgrade.gold} Gold
+                <em>
+                  {focus.upgrade.wood} timber · {focus.upgrade.stone} stone
+                  {focus.upgrade.stocked ? '' : ' — not in the yard'}
+                </em>
+              </button>
+            ) : (
+              <span className="muted small">As good as it gets.</span>
+            )}
+            <button
+              className={moving === focus.id ? 'shift armed' : 'shift'}
+              disabled={treasury < focus.moveGold}
+              onClick={() => onMove(moving === focus.id ? null : focus.id)}
+            >
+              {moving === focus.id ? 'Tap the ground' : `Move · ${focus.moveGold} Gold`}
+            </button>
+          </div>
+        )}
+        {focus.upgrade && !readOnly && (
+          <p className="muted small">
+            An improved building gets about a fifth more done — and costs half again in
+            upkeep for as long as it stands.
+          </p>
+        )}
         {focus.demolishable && !readOnly && (
           <div className="demolish">
             <button
@@ -729,6 +777,10 @@ export function Hud(props: HudProps) {
               onToggleFollow={props.onToggleFollow}
               onRenameCitizen={props.onRenameCitizen}
               onDemolish={props.onDemolish}
+              treasury={view.treasury}
+              moving={props.movingBuilding}
+              onUpgrade={props.onUpgradeBuilding}
+              onMove={props.onMoveBuilding}
             />
           )
           : (

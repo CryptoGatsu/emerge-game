@@ -8,8 +8,8 @@
  */
 
 import {
-  JOB_LABELS, buildingOf, plannedDay, spokenLine, talkingWith,
-  type Citizen, type World,
+  JOB_LABELS, SKILL_TITLES, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
+  type Citizen, type WorkingJob, type World,
 } from './simulation';
 
 type Line = string;
@@ -57,6 +57,27 @@ const BY_ACTIVITY: Record<string, Line[]> = {
     'The light here is lovely.',
   ],
 };
+
+/**
+ * What somebody says about a friend they are going to meet.
+ *
+ * Only reachable for a citizen who is actually crossing the settlement to find
+ * a particular person, so the name in it is always a real one.
+ */
+const SEEKING: Line[] = [
+  'Going to find {friend}.',
+  'I owe {friend} a word.',
+  '{friend} will be about somewhere.',
+  'Not seen {friend} all day.',
+];
+
+/** What a master of a trade says about it, which a novice would not. */
+const BY_MASTERY: Line[] = [
+  'Twenty years and the wood still surprises me.',
+  'You stop counting the hours eventually.',
+  'Anyone can do it once. Doing it every day is the trade.',
+  'I could do this with my eyes shut. I do not, mind.',
+];
 
 const BY_JOB: Partial<Record<string, Line[]>> = {
   farmer: ['The fields are coming along.', 'Rain would help right now.'],
@@ -107,6 +128,21 @@ export function speechFor(world: World, c: Citizen, beat: number): string | null
 
   const roll = (c.hash * 31 + beat * 17) % 100;
   if (roll > 34) return null;
+
+  // Somebody they are on their way to see. The most specific thing anybody in
+  // the settlement can be doing, so it is the first thing they will mention.
+  if (c.seeking) {
+    const friend = world.citizens.find((other) => other.id === c.seeking);
+    if (friend && roll < 22) {
+      return SEEKING[(c.hash + beat) % SEEKING.length].replace('{friend}', friend.name);
+    }
+  }
+
+  // The voice of somebody who has done the work for years.
+  if (c.job !== 'unemployed' && c.activity === 'working' && roll < 9
+    && skillLevel(skillDays(c, c.job as WorkingJob)) >= 6) {
+    return BY_MASTERY[(c.hash + beat) % BY_MASTERY.length];
+  }
 
   // What they are actually doing, before anything generic. A line that names
   // where this person is walking and why is worth a dozen that could belong to
@@ -174,10 +210,23 @@ function moodLine(world: World, c: Citizen, beat: number): string | null {
 }
 
 /** One-line status used by the inspector and the selected-being card. */
-export function statusLine(c: Citizen): string {
+export function statusLine(c: Citizen, world?: World): string {
   if (c.age < 16) return c.activity === 'walking' ? 'Exploring the settlement' : 'Playing outside';
+  // Crossing the settlement to find somebody is the most interesting thing a
+  // person can be doing, so it outranks the generic reading of their activity.
+  if (c.seeking && world) {
+    const friend = world.citizens.find((other) => other.id === c.seeking);
+    if (friend) return `Going to find ${friend.name}`;
+  }
   switch (c.activity) {
-    case 'working': return `${JOB_LABELS[c.job]} at work`;
+    case 'working': {
+      const days = c.job === 'unemployed' ? 0 : skillDays(c, c.job as WorkingJob);
+      const level = skillLevel(days);
+      // A master at their bench is not the same sight as an apprentice at it.
+      return level >= 5
+        ? `${SKILL_TITLES[level]} ${JOB_LABELS[c.job].toLowerCase()} at work`
+        : `${JOB_LABELS[c.job]} at work`;
+    }
     case 'walking': return 'On the way somewhere';
     case 'trading': return 'Socialising';
     case 'eating': return 'Eating at the market';

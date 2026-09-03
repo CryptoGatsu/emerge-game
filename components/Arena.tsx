@@ -75,7 +75,7 @@ function Corner({ fighter, side, odds, winner, health }: {
   );
 }
 
-export default function Arena({ world, seed, worldName, playerName, address, treasury, onStake, onClose }: {
+export default function Arena({ world, seed, worldName, playerName, address, treasury, onStake, onCue, onClose }: {
   /** The player's own settlement, for picking a fighter out of it. */
   world: World | null;
   seed: number;
@@ -85,6 +85,8 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
   treasury: number;
   /** Take a stake, or pay a win. Returns false when the treasury cannot cover it. */
   onStake: (gold: number, on: string) => boolean;
+  /** Make a noise. The panel does not own the soundscape; the game does. */
+  onCue: (kind: 'crowd' | 'blow' | 'win' | 'lose' | 'bell' | 'coin') => void;
   onClose: () => void;
 }) {
   const [state, setState] = useState<ArenaState | null>(null);
@@ -149,6 +151,25 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
     };
   }, [bout, now]);
 
+  /*
+   * The arena, out loud.
+   *
+   * Driven off what is on screen rather than off the clock, so the thud lands
+   * with the line that describes it. The crowd comes up once as the bell goes
+   * and once when it is decided; the blows are one each; and a settled bout
+   * plays win or lose depending on where the money went.
+   */
+  const heard = useRef(0);
+  const rung = useRef<number | null>(null);
+  useEffect(() => {
+    if (shown.rounds.length > heard.current) onCue('blow');
+    heard.current = shown.rounds.length;
+  }, [shown.rounds.length, onCue]);
+  useEffect(() => {
+    if (!bout || rung.current === bout.id) return;
+    if (phase === 'fighting') { rung.current = bout.id; onCue('crowd'); }
+  }, [bout, phase, onCue]);
+
   /* Pay a won bet once the bout that carried it is settled. */
   useEffect(() => {
     if (!bet) return;
@@ -160,12 +181,14 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
     if (finished.winner === bet.on) {
       const back = payout(bet.gold, bet.odds);
       onStake(-back, `the ${bet.on} corner`);
+      onCue('win');
       setNotice(`${bet.on === 'red' ? finished.red.name : finished.blue.name} won. ${back.toLocaleString()} Gold came back.`);
     } else {
+      onCue('lose');
       setNotice(`${bet.on === 'red' ? finished.red.name : finished.blue.name} went down. The stake is gone.`);
     }
     setBet(null);
-  }, [state, bet, onStake]);
+  }, [state, bet, onStake, onCue]);
 
   /* Check the arena's promise on whatever bout has just been revealed. */
   useEffect(() => {
@@ -189,6 +212,7 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
     const who = on === 'red' ? bout.red.name : bout.blue.name;
     if (!onStake(gold, who)) { setNotice('Your treasury cannot cover that.'); return; }
     stakedToday.current += gold;
+    onCue('coin');
     setBet({ boutId: bout.id, on, gold, odds: price });
     setNotice(`${gold.toLocaleString()} Gold on ${who} at ${price.toFixed(2)}×.`);
   };

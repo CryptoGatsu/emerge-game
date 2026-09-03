@@ -2864,3 +2864,22 @@ button.fold:hover { color: var(--emerald); }
   .arena-versus { flex-direction: row; gap: 12px; min-width: 0; }
   .arena-bet-row .bet { min-width: 0; }
 }
+
+/* Moving and improving a building. Two verbs on one row, because they are the
+   two things you can do to a place that already exists. */
+.building-level { margin-top: 4px !important; }
+.building-work { display: flex; gap: 8px; margin: 12px 0 6px; flex-wrap: wrap; }
+.building-work button {
+  flex: 1; min-width: 128px;
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--panel-edge-soft);
+  background: rgba(1, 26, 17, 0.55);
+  font-size: 12px; font-weight: 650; color: var(--cream);
+}
+.building-work button em { font-style: normal; font-size: 10px; font-weight: 400; color: var(--muted); }
+.building-work .improve:hover:not(:disabled) { border-color: var(--emerald); }
+.building-work .shift:hover:not(:disabled) { border-color: var(--gold); }
+.building-work .shift.armed { border-color: var(--gold); color: var(--gold); }
+.building-work button:disabled { opacity: 0.45; cursor: default; }
