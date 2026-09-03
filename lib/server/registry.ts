@@ -527,3 +527,25 @@ async function withoutOwner(seed: number, present: string[]): Promise<string[]> 
 export async function depart(seed: number, who: string): Promise<void> {
   await hdel(presenceKey(seed), who);
 }
+
+
+/* ------------------------------------------------------------------ *
+ * The player's own record
+ *
+ * Name, ledger, holdings: what used to live only in one browser's storage,
+ * so a second device met a stranger with the same wallet. Written by the
+ * session that proved the address and read back by any device that does.
+ * ------------------------------------------------------------------ */
+
+const playerKey = (address: string) => serverKey(`player:${address.toLowerCase()}`);
+const PLAYER_TTL_SECONDS = 400 * 86_400;
+
+export async function savePlayerRecord(address: string, record: unknown): Promise<void> {
+  await setValue(playerKey(address), JSON.stringify(record), PLAYER_TTL_SECONDS);
+}
+
+export async function readPlayerRecord(address: string): Promise<unknown | null> {
+  const raw = await getValue(playerKey(address));
+  if (!raw) return null;
+  try { return JSON.parse(raw) as unknown; } catch { return null; }
+}

@@ -418,6 +418,34 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
 }
 
 /**
+ * What to build next.
+ *
+ * Read off the settlement every tick, so the advice moves as the town does:
+ * raise the house and the house drops off the list. Each line says what is
+ * asking for it and what it will do, because "build a mill" on its own is an
+ * instruction and not a reason.
+ */
+function HelperPanel({ view, onPanel }: { view: Snapshot; onPanel: (panel: PanelKey) => void }) {
+  return (
+    <Folding id="helper" title="PLOT HELPER" badge={view.advice.length ? <span>{view.advice.length}</span> : undefined}>
+      {view.advice.length === 0 && (
+        <p className="muted small">Nothing is asking to be built. Put the surplus by, or improve what stands.</p>
+      )}
+      {view.advice.map((a, i) => (
+        <div key={`${a.kind}-${a.type ?? ''}-${i}`} className={`advice ${a.kind}`}>
+          <div className="advice-head">
+            <b>{a.title}</b>
+            {a.kind === 'build' && <button className="ghost small" onClick={() => onPanel('build')}>Build</button>}
+          </div>
+          <span>{a.why}</span>
+          <em>{a.gain}</em>
+        </div>
+      ))}
+    </Folding>
+  );
+}
+
+/**
  * What is going wrong, and how ready the settlement is for the next thing.
  *
  * The readiness bars are here whether or not anything is happening, because
@@ -748,6 +776,7 @@ export function Hud(props: HudProps) {
             <aside className={`phone-sheet ${railOpen ? 'open' : ''}`} aria-hidden={!railOpen}>
               <div className="sheet-grip" />
               <StatusPanel view={view} woodland={props.woodland} />
+              {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} />}
               <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
               <EventsPanel view={view} />
               <DangerPanel view={view} />
@@ -758,6 +787,7 @@ export function Hud(props: HudProps) {
         : (
           <aside className="right-rail">
             <StatusPanel view={view} woodland={props.woodland} />
+            {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} />}
             <EventsPanel view={view} />
             <DangerPanel view={view} />
             <FeedPanel view={view} />

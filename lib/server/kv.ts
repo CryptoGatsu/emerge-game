@@ -36,11 +36,13 @@ type Memory = {
   lists: Map<string, string[]>;
   hashes: Map<string, Map<string, string>>;
   values: Map<string, string>;
+  /** When each value in `values` stops being true, in epoch milliseconds. Absent means never. */
+  expires: Map<string, number>;
 };
 
 const memory = (): Memory => {
   const g = globalThis as typeof globalThis & { __emergeKv?: Memory };
-  if (!g.__emergeKv) g.__emergeKv = { lists: new Map(), hashes: new Map(), values: new Map() };
+  if (!g.__emergeKv) g.__emergeKv = { lists: new Map(), hashes: new Map(), values: new Map(), expires: new Map() };
   return g.__emergeKv;
 };
 
@@ -191,7 +193,12 @@ export async function hdel(key: string, field: string): Promise<void> {
 /** Write a value with a time to live, in seconds. */
 export async function setValue(key: string, value: string, ttlSeconds: number): Promise<void> {
   if (!shared()) {
-    memory().values.set(key, value);
+    // The expiry is kept here too. Without it a cached market quote lived
+    // for the life of the process, and the price chart never got a second
+    // sample while the game ran without Redis.
+    const store = memory();
+    store.values.set(key, value);
+    store.expires.set(key, Date.now() + Math.max(1, ttlSeconds) * 1000);
     return;
   }
   await redis(['SET', key, value, 'EX', Math.max(1, Math.round(ttlSeconds))]);
@@ -199,7 +206,16 @@ export async function setValue(key: string, value: string, ttlSeconds: number): 
 
 /** Read a value, or null when it is not there or has expired. */
 export async function getValue(key: string): Promise<string | null> {
-  if (!shared()) return memory().values.get(key) ?? null;
+  if (!shared()) {
+    const store = memory();
+    const until = store.expires.get(key);
+    if (until !== undefined && until <= Date.now()) {
+      store.values.delete(key);
+      store.expires.delete(key);
+      return null;
+    }
+    return store.values.get(key) ?? null;
+  }
   const raw = await redis(['GET', key]);
   return typeof raw === 'string' ? raw : null;
 }

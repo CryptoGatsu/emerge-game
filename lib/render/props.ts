@@ -489,29 +489,6 @@ function signpost(): Pixels {
   return p;
 }
 
-/** Plank bridge crossing the river along the north-east axis. */
-function bridge(): Pixels {
-  const p = surface(80, 44);
-  for (let i = 0; i < 72; i++) {
-    const x = 4 + i;
-    const y = 24 - Math.round(i * 0.5);
-    rect(p, x, y, 1, 7, i % 5 === 0 ? BUILD.timberDark : BUILD.timber);
-    rect(p, x, y, 1, 1, BUILD.timberLight);
-  }
-  for (let i = 0; i <= 72; i += 12) {
-    const x = 4 + i;
-    const y = 24 - Math.round(i * 0.5);
-    rect(p, x, y - 10, 2, 11, BUILD.timberDark);
-  }
-  for (let i = 0; i < 72; i++) {
-    const x = 4 + i;
-    const y = 24 - Math.round(i * 0.5);
-    rect(p, x, y - 9, 1, 2, BUILD.timber);
-  }
-  outline(p, DARK, 0.85);
-  return p;
-}
-
 function campfire(frame: number): Pixels {
   const p = surface(24, 26);
   groundShadow(p, 12, 24, 9, 3, 0.3);
@@ -602,7 +579,6 @@ export function buildProps(): PropArt[] {
   add('prop.haybale', haybale());
   add('prop.well', well());
   add('prop.signpost', signpost());
-  add('prop.bridge', bridge());
   add('prop.campfire.0', campfire(0));
   add('prop.campfire.1', campfire(1));
   add('prop.planter', planter(930));

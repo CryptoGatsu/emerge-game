@@ -15,8 +15,7 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type World,
-} from './simulation';
+  type WorkingJob, type World, adviseBuild, type Advice } from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -103,6 +102,8 @@ export interface Snapshot {
   outgoingLines: { key: LedgerLine; label: string; amount: number }[];
   /** The standing decision of the last town meeting, while it holds. */
   resolution: { text: string; voters: number; day: number } | null;
+  /** What to build next, and why, in order. */
+  advice: Advice[];
   /** What the settlement's showcases have produced, newest first. */
   artworks: { id: string; title: string; maker: string; day: number }[];
   /**
@@ -300,6 +301,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     spentYesterday: closed.spent,
     incomeLines: ledgerLines(world.ledgerYesterday.in),
     outgoingLines: ledgerLines(world.ledgerYesterday.out),
+    advice: adviseBuild(world),
     resolution: world.resolution
       ? { text: world.resolution.text, voters: world.resolution.voters, day: world.resolution.day }
       : null,

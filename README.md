@@ -657,7 +657,19 @@ EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, v
 EMERGE_DEPOSIT_CONFIRMATIONS=              # default: 3
 KV_REST_API_URL=                           # required in production: the settlement ledger
 KV_REST_API_TOKEN=
+EMERGE_TOKEN_STATS_URL=                    # default: DexScreener; {address} is the token
+EMERGE_TOKEN_HOLDERS_URL=                  # default: the chain explorer's Blockscout token API
+EMERGE_TOKEN_CACHE_SECONDS=                # default: 60, how long one market reading is reused
+EMERGE_TOKEN_SAMPLE_MS=                    # default: five minutes, the chart's sampling interval
 ```
+
+**The token on the front door.** The landing page shows the market cap,
+24-hour volume, holder count and a chart of the last day or week, read by
+`/api/token` from DexScreener and the explorer and cached for a minute. The
+chart is the server's own record, sampled every five minutes and kept for
+seven days, so it needs shared storage to survive a redeploy. Both sources are
+overridable, for a chain DexScreener has not indexed or an explorer that is not
+Blockscout; while neither answers, the tiles say so rather than showing zeros.
 
 **Proving a wallet.** Paying out, gifting, claiming land and posting under a
 wallet all require one free signature on a plain sentence, good for a day and
@@ -761,6 +773,15 @@ water. A settlement of twenty-three people and sixty-seven buildings comes to
 
 A save that cannot be read is discarded and the world regenerated. A corrupt
 entry should cost a player their progress, never their ability to open the game.
+
+**Across devices.** The world is also published to the server, and the
+published copy is read back when the world opens: if it is further along than
+the one in this browser — day twenty-six against day one — it is the one that
+continues, with a card saying so. Further along, not more recent, because a
+day-one save made a minute ago is not progress over yesterday's day twenty-six.
+The player record (name, earned $EMERGE, plots, listings) travels the same way,
+through `/api/player`, and the one-time Gold grant is remembered on the world
+itself so a second device is not handed it again.
 
 ## Earning is paced by the wall clock
 

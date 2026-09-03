@@ -415,6 +415,8 @@ export interface PlayerRecord {
   claims: ClaimedWorld[];
   /** Plots they have put up for resale. */
   listings: Listing[];
+  /** Wall-clock time this record was last written, so two devices can tell which is newer. */
+  savedAt?: number;
 }
 
 const PLAYER_NAMES = [
@@ -520,7 +522,37 @@ export function claimOf(record: PlayerRecord, seed: number): ClaimedWorld | null
 }
 
 export const savePlayer = (record: PlayerRecord, address: string | null = null) =>
-  writeJson(playerKeyFor(address), record);
+  writeJson(playerKeyFor(address), { ...record, savedAt: Date.now() });
+
+/**
+ * Two copies of the same wallet's record, from two devices.
+ *
+ * The newer one leads — name, ledger, tokens — because it is the one the
+ * player was most recently using. Holdings are unioned, since a plot bought
+ * on either device is bought, and uncollected earnings take the larger of
+ * the two rather than the newer, so nothing a settlement earned on the other
+ * device is written off by opening this one.
+ */
+export function mergeRecords(local: PlayerRecord, remote: PlayerRecord): PlayerRecord {
+  const newer = (remote.savedAt ?? 0) > (local.savedAt ?? 0) ? remote : local;
+  const older = newer === remote ? local : remote;
+  const bySeed = <T extends { seed: number }>(a: T[], b: T[]) => {
+    const out = new Map<number, T>();
+    for (const item of [...(b ?? []), ...(a ?? [])]) out.set(item.seed, item);
+    return [...out.values()];
+  };
+  return {
+    ...newer,
+    ledger: {
+      ...newer.ledger,
+      earnedEmerge: Math.max(local.ledger?.earnedEmerge ?? 0, remote.ledger?.earnedEmerge ?? 0),
+    },
+    nameChanges: Math.max(local.nameChanges ?? 0, remote.nameChanges ?? 0),
+    claims: bySeed(newer.claims, older.claims),
+    prospected: bySeed(newer.prospected, older.prospected),
+    listings: bySeed(newer.listings, older.listings),
+  };
+}
 
 /**
  * Move a browsing session's record onto a wallet the first time one connects.

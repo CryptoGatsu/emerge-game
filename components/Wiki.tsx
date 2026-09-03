@@ -137,8 +137,8 @@ const CIVIC_BUILDINGS = [
 
 /** What a plot's status figures mean, and what actually moves them. */
 const STATUS = [
-  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and falls in a hard winter or a bad hazard.',
-    'Build houses before you build anything else. A settlement with nowhere to put people stops growing whatever else you do.'],
+  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and when word gets round: a well-run plot with a spare roof draws settlers on the road, and a cafe, a school, a clinic and improved houses draw more — up to three a day. It falls in a hard winter or a bad hazard.',
+    'Build houses before you build anything else, and improve them: an improved house sleeps more. Nobody moves to a town with no spare roof, however good it is.'],
   ['Happiness', 'The average of six things each person carries: how fed, how rested, how sociable, how well clothed, how purposeful and how warm they are.',
     'The quickest lever is wages. After that: a tavern and benches for company, clothing in the stores, and firewood through the winter.'],
   ['Energy', 'How rested people are. It drains all day and comes back in a bed — faster in a real house than for somebody sleeping rough.',
@@ -829,17 +829,29 @@ export default function Wiki() {
               </tr>
               <tr>
                 <td>Stewardship payouts</td>
-                <td className={landOnChain ? 'yes' : 'no'}>
-                  {landOnChain ? 'On chain' : 'Not yet'}
+                <td className={landOnChain ? 'yes' : live ? 'partial' : 'no'}>
+                  {landOnChain ? 'On chain' : live ? 'Paid' : 'Not yet'}
                 </td>
                 <td className="muted">
-                  {landOnChain ? 'paid from the vault' : 'waiting on the land contract'}
+                  {landOnChain
+                    ? 'paid from the vault'
+                    : live
+                      ? 'from the vault, to wallets on our land record'
+                      : 'waiting on the token'}
                 </td>
               </tr>
               <tr>
                 <td>The simulation</td>
                 <td className="partial">Off chain</td>
                 <td className="muted">it runs in your browser, as it must to be responsive</td>
+              </tr>
+              <tr>
+                <td>Your settlement</td>
+                <td className="partial">Saved</td>
+                <td className="muted">
+                  in this browser and on our server; open it on another device and the copy that is
+                  further along continues
+                </td>
               </tr>
             </tbody>
           </table>

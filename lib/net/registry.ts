@@ -228,12 +228,15 @@ export async function releasePlot(seed: number, owner: string): Promise<boolean>
 export async function publishWorld(input: {
   seed: number; owner: string; ownerName: string; worldName: string;
   day: number; population: number; snapshot: unknown;
-}): Promise<boolean> {
+}, keepalive = false): Promise<boolean> {
   try {
+    // `keepalive` lets the request outlive the page: this is how a phone
+    // that is being put in a pocket gets its last few minutes saved.
     const response = await fetch('/api/worlds', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
+      keepalive,
     });
     return response.ok;
   } catch {

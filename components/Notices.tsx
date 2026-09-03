@@ -21,11 +21,13 @@ import { shortAddress } from '@/lib/chain/emerge';
 
 export interface Notice {
   id: string;
-  kind: 'chat' | 'claim' | 'sale';
+  kind: 'chat' | 'claim' | 'sale' | 'sync';
   title: string;
   body: string;
   /** What tapping the card does, when there is something useful to do. */
   action?: { label: string; run: () => void };
+  /** How long it stays, in milliseconds. A hand-off deserves longer than a chat line. */
+  lifetime?: number;
 }
 
 /** How often the world is asked what happened, in milliseconds. */
@@ -97,7 +99,7 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
     });
     window.setTimeout(() => {
       setNotices((held) => held.filter((n) => n.id !== notice.id));
-    }, LIFETIME);
+    }, notice.lifetime ?? LIFETIME);
   }, []);
 
   const dismiss = useCallback((id: string) => {
@@ -194,7 +196,7 @@ const nameOf = (claim: Claim) =>
   claim.ownerName?.trim() ? claim.ownerName : shortAddress(claim.owner);
 
 /** One mark per kind, so a glance says what a card is before it is read. */
-const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎' };
+const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎', sync: '⇄' };
 
 /** The cards themselves. */
 export function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: string) => void }) {

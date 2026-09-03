@@ -28,11 +28,12 @@ import {
   type World,
 } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
-import { GOODWILL, claimGoodwill } from '@/lib/world/grants';
+import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
+import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
 import {
-  adoptRecord, clearClaimedWorld, loadClaimedWorld, loadPlayer, savePlayer, saveClaimedWorld,
+  adoptRecord, clearClaimedWorld, loadClaimedWorld, loadPlayer, mergeRecords, savePlayer, saveClaimedWorld,
   withClaim, withoutClaim,
   type ClaimedWorld, type PlayerRecord,
 } from '@/lib/world/plots';
@@ -159,8 +160,8 @@ export interface Visit {
  * on switching plots — and never on a visit, because a visitor's copy of
  * somebody else's settlement is not a settlement to pay anything into.
  */
-function makeGood(world: World, seed: number) {
-  const gold = claimGoodwill(seed);
+function makeGood(world: World) {
+  const gold = claimGoodwill(world);
   if (gold > 0) fundTreasury(world, gold, `${gold.toLocaleString()} Gold arrived: ${GOODWILL.reason}`);
 }
 
@@ -209,7 +210,30 @@ export default function EmergeClient() {
     // was a stranger today.
     savePlayer(record, address);
     setPlayer(record);
+    if (!address) return;
+    // And the copy the server holds for this wallet, from whichever device
+    // wrote it last. Merged rather than adopted, so a plot bought here and a
+    // name chosen there both survive.
+    let live = true;
+    void (async () => {
+      const remote = await fetchPlayerRecord(address);
+      if (!live || !remote) return;
+      setPlayer((prev) => {
+        const merged = mergeRecords(prev ?? record, remote);
+        savePlayer(merged, address);
+        return merged;
+      });
+    })();
+    return () => { live = false; };
   }, [address]);
+
+  // Whatever the record becomes, the server gets it a moment later. Debounced,
+  // because the yield timer touches it several times a minute.
+  useEffect(() => {
+    if (!address || !player) return;
+    const timer = window.setTimeout(() => { void pushPlayerRecord(address, player); }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [address, player]);
 
   const addressRef = useRef<string | null>(address);
   addressRef.current = address;
@@ -467,7 +491,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     worldRef.current = visit
       ? worldFromSave(visit.save, visit.seed, visit.worldName) ?? createWorld(visit.seed, visit.worldName)
       : loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
-    if (!visit) makeGood(worldRef.current, claimed.seed);
+    if (!visit) makeGood(worldRef.current);
   }
 
   /* -------------------------------------------------------------- *
@@ -611,7 +635,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const scene = sceneRef.current;
     if (!scene) return;
     const next = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
-    makeGood(next, claimed.seed);
+    makeGood(next);
     worldRef.current = next;
     setSelected(null);
     setFollowing(null);
@@ -765,12 +789,79 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // does not push a snapshot for every plot they open.
     const first = window.setTimeout(put, 6_000);
     const timer = window.setInterval(put, PUBLISH_INTERVAL);
+    // And the moment the page is put away. On a phone this is the only save
+    // that reliably happens: the interval never gets another turn once the
+    // app is in the background.
+    const away = () => {
+      const world = worldRef.current;
+      if (!world || document.visibilityState !== 'hidden') return;
+      void publishWorld({
+        seed, owner, ownerName: player.name, worldName: world.name,
+        day: world.day, population: world.population, snapshot: snapshotOf(world),
+      }, true);
+    };
+    document.addEventListener('visibilitychange', away);
+    window.addEventListener('pagehide', away);
     return () => {
       live = false;
       window.clearTimeout(first);
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', away);
+      window.removeEventListener('pagehide', away);
     };
   }, [claimed.seed, wallet.address, player.name, spectating]);
+
+  /*
+   * Pick up where you left off, on any device.
+   *
+   * The settlement is saved in this browser and published to the server for
+   * visitors; until now only the first of those was ever read back by the
+   * owner. So a plot played to day twenty-six on a desktop opened at day one
+   * on a phone, was handed its opening grant again, and — worse — the phone
+   * then published that day-one world over the real one. Now the published
+   * copy is read when the world opens and, if it is further along than what
+   * this browser has, it is the one that continues. Further along, not more
+   * recent: progress is what must never be lost, and a day-one world saved a
+   * minute ago is not progress over a day-twenty-six world saved yesterday.
+   */
+  useEffect(() => {
+    if (spectating || !wallet.address) return;
+    const owner = wallet.address.toLowerCase();
+    const seed = claimed.seed;
+    let live = true;
+    void (async () => {
+      const { world: published } = await fetchWorld(seed);
+      if (!live || !published || published.owner.toLowerCase() !== owner) return;
+      const remote = worldFromSave(published.snapshot as SavedWorld, seed, claimed.name);
+      const local = worldRef.current;
+      if (!remote || !local || seedRef.current !== seed) return;
+      const ahead = remote.day > local.day || (remote.day === local.day && remote.hour > local.hour + 0.5);
+      // Said in the console as well as on a card, so a player asking why
+      // their settlement jumped has the answer in front of them.
+      console.info(`Emerge: the published copy of ${remote.name} is on day ${remote.day}; this browser has day ${local.day}.${ahead ? ' Continuing from the published copy.' : ''}`);
+      if (!ahead) return;
+      // A world that was published was opened by a client that made good on
+      // it, whether or not it wrote that down: it is not owed the grant again.
+      markGoodwill(remote);
+      worldRef.current = remote;
+      selectedRef.current = null;
+      setSelected(null);
+      setFollowing(null);
+      sceneRef.current?.reset(remote);
+      setView(snapshot(remote, null));
+      saveWorld(remote);
+      announce({
+        id: `cloud-${seed}-${remote.day}`,
+        kind: 'sync',
+        title: 'Picked up where you left off',
+        body: `${remote.name} is on day ${remote.day}, as you last left it on another device.`,
+        lifetime: 20_000,
+      });
+    })();
+    return () => { live = false; };
+    // `announce` is stable for the life of the world; the effect is about the seed and the wallet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimed.seed, claimed.name, wallet.address, spectating]);
 
   /**
    * Burn $EMERGE to put Gold in the treasury of the world being visited.

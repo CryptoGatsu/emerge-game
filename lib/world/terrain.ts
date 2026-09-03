@@ -476,17 +476,13 @@ function placeSettlementProps(out: PropInstance[], world: World, roads: Polyline
     return true;
   };
 
-  // A deck at every place the plan found a road crossing water, laid along the
-  // whole span rather than as a single sprite at the midpoint — a crossing is
-  // as long as the water under it.
+  // The decks themselves are drawn by the renderer along each bridge's own
+  // line. They are only reserved here, so no dressing lands on the planks.
   for (const bridge of layout.bridges) {
-    // `deck`, not `span`: the walkable ramp runs well past the planks so that
-    // the approach is wider than a person, but drawing it that long turned a
-    // one-unit stream into seven units of boardwalk.
-    const sections = Math.max(1, Math.round(bridge.deck / 2.6));
+    const sections = Math.max(1, Math.round(bridge.deck / 2));
     for (let i = -sections; i <= sections; i++) {
       const t = (i / sections) * bridge.deck;
-      push(bridge.x + Math.cos(bridge.angle) * t, bridge.y + Math.sin(bridge.angle) * t, 'prop.bridge');
+      placed.push({ x: bridge.x + Math.cos(bridge.angle) * t, y: bridge.y + Math.sin(bridge.angle) * t });
     }
   }
 

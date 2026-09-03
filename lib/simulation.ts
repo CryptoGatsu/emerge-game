@@ -393,6 +393,14 @@ export interface World {
    * a hard daily ceiling.
    */
   stewardship: Stewardship;
+  /**
+   * One-off grants this settlement has already had, by id.
+   *
+   * Kept on the world rather than in the browser, because the world is what
+   * travels between devices: a marker in one browser's storage let a second
+   * device hand the same compensation out again.
+   */
+  grants: string[];
   counter: number;
 }
 
@@ -2016,7 +2024,16 @@ function starterBuildings(seed: number, layout: WorldLayout, population: number)
   // Trades go on the sites the plan set aside for them — the outer ends of the
   // arms, the far side of the ring, the head of the causeway — so the shape of
   // the settlement decides where its work happens.
-  const sites = layout.workSites;
+  // A plan can come back with no work sites at all — one seed in a few
+  // hundred, where every candidate stood in water — and indexing an empty
+  // list crashed the world before it opened. The trades then go on the house
+  // plots, or failing those in a ring round the plaza.
+  const sites: [number, number][] = layout.workSites.length ? layout.workSites
+    : layout.housePlots.length ? layout.housePlots
+      : [0, 1, 2, 3].map((i) => [
+        layout.plaza.x + Math.cos(i * Math.PI / 2 + 0.6) * (layout.plaza.r + 7),
+        layout.plaza.y + Math.sin(i * Math.PI / 2 + 0.6) * (layout.plaza.r + 7),
+      ]);
   // Only as many trades as the settlement can staff and pay for. The lists are
   // written as what the land *could* support; opening every one of them on a
   // desert of twelve people meant a wage bill and an upkeep bill that its
@@ -2322,8 +2339,15 @@ export function createWorld(seed = 481516, name?: string): World {
     family.members.push(citizen.id);
   }
   const buildings = starterBuildings(seed, layout, count);
+  // The same guard as the trades: a plan without house plots puts the homes
+  // round the plaza rather than failing to open.
+  const homes: [number, number][] = layout.housePlots.length ? layout.housePlots
+    : [0, 1, 2, 3, 4, 5].map((i) => [
+      layout.plaza.x + Math.cos(i * Math.PI / 3) * (layout.plaza.r + 5),
+      layout.plaza.y + Math.sin(i * Math.PI / 3) * (layout.plaza.r + 5),
+    ]);
   families.forEach((f, i) => {
-    const [hx, hy] = layout.housePlots[i % layout.housePlots.length];
+    const [hx, hy] = homes[i % homes.length];
     buildings.push({ id: f.homeId, type: 'House', x: hx, y: hy, workers: [], active: true });
   });
   enforceSpacing(buildings, layout, water);
@@ -2352,6 +2376,7 @@ export function createWorld(seed = 481516, name?: string): World {
       score: 0, attention: 1, lastActionDay: 1, lastActionAt: Date.now(),
       banked: 0, dailyYield: 0, pending: 0, lifetime: 0,
     },
+    grants: [],
     counter: 0,
   };
   pushFeed(world, 'world', `${world.name} has emerged.`);
@@ -3222,6 +3247,182 @@ export function gatheringPlace(world: World): Building | undefined {
   return findBuilding(world, 'Tavern') ?? findBuilding(world, 'Cafe');
 }
 
+/* ------------------------------------------------------------------ *
+ * Housing
+ * ------------------------------------------------------------------ */
+
+/**
+ * Put homeless families into empty houses.
+ *
+ * A family that arrived, or formed, when every house was full was written
+ * down with no home — and then nothing ever looked again. The settlement
+ * would raise house after house, the feed would say so, and the same people
+ * went on sleeping at the tavern and saying they needed somewhere to live,
+ * because the only moment anybody was ever matched to a house was the moment
+ * they appeared. This runs every morning and the moment a house is raised.
+ *
+ * Empty families — everybody in them dead or married out — give their house
+ * up first, or a town of ghosts would keep the living on the street.
+ */
+export function rehouse(world: World): number {
+  const alive = new Set(world.citizens.map((c) => c.id));
+  for (const f of world.families) {
+    f.members = f.members.filter((id) => alive.has(id));
+    if (!f.members.length) f.homeId = '';
+  }
+  const standing = (id: string) => world.buildings.some((b) => b.id === id && b.type === 'House');
+  const taken = new Set(world.families.filter((f) => f.members.length && standing(f.homeId)).map((f) => f.homeId));
+  const vacant = world.buildings.filter((b) => b.type === 'House' && b.active && !taken.has(b.id));
+  // The largest family first: the most people off the street per house.
+  const homeless = world.families
+    .filter((f) => f.members.length && !standing(f.homeId))
+    .sort((a, b) => b.members.length - a.members.length);
+  let moved = 0;
+  for (const family of homeless) {
+    const house = vacant.shift();
+    if (!house) break;
+    family.homeId = house.id;
+    moved += family.members.length;
+    pushFeed(world, 'social', `The ${family.name} family moved into the new house.`);
+  }
+  return moved;
+}
+
+/* ------------------------------------------------------------------ *
+ * The plot helper
+ *
+ * What to build next, and why, read off the settlement itself. Everything
+ * here is a condition the player could find for themselves in the panels;
+ * the helper's job is to have found it already and put it in order.
+ * ------------------------------------------------------------------ */
+
+export interface Advice {
+  /** What to do: raise a building, improve one, or move a lever. */
+  kind: 'build' | 'improve' | 'wages';
+  /** The building type, where there is one. */
+  type?: string;
+  /** For an improvement, which building. */
+  buildingId?: string;
+  title: string;
+  /** What in the settlement is asking for it. */
+  why: string;
+  /** What it will do, in plain words. */
+  gain: string;
+}
+
+export function adviseBuild(world: World): Advice[] {
+  const out: Advice[] = [];
+  const adults = world.citizens.filter((c) => c.age >= 16);
+  const people = world.citizens.length;
+  const has = (type: string) => world.buildings.some((b) => b.type === type);
+  const count = (type: string) => world.buildings.filter((b) => b.type === type && b.active).length;
+  const r = world.resources;
+  const supported = new Set(biomeProfile(world.biome).trades);
+
+  const homeless = adults.filter((c) => !homeOf(world, c)).length;
+  if (homeless > 0) {
+    out.push({ kind: 'build', type: 'House', title: 'Raise a house',
+      why: `${homeless} ${homeless === 1 ? 'adult has' : 'adults have'} nowhere to live and are sleeping rough.`,
+      gain: 'Housing is a quarter of stewardship, and people with a bed rest twice as fast.' });
+  } else if (people >= housingRoom(world)) {
+    out.push({ kind: 'build', type: 'House', title: 'Raise a house',
+      why: `${people} people in ${count('House')} houses is full, and nobody moves to a town with no spare roof.`,
+      gain: 'Room for the next family to arrive. An improved house sleeps more, too.' });
+  }
+
+  const food = r.bread + r.wheat + r.vegetables;
+  if (food < people * 2.5) {
+    out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
+      why: `${Math.round(food)} food in store is about ${(food / Math.max(1, people)).toFixed(1)} days for ${people} people.`,
+      gain: 'Fed people are a quarter of stewardship, and the market stops buying bread at a premium.' });
+  }
+  if (r.wood < 22 && !has('Woodcutter')) {
+    out.push({ kind: 'build', type: 'Woodcutter', title: 'Put hands to the timber',
+      why: `${Math.round(r.wood)} wood in the yard, and nobody felling.`,
+      gain: 'Every building and every winter fire is timber; without it the town stops.' });
+  }
+
+  // Chains with a link missing: something piling up that a trade would turn
+  // into something worth more.
+  const chain: [Resource, number, string, string][] = [
+    ['wheat', 40, 'Mill', 'Flour sells for more than grain, and it is what the bakery needs.'],
+    ['flour', 20, 'Bakery', 'Bread is the settlement\u2019s own food rather than an import.'],
+    ['ironOre', 15, 'Blacksmith', 'Tools sell well and lift every trade that uses them.'],
+    ['wool', 8, 'Tailor', 'Clothing is a need people pay for every winter.'],
+    ['wood', 90, 'Carpenter', 'Furniture is the highest-priced thing a forest town makes.'],
+  ];
+  for (const [res, at, type, gain] of chain) {
+    if ((r[res] ?? 0) >= at && !has(type) && supported.has(type)) {
+      out.push({ kind: 'build', type, title: `Open a ${type.toLowerCase()}`,
+        why: `${Math.round(r[res])} ${RESOURCE_LABELS[res].toLowerCase()} is sitting in store with nothing to turn it into.`,
+        gain });
+    }
+  }
+
+  if (!has('Storage') && world.buildings.length >= 6) {
+    out.push({ kind: 'build', type: 'Storage', title: 'Build a store',
+      why: 'The town has grown and keeps no surplus anywhere.',
+      gain: 'Readiness for blight, and room for a harvest to be put by.' });
+  }
+  if (!has('Tavern') && !has('Cafe') && people >= 10) {
+    out.push({ kind: 'build', type: 'Cafe', title: 'Give them somewhere to meet',
+      why: `${people} people and nowhere to gather but the market.`,
+      gain: 'Company every day, and gatherings — which are what turn neighbours into friends.' });
+  }
+  if (people >= 14 && !has('School')) {
+    out.push({ kind: 'build', type: 'School', title: 'Open a school',
+      why: `${adults.length} adults learning their trades the slow way.`,
+      gain: `Everybody learns ${Math.round(SCHOOL_LEARNING * 100)}% faster, and skill is output.` });
+  }
+  const social = people ? world.citizens.reduce((sum, c) => sum + c.social, 0) / people : 100;
+  const purpose = people ? world.citizens.reduce((sum, c) => sum + c.purpose, 0) / people : 100;
+  if (social < 45 && !has('Cafe')) {
+    out.push({ kind: 'build', type: 'Cafe', title: 'Open a cafe',
+      why: `Company is the lowest need in town, at ${Math.round(social)}%.`,
+      gain: `Everybody gains ${CAFE_SOCIAL} company a day. Happiness is a fifth of stewardship.` });
+  }
+  if (purpose < 45 && !has('Studio')) {
+    out.push({ kind: 'build', type: 'Studio', title: 'Open a studio',
+      why: `Purpose is the lowest need in town, at ${Math.round(purpose)}%.`,
+      gain: `Everybody gains ${STUDIO_PURPOSE} purpose a day, and purpose is what keeps people at their trades.` });
+  }
+  if (people >= 20 && !has('Clinic')) {
+    out.push({ kind: 'build', type: 'Clinic', title: 'Open a clinic',
+      why: `${people} people and no clinic; the next hard winter will take somebody.`,
+      gain: `Nearly half the daily risk of death gone.` });
+  }
+  if (!has('Lab') && world.treasury > 3000 && world.buildings.filter((b) => b.production !== undefined || JOB_BUILDINGS.has(b.type)).length >= 4) {
+    out.push({ kind: 'build', type: 'Lab', title: 'Open a lab',
+      why: 'Four trades or more, all working the old way.',
+      gain: `Every trade gets ${Math.round(LAB_METHODS * 100)}% more out of the same day, and trouble is seen coming.` });
+  }
+
+  // Improve the busiest workshop once there is Gold to spare.
+  if (world.treasury > 2500) {
+    const busiest = world.buildings
+      .filter((b) => JOB_BUILDINGS.has(b.type) && b.active && levelOf(b) < MAX_BUILDING_LEVEL)
+      .sort((a, b) => b.workers.length - a.workers.length)[0];
+    if (busiest) {
+      const cost = upgradeCost(busiest);
+      out.push({ kind: 'improve', type: busiest.type, buildingId: busiest.id, title: `Improve the ${busiest.type.toLowerCase()}`,
+        why: `It is the busiest workshop in town and still at level ${levelOf(busiest)}.`,
+        gain: `${Math.round(OUTPUT_PER_LEVEL * 100)}% more from it for ${cost?.gold ?? 0} Gold, against ${Math.round(UPKEEP_PER_LEVEL * 100)}% more upkeep.` });
+    }
+  }
+
+  const happiness = people ? world.citizens.reduce((sum, c) => sum + c.happiness, 0) / people : 100;
+  if (world.wageRate < WAGE_STANDARD && happiness < 60) {
+    out.push({ kind: 'wages', title: 'Pay the going rate',
+      why: `Wages are at ${Math.round(world.wageRate * 100)}% and happiness is ${Math.round(happiness)}%.`,
+      gain: 'Underpaid people do less and lose heart; over a long run it costs more than it saves.' });
+  }
+
+  return out.slice(0, 4);
+}
+
+/** The trade buildings, for telling a workshop from a house. */
+const JOB_BUILDINGS = new Set(Object.values(JOBS).map((j) => j.building));
+
 /** Everybody a settlement could reasonably send to the arena, best first. */
 export function fightersOf(world: World): Citizen[] {
   return world.citizens
@@ -4078,9 +4279,8 @@ function drawMaterials(world: World, type: string) {
  * settlement in trouble spends its gold on wages instead.
  */
 function settlementBuilds(world: World) {
-  const houses = world.buildings.filter((b) => b.type === 'House' && b.active).length;
   const homeless = world.citizens.filter((c) => c.age >= 16 && !homeOf(world, c)).length;
-  const crowded = world.citizens.length > houses * 3.4;
+  const crowded = world.citizens.length > housingRoom(world) * 1.06;
 
   // What the settlement would choose on its own, reading its own shortages.
   let ownChoice: string | null = null;
@@ -4140,6 +4340,7 @@ function settlementBuilds(world: World) {
   drawMaterials(world, want);
   const raised: Building = { id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true };
   world.buildings.push(raised);
+  if (raised.type === 'House') rehouse(world);
   linkToRoads(world, raised);
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   pushFeed(world, 'build', bySay
@@ -4383,12 +4584,34 @@ const SETTLER_NAMES = [
  */
 const LAST_RESORT_POPULATION = 3;
 
+/** How many people a house is thought to sleep, and what each improvement adds. */
+export const HOUSE_ROOM = 3.2;
+export const HOUSE_ROOM_PER_LEVEL = 0.8;
+
+/**
+ * How many people the settlement's houses can sleep between them.
+ *
+ * An improved house is a roomier one: this is where improving a home pays,
+ * since a house holds no workers to give more of.
+ */
+export function housingRoom(world: World): number {
+  return world.buildings
+    .filter((b) => b.type === 'House' && b.active)
+    .reduce((sum, b) => sum + HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL, 0);
+}
+
+/** What draws people: the most a well-run town can expect in one day. */
+export const MAX_ARRIVALS_PER_DAY = 3;
+
 function migration(world: World, rand: () => number) {
-  const houses = world.buildings.filter((b) => b.type === 'House' && b.active).length;
-  // A spare roof. Nobody moves to a place they would have to sleep outside in.
-  if (world.citizens.length >= houses * 3.2) return;
-  const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
-  if (food < Math.max(12, world.citizens.length * 4)) return;
+  const roomFor = () => world.citizens.length < housingRoom(world);
+  const fedFor = () => {
+    const food = world.resources.bread + world.resources.wheat + world.resources.vegetables;
+    return food >= Math.max(12, world.citizens.length * 4);
+  };
+  // A spare roof and a full store. Nobody moves to a place they would have
+  // to sleep outside in, or go hungry in.
+  if (!roomFor() || !fedFor()) return;
 
   /*
    * Below a handful of people, a roof and a meal are the whole test.
@@ -4420,12 +4643,36 @@ function migration(world: World, rand: () => number) {
     if (content < 55) return;
   }
 
-  // Bigger places draw more people, but never more than one a day. A settlement
-  // down to its last few draws steadily rather than quickly: enough to come
-  // back from, not enough to make neglect free.
-  const draw = desperate ? 0.22 : 0.18 + Math.min(0.32, world.buildings.length * 0.02);
-  if (rand() > draw) return;
+  /*
+   * How many come.
+   *
+   * Word travels on how the place is run. A bare camp draws somebody every
+   * few days; a town that is well stewarded, has a cafe and a school and a
+   * clinic, and has improved what it built, draws a couple of people most
+   * days. That is the reward for improving a plot: it fills up. A settlement
+   * down to its last few draws steadily rather than quickly — enough to come
+   * back from, not enough to make neglect free.
+   */
+  const renown = stewardshipScore(world);
+  const civic = ['Cafe', 'School', 'Library', 'Studio', 'Clinic', 'Lab', 'Tavern']
+    .filter((type) => hasCivic(world, type)).length;
+  const improved = world.buildings.reduce((sum, b) => sum + (levelOf(b) - 1), 0);
+  const draw = desperate
+    ? 0.22
+    : 0.16 + Math.min(0.3, world.buildings.length * 0.02) + renown * 0.5 + civic * 0.06 + Math.min(0.24, improved * 0.04);
+  let coming = Math.min(MAX_ARRIVALS_PER_DAY, Math.floor(draw) + (rand() < draw - Math.floor(draw) ? 1 : 0));
+  let arrived = 0;
+  while (coming-- > 0 && roomFor() && fedFor()) {
+    arriveOne(world, rand);
+    arrived += 1;
+  }
+  if (arrived >= 2) {
+    pushFeed(world, 'social', `${arrived} people arrived on the road today. Word of ${world.name} is getting round.`);
+  }
+}
 
+/** One settler, on the road, with a family record of their own. */
+function arriveOne(world: World, rand: () => number) {
   const hash = world.counter * 37 + 11;
   const name = SETTLER_NAMES[Math.floor(rand() * SETTLER_NAMES.length)];
   // In on the road: the wander spot furthest from the square, so they are
@@ -4707,6 +4954,7 @@ export function collectYield(world: World) {
 }
 
 function daily(world: World) {
+  rehouse(world);
   world.flowYesterday = world.flow;
   world.flow = { produced: {}, consumed: {} };
   // Yesterday's books close before today's wages are drawn, so the figures the
@@ -5059,6 +5307,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   }
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   staffNow(world);
+  if (type === 'House') rehouse(world);
   pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
   checkUnlocks(world);
   return building;

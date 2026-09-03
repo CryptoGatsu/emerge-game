@@ -19,7 +19,7 @@ import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
 import { spokenLine } from '../simulation';
 import { speechFor } from '../speech';
-import { AMBIENT, SEASON_TINT, UI, WEATHER_TINT } from './palette';
+import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
 import { CitizenSprite } from './citizenSprite';
@@ -27,6 +27,11 @@ import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, 
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
 import type { ShoreEdge } from './tiles';
 import type { BiomeKind } from '../world/biomes';
+
+/** How far the drawn deck reaches either side of the bridge's centre line, in world units. */
+const DECK_HALF_WIDTH = 1.7;
+/** Rail height in screen pixels. */
+const RAIL_HEIGHT = 9;
 
 export type PickTarget = { kind: 'citizen' | 'building'; id: string } | null;
 
@@ -226,7 +231,10 @@ export class EmergeScene {
     this.app.canvas.style.cursor = 'grab';
 
     this.assets = loadAssets();
-    this.map = generateWorldMap(world);
+    // `this.world`, not the argument: a world handed to reset() while the
+    // renderer was booting — the published copy arriving from another device
+    // — has replaced it, and is the one to draw.
+    this.map = generateWorldMap(this.world);
 
     this.vignette.texture = this.assets.get('fx.vignette');
     this.vignette.blendMode = 'multiply';
@@ -324,6 +332,61 @@ export class EmergeScene {
       sprite.position.set(pos.x - TILE_W / 2, pos.y);
       this.waterLayer.addChild(sprite);
       this.waterfallSprites.push(sprite);
+    }
+
+    this.buildBridges();
+  }
+
+  /**
+   * One deck per bridge, laid along the bridge's own line.
+   *
+   * These used to be a north-east-facing sprite dropped every 2.6 units along
+   * the deck. A crossing on the other diagonal, or a long one the settlement
+   * built itself, came out as a staircase of railings marching over a strip of
+   * sand. The deck is drawn instead — planks between the banks and a rail down
+   * each edge — whatever the angle and however long the water. It sits in the
+   * water layer, over the river and under everything that walks across it.
+   */
+  private buildBridges() {
+    const cos0 = Math.cos, sin0 = Math.sin;
+    for (const bridge of this.world.layout.bridges) {
+      const cos = cos0(bridge.angle), sin = sin0(bridge.angle);
+      const h = this.map.heightAt(bridge.x, bridge.y);
+      const at = (along: number, across: number) => worldToScreen(
+        bridge.x + cos * along - sin * across,
+        bridge.y + sin * along + cos * across,
+        h,
+      );
+      const L = bridge.deck, W = DECK_HALF_WIDTH;
+      const g = new Graphics();
+
+      // The shadow the deck throws on the water, then the timber under the edge.
+      const corners = [at(-L, -W), at(L, -W), at(L, W), at(-L, W)];
+      g.poly(corners.map((c) => ({ x: c.x, y: c.y + 6 }))).fill({ color: 0x06110c, alpha: 0.35 });
+      g.poly(corners.map((c) => ({ x: c.x, y: c.y + 3 }))).fill(BUILD.timberDark);
+      g.poly(corners).fill(BUILD.timber);
+
+      // Planks run across the deck; every fifth is darker, the way the sprite was.
+      let k = 0;
+      for (let t = -L + 0.35; t < L; t += 0.7, k++) {
+        const a = at(t, -W), b = at(t, W);
+        g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 1, color: k % 5 === 0 ? BUILD.timberDark : BUILD.timberLight, alpha: k % 5 === 0 ? 0.9 : 0.45 });
+      }
+
+      // A rail down each edge: posts every couple of units, a bar along the top.
+      for (const side of [-W, W]) {
+        const posts: { x: number; y: number }[] = [];
+        for (let t = -L + 0.6; t <= L - 0.3; t += 2) posts.push(at(t, side));
+        if (posts.length < 2) posts.push(at(L - 0.6, side));
+        for (const post of posts) {
+          g.rect(Math.round(post.x) - 1, Math.round(post.y) - RAIL_HEIGHT, 2, RAIL_HEIGHT).fill(BUILD.timberDark);
+        }
+        const first = posts[0], last = posts[posts.length - 1];
+        g.moveTo(first.x, first.y - RAIL_HEIGHT + 1).lineTo(last.x, last.y - RAIL_HEIGHT + 1).stroke({ width: 2, color: BUILD.timber });
+        g.moveTo(first.x, first.y - RAIL_HEIGHT * 0.5).lineTo(last.x, last.y - RAIL_HEIGHT * 0.5).stroke({ width: 1, color: BUILD.timberLight, alpha: 0.7 });
+      }
+
+      this.waterLayer.addChild(g);
     }
   }
 
@@ -970,6 +1033,9 @@ export class EmergeScene {
    */
   reset(world: World) {
     this.world = world;
+    // Still booting: there is no atlas to draw with and nothing on stage to
+    // clear. init() finishes with the world set here.
+    if (!this.assets) return;
     this.map = generateWorldMap(world);
     // The backdrop survives the teardown below, so it is re-tinted here rather
     // than rebuilt — otherwise a desert claimed after a woodland keeps the

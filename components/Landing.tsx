@@ -21,6 +21,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT } from '@/lib/chain/vault';
 import { VERSION } from '@/lib/version';
+import TokenStats from './TokenStats';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 /** Where to find the project outside the game. */
@@ -176,6 +177,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
         </section>
 
         <ContractAddress />
+        <TokenStats />
 
         <section className="notes">
           {notesFor(onChainClaimsLive()).map((note) => (

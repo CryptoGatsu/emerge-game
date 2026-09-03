@@ -363,6 +363,18 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         </section>
 
         <section>
+          <h4>The plot helper</h4>
+          <p>
+            The side panel&rsquo;s <b>Plot Helper</b> reads the settlement every few seconds and
+            says what to build next, and why: who is sleeping rough, what is piling up in store with
+            no trade to turn it into something, which need is lowest in town, what the busiest
+            workshop would give if it were improved. It is the same list the Build panel opens
+            with. Follow it and the place fills up — a well-run plot with a spare roof draws
+            settlers on the road, and a cafe, a school, a clinic and improved houses draw more.
+          </p>
+        </section>
+
+        <section>
           <h4>Building</h4>
           <p>
             The Build panel places new buildings. Each costs Gold <em>and</em> materials — timber and
@@ -1592,6 +1604,14 @@ function BuildPanel({ view, onClose, onBuild }: { view: Snapshot; onClose: () =>
       onClose={onClose}
       wide
     >
+      {view.advice.length > 0 && (
+        <div className="build-advice">
+          <span>THE HELPER SUGGESTS</span>
+          {view.advice.map((a, i) => (
+            <p key={`${a.kind}-${a.type ?? ''}-${i}`}><b>{a.title}</b> — {a.why} <em>{a.gain}</em></p>
+          ))}
+        </div>
+      )}
       <div className="build-stores">
         <span>IN THE YARD</span>
         <b>{Math.floor(wood)} wood</b>
