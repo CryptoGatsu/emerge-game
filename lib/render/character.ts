@@ -297,7 +297,7 @@ function drawHair(p: Pixels, dir: Dir, pose: Pose, style: number) {
   }
 }
 
-function drawHat(p: Pixels, dir: Dir, pose: Pose, kind: 'straw' | 'helmet' | 'cap' | 'hood') {
+function drawHat(p: Pixels, dir: Dir, pose: Pose, kind: Exclude<HatKind, 'none'>) {
   const m = metrics(dir);
   const top = m.headTop + pose.bob + pose.crouch + (pose.lean > 1 ? 1 : 0);
   const x = m.headX + (dir === 'e' ? pose.lean : 0);
@@ -316,10 +316,57 @@ function drawHat(p: Pixels, dir: Dir, pose: Pose, kind: 'straw' | 'helmet' | 'ca
     rect(p, x - 1, top - 3, m.headW + 2, 5, BASE);
     rect(p, x, top - 3, m.headW, 1, HI);
     if (dir !== 'n') rect(p, x + m.headW - 1, top + 1, 4, 1, MID);
-  } else {
+  } else if (kind === 'hood') {
     rect(p, x - 2, top - 3, m.headW + 4, 9, BASE);
     rect(p, x - 1, top - 3, m.headW + 2, 1, HI);
     if (dir !== 'n') rect(p, x + 1, top + 3, m.headW - 2, 5, LINE);
+  } else if (kind === 'bonnet') {
+    // A township bonnet: a soft dome, a brim at the back, a ribbon.
+    rect(p, x - 1, top - 4, m.headW + 2, 6, BASE);
+    rect(p, x, top - 5, m.headW, 1, HI);
+    rect(p, x - 2, top + 1, m.headW + 4, 2, LOW);
+    rect(p, x + (dir === 'e' ? 1 : m.headW - 2), top + 2, 1, 3, LINE);
+  } else if (kind === 'tricorn') {
+    rect(p, x - 3, top - 1, m.headW + 6, 2, BASE);
+    rect(p, x + 1, top - 5, m.headW - 2, 4, BASE);
+    rect(p, x + 2, top - 6, m.headW - 4, 1, HI);
+    rect(p, x - 3, top - 2, 2, 1, HI); rect(p, x + m.headW + 1, top - 2, 2, 1, HI);
+    rect(p, x + 1, top - 1, m.headW - 2, 1, LOW);
+  } else if (kind === 'bowler') {
+    rect(p, x, top - 5, m.headW, 6, BASE);
+    rect(p, x + 1, top - 6, m.headW - 2, 1, BASE);
+    rect(p, x + 2, top - 6, 3, 1, HI);
+    rect(p, x, top - 1, m.headW, 1, LINE);
+    rect(p, x - 2, top + 1, m.headW + 4, 1, LOW);
+  } else if (kind === 'goggles') {
+    // A flat cap with the goggles pushed up onto it.
+    rect(p, x - 1, top - 2, m.headW + 2, 4, BASE);
+    rect(p, x, top - 3, m.headW, 1, HI);
+    if (dir !== 'n') rect(p, x + m.headW - 1, top + 1, 4, 1, MID);
+    rect(p, x, top - 1, m.headW, 2, LINE);
+    if (dir !== 'n') { rect(p, x + 1, top - 1, 3, 2, HI); rect(p, x + m.headW - 4, top - 1, 3, 2, HI); }
+  } else if (kind === 'ballcap') {
+    rect(p, x, top - 3, m.headW, 5, BASE);
+    rect(p, x + 1, top - 4, m.headW - 2, 1, BASE);
+    rect(p, x + Math.floor(m.headW / 2), top - 5, 1, 1, HI);
+    if (dir === 'e') rect(p, x + m.headW - 1, top + 1, 6, 1, BASE);
+    else if (dir === 's') rect(p, x - 1, top + 1, m.headW + 2, 1, HI);
+    rect(p, x, top + 1, m.headW, 1, LOW);
+  } else if (kind === 'beanie') {
+    rect(p, x - 1, top - 4, m.headW + 2, 7, BASE);
+    rect(p, x, top - 5, m.headW, 1, BASE);
+    rect(p, x - 1, top + 1, m.headW + 2, 2, MID);
+    rect(p, x + Math.floor(m.headW / 2) - 1, top - 6, 2, 1, HI);
+  } else if (kind === 'visor') {
+    // A thin band round the head, a glass visor over the eyes.
+    rect(p, x - 1, top + 2, m.headW + 2, 1, LINE);
+    if (dir !== 'n') { rect(p, x - 2, top + 3, m.headW + 4, 2, HI); rect(p, x - 2, top + 5, m.headW + 4, 1, MID); }
+    rect(p, x + (dir === 'e' ? m.headW : -1), top + 1, 1, 3, HI);
+  } else if (kind === 'halo') {
+    // A light band floating above the head.
+    rect(p, x - 1, top - 6, m.headW + 2, 1, HI);
+    rect(p, x, top - 7, m.headW, 1, BASE);
+    rect(p, x + 1, top - 5, m.headW - 2, 1, MID);
   }
 }
 
@@ -406,8 +453,25 @@ export function characterFrameKeys(): { dir: Dir; state: CharState; frame: numbe
 
 /** Silhouette variants. Combining hair style and hat keeps a crowd from cloning. */
 export const HAIR_STYLES = 5;
-export const HATS = ['none', 'straw', 'helmet', 'cap', 'hood'] as const;
+export const HATS = ['none', 'straw', 'helmet', 'cap', 'hood', 'bonnet', 'tricorn', 'bowler', 'goggles', 'ballcap', 'beanie', 'visor', 'halo'] as const;
 export type HatKind = (typeof HATS)[number];
+
+/**
+ * What people wear on their heads in each era. The work hats that say what
+ * somebody does stay where they still make sense; everybody else wears the
+ * era: bonnets and tricorns, bowlers and goggles, caps and beanies, visors
+ * and halos.
+ */
+export function hatFor(job: string, look: number, era: number): HatKind {
+  if (job === 'miner' || job === 'quarry') return 'helmet';
+  if (job === 'farmer' && era <= 3) return 'straw';
+  if (era <= 1) return hatForJob(job, look);
+  const pick = look % 4;
+  if (era === 2) return pick === 0 ? 'bonnet' : pick === 1 ? 'tricorn' : pick === 2 ? 'cap' : 'none';
+  if (era === 3) return pick === 0 ? 'bowler' : pick === 1 ? 'goggles' : pick === 2 ? 'cap' : 'bowler';
+  if (era === 4) return pick === 0 ? 'ballcap' : pick === 1 ? 'beanie' : pick === 2 ? 'none' : 'ballcap';
+  return pick === 0 ? 'visor' : pick === 1 ? 'halo' : pick === 2 ? 'visor' : 'none';
+}
 
 /** Work hats follow the job, which makes professions readable on the map. */
 export function hatForJob(job: string, look: number): HatKind {

@@ -267,6 +267,107 @@ function compositeTile(seed: number): Pixels {
   return p;
 }
 
+/**
+ * Streets that connect.
+ *
+ * A road tile knows which of its four edges meet another road (or the plaza)
+ * and draws itself accordingly: the surface runs unbroken into a connected
+ * edge, and an unconnected edge gets the era's kerb and pavement along it.
+ * Centre lines, rails and ruts run only along the axes that carry road, so a
+ * straight street reads as one line and a junction as a crossing.
+ *
+ * Edges, by mask bit: 1 upper-left (the tile at tx-1), 2 upper-right (ty-1),
+ * 4 lower-right (tx+1), 8 lower-left (ty+1). Distances are in tile rows: the
+ * diamond is twice as wide as it is high, so a band `w` rows deep is `2w`
+ * pixels across.
+ */
+export type StreetEra = 1 | 2 | 3 | 4 | 5;
+const edgeDepth = (x: number, y: number): [number, number, number, number] => {
+  const hx = (x + 0.5) / 2, cy = y + 0.5;
+  return [hx + cy - 16, cy - hx + 16, 48 - hx - cy, 16 + hx - cy];
+};
+
+function streetTile(era: StreetEra, mask: number, seed: number): Pixels {
+  const p = tile();
+  const r = rng(seed + era * 977 + mask * 31);
+  // The surface, by era.
+  const surfaceOf = () => {
+    if (era === 1) { fillDiamond(p, GROUND.path); speckle(p, seed, 200, [GROUND.pathDark, GROUND.pathLight, shade(GROUND.path, -0.08)], clip); }
+    else if (era === 2) { fillDiamond(p, shade(GROUND.plaza, -0.06)); speckle(p, seed, 120, [shade(GROUND.plaza, 0.06), shade(GROUND.plaza, -0.14)], clip); }
+    else if (era === 3) { const base = shade(GROUND.plaza, -0.22); fillDiamond(p, base); speckle(p, seed, 140, [shade(base, 0.08), shade(base, -0.14)], clip); }
+    else if (era === 4) { fillDiamond(p, '#3a3f44'); speckle(p, seed, 120, ['#454a50', '#30353a'], clip); }
+    else { fillDiamond(p, '#c9cfd4'); speckle(p, seed, 80, ['#d6dbe0', '#bcc3c9'], clip); }
+  };
+  surfaceOf();
+  // Stones on the cobbled and setts streets.
+  if (era === 2 || era === 3) {
+    const step = era === 2 ? 3 : 2, len = era === 2 ? 4 : 3;
+    for (let y = 1; y < TILE_H - 1; y += step) {
+      const [x0, width] = diamondRow(y);
+      const offset = ((y / step) | 0) % 2 ? 2 : 0;
+      for (let x = x0 + 1 + offset; x < x0 + width - len; x += len + 1) {
+        if (!insideDiamond(x, y) || !insideDiamond(x + len - 1, y + 1)) continue;
+        const tone = era === 2 ? (r() < 0.5 ? GROUND.stone : GROUND.stoneLight) : (r() < 0.5 ? shade(GROUND.stoneDark, 0.05) : shade(GROUND.stone, -0.12));
+        rect(p, x, y, len, step - 1, tone);
+        rect(p, x, y + step - 1, len, 1, era === 2 ? GROUND.stoneDark : shade(tone, -0.2));
+      }
+    }
+  }
+  // Ruts, rails, lines: along each axis that carries road, from the centre out.
+  const axisLine = (dx: number, dy: number, paint: (x: number, y: number, i: number) => void) => {
+    for (let i = 0; i < 18; i++) { const x = 32 + dx * i, y = 16 + dy * i * 0.5; if (insideDiamond(x, y)) paint(x, y, i); }
+  };
+  const along = (bit: number, dx: number, dy: number, paint: (x: number, y: number, i: number) => void) => { if (mask & bit) axisLine(dx, dy, paint); };
+  const pave: [number, number, number][] = [[1, -1, -1], [2, 1, -1], [4, 1, 1], [8, -1, 1]];
+  if (era === 1) {
+    // Two wheel ruts, worn darker.
+    for (const [bit, dx, dy] of pave) along(bit, dx, dy, (x, y) => { rect(p, x, y - 3, 1, 1, GROUND.pathDark); rect(p, x, y + 3, 1, 1, GROUND.pathDark); });
+  } else if (era === 3) {
+    // A pair of iron rails on sleepers.
+    for (const [bit, dx, dy] of pave) along(bit, dx, dy, (x, y, i) => {
+      if (i % 4 === 0) rect(p, x - 1, y - 3, 3, 7, '#3a2a1c');
+      rect(p, x, y - 2, 1, 1, '#8a929c'); rect(p, x, y + 2, 1, 1, '#8a929c');
+    });
+  } else if (era === 4) {
+    for (const [bit, dx, dy] of pave) along(bit, dx, dy, (x, y, i) => { if (((i / 4) | 0) % 2 === 0) rect(p, x, y, 1, 1, '#e8e2c8'); });
+  } else if (era === 5) {
+    for (const [bit, dx, dy] of pave) along(bit, dx, dy, (x, y) => { rect(p, x, y, 1, 1, '#8fe3dc'); rect(p, x, y + 1, 1, 1, '#5fb8b0'); });
+  }
+  // Kerb and pavement along every edge that meets no road.
+  if (era >= 2) {
+    const depth = era === 2 ? 2.2 : era === 3 ? 4 : era === 4 ? 5 : 5;
+    const walk = era === 2 ? shade(GROUND.stone, 0.12) : era === 3 ? '#8d9489' : era === 4 ? '#a9adb0' : '#eef1f4';
+    const walkAlt = era === 2 ? shade(GROUND.stoneLight, 0.05) : era === 3 ? '#7f867c' : era === 4 ? '#9da1a5' : '#e2e6ea';
+    const kerb = era === 2 ? GROUND.stoneDark : era === 3 ? '#3a3f3a' : era === 4 ? '#e8e2c8' : '#5fd6c8';
+    for (let y = 0; y < TILE_H; y++) {
+      const [x0, width] = diamondRow(y);
+      for (let x = x0; x < x0 + width; x++) {
+        const d = edgeDepth(x, y);
+        for (let e = 0; e < 4; e++) {
+          if (mask & (1 << e)) continue;
+          if (d[e] < depth) {
+            const flag = ((x >> 2) + (y >> 1)) % 2 === 0;
+            rect(p, x, y, 1, 1, flag ? walk : walkAlt);
+            if (d[e] >= depth - 0.7) rect(p, x, y, 1, 1, kerb);
+          }
+        }
+      }
+    }
+  } else {
+    // A dirt lane: grass creeps in at the verges that meet no road.
+    for (let y = 0; y < TILE_H; y++) {
+      const [x0, width] = diamondRow(y);
+      for (let x = x0; x < x0 + width; x++) {
+        const d = edgeDepth(x, y);
+        for (let e = 0; e < 4; e++) if (!(mask & (1 << e)) && d[e] < 3 && r() < 0.35) rect(p, x, y, 1, 1, r() < 0.5 ? GROUND.grassDark : GROUND.moss);
+      }
+    }
+    scuff(p, seed + 613, GROUND.path);
+    ragged(p, seed + 713, 5);
+  }
+  return p;
+}
+
 function plazaTile(seed: number): Pixels {
   const p = tile();
   fillDiamond(p, GROUND.plaza);
@@ -537,6 +638,7 @@ export function buildTiles(): TileArt[] {
   for (let i = 0; i < 2; i++) add(`tile.plaza.${i}`, plazaTile(2600 + i * 31));
   for (let i = 0; i < 3; i++) add(`tile.cobble.${i}`, cobbleTile(2700 + i * 37));
   for (let i = 0; i < 3; i++) add(`tile.setts.${i}`, settsTile(2800 + i * 31));
+  for (const era of [1, 2, 3, 4, 5] as StreetEra[]) for (let mask = 0; mask < 16; mask++) add(`tile.street.${era}.${mask}`, streetTile(era, mask, 3100 + era * 100 + mask));
   for (let i = 0; i < 3; i++) add(`tile.tarmac.${i}`, tarmacTile(2900 + i * 29));
   for (let i = 0; i < 3; i++) add(`tile.composite.${i}`, compositeTile(3000 + i * 23));
   for (let i = 0; i < 2; i++) add(`tile.rock.${i}`, rockTile(2800 + i * 47));

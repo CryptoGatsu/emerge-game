@@ -14,7 +14,7 @@ import { Container, Sprite } from 'pixi.js';
 import type { Citizen } from '../simulation';
 import { PEOPLE, PEOPLE_AI, PEOPLE_INDUSTRIAL, PEOPLE_MODERN, PEOPLE_TOWNSHIP } from './palette';
 import { appearanceFor, type Appearance, type AssetLibrary } from './assets';
-import { BODY_LAYERS, CHAR_GROUND, CHAR_H, STATE_FRAMES, hatForJob, type CharState, type Dir, type HatKind, type LayerName } from './character';
+import { BODY_LAYERS, CHAR_GROUND, CHAR_H, STATE_FRAMES, hatFor, type CharState, type Dir, type HatKind, type LayerName } from './character';
 import { ELEVATION, worldToScreen } from '../world/iso';
 
 const OUTLINE_TINT = 0x0c130d;
@@ -24,6 +24,14 @@ const HAT_TINTS: Record<Exclude<HatKind, 'none'>, number> = {
   helmet: 0x7d8490,
   cap: 0x3a4a3a,
   hood: 0x2e2a36,
+  bonnet: 0xd8c8a8,
+  tricorn: 0x2a2a30,
+  bowler: 0x1e1e22,
+  goggles: 0x4a4038,
+  ballcap: 0xc84a4a,
+  beanie: 0x3a5a9a,
+  visor: 0x5fd6c8,
+  halo: 0xa986d8,
 };
 
 /** How far a citizen has to travel for one full four-frame walk cycle. */
@@ -92,7 +100,7 @@ export class CitizenSprite {
     // The same person, dressed for the era the plot is in.
     this.appearance = appearanceFor(citizen.look, citizen.age, era >= 5 ? PEOPLE_AI : era >= 4 ? PEOPLE_MODERN : era >= 3 ? PEOPLE_INDUSTRIAL : era >= 2 ? PEOPLE_TOWNSHIP : PEOPLE);
     this.era = era;
-    this.hatKind = hatForJob(citizen.job, citizen.look);
+    this.hatKind = hatFor(citizen.job, citizen.look, era);
 
     this.shadow = new Sprite(assets.get('fx.shadow'));
     this.shadow.anchor.set(0.5, 0.5);
@@ -159,7 +167,7 @@ export class CitizenSprite {
     const tool = TOOLS[citizen.job];
     if (tool) this.tool.texture = this.assets.get(tool);
     this.tool.visible = false;
-    this.hatKind = hatForJob(citizen.job, citizen.look);
+    this.hatKind = hatFor(citizen.job, citizen.look, this.era);
     this.hat.visible = this.hatKind !== 'none';
     if (this.hatKind !== 'none') this.hat.tint = HAT_TINTS[this.hatKind];
     this.appliedKey = '';

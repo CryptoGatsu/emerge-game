@@ -345,10 +345,11 @@ export class EmergeScene {
           this.groundLayer.addChild(cliff);
         }
 
-        // A township's roads are cobbled where a settlement's were worn earth.
-        const era = eraOf(this.world);
-        const road = era >= 5 ? 'tile.composite' : era >= 4 ? 'tile.tarmac' : era >= 3 ? 'tile.setts' : era >= 2 ? 'tile.cobble' : null;
-        const art = kind === Tile.Path && road ? { key: road, variants: 3 } : TILE_ART[kind];
+        // Streets read their neighbours: the surface runs on into another
+        // road or the plaza, and every other edge gets the era's kerb and
+        // pavement. The era decides what the street is made of.
+        const era = Math.max(1, Math.min(5, eraOf(this.world)));
+        const art = kind === Tile.Path ? { key: `tile.street.${era}.${this.streetMask(tx, ty)}`, variants: 0 } : TILE_ART[kind];
         if (kind === Tile.Water || kind === Tile.WaterShore) {
           const sprite = new Sprite(assets.get(`${art.key}.0`));
           sprite.position.set(pos.x - TILE_W / 2, pos.y);
@@ -1128,6 +1129,17 @@ export class EmergeScene {
     const meta = this.assets.buildingMeta.get(key);
     const tex = this.assets.has(`building.${key}`) ? this.assets.get(`building.${key}`) : null;
     return { has: !!tex, meta: !!meta, pages: this.assets.pages, w: tex?.width ?? 0, h: tex?.height ?? 0, frame: tex ? [tex.frame.x, tex.frame.y] : null, source: tex ? (tex.source.width ?? 0) : 0 };
+  }
+
+  /** Which of a road tile's four edges meet another road or the plaza. */
+  private streetMask(tx: number, ty: number) {
+    const { map } = this;
+    const roadAt = (x: number, y: number) => {
+      if (x < 0 || y < 0 || x >= map.grid || y >= map.grid) return false;
+      const k = map.tiles[y * map.grid + x] as Tile;
+      return k === Tile.Path || k === Tile.Plaza;
+    };
+    return (roadAt(tx - 1, ty) ? 1 : 0) | (roadAt(tx, ty - 1) ? 2 : 0) | (roadAt(tx + 1, ty) ? 4 : 0) | (roadAt(tx, ty + 1) ? 8 : 0);
   }
 
   /** Every building sprite the scene holds, for the trial build's diagnostics. */

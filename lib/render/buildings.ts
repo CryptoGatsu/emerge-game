@@ -340,6 +340,8 @@ interface Recipe {
   /** The name on the board over the door, if the building wears one. */
   sign?: string;
   extras?: (p: Pixels, lit: Pixels, g: Geometry, seed: number) => void;
+  /** The era whose structural dressing this body wears, when it is a later era's rebuild. */
+  eraLook?: 2 | 3 | 4 | 5;
 }
 
 const BOTTOM_MARGIN = 6;
@@ -409,6 +411,11 @@ function buildOne(name: string, seed: number, r: Recipe, level: ArtLevel): Build
   weather(p, g, seed);
   drawRoof(p, g, r.roof, r.roofColor, overhang, seed);
   r.extras?.(p, lit, g, seed);
+  // A later era's rebuild of the body: what that era does to every building.
+  if (r.eraLook) {
+    const stack = ERA_LOOK[r.eraLook](p, lit, g, r, seed, [dSide, dT], overhang);
+    if (stack && !chimneyOffset) chimneyOffset = [stack[0] - g.cx, stack[1] - g.groundY];
+  }
 
   // Improvements, on top of everything the building already is.
   if (level >= 2) {
@@ -1081,23 +1088,142 @@ const TOWNSHIP: Record<string, Recipe> = {
 function townshipDress(r: Recipe): Recipe {
   const wall: WallStyle = 'stone';
   const roofColor: RoofColor = r.roofColor === 'thatch' ? 'red' : r.roofColor === 'green' ? 'slate' : r.roofColor;
-  return { ...r, wall, roofColor };
+  // Steeper roofs, a little taller: the township builds up.
+  return { ...r, wall, roofColor, roofH: r.roof === 'flat' ? r.roofH : r.roofH + 4, wallH: r.wallH + 2, eraLook: 2 };
 }
 
 /** As the industrial era rebuilds it: brick, and iron sheet on the roof. */
 function industrialDress(r: Recipe): Recipe {
   const roofColor: RoofColor = r.roofColor === 'red' ? 'red' : 'iron';
-  return { ...r, wall: 'brick', roofColor };
+  // Taller, squarer, with a shallow iron roof: a mill town's building.
+  return { ...r, wall: 'brick', roofColor, wallH: r.wallH + 8, roofH: r.roof === 'flat' ? r.roofH : Math.max(10, Math.round(r.roofH * 0.6)), roof: r.roof === 'hip' ? 'gable' : r.roof, eraLook: 3 };
 }
 /** As the modern era rebuilds it: concrete, glass on the roof, flatter. */
 function modernDress(r: Recipe): Recipe {
-  return { ...r, wall: 'concrete', roofColor: 'glass', roof: r.roof === 'gable' ? 'hip' : r.roof };
+  // A storey taller, flat-roofed with a parapet: concrete and glass.
+  return { ...r, wall: 'concrete', roofColor: 'white', roof: 'flat', roofH: 10, wallH: r.wallH + 14, windows: [], eraLook: 4 };
 }
 /** As the AI era rebuilds it: white composite, a garden or a white roof, flat. */
 function aiDress(r: Recipe): Recipe {
-  const roofColor: RoofColor = r.roofColor === 'green' || r.roofColor === 'thatch' || r.roofColor === 'garden' ? 'garden' : 'white';
-  return { ...r, wall: 'composite', roofColor, roof: 'flat', roofH: Math.min(r.roofH, 14) };
+  // Low, white and flat, a garden on the roof, light where the windows were.
+  return { ...r, wall: 'composite', roofColor: 'garden', roof: 'flat', roofH: 10, wallH: r.wallH + 6, windows: [], eraLook: 5 };
 }
+const isoDiamond = (p: Pixels, cx: number, cy: number, w: number, h: number, color: string) => {
+  p.ctx.fillStyle = color;
+  p.ctx.beginPath();
+  p.ctx.moveTo(cx - w / 2, cy); p.ctx.lineTo(cx, cy - h / 2); p.ctx.lineTo(cx + w / 2, cy); p.ctx.lineTo(cx, cy + h / 2);
+  p.ctx.closePath(); p.ctx.fill();
+};
+
+/**
+ * What each era does to every building it rebuilds. Drawn over the finished
+ * body, before the improvements, so the same recipe is a different building
+ * in each era rather than the same one repainted. Returns a chimney it
+ * added, if any, so smoke has somewhere to come from.
+ */
+type EraLook = (p: Pixels, lit: Pixels, g: Geometry, r: Recipe, seed: number, door: [Side, number], overhang: number) => [number, number] | null;
+const ERA_LOOK: Record<number, EraLook> = {
+  // Township: dressed stone. Quoins up the near corner, shutters at the
+  // windows, a dormer in the roof, an arch over the door, pots on the chimney.
+  2: (p, _lit, g, r, seed, [dSide, dT]) => {
+    const rr = rng(seed + 2);
+    const cornerX = g.cx, cornerY = g.wallTopY + g.bh;
+    for (let i = 0; i < g.wallH; i += 4) rect(p, cornerX - 2 + (i % 8 === 0 ? 0 : 1), cornerY + i, 4, 3, i % 8 === 0 ? BUILD.stoneWallLight : shade(BUILD.stoneWallLight, 0.15));
+    for (const [side, t, v] of r.windows ?? []) {
+      wallPatch(p, g, side, t - 0.035, v + 0.005, 3, 9, '#2f5a3a');
+      wallPatch(p, g, side, t + 0.05, v + 0.005, 3, 9, '#2f5a3a');
+    }
+    if (r.roof !== 'flat') {
+      const dx = g.cx - Math.round(g.bw * 0.22), dy = g.wallTopY + g.bh / 2 - Math.round(r.roofH * 0.45);
+      rect(p, dx - 6, dy - 6, 12, 10, BUILD.stoneWall);
+      rect(p, dx - 8, dy - 9, 16, 4, BUILD.roofSlateDark);
+      rect(p, dx - 3, dy - 4, 6, 6, BUILD.glassDark);
+      rect(p, dx - 2, dy - 3, 2, 2, shade(BUILD.glassDark, 0.3));
+    }
+    const [ax, ay] = wallPoint(g, dSide, dT + 0.05, 0.27);
+    rect(p, ax - 7, ay - 3, 14, 3, BUILD.stoneWallLight);
+    rect(p, ax - 5, ay - 5, 10, 2, BUILD.stoneWallLight);
+    if (r.chimneyAt !== undefined) {
+      const x = Math.round(g.cx + r.chimneyAt), topY = Math.round(g.wallTopY + g.bh / 2 - g.roofH - (r.chimneyH ?? 20) + 6);
+      rect(p, x - 4, topY - 4, 3, 4, '#7a4434'); rect(p, x + 1, topY - 4, 3, 4, '#7a4434');
+    }
+    if (rr() < 0.6) { const [vx, vy] = wallPoint(g, dSide === 'left' ? 'right' : 'left', 0.5, 0.9); rect(p, vx - 6, vy - 2, 12, 3, '#2f5a3a'); rect(p, vx - 4, vy - 4, 3, 2, BLOOM.pink); rect(p, vx + 2, vy - 4, 3, 2, BLOOM.yellow); }
+    return null;
+  },
+  // Industrial: a mill town's brick. A soldier course, tall arched windows
+  // between the old ones, iron guttering, a gas lamp at the door, a stack.
+  3: (p, lit, g, r, seed, [dSide, dT]) => {
+    for (const side of ['left', 'right'] as Side[]) {
+      for (let t = 0; t < 0.96; t += 0.04) wallPatch(p, g, side, t, 0.36, 2, 3, ((t * 100) | 0) % 8 < 4 ? '#563024' : '#b06a50');
+      wallBand(p, g, side, -0.02, 2, BUILD.metal);
+      wallBand(p, g, side, 0.97, 2, '#3a2a24');
+      for (const t of [0.08, 0.3, 0.52, 0.74]) {
+        const h = Math.round(g.wallH * 0.42);
+        wallPatch(p, g, side, t, 0.46, 6, h, '#3a2a24');
+        wallPatch(p, g, side, t + 0.008, 0.5, 4, h - 4, BUILD.glassDark);
+        wallPatch(lit, g, side, t + 0.008, 0.5, 4, h - 4, '#ffb060');
+        wallPatch(p, g, side, t + 0.008, 0.48, 4, 1, shade(BUILD.glassDark, 0.3));
+        wallPatch(p, g, side, t + 0.016, 0.52, 1, h - 6, shade(BUILD.glassDark, 0.2));
+      }
+    }
+    const [lx, ly] = wallPoint(g, dSide, dT + 0.27, 0.32);
+    rect(p, lx - 3, ly - 2, 7, 1, BUILD.metal); rect(p, lx + 2, ly - 8, 1, 7, BUILD.metal);
+    rect(p, lx, ly - 12, 5, 5, '#2a2a2e'); rect(p, lx + 1, ly - 11, 3, 3, '#ffd07a');
+    glow(lit, lx + 2, ly - 9, 12, '#ffcf7a', 0.6);
+    if (r.chimneyAt === undefined) {
+      const [cx, cy] = chimney(p, g, Math.round(g.bw * 0.28), 30);
+      rect(p, cx - 6, cy, 12, 2, '#2a2a2e');
+      return [cx, cy];
+    }
+    return null;
+  },
+  // Modern: concrete and glass. A window band on every floor, a canopy over
+  // the door, a parapet and a plant room on the roof, an aerial.
+  4: (p, lit, g, r, _seed, [dSide, dT], overhang) => {
+    const floors = Math.max(2, Math.round(g.wallH / 18));
+    for (const side of ['left', 'right'] as Side[]) {
+      for (let f = 0; f < floors; f++) {
+        const v = 0.12 + (f / floors) * 0.8;
+        wallPatch(p, g, side, 0.03, v, Math.round(g.bw / 2 * 0.92), 7, '#1d2a30');
+        wallPatch(p, g, side, 0.03, v + 0.01, Math.round(g.bw / 2 * 0.92), 3, '#5aa8c0');
+        wallPatch(lit, g, side, 0.03, v, Math.round(g.bw / 2 * 0.92), 7, '#ffe6a0');
+        for (let t = 0.03; t < 0.95; t += 0.12) wallPatch(p, g, side, t, v, 1, 7, '#dfe4ea');
+        wallBand(p, g, side, v + 0.11, 1, '#7a7f86');
+      }
+    }
+    const [cx, cy] = wallPoint(g, dSide, dT + 0.1, 0.28);
+    rect(p, cx - 12, cy - 4, 24, 3, '#dfe4ea'); rect(p, cx - 12, cy - 1, 24, 1, '#6e7278');
+    const px = g.cx + Math.round(g.bw * 0.18), py = g.wallTopY - 4;
+    rect(p, px - 8, py - 8, 16, 8, '#8a8f96'); rect(p, px - 8, py - 8, 16, 1, '#b8bcc0'); rect(p, px - 5, py - 6, 3, 3, '#3a3f44');
+    rect(p, g.cx - Math.round(g.bw * 0.3), py - 22, 1, 20, BUILD.metal); rect(lit, g.cx - Math.round(g.bw * 0.3), py - 23, 2, 2, '#ff6060');
+    isoWalls(p, g.cx, g.wallTopY - 4, g.bw + overhang * 2, g.bh + overhang, 2, '#dfe4ea', '#b8c0c8');
+    return null;
+  },
+  // AI: white composite. Slit windows in a light band, teal strips at the
+  // foot and the eave, a garden and solar glass on the roof, a holo sign.
+  5: (p, lit, g, r, seed, [dSide, dT], overhang) => {
+    const rr = rng(seed + 5);
+    for (const side of ['left', 'right'] as Side[]) {
+      wallPatch(p, g, side, 0.05, 0.22, Math.round(g.bw / 2 * 0.88), 4, '#7fd8e8');
+      wallPatch(p, g, side, 0.05, 0.22, Math.round(g.bw / 2 * 0.88), 1, '#d8f4fa');
+      wallPatch(lit, g, side, 0.05, 0.22, Math.round(g.bw / 2 * 0.88), 4, '#dffcf8');
+      if (g.wallH > 30) { wallPatch(p, g, side, 0.05, 0.55, Math.round(g.bw / 2 * 0.88), 4, '#7fd8e8'); wallPatch(lit, g, side, 0.05, 0.55, Math.round(g.bw / 2 * 0.88), 4, '#dffcf8'); }
+      wallBand(p, g, side, 0.94, 1, '#5fd6c8'); wallBand(lit, g, side, 0.94, 1, '#dffcf8');
+      wallBand(p, g, side, 0.0, 1, '#a986d8'); wallBand(lit, g, side, 0.0, 1, '#e8dcff');
+    }
+    // The roof: a garden on one half, solar glass on the other.
+    const rc = g.wallTopY - 2 + (g.bh + overhang) / 2;
+    for (let i = 0; i < 14; i++) {
+      const x = g.cx - Math.round(g.bw * 0.42) + rr() * g.bw * 0.4, y = rc - 6 + rr() * 12;
+      rect(p, x, y, 3, 2, rr() < 0.5 ? '#4a8a3a' : '#6fb04a'); if (rr() < 0.3) rect(p, x + 1, y - 1, 1, 1, BLOOM.pink);
+    }
+    for (let i = 0; i < 3; i++) { const x = g.cx + 6 + i * 10, y = rc - 5 + i * 3; rect(p, x, y, 8, 4, '#1d2a30'); rect(p, x, y, 8, 1, '#7ab8ff'); }
+    const [hx, hy] = wallPoint(g, dSide, dT + 0.1, 0.18);
+    rect(p, hx - 8, hy - 3, 16, 1, '#5fd6c8'); glow(lit, hx, hy - 3, 16, '#5fd6c8', 0.5); rect(lit, hx - 8, hy - 4, 16, 3, '#bffaf4');
+    isoWalls(p, g.cx, g.wallTopY - 4, g.bw + overhang * 2, g.bh + overhang, 2, '#f4f6f8', '#c8d0d8');
+    return null;
+  },
+};
 const DRESS: Record<number, (r: Recipe) => Recipe> = { 2: townshipDress, 3: industrialDress, 4: modernDress, 5: aiDress };
 
 /** A lit strip along a wall face, the AI era's signature. */
