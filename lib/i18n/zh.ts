@@ -501,7 +501,7 @@ export const UI: Record<string, string> = {
   'Nothing went out': '没有支出',
   'So far today': '今日至今',
   'What you are earning': '你的收益',
-  'Gold is the settlement’s money and stays in the settlement. The {ticker} you earn is minted against how well you run the place: a daily ceiling of {cap}, multiplied by how the settlement is doing and by how recently you did anything about it. A world nobody touches earns a fraction of one that is being run.': '金币是聚落的钱，留在聚落里。你赚的 {ticker} 按你经营得好不好铸造：每日上限 {cap}，乘以聚落的状况，再乘以你最近有没有做什么。没人碰的世界只能赚到经营中的世界的一小部分。',
+  'Gold is the settlement’s money and stays in the settlement. The {ticker} you earn is minted against how well you run the place: a daily ceiling of {cap}, multiplied by how the settlement is doing and by how recently you did anything about it. It accrues against the clock whether or not the game is open; attention slides over a day and a half away. A world nobody touches earns a fraction of one that is being run.': '金币是聚落的钱，留在聚落里。你赚的 {ticker} 按你经营得好不好铸造：每日上限 {cap}，乘以聚落的状况，再乘以你最近有没有做什么。无论游戏是否打开，它都按时钟累积；离开一天半后关注度逐渐下滑。没人碰的世界只能赚到经营中的世界的一小部分。',
   'HOW IT IS RUN': '经营状况',
   'Housed, fed, employed, content and safe': '有房、有饭、有活、满足、安全',
   'YOUR ATTENTION': '你的关注',

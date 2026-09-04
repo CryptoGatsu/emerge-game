@@ -391,6 +391,12 @@ export default function Wiki() {
             {' '}{TOKEN.ticker} coming to <em>your wallet</em>; the Gold your citizens earn is a
             separate thing and has <a href="#economy">its own section below</a>.
           </p>
+          <p>
+            It accrues against the clock, open or closed: the stretch since the game last paid you
+            is paid at the attention it actually had through it, so a day away is a day of a
+            slowly falling rate, not nothing. What comes to more than the day&rsquo;s ceiling stays
+            banked in the world for tomorrow.
+          </p>
           <div className="wiki-formula">
             <code>daily yield = ceiling(level, era) × quality × attention</code>
             <span>per plot, per real day: {n(plotCeiling(1, 1))} at level one, {n(plotCeiling(10, 5))} for a level-ten city in the AI era</span>

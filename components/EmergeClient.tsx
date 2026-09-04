@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -49,7 +49,7 @@ import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost } from '@/lib/chain/vault';
+  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost, earnRoom } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
@@ -189,6 +189,8 @@ export default function EmergeClient() {
   // The $EMERGE balance and everything bought with it belongs to the player,
   // not to whichever plot they happen to be standing on.
   const [player, setPlayer] = useState<PlayerRecord | null>(null);
+  const playerRef = useRef<PlayerRecord | null>(null);
+  playerRef.current = player;
   // Which world the yield being credited belongs to. Read inside the state
   // updater, where the current `claimed` is not in scope.
   const claimedSeedRef = useRef<number | null>(null);
@@ -327,8 +329,17 @@ export default function EmergeClient() {
    * once at mount and would otherwise be adding to whichever ledger existed
    * then — every day's earnings landing on the same stale balance.
    */
-  const earn = useCallback((emerge: number, ceiling = DAILY_EARN_CEILING) => {
-    if (!(emerge > 0)) return;
+  const earn = useCallback((emerge: number, ceiling = DAILY_EARN_CEILING): number => {
+    if (!(emerge > 0)) return 0;
+    // What the ledger will take today, worked out before the update so the
+    // caller can keep the rest banked in the world rather than lose it.
+    const current = playerRef.current;
+    let accepted = 0;
+    if (current) {
+      const earningNow = [...current.claims].sort((a, b) => a.claimedAt - b.claimedAt).slice(0, EARNING_PLOT_LIMIT).some((c) => c.seed === claimedSeedRef.current);
+      const plotsNow = Math.max(1, Math.min(EARNING_PLOT_LIMIT, current.claims.length));
+      accepted = earningNow ? Math.min(emerge, earnRoom(current.ledger, Math.min(WALLET_DAILY_CEILING, ceiling * plotsNow))) : 0;
+    }
     setPlayer((prev) => {
       if (!prev) return prev;
       // Only the first four plots a player claimed pay. Beyond that a world is
@@ -347,6 +358,7 @@ export default function EmergeClient() {
       savePlayer(next, addressRef.current);
       return next;
     });
+    return accepted;
   }, []);
 
   /**
@@ -358,13 +370,13 @@ export default function EmergeClient() {
    * it again before paying anything out.
    */
   const handBank = useRef(0);
-  const earnAsHand = useCallback((emerge: number) => {
-    if (!(emerge > 0)) return;
+  const earnAsHand = useCallback((emerge: number): number => {
+    if (!(emerge > 0)) return 0;
     // The yield arrives a token at a time, so a tenth of each would round to
     // nothing for ever. The fraction is banked and paid whole.
     handBank.current += emerge * HAND_SHARE;
     const share = Math.floor(handBank.current);
-    if (!(share > 0)) return;
+    if (!(share > 0)) return emerge;
     handBank.current -= share;
     setPlayer((prev) => {
       if (!prev) return prev;
@@ -372,6 +384,7 @@ export default function EmergeClient() {
       savePlayer(next, addressRef.current);
       return next;
     });
+    return emerge;
   }, []);
 
   const enter = useCallback((world: ClaimedWorld) => {
@@ -529,7 +542,7 @@ export default function EmergeClient() {
           onRelease={endVisit}
           onRename={() => { /* not yours to rename */ }}
           onPlayer={updatePlayer}
-          onEarn={visit.hand ? earnAsHand : () => { /* a visitor earns nothing */ }}
+          onEarn={visit.hand ? earnAsHand : () => 0}
           onVisit={goVisit}
         />
       )}
@@ -554,7 +567,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   onRename: (world: ClaimedWorld) => void;
   onPlayer: (record: PlayerRecord) => void;
   /** Credit stewardship yield the simulation has accrued. */
-  onEarn: (emerge: number, ceiling?: number) => void;
+  /** Take earned tokens into the ledger; answers how many it took, so the rest can stay banked. */
+  onEarn: (emerge: number, ceiling?: number) => number;
   /** Go and look at somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
 }) {
@@ -688,7 +702,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         // drained — so it cannot pile up — and then dropped, because watching
         // somebody else's settlement is not stewarding it.
         const earned = collectYield(live);
-        if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned, dailyCeiling(live));
+        if (earned > 0 && (!spectating || visit?.hand)) {
+          const accepted = onEarnRef.current(earned, dailyCeiling(live));
+          // The ledger takes a day's ceiling a day; a stretch away that came
+          // to more than that stays banked in the world for tomorrow.
+          if (!spectating && accepted < earned) returnYield(live, earned - accepted);
+        }
         // A danger that is still doing harm changes the music; a harmless
         // one, or one already fought down, does not.
         if (!hiddenRef.current) {

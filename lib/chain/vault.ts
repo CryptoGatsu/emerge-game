@@ -300,6 +300,12 @@ export function accrue(ledger: VaultLedger, emerge: number, ceiling = DAILY_EARN
 }
 
 /** How much of today's ceiling is left. */
+/** How much a ledger will still take today against a given ceiling. */
+export function earnRoom(ledger: VaultLedger, ceiling: number) {
+  const spent = ledger.earnedOn === todayKey() ? ledger.earnedToday : 0;
+  return Math.max(0, ceiling - spent);
+}
+
 export function earnRoomToday(ledger: VaultLedger) {
   const spent = ledger.earnedOn === todayKey() ? ledger.earnedToday : 0;
   return { spent, ceiling: DAILY_EARN_CEILING, left: Math.max(0, DAILY_EARN_CEILING - spent) };

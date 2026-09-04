@@ -94,8 +94,14 @@ export function judgedLevel(world: World | null, presentDays: number): number {
 /** The same attention rule the settlement runs, on the server's own record of the owner's presence. */
 const ATTENTION_HOURS = 36;
 const ATTENTION_FLOOR = 0.08;
+/**
+ * A day's grace: somebody who played this morning and withdraws tonight was
+ * attending all day, and is judged so. The decay starts a day after the last
+ * heartbeat, at the same slope the settlement uses.
+ */
+const GRACE_MS = 24 * 3_600_000;
 export const attentionFrom = (lastSeen: number, now = Date.now()) =>
-  lastSeen > 0 ? Math.max(ATTENTION_FLOOR, 1 - Math.max(0, now - lastSeen) / 3_600_000 / ATTENTION_HOURS) : ATTENTION_FLOOR;
+  lastSeen > 0 ? Math.max(ATTENTION_FLOOR, 1 - Math.max(0, now - lastSeen - GRACE_MS) / 3_600_000 / ATTENTION_HOURS) : ATTENTION_FLOOR;
 
 export interface Judged {
   /** The wallet's earning plots' ceilings, added up. */

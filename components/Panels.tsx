@@ -1514,7 +1514,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
 
       <h4>{t('What you are earning')}</h4>
       <p className="muted small">
-        {t('Gold is the settlement’s money and stays in the settlement. The {ticker} you earn is minted against how well you run the place: a daily ceiling of {cap}, multiplied by how the settlement is doing and by how recently you did anything about it. A world nobody touches earns a fraction of one that is being run.', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })}
+        {t('Gold is the settlement’s money and stays in the settlement. The {ticker} you earn is minted against how well you run the place: a daily ceiling of {cap}, multiplied by how the settlement is doing and by how recently you did anything about it. It accrues against the clock whether or not the game is open; attention slides over a day and a half away. A world nobody touches earns a fraction of one that is being run.', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })}
       </p>
       <div className="steward-grid">
         <div>

@@ -558,6 +558,16 @@ export interface Stewardship {
   pending: number;
   /** $EMERGE this world has earned in total, for the panel. */
   lifetime: number;
+  /**
+   * Wall-clock time the yield was last paid up to.
+   *
+   * The yield is paid for the real time that passed, whether or not the
+   * game was open: a player who saw "16,000 a day" and closed the tab for
+   * eleven hours was paid 8,800, because accrual used to run only while the
+   * page drew frames. Attention still falls the longer the plot goes without
+   * a hand on it, so an abandoned world earns the floor and no more.
+   */
+  accruedAt?: number;
 }
 
 /** The headings a day's Gold is booked under. */
@@ -6788,17 +6798,45 @@ export function stewardshipScore(world: World) {
  * wall-clock seconds that actually passed. Running the settlement faster shows
  * the player more of its life in the same minute; it does not pay them more.
  */
-function accrueYield(world: World, realSeconds: number) {
+/**
+ * Attention averaged over a stretch of real time, given how long the plot
+ * had already gone unattended when the stretch began. Attention falls in a
+ * straight line to the floor, so the average is the integral of that line.
+ */
+export function meanAttention(idleHoursAtStart: number, hours: number): number {
+  if (!(hours > 0)) return Math.max(ATTENTION_FLOOR, 1 - Math.max(0, idleHoursAtStart) / ATTENTION_HOURS);
+  const a = Math.max(0, idleHoursAtStart), b = a + hours;
+  const knee = (1 - ATTENTION_FLOOR) * ATTENTION_HOURS; // where the line meets the floor
+  const line = (h: number) => h - (h * h) / (2 * ATTENTION_HOURS); // integral of 1 - h/H
+  const upTo = (h: number) => (h <= knee ? line(h) : line(knee) + (h - knee) * ATTENTION_FLOOR);
+  return (upTo(b) - upTo(a)) / hours;
+}
+
+/** The longest stretch paid at once: a month; beyond that the plot has been abandoned. */
+const ACCRUAL_CAP_MS = 30 * 86_400_000;
+
+function accrueYield(world: World, realSeconds: number, now = Date.now()) {
   const s = world.stewardship;
-  if (!(realSeconds > 0)) return;
-  const idleHours = Math.max(0, (Date.now() - s.lastActionAt) / 3_600_000);
+  void realSeconds;
+  // The time since the yield was last paid up to, on the wall clock, whether
+  // or not the game was open in between. A save from before this field
+  // existed starts here rather than being paid for its whole history.
+  const since = s.accruedAt ?? now;
+  const elapsed = Math.max(0, Math.min(ACCRUAL_CAP_MS, now - since));
+  s.accruedAt = now;
+  const idleHours = Math.max(0, (now - s.lastActionAt) / 3_600_000);
   s.attention = Math.max(ATTENTION_FLOOR, 1 - idleHours / ATTENTION_HOURS);
   s.score = stewardshipScore(world);
   // What a full real day at this rate would come to, which is the figure worth
   // showing: "you are earning this much a day, if you keep this up".
-  // Rewards grow with the era: the cap a plot can reach rises with each step.
   s.dailyYield = Math.round(dailyCeiling(world) * s.score * s.attention);
-  s.banked += (s.dailyYield * realSeconds) / REAL_DAY;
+  if (elapsed <= 0) return;
+  // Paid for the stretch at the attention it actually had through it, not
+  // the attention it has now: eleven hours away is paid as eleven hours of
+  // a slowly falling rate, not as eleven hours at the rate on return.
+  const hours = elapsed / 3_600_000;
+  const idleAtStart = Math.max(0, (since - s.lastActionAt) / 3_600_000);
+  s.banked += dailyCeiling(world, now) * s.score * meanAttention(idleAtStart, hours) * (elapsed / (REAL_DAY * 1000));
   // Hand over whole tokens only, and keep the remainder banked, so a tick of a
   // sixtieth of a second is not silently rounded away to nothing.
   const whole = Math.floor(s.banked);
@@ -6829,6 +6867,12 @@ export function collectYield(world: World) {
   const amount = Math.round(world.stewardship.pending);
   world.stewardship.pending = 0;
   return amount;
+}
+
+/** Put back what the ledger would not take today, so nothing earned is lost. */
+export function returnYield(world: World, amount: number) {
+  if (!(amount > 0)) return;
+  world.stewardship.pending += Math.round(amount);
 }
 
 function daily(world: World) {

@@ -26,6 +26,7 @@ export const UPDATES: Update[] = [
       'Prices, for a game where a plot can earn 250,000 a day: plots cost about three times what they did; a fresh plot’s ceiling starts at 40,000; a charter is four days of the plot’s own ceiling (160,000 for a new plot, 1,000,000 for a top city), the same bargain at every level; eras cost a million per step already taken, 1M, 2M, 3M, 4M; expansion is 1,000,000; renames, surveys and digs are doubled; a withdrawal holds back 10%, half burned and half kept; a hand needs 50,000 to be hired and the owner pays 10,000 to open the job; a resale carries a 5% registry fee into the vault.',
       'Bets in $EMERGE at the colosseum, beside the Gold ones. The stake goes into the vault, a win is paid by the vault at the odds shown, a loss stays. 50,000 a bout, 250,000 a day. The house edge is booked like every charge.',
       'Prestige. A monument in the square, 250,000, unique to the plot, lifts everyone a little each day and stands as long as the city does. A banner, 100,000, an emblem of your choosing over your name and on every world map.',
+      'Rewards are paid against the clock whether or not the game is open. A player who saw 16,000 a day and received 8,800 had the tab closed for eleven hours: accrual used to run only while the page drew frames. Now the stretch since the last accrual is paid at the attention it actually had through it, up to a month at a time, and a stretch that comes to more than the day’s ceiling stays banked for tomorrow instead of being lost. The payout route allows a day’s grace after your last visit before attention starts to slide.',
     ],
   },
   {
@@ -154,6 +155,7 @@ export const UPDATES_ZH: Update[] = [
       '为一块地每天可赚 250,000 的游戏重新定价：地块价格约为原来的三倍；新地块上限从 40,000 起；特许状为地块自身上限的四天（新地块 160,000，顶级城市 1,000,000），各等级同样划算；时代每已走一步一百万，即 1M、2M、3M、4M；扩建 1,000,000；改名、勘测和勘探翻倍；提现扣留 10%，一半销毁一半留存；雇工须持有 50,000，雇主开放职位付 10,000；转售收取 5% 登记费进入金库。',
       '竞技场可用 $EMERGE 下注，与金币并列。赌注进入金库，赢家由金库按显示赔率支付，输了留在金库。每场 50,000，每天 250,000。庄家优势按收费方式记账。',
       '声望。广场上的纪念碑，250,000，每块地一座，每天让所有人略微开心，城在碑在。旗帜，100,000，自选徽记，飘在你的名字上和每张世界地图上。',
+      '收益无论游戏是否打开都按时钟支付。一位玩家看到"每天 16,000"却只收到 8,800，是因为标签页关了十一个小时：累积过去只在页面绘制帧时进行。现在自上次累积以来的时段按当时的关注度支付，一次最多一个月；超过当日上限的部分留到明天而不是丢失。支付接口在你最后一次访问后给一天宽限，之后关注度才开始下滑。',
     ],
   },
   {
