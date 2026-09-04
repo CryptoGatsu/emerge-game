@@ -33,6 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
+import { PERMIT2, PERMIT2_ADDRESS, QUOTER_V2, UNIVERSAL_ROUTER, parseRoute, universalSwap, v3Path } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -297,17 +298,26 @@ export async function sendTokenFromVault(tokenAddress: string, to: string, units
   }
 }
 
-export type Swap = { ok: true; txHash: string; received: bigint } | { ok: false; problem: string };
+export type Swap = { ok: true; txHash: string; received: bigint; unquoted?: boolean } | { ok: false; problem: string };
 
 /**
  * Swap $EMERGE the vault holds into GLD through the router.
  *
- * Uniswap's V2 shape by default (`swapExactTokensForTokens`, floored at
- * three percent under `getAmountsOut`); set `EMERGE_SWAP_KIND=v3` for the V3
- * router's `exactInputSingle` (fee tier from `EMERGE_SWAP_FEE`, default 3000).
+ * Three shapes, picked by `EMERGE_SWAP_KIND`:
+ *
+ *  - `universal`: Uniswap's Universal Router, which is what Robinhood Chain
+ *    has. One `execute` with a V3 exact-input command along the route in
+ *    `EMERGE_SWAP_PATH` (fee, token, fee…; GLD's pool is against USDG, so
+ *    the route goes through it). Paid through Permit2, so the tokens never
+ *    rest in the router. Floored three percent under QuoterV2's answer when
+ *    `EMERGE_SWAP_QUOTER` is set; unfloored, and said so, when it is not.
+ *  - `v3`: a plain SwapRouter's `exactInputSingle`, fee from `EMERGE_SWAP_FEE`.
+ *  - `v2`, the default: `swapExactTokensForTokens`, floored under `getAmountsOut`.
+ *
  * What was received is measured from the vault's GLD balance before and
  * after, which is the one figure that does not depend on the router's
- * return value.
+ * return value. Every send is simulated first, so a route that cannot
+ * fill fails before any gas is spent.
  */
 export async function swapForGld(wholeEmerge: number): Promise<Swap> {
   const key = vaultKey();
@@ -335,7 +345,37 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     }
     const kind = (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase();
     let txHash: Hex;
-    if (kind === 'v3') {
+    let unquoted = false;
+    if (kind === 'universal') {
+      // Permit2 pays the router out of the vault: the token approves Permit2
+      // once, and Permit2 approves the router for this amount and the hour.
+      const permit2 = ((process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex);
+      const toPermit = await client.readContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'allowance', args: [account.address, permit2] });
+      if (toPermit < units) {
+        const tx = await wallet.writeContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'approve', args: [permit2, 2n ** 256n - 1n], nonce });
+        await client.waitForTransactionReceipt({ hash: tx });
+        nonce += 1;
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const [granted, expires] = await client.readContract({ address: permit2, abi: PERMIT2, functionName: 'allowance', args: [account.address, token() as Hex, SWAP_ROUTER as Hex] });
+      if (granted < units || expires <= now + 300) {
+        const tx = await wallet.writeContract({ address: permit2, abi: PERMIT2, functionName: 'approve', args: [token() as Hex, SWAP_ROUTER as Hex, units, now + 3600], nonce });
+        await client.waitForTransactionReceipt({ hash: tx });
+        nonce += 1;
+      }
+      const route = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
+      const path = v3Path(token() as Hex, route, GLD_ADDRESS as Hex);
+      let minOut = 0n;
+      const quoter = process.env.EMERGE_SWAP_QUOTER ?? '';
+      if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
+        const [quoted] = await client.readContract({ address: quoter as Hex, abi: QUOTER_V2, functionName: 'quoteExactInput', args: [path, units] });
+        minOut = (quoted * 97n) / 100n;
+      } else unquoted = true;
+      const { commands, inputs } = universalSwap(account.address, units, minOut, path);
+      const deadline = BigInt(now + 600);
+      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [commands, inputs, deadline], nonce });
+      txHash = await wallet.writeContract(request);
+    } else if (kind === 'v3') {
       const fee = Number(process.env.EMERGE_SWAP_FEE) || 3000;
       txHash = await wallet.writeContract({
         address: SWAP_ROUTER as Hex, abi: ROUTER_V3, functionName: 'exactInputSingle',
@@ -351,9 +391,10 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     }
     await client.waitForTransactionReceipt({ hash: txHash });
     const after = await client.readContract({ address: GLD_ADDRESS as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
-    return { ok: true, txHash, received: after > before ? after - before : 0n };
-  } catch {
-    return { ok: false, problem: 'The swap could not be sent.' };
+    return { ok: true, txHash, received: after > before ? after - before : 0n, unquoted };
+  } catch (error) {
+    const why = error instanceof Error ? error.message.split('\n')[0].slice(0, 160) : 'unknown';
+    return { ok: false, problem: `The swap could not be sent: ${why}` };
   } finally {
     await releaseLock(NONCE_LOCK);
   }

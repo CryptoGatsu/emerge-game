@@ -31,6 +31,7 @@ export const UPDATES: Update[] = [
       'A leaderboard on the world map. Every city ranked by the level the vault judges it at, then by how well it is run, with its banner, era and GLD beside it. Tap a row to go and look.',
       'A pass over the phone: every panel by touch. The language switch no longer sits over the population pill in the world, and everything a finger has to hit is big enough to hit.',
       'Nine more charts. The world grows from twelve charts and 204 plots to twenty-one charts and 357, seventy-two new islands with names of their own, and the map counts across all of them.',
+      'The GLD swap goes through Uniswap’s Universal Router, routed: $EMERGE is sold into its own pool and GLD bought with the proceeds in one trade, paid through Permit2 and floored under the quoter, because that is the router Robinhood Chain has and GLD’s pool is against USDG.',
     ],
   },
   {
@@ -188,6 +189,7 @@ export const UPDATES_ZH: Update[] = [
       '世界地图上的排行榜。每座城市按金库裁定的等级排名，再按经营好坏排，旁边是它的旗帜、时代和 GLD。点一行就去看看。',
       '手机上过了一遍：每个面板都用手指点过。语言切换不再压在世界里的人口标签上，手指要点的东西都够大了。',
       '再开九张海图。世界从十二张海图、204 块地扩到二十一张海图、357 块地，七十二座新岛各有自己的名字，地图上的计数覆盖全部海图。',
+      'GLD 兑换改走 Uniswap 的 Universal Router，按路径交易：一笔交易里先把 $EMERGE 卖进它自己的池子，再用所得买入 GLD，经 Permit2 支付并以报价器设下限——因为 Robinhood Chain 上就是这个路由器，而 GLD 的池子对的是 USDG。',
     ],
   },
   {

@@ -543,8 +543,14 @@ balance per staker), weekly `settleEpoch` (the development share to
 `?sample=1` and `?settle=1` with `EMERGE_CRON_SECRET` (or Vercel's
 `CRON_SECRET`) are the crons in `vercel.json`. `NEXT_PUBLIC_GLD_TOKEN` and
 `NEXT_PUBLIC_SWAP_ROUTER` default to the GLD contract and the Uniswap router
-on Robinhood Chain; `EMERGE_SWAP_KIND` (`v2`, the default, or `v3`) and
-`EMERGE_SWAP_FEE` pick the router's shape. Without a live token the
+on Robinhood Chain. That router is Uniswap's Universal Router and GLD's pool
+is against USDG, so the live setting is `EMERGE_SWAP_KIND=universal` with
+`EMERGE_SWAP_PATH` naming the route (`fee,token,fee…` between $EMERGE and
+GLD, e.g. `3000,<USDG>,3000`), paid through Permit2 (`EMERGE_PERMIT2`,
+default the canonical address) and floored under QuoterV2 when
+`EMERGE_SWAP_QUOTER` is set (`lib/chain/universal.ts` does the encoding).
+`v2` (`swapExactTokensForTokens`) and `v3` (`exactInputSingle`, fee from
+`EMERGE_SWAP_FEE`) remain for plain routers. Without a live token the
 settlement is simulated in $EMERGE units so the flow can be exercised.
 
 v2.3: stewardship is judged on the server (`judgedFor` in
@@ -985,6 +991,13 @@ EMERGE_VAULT_PRIVATE_KEY=                  # the vault's key, for automatic with
 EMERGE_SESSION_SECRET=                      # signs sign-in cookies; derived from the vault key if unset
 EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, vault-wide
 EMERGE_DEPOSIT_CONFIRMATIONS=              # default: 3
+EMERGE_DEV_ADDRESS=                        # the 30% development share of the dividend pool
+EMERGE_CRON_SECRET=                        # or Vercel's CRON_SECRET: the crons' bearer token
+EMERGE_SWAP_KIND=                          # universal (Robinhood Chain), v3 or v2 (default)
+EMERGE_SWAP_PATH=                          # universal: fee,token,fee… e.g. 3000,<USDG>,3000
+EMERGE_SWAP_QUOTER=                        # universal: QuoterV2, for the 3% floor
+EMERGE_PERMIT2=                            # universal: default 0x000000000022D473030F116dDEE9F6B43aC78BA3
+EMERGE_SWAP_FEE=                           # v3: the pool's fee tier, default 3000
 KV_REST_API_URL=                           # required in production: the settlement ledger
 KV_REST_API_TOKEN=
 EMERGE_TOKEN_STATS_URL=                    # default: DexScreener; {address} is the token

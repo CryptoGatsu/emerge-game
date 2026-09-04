@@ -186,6 +186,7 @@ export async function settleEpoch(epoch = previousEpoch()): Promise<Settlement |
       }
       txHash = swap.txHash;
       gldUnits = swap.received;
+      if (swap.unquoted) problem = 'swapped without a quote: set EMERGE_SWAP_QUOTER so the trade carries a floor';
     } else {
       // Simulated: units are $EMERGE, one to one, so the arithmetic is visible.
       await incrBy(DEV_OWED, dev);
