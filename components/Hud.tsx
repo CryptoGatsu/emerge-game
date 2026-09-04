@@ -713,6 +713,7 @@ function sinceWhen(at: number) {
 const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; short: string; blurb: string }[] = [
   { key: 'guide', icon: '◎', label: 'GAME GUIDE', short: 'GUIDE', blurb: 'How all of this works' },
   { key: 'build', icon: '⚒', label: 'BUILD', short: 'BUILD', blurb: 'Places and resources' },
+  { key: 'people', icon: '☺', label: 'PEOPLE', short: 'PEOPLE', blurb: 'Trades, posts and training' },
   { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
   { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
   { key: 'arena', icon: '⚔', label: 'ARENA', short: 'ARENA', blurb: 'Duels and betting' },

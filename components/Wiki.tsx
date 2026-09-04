@@ -444,6 +444,15 @@ export default function Wiki() {
               </p>
             </div>
           )}
+          <h3>Eras pay more</h3>
+          <p>
+            Each era a plot advances to lifts its daily ceiling by 15% of the base: a township
+            can earn up to 15% more than a settlement, an industrial city 30% more, a modern one
+            45% more, an AI-era city 60% more. The stewardship score and the attention rule are
+            unchanged; the ceiling they multiply is what grows. The payout route reads the era
+            from the claim row, which only the gated, burn-verified advance can raise, so the
+            higher ceiling cannot be reached by editing a save.
+          </p>
         </section>
 
         {/* ---------------------------------------------------------- */}
@@ -645,6 +654,25 @@ export default function Wiki() {
             rough first, then a farm or a woodcutter when the stores are thin, then whatever the
             plot helper would tell you next — a store, a cafe, a school, a clinic, a lab, a trade
             the land supports. One building a day at most, and the feed says what it built and why.
+          </p>
+
+          <h3>People and training</h3>
+          <p>
+            The <b>People</b> panel in the bar is the whole workforce at a glance. One tab lists
+            every adult with their trade, their skill and where they work, the unemployed first
+            and filterable by trade. Another lists every trade with its workers against the posts
+            its workplaces offer, and how many stand open. A third lists every workplace with its
+            crew and its posts, ruins flagged. It is how you see what a building is and which
+            jobs you are missing once there are thirty of them.
+          </p>
+          <p>
+            <b>Training</b> is the lever. Retrain one person into any trade that has a workplace,
+            or fill every open post in a trade at once with the people who can best be spared: the
+            unemployed first, then anyone in a trade with more hands than posts, then the least
+            skilled; never the last farmer, fisher, hunter or forager. It costs Gold a head, takes
+            effect at once, gives the trainee a head start in skill (doubled by a School), and
+            holds them to the trade for forty days against the settlement&rsquo;s own daily
+            reshuffling. After that they are the settlement&rsquo;s to move again.
           </p>
 
           <h3>The trades</h3>

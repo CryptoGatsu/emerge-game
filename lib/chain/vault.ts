@@ -38,6 +38,7 @@
  * the vault, to be burned deliberately rather than sent anywhere.
  */
 
+import { ERA_YIELD_STEP, eraYield } from '../world/eras';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, chainConfigured, tokenBalance, tokenLive, transferTokens,
   vaultLive, type ChainConfig,
@@ -161,6 +162,20 @@ export const EARNING_PLOT_LIMIT = 4;
  * four settlements' worth, which is the same limit stated as a number.
  */
 export const DAILY_EARN_CEILING = 25_000 * EARNING_PLOT_LIMIT;
+
+/**
+ * Rewards grow with the era.
+ *
+ * Each era a plot advances to lifts its daily ceiling by this share of the
+ * base: a township earns up to 15% more than a settlement, an AI-era city up
+ * to 60% more. Modest on purpose: the point is that developing a city is
+ * worth more than claiming another, not that the emission doubles. The
+ * multiplier is judged from the claim row, which only the gated, burn-verified
+ * advance route can raise.
+ */
+export { ERA_YIELD_STEP, eraYield };
+/** A wallet's daily ceiling across its earning plots, at the highest era it holds. */
+export const eraCeiling = (era: number) => Math.round(DAILY_EARN_CEILING * eraYield(era));
 
 /*
  * Hired hands: earning without land.

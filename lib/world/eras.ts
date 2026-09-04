@@ -52,6 +52,14 @@ export const ERAS: EraSpec[] = [
   },
 ];
 
+/**
+ * Rewards grow with the era. Each era a plot advances to lifts its daily
+ * stewardship ceiling by this share of the base: a township earns up to 15%
+ * more than a settlement, an AI-era city up to 60% more.
+ */
+export const ERA_YIELD_STEP = 0.15;
+export const eraYield = (era: number) => 1 + Math.max(0, Math.min(ERAS.length - 1, Math.round(era) - 1)) * ERA_YIELD_STEP;
+
 /** How far the game has been built. Eras past this are described, not reachable. */
 export const OPEN_ERA: EraId = 5;
 

@@ -453,6 +453,24 @@ Power Plant and Research Campus add to `methodBonus`; a Hospital is a stronger
 Clinic (`careOf`, `survivalOf`); Telegraph, Stadium, Supermarket, Office,
 Vertical Farm and Drone Port put something back into people each day.
 
+## People and training
+
+The People panel (`Roster` in `lib/hud.ts`) lists every adult with trade,
+skill and workplace, every trade with workers against posts (`tradeCapacity`,
+`openPosts`), and every workplace with crew and posts (`buildingPosts`).
+`trainCitizen` moves one person into a trade for `TRAIN_COST_GOLD`, booked
+under the `training` ledger line, gives them `TRAIN_SKILL_DAYS` of skill
+(doubled by a School) and a `trained` hold of `TRAIN_HOLD_DAYS` that the daily
+reassignment and `fillEmptyTrades` respect (`heldTrade`). `trainTrade` fills a
+trade's open posts with the people who can best be spared: the unemployed,
+then over-capacity trades, then the least skilled, never the last hand in a
+food trade.
+
+Rewards grow with the era: `eraYield` in `lib/world/eras.ts` lifts the daily
+stewardship cap by `ERA_YIELD_STEP` per era, the client accrues against
+`eraCeiling(era)`, and the payout route judges the same ceiling from the claim
+rows (`eraHeldBy`), which only the advance route can raise.
+
 ## Room for two hundred settlements
 
 Twelve charts of seventeen berths — 204 plots in all — and the world map says

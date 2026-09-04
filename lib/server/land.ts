@@ -55,6 +55,21 @@ const ERC721 = [
 export type LandCheck = 'holds' | 'none' | 'no-registry' | 'unreachable';
 
 /** Whether the relay shows any plot standing in this wallet's name. */
+/**
+ * The highest era among the plots this wallet holds, from the claim rows.
+ * The row's era is set only by the advance route, which re-runs the gate on
+ * the published world and verifies the burn, so it is the record to pay by.
+ */
+export async function eraHeldBy(address: string): Promise<number> {
+  try {
+    const me = address.toLowerCase();
+    const rows = await allClaims();
+    return rows.filter((c) => c.owner.toLowerCase() === me).reduce((era, c) => Math.max(era, c.era ?? 1), 1);
+  } catch {
+    return 1;
+  }
+}
+
 async function claimsHeldBy(address: string): Promise<boolean> {
   const wanted = address.toLowerCase();
   const claims = await allClaims();

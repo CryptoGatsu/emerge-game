@@ -11,8 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory,
-} from '@/lib/simulation';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS } from '@/lib/simulation';
 import { eraName } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
@@ -40,7 +39,7 @@ import { WalletPicker, useWallet } from './WalletPicker';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
 import { GuideZh } from './GuideZh';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | null;
 
 interface PanelsProps {
   panel: PanelKey;
@@ -49,6 +48,10 @@ interface PanelsProps {
   player: PlayerRecord;
   onClose: () => void;
   onBuild: (type: string, cost: number) => void;
+  /** Retrain one person into a trade, for Gold. Returns a refusal, or null. */
+  onTrain: (id: string, job: string) => string | null;
+  /** Fill open posts in a trade by retraining the people who can best be spared. Returns a refusal, or null. */
+  onTrainTrade: (job: string, count: number) => string | null;
   /** Arm the clearing cursor. */
   onClearTrees: () => void;
   onRenameWorld: (name: string) => void;
@@ -1672,6 +1675,109 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
   );
 }
 
+/**
+ * Everybody and every workplace at a glance, and the lever to change it.
+ *
+ * Three tabs. People: every adult with their trade, their skill and where
+ * they work, the unemployed first, filterable by trade, each with a Retrain
+ * control. Trades: every trade with its workers against its posts and a
+ * button to fill the open ones with the people who can best be spared.
+ * Buildings: every workplace with its crew and its posts, ruins flagged.
+ */
+function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
+  view: Snapshot; onClose: () => void; onTrain: (id: string, job: string) => string | null; onTrainTrade: (job: string, count: number) => string | null;
+}) {
+  useLocale();
+  const { roster } = view;
+  const [tab, setTab] = useState<'people' | 'trades' | 'buildings'>('people');
+  const [filter, setFilter] = useState<string>('all');
+  const [retraining, setRetraining] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const trades = roster.trades;
+  const shown = roster.people.filter((p) => filter === 'all' ? true : filter === 'unemployed' ? p.job === 'unemployed' : p.job === filter);
+  const canPay = (n: number) => view.treasury >= roster.trainCost * n;
+  const act = (fn: () => string | null) => { const why = fn(); setNote(why); if (!why) setRetraining(null); };
+  return (
+    <Shell title={t('PEOPLE')} subtitle={t('{n} adults · {u} without work · {o} open posts', { n: roster.people.length, u: roster.unemployed, o: roster.openPosts })} onClose={onClose} wide>
+      <div className="build-shelves">
+        <button className={tab === 'people' ? 'on' : ''} onClick={() => setTab('people')}>{t('People')}</button>
+        <button className={tab === 'trades' ? 'on' : ''} onClick={() => setTab('trades')}>{t('Trades')}</button>
+        <button className={tab === 'buildings' ? 'on' : ''} onClick={() => setTab('buildings')}>{t('Buildings')}</button>
+      </div>
+      <p className="muted small">
+        {t('Training costs {n} Gold a head and takes effect at once; a trained person holds their trade for {d} days against the settlement\u2019s own reshuffling, and starts with a head start in skill.', { n: roster.trainCost, d: TRAIN_HOLD_DAYS })}
+        {' '}{roster.hasSchool ? t('The School doubles that head start.') : t('A School would double that head start.')}
+      </p>
+      {note && <p className="people-note">{tx(note)}</p>}
+
+      {tab === 'people' && (
+        <>
+          <div className="people-filter">
+            <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>{t('Everyone')} · {roster.people.length}</button>
+            <button className={filter === 'unemployed' ? 'on' : ''} onClick={() => setFilter('unemployed')}>{t('Without work')} · {roster.unemployed}</button>
+            {trades.filter((tr) => tr.workers > 0).map((tr) => (
+              <button key={tr.job} className={filter === tr.job ? 'on' : ''} onClick={() => setFilter(tr.job)}>{tn(tr.label)} · {tr.workers}</button>
+            ))}
+          </div>
+          <div className="people-rows">
+            {shown.map((p) => (
+              <div key={p.id} className={`people-row ${p.job === 'unemployed' ? 'idle' : ''}`}>
+                <b>{p.name}</b>
+                <span className="muted">{t('{n} yrs', { n: p.age })}</span>
+                <span className="people-trade">{tn(p.jobLabel)}{p.trained && <i title={t('Trained')}>✦</i>}</span>
+                <span className="muted">{p.skill ? tx(p.skill.title) : t('no trade')}</span>
+                <span className="muted">{p.workplace ? (p.at ? t('at the {b}', { b: tn(p.at).toLowerCase() }) : t('works at a {b}', { b: tn(p.workplace).toLowerCase() })) : t('nowhere to work')}</span>
+                {retraining === p.id ? (
+                  <select autoFocus defaultValue="" onChange={(e) => { if (e.target.value) act(() => onTrain(p.id, e.target.value)); }}>
+                    <option value="">{t('Choose a trade')}</option>
+                    {trades.filter((tr) => tr.job !== p.job && tr.capacity > 0).map((tr) => (
+                      <option key={tr.job} value={tr.job}>{tn(tr.label)} · {tr.open > 0 ? t('{n} open', { n: tr.open }) : t('full')}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <button onClick={() => { setNote(null); setRetraining(p.id); }} disabled={!canPay(1)}>{t('Retrain')}</button>
+                )}
+              </div>
+            ))}
+            {shown.length === 0 && <p className="muted small">{t('Nobody here.')}</p>}
+          </div>
+        </>
+      )}
+
+      {tab === 'trades' && (
+        <div className="people-rows">
+          {trades.map((tr) => (
+            <div key={tr.job} className={`people-row ${tr.open > 0 ? 'short' : ''}`}>
+              <b>{tn(tr.label)}</b>
+              <span className="muted">{tn(tr.building)}</span>
+              <span className="people-trade">{t('{w} of {c} posts filled', { w: tr.workers, c: tr.capacity })}</span>
+              <span className={tr.open > 0 ? 'people-open' : 'muted'}>{tr.open > 0 ? t('{n} open', { n: tr.open }) : tr.workers > tr.capacity ? t('{n} over', { n: tr.workers - tr.capacity }) : t('full')}</span>
+              <button disabled={tr.open === 0 || !canPay(1)} onClick={() => act(() => onTrainTrade(tr.job, tr.open))}>
+                {tr.open > 0 ? t('Fill {n} for {g} Gold', { n: tr.open, g: tr.open * roster.trainCost }) : t('Full')}
+              </button>
+            </div>
+          ))}
+          {trades.length === 0 && <p className="muted small">{t('No workplaces yet. Raise one from the Build panel.')}</p>}
+        </div>
+      )}
+
+      {tab === 'buildings' && (
+        <div className="people-rows">
+          {roster.buildings.map((b) => (
+            <div key={b.id} className={`people-row ${b.ruined ? 'idle' : b.posts !== null && b.crew < b.posts ? 'short' : ''}`}>
+              <b>{tn(b.type)}</b>
+              <span className="muted">{t('level {n}', { n: b.level })}</span>
+              <span className="people-trade">{b.trade ? tn(b.trade) : t('civic')}</span>
+              <span className={b.ruined ? 'people-open' : 'muted'}>{b.ruined ? t('ruin') : b.posts !== null ? t('{c} of {p} at their posts', { c: b.crew, p: b.posts }) : t('{c} inside', { c: b.crew })}</span>
+              <span className="muted">{tn(eraName(b.era))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Shell>
+  );
+}
+
 function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
   view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void;
 }) {
@@ -2079,7 +2185,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onClearTrees, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2111,7 +2217,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onClear
   }
 
   // Everything that changes the settlement is the owner's alone.
-  if (spectating && (panel === 'build' || panel === 'gacha' || panel === 'connect')) return null;
+  if (spectating && (panel === 'build' || panel === 'people' || panel === 'gacha' || panel === 'connect')) return null;
   if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
   if (panel === 'chat') {
     return (
@@ -2124,6 +2230,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onClear
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} />;
+  if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} />;
   if (panel === 'connect') {
     return (
       <ConnectPanel

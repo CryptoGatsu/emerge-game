@@ -25,8 +25,7 @@ import {
   advanceEra, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, trial,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
-  type World, clearTrees,
-} from '@/lib/simulation';
+  type World, clearTrees, trainCitizen, trainTrade, type WorkingJob } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -48,8 +47,7 @@ import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  liveToken, type VaultLedger,
-} from '@/lib/chain/vault';
+  liveToken, type VaultLedger, eraCeiling } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
@@ -327,7 +325,7 @@ export default function EmergeClient() {
    * once at mount and would otherwise be adding to whichever ledger existed
    * then — every day's earnings landing on the same stale balance.
    */
-  const earn = useCallback((emerge: number) => {
+  const earn = useCallback((emerge: number, era = 1) => {
     if (!(emerge > 0)) return;
     setPlayer((prev) => {
       if (!prev) return prev;
@@ -339,7 +337,8 @@ export default function EmergeClient() {
         .slice(0, EARNING_PLOT_LIMIT)
         .some((c) => c.seed === claimedSeedRef.current);
       if (!earning) return prev;
-      const next = { ...prev, ledger: accrue(prev.ledger, emerge) };
+      // The ceiling grows with the era the plot has reached; the payout route judges the same from the claim row.
+      const next = { ...prev, ledger: accrue(prev.ledger, emerge, eraCeiling(era)) };
       savePlayer(next, addressRef.current);
       return next;
     });
@@ -550,7 +549,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   onRename: (world: ClaimedWorld) => void;
   onPlayer: (record: PlayerRecord) => void;
   /** Credit stewardship yield the simulation has accrued. */
-  onEarn: (emerge: number) => void;
+  onEarn: (emerge: number, era?: number) => void;
   /** Go and look at somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
 }) {
@@ -684,7 +683,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         // drained — so it cannot pile up — and then dropped, because watching
         // somebody else's settlement is not stewarding it.
         const earned = collectYield(live);
-        if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned);
+        if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned, eraOf(live));
         // A danger that is still doing harm changes the music; a harmless
         // one, or one already fought down, does not.
         if (!hiddenRef.current) {
@@ -1230,6 +1229,28 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     });
   }, []);
 
+  /** Retrain one person into a trade, for Gold. */
+  const trainFor = useCallback((id: string, job: string): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = trainCitizen(world, id, job as WorkingJob);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+
+  /** Fill a trade's open posts with the people who can best be spared. */
+  const trainTradeFor = useCallback((job: string, count: number): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = trainTrade(world, job as WorkingJob, count);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+
   /** Pull a building down. Half the materials come back; the Gold does not. */
   const demolish = useCallback((id: string) => {
     const world = worldRef.current;
@@ -1761,6 +1782,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             player={player}
             onClose={() => setPanel(null)}
             onBuild={beginBuild}
+            onTrain={trainFor}
+            onTrainTrade={trainTradeFor}
             onClearTrees={beginClear}
             onRenameWorld={renameWorldFor}
             onExpand={expandFor}

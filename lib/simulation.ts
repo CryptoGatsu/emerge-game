@@ -21,7 +21,7 @@ import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './wor
 import { buildWater, type WaterField } from './world/water';
 import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
-import { ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec } from './world/eras';
+import { ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec, eraYield } from './world/eras';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -296,6 +296,12 @@ export interface Citizen {
   riding?: boolean;
   /** What they ride, when they do: the era and the town's transport decide. */
   ride?: Ride;
+  /**
+   * A trade the player trained them for. Held against the settlement's own
+   * daily reshuffling for `hold` days from `since`, so a town does not undo
+   * the owner's plan the next morning.
+   */
+  trained?: { job: WorkingJob; since: number; hold: number };
   /** True while sat on a bench or crouched at a fire, which the renderer draws. */
   seated: boolean;
   /**
@@ -537,7 +543,7 @@ export interface Stewardship {
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
   | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
-  | 'exports' | 'households' | 'food' | 'vault' | 'arena';
+  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
@@ -548,6 +554,7 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
   gear: 'Bait and arrows',
   exports: 'Exports',
   households: 'Household spending',
+  training: 'Training',
   food: 'Food sales',
   vault: 'Vault',
   arena: 'The arena',
@@ -3970,6 +3977,100 @@ function jobCapacity(world: World, j: WorkingJob) {
     .reduce((room, b) => room + buildingCapacity(b, base), 0);
 }
 
+/** Posts at one workplace, by its level. Three at a mine, two elsewhere. */
+export function buildingPosts(b: Building) {
+  const base = b.type === 'Mine' ? 3 : 2;
+  return buildingCapacity(b, base);
+}
+/** How many people a trade can employ across its standing workplaces. */
+export const tradeCapacity = (world: World, job: WorkingJob) => { useWorld(world); return jobCapacity(world, job); };
+/** Posts nobody fills, in a trade. */
+export function openPosts(world: World, job: WorkingJob) {
+  const working = world.citizens.filter((c) => c.job === job).length;
+  return Math.max(0, jobCapacity(world, job) - working);
+}
+
+/*
+ * Targeted training.
+ *
+ * The settlement picks trades for itself, and mostly picks well; but a town
+ * with thirty workplaces and one owner who can see what is short needs a
+ * lever, not a suggestion. Training moves one person into a trade now, for
+ * Gold, gives them a head start in skill, and holds them there for a while
+ * against the daily reshuffle. It is a Gold sink on purpose.
+ */
+const FOOD_TRADES = new Set<Job>(['farmer', 'fisher', 'hunter', 'forager']);
+/** Whether somebody is still held to a trade the owner trained them for. */
+export const heldTrade = (world: World, c: Citizen) => !!c.trained && world.day - c.trained.since < c.trained.hold;
+export const TRAIN_COST_GOLD = 60;
+export const TRAIN_HOLD_DAYS = 40;
+/** The head start, in days of skill; the School doubles it. */
+export const TRAIN_SKILL_DAYS = 12;
+
+export function trainCitizen(world: World, id: string, job: WorkingJob): { ok: boolean; message: string } {
+  useWorld(world);
+  const c = world.citizens.find((x) => x.id === id);
+  if (!c) return { ok: false, message: 'Nobody by that name.' };
+  if (!jobs[job]) return { ok: false, message: 'That is not a trade.' };
+  if (c.age < 16) return { ok: false, message: `${c.name} is too young to work.` };
+  if (c.job === job) return { ok: false, message: `${c.name} is already a ${JOB_LABELS[job].toLowerCase()}.` };
+  if (jobCapacity(world, job) <= 0) return { ok: false, message: `There is no ${jobs[job].building.toLowerCase()} for a ${JOB_LABELS[job].toLowerCase()} to work at.` };
+  if (world.treasury < TRAIN_COST_GOLD) return { ok: false, message: `Training costs ${TRAIN_COST_GOLD} Gold, and the treasury holds ${Math.floor(world.treasury)}.` };
+  spend(world, 'training', TRAIN_COST_GOLD);
+  const was = c.job;
+  c.job = job;
+  c.trained = { job, since: world.day, hold: TRAIN_HOLD_DAYS };
+  c.wage = jobs[job].wage * cleanWageRate(world.wageRate);
+  const head = TRAIN_SKILL_DAYS * (hasCivic(world, 'School') ? 2 : 1);
+  c.skills = c.skills ?? {};
+  c.skills[job] = Math.max(c.skills[job] ?? 0, head);
+  // New trade, new day: drop what they were walking toward.
+  c.path = []; c.detour = undefined; c.dwell = 0;
+  pushFeed(world, 'work', was === 'unemployed'
+    ? `${c.name} was trained as a ${JOB_LABELS[job].toLowerCase()}.`
+    : `${c.name} was retrained from ${JOB_LABELS[was].toLowerCase()} to ${JOB_LABELS[job].toLowerCase()}.`);
+  noteAttention(world);
+  return { ok: true, message: '' };
+}
+
+/**
+ * Fill open posts in a trade with the people who can best be spared: the
+ * unemployed first, then anyone in a trade with more hands than posts, then
+ * the least skilled of the rest. Stops at the posts, at the Gold, or at the
+ * count asked for, whichever comes first.
+ */
+export function trainTrade(world: World, job: WorkingJob, count: number): { ok: boolean; message: string; trained: number } {
+  useWorld(world);
+  if (!jobs[job]) return { ok: false, message: 'That is not a trade.', trained: 0 };
+  const open = openPosts(world, job);
+  const want = Math.min(Math.max(0, Math.floor(count)), open);
+  if (want <= 0) return { ok: false, message: `Every ${JOB_LABELS[job].toLowerCase()} post is filled.`, trained: 0 };
+  if (world.treasury < TRAIN_COST_GOLD) return { ok: false, message: `Training costs ${TRAIN_COST_GOLD} Gold a head, and the treasury holds ${Math.floor(world.treasury)}.`, trained: 0 };
+  const tally: Partial<Record<Job, number>> = {};
+  for (const c of world.citizens) tally[c.job] = (tally[c.job] ?? 0) + 1;
+  const spare = (c: Citizen) => {
+    if (c.job === 'unemployed') return 0;
+    const over = (tally[c.job] ?? 0) - jobCapacity(world, c.job as WorkingJob);
+    return over > 0 ? 1 : 2;
+  };
+  const pool = world.citizens
+    .filter((c) => c.age >= 16 && c.job !== job && !heldTrade(world, c))
+    .sort((a, b) => spare(a) - spare(b) || (a.job === 'unemployed' ? 0 : skillDays(a, a.job as WorkingJob)) - (b.job === 'unemployed' ? 0 : skillDays(b, b.job as WorkingJob)));
+  let trained = 0;
+  for (const c of pool) {
+    if (trained >= want || world.treasury < TRAIN_COST_GOLD) break;
+    // Never strip a food trade to nothing to fill another: a town can do
+    // without its last carpenter for a while, not its last farmer.
+    if (c.job !== 'unemployed' && (tally[c.job] ?? 0) <= 1 && FOOD_TRADES.has(c.job)) continue;
+    const r = trainCitizen(world, c.id, job);
+    if (!r.ok) continue;
+    tally[c.job] = (tally[c.job] ?? 0) + 1;
+    trained++;
+  }
+  if (trained === 0) return { ok: false, message: 'Nobody could be spared for it.', trained: 0 };
+  return { ok: true, message: `${trained} trained as ${JOB_LABELS[job].toLowerCase()}${trained === 1 ? '' : 's'}.`, trained };
+}
+
 /**
  * Pick a job for one citizen.
  *
@@ -5899,8 +6000,9 @@ function fillEmptyTrades(world: World, tally: Partial<Record<Job, number>>) {
       const score = room === 0 ? have + 20 : over > 0 ? over + 10 : have;
       if (score > surplus) { surplus = score; from = other; }
     }
+    // Never somebody the owner trained and is still holding to a trade.
     const mover = from
-      ? workers.find((c) => c.job === from)
+      ? workers.find((c) => c.job === from && !heldTrade(world, c))
       : workers.find((c) => c.job === 'unemployed');
     if (!mover) continue;
 
@@ -6471,7 +6573,8 @@ function accrueYield(world: World, realSeconds: number) {
   s.score = stewardshipScore(world);
   // What a full real day at this rate would come to, which is the figure worth
   // showing: "you are earning this much a day, if you keep this up".
-  s.dailyYield = Math.round(STEWARDSHIP_DAILY_CAP * s.score * s.attention);
+  // Rewards grow with the era: the cap a plot can reach rises with each step.
+  s.dailyYield = Math.round(STEWARDSHIP_DAILY_CAP * eraYield(eraOf(world)) * s.score * s.attention);
   s.banked += (s.dailyYield * realSeconds) / REAL_DAY;
   // Hand over whole tokens only, and keep the remainder banked, so a tick of a
   // sixtieth of a second is not silently rounded away to nothing.
@@ -6530,6 +6633,12 @@ function daily(world: World) {
       && (tally[current] ?? 0) >= Math.max(1, jobCapacity(world, current));
     let jobKey: WorkingJob = current ?? chooseJob(world, tally);
     if (need < 35 || overCapacity) jobKey = chooseJob(world, tally);
+    // A trade the owner trained them for holds, while it has somewhere to work.
+    const held = c.trained;
+    if (held && heldTrade(world, c)) {
+      if (jobCapacity(world, held.job) > 0) jobKey = held.job;
+      else c.trained = undefined;
+    }
     if (c.job === 'unemployed') {
       pushFeed(world, 'work', `${c.name} is old enough to work, and took up ${JOB_LABELS[jobKey].toLowerCase()}.`);
     }

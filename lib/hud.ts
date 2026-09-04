@@ -7,7 +7,7 @@
  * never holds a reference into mutable simulation state.
  */
 
-import { eraSpec } from './world/eras';
+import { eraSpec, eraYield } from './world/eras';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -16,8 +16,7 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type World, adviseBuild, foodInStore, type Advice, eraGate, eraOf, type EraGate
-} from './simulation';
+  type WorkingJob, type Job, type World, adviseBuild, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD } from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -149,8 +148,86 @@ export interface Snapshot {
   expanded: boolean;
   /** Which era the plot is in, and what stands between it and the next. */
   era: { id: number; name: string; days: number; gate: EraGate };
+  /**
+   * Everybody and every workplace at a glance: who does what and where, which
+   * trades have open posts, which buildings stand short-handed. What the
+   * People panel is made of.
+   */
+  roster: Roster;
   projects: { id: string; name: string; owner: string; progress: number; length: number }[];
   focus: Focus | null;
+}
+
+export interface RosterPerson {
+  id: string; name: string; age: number; job: Job; jobLabel: string;
+  /** The kind of building their trade works at, or null for the unemployed. */
+  workplace: string | null;
+  /** The building they are in right now, if they are at work in one. */
+  at: string | null;
+  skill: { level: number; title: string } | null;
+  /** Holding a trade the player trained them for. */
+  trained: boolean;
+}
+export interface RosterTrade {
+  job: WorkingJob; label: string; building: string;
+  workers: number; capacity: number; open: number;
+}
+export interface RosterBuilding {
+  id: string; type: string; level: number; ruined: boolean; era: number;
+  /** People at their posts inside right now, and the posts it has; null for a building that employs nobody. */
+  crew: number; posts: number | null;
+  /** The trade that works here, if one does. */
+  trade: string | null;
+}
+export interface Roster {
+  people: RosterPerson[];
+  trades: RosterTrade[];
+  buildings: RosterBuilding[];
+  unemployed: number;
+  openPosts: number;
+  trainCost: number;
+  hasSchool: boolean;
+}
+
+function rosterOf(world: World): Roster {
+  const working = (Object.keys(JOBS) as WorkingJob[]);
+  const counts: Partial<Record<Job, number>> = {};
+  for (const c of world.citizens) counts[c.job] = (counts[c.job] ?? 0) + 1;
+  const trades: RosterTrade[] = working.map((job) => {
+    const capacity = tradeCapacity(world, job);
+    const workers = counts[job] ?? 0;
+    return { job, label: JOB_LABELS[job], building: JOBS[job].building, workers, capacity, open: Math.max(0, capacity - workers) };
+  }).filter((t) => t.capacity > 0 || t.workers > 0);
+  const byType = (type: string) => JOBS[working.find((j) => JOBS[j].building === type) as WorkingJob] ? working.find((j) => JOBS[j].building === type) ?? null : null;
+  const people: RosterPerson[] = world.citizens.filter((c) => c.age >= 16).map((c) => {
+    const job = c.job;
+    const at = c.inside && c.targetBuildingId ? world.buildings.find((b) => b.id === c.targetBuildingId) : undefined;
+    const days = job === 'unemployed' ? 0 : skillDays(c, job as WorkingJob);
+    const level = skillLevel(days);
+    return {
+      id: c.id, name: c.name, age: Math.floor(c.age), job, jobLabel: JOB_LABELS[job],
+      workplace: job === 'unemployed' ? null : JOBS[job as WorkingJob].building,
+      at: at ? at.type : null,
+      skill: job === 'unemployed' ? null : { level, title: SKILL_TITLES[level] },
+      trained: !!c.trained && world.day - c.trained.since < c.trained.hold,
+    };
+  });
+  // The unemployed first, then by trade, then by name.
+  people.sort((a, b) => (a.job === 'unemployed' ? 0 : 1) - (b.job === 'unemployed' ? 0 : 1) || a.jobLabel.localeCompare(b.jobLabel) || a.name.localeCompare(b.name));
+  const buildings: RosterBuilding[] = world.buildings.filter((b) => b.type !== 'House').map((b) => {
+    const trade = byType(b.type);
+    return {
+      id: b.id, type: b.type, level: levelOf(b), ruined: !!b.ruined, era: b.era ?? 1,
+      crew: b.workers.length, posts: trade ? buildingPosts(b) : null, trade: trade ? JOB_LABELS[trade] : null,
+    };
+  }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
+  return {
+    people, trades, buildings,
+    unemployed: people.filter((p) => p.job === 'unemployed').length,
+    openPosts: trades.reduce((s, t) => s + t.open, 0),
+    trainCost: TRAIN_COST_GOLD,
+    hasSchool: world.buildings.some((b) => b.type === 'School' && b.active && !b.ruined),
+  };
 }
 
 const MARKET_ORDER: Resource[] = ['wheat', 'vegetables', 'fish', 'game', 'berries', 'wood', 'stone', 'ironOre', 'wool', 'hides', 'herbs', 'flour', 'bread', 'furniture', 'tools', 'clothing'];
@@ -335,7 +412,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       dailyYield: world.stewardship.dailyYield,
       lifetime: world.stewardship.lifetime,
       idleHours: Math.max(0, (Date.now() - world.stewardship.lastActionAt) / 3_600_000),
-      cap: STEWARDSHIP_DAILY_CAP,
+      cap: Math.round(STEWARDSHIP_DAILY_CAP * eraYield(eraOf(world))),
     },
     rogue: (() => {
       const r = world.citizens.find((c) => c.rogue);
@@ -367,6 +444,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     unlockedAreas: [...world.unlockedAreas],
     expanded: !!world.expanded,
     era: { id: eraOf(world), name: eraSpec(eraOf(world)).name, days: Math.max(0, world.day - (world.eraSince ?? 1)), gate: eraGate(world) },
+    roster: rosterOf(world),
     projects: world.projects.map((p) => ({
       id: p.id, name: p.name, progress: p.progress, length: p.length,
       owner: world.citizens.find((c) => c.id === p.ownerId)?.name ?? 'Someone',

@@ -46,8 +46,8 @@ import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { handCheck, landCheck } from '@/lib/server/land';
-import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
+import { handCheck, landCheck, eraHeldBy } from '@/lib/server/land';
+import { DAILY_EARN_CEILING, HAND_DAILY_CEILING, eraCeiling } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
 
@@ -188,7 +188,11 @@ export async function POST(request: Request) {
     if (hand === 'hand') ceiling = HAND_DAILY_CEILING;
     else if (hand === 'unreachable') {
       return NextResponse.json({ error: 'We could not read this wallet\u2019s balance to confirm your job. Nothing was taken — try again in a minute.', land }, { status: 403 });
-    } else if (land !== 'holds') {
+    } else if (land === 'holds') {
+      // Rewards grow with the era: the ceiling is the base lifted by the
+      // highest era this wallet's plots have reached, read from the rows.
+      ceiling = eraCeiling(await eraHeldBy(address));
+    } else {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.
       const said = land === 'no-registry'

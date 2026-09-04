@@ -17,6 +17,16 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '1.6',
+    date: '2026-09-05',
+    title: 'People, training, and rewards that grow with the city',
+    notes: [
+      'A People panel in the bar. Every adult with their trade, their skill and where they work, the unemployed first, filterable by trade. Every trade with its workers against its posts and how many stand open. Every workplace with its crew and its posts, ruins flagged. No more guessing what a building is or which jobs you are missing.',
+      'Targeted training. Retrain one person into any trade that has a workplace, or fill every open post in a trade at once with the people who can best be spared: the unemployed first, then anyone in a trade with more hands than posts, then the least skilled. 60 Gold a head. A trained person keeps the trade for forty days against the settlement\u2019s own reshuffling and starts with a head start in skill, doubled by a School.',
+      'Rewards grow with the era. Each era a plot advances to lifts its daily stewardship ceiling by 15% of the base: a township can earn up to 15% more than a settlement, an AI-era city up to 60% more. The payout route reads the era from the claim row, which only the gated, burn-verified advance can raise.',
+    ],
+  },
+  {
     version: '1.5',
     date: '2026-09-04',
     title: 'Every era, to the AI age',
@@ -83,6 +93,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '1.6',
+    date: '2026-09-05',
+    title: '居民、培训，以及随城市成长的收益',
+    notes: [
+      '操作栏新增"居民"面板。每位成年人的行当、技能和工作地点，无业者排在最前，可按行当筛选。每个行当的在岗人数对比岗位数，以及有多少空缺。每个工作场所的在岗人员与岗位，废墟有标记。不用再猜某栋建筑是什么、缺哪些工作。',
+      '定向培训。把一个人培训成任何有工作场所的行当，或一次填满某个行当的全部空缺，由最能腾出的人担任：先是无业者，再是人手多于岗位的行当，再是技能最低的人。每人 60 金币。受训者四十天内不会被聚落自行调岗，并带着技能起点，有学校则翻倍。',
+      '收益随时代增长。地块每推进一个时代，每日管理收益上限提高基础值的 15%：城镇比聚落最多多 15%，人工智能时代的城市最多多 60%。支付接口从地块记录读取时代，而该记录只有经过门槛与销毁验证的推进才能提高。',
+    ],
+  },
   {
     version: '1.5',
     date: '2026-09-04',
