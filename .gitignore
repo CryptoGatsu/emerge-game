@@ -1,0 +1,10 @@
+node_modules/
+.next/
+*.tsbuildinfo
+.env*.local
+.vercel
+
+# Never commit a vault key, however it is written down.
+.env
+.env.local
+.env*.local
