@@ -57,6 +57,13 @@ export const RENAME_CITIZEN_EMERGE = 20_000;
 export const PROSPECT_COST_EMERGE = 120_000;
 /** Changing your own name, after the first change, which is free. */
 export const RENAME_PLAYER_EMERGE = 30_000;
+/**
+ * What it costs to expand a plot, once, opening its outer belt for building.
+ * Burned like every other charge. Set high on purpose: it is the one thing a
+ * player can buy that makes a plot itself bigger, and it should read as a
+ * decision rather than an upgrade.
+ */
+export const EXPAND_COST_EMERGE = 500_000;
 
 /**
  * What a player starts with while there is no token to hold.

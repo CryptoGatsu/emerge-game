@@ -26,6 +26,8 @@ export interface Claim {
   hiring?: boolean;
   /** Whoever holds that job. */
   hand?: { address: string; name: string; since: number; lastSeen: number };
+  /** When the owner expanded the plot. */
+  expandedAt?: number;
 }
 
 export interface Offer {
@@ -270,6 +272,38 @@ async function offerCall(owner: string, body: Record<string, unknown>): Promise<
 /** Offer a price for somebody else's plot. */
 export const placeOffer = (seed: number, bidder: string, bidderName: string, price: number) =>
   offerCall(bidder, { seed, offer: true, price, ownerName: bidderName });
+
+export type ExpandResult =
+  | { ok: true; claim: Claim; already: boolean }
+  | { ok: false; reason: string; settling?: boolean };
+
+/**
+ * Expand a plot, once.
+ *
+ * The server checks the burn where the token is live, so the order is pay
+ * first, then ask — and a plot already expanded comes back `already` rather
+ * than refused, so a lost reply can be asked for again.
+ */
+export async function expandPlot(seed: number, owner: string, burnTx?: string): Promise<ExpandResult> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, expand: true, burnTx }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean };
+    if (!response.ok || !json.claim) {
+      return { ok: false, reason: json.error ?? 'The registry refused the expansion.', settling: json.retry === true };
+    }
+    return { ok: true, claim: json.claim, already: json.already === true };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
 
 /** As the owner: open the job at this plot, or close it and let the hand go. */
 export const setHiring = (seed: number, owner: string, hiring: boolean) =>

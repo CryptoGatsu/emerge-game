@@ -18,7 +18,7 @@ import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
 } from '@/lib/chain/emerge';
 import {
-  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
+  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
@@ -51,6 +51,8 @@ interface PanelsProps {
   /** Arm the clearing cursor. */
   onClearTrees: () => void;
   onRenameWorld: (name: string) => void;
+  /** Open the plot's outer belt, once, for $EMERGE. Resolves to a refusal, or null. */
+  onExpand: () => Promise<string | null>;
   onRenameCitizen: (id: string, name: string) => void;
   onLeave: () => void;
   /** Give the plot up entirely, as opposed to stepping out of it. */
@@ -1724,12 +1726,21 @@ function sinceWhen(at: number): string {
   return t('{n} days ago', { n: Math.round(hours / 24) });
 }
 
-function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, onRelease, onList }: {
+function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
-  onRenameWorld: (name: string) => void; onLeave: () => void; onRelease: () => void;
+  onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onLeave: () => void; onRelease: () => void;
   onList: (price: number | null) => void;
 }) {
   const [releasing, setReleasing] = useState(false);
+  const [expanding, setExpanding] = useState(false);
+  const [expandNote, setExpandNote] = useState<string | null>(null);
+  const expand = async () => {
+    setExpanding(true);
+    setExpandNote(null);
+    const refused = await onExpand();
+    setExpanding(false);
+    setExpandNote(refused);
+  };
   const [draftName, setDraftName] = useState(view.name);
   const [askPrice, setAskPrice] = useState(String(Math.round(claimed.price * 1.25)));
   const configured = tokenLive();
@@ -1832,6 +1843,33 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
           <button onClick={() => onRenameWorld(draftName)} disabled={!changed || !affordable}>
             {affordable ? t('Rename for {cost} {ticker}', { cost: RENAME_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker }) : t('Not enough {ticker}', { ticker: TOKEN.ticker })}
           </button>
+        </div>
+
+        <div className="connect-card">
+          <span className="eyebrow">{t('EXPAND THIS PLOT')}</span>
+          {view.expanded ? (
+            <>
+              <h3>{t('Expanded')}</h3>
+              <p className="muted small">{t('The outer belt is open. Buildings, lanes and people can go right out to the edge of the land.')}</p>
+            </>
+          ) : (
+            <>
+              <h3>{t('Open the outer belt')}</h3>
+              <p className="muted small">
+                {t('Every plot is surveyed with a margin nobody builds on. Expanding opens it — about a fifth more ground, all the way round — for {cost} {ticker}, burned. Once per plot.', { cost: EXPAND_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+              </p>
+              <button onClick={expand} disabled={expanding || !wallet.address || player.ledger.balance < EXPAND_COST_EMERGE}>
+                {expanding
+                  ? t('Expanding…')
+                  : !wallet.address
+                    ? t('Connect a wallet to expand')
+                    : player.ledger.balance < EXPAND_COST_EMERGE
+                      ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                      : t('Expand for {cost} {ticker}', { cost: EXPAND_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+              </button>
+            </>
+          )}
+          {expandNote && <p className="muted small">{expandNote}</p>}
         </div>
 
         <div className="connect-card">
@@ -1945,7 +1983,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onLeave, 
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onClearTrees, onRenameWorld, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onClearTrees, onRenameWorld, onExpand, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -1994,7 +2032,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onClear
     return (
       <ConnectPanel
         view={view} claimed={claimed} player={player} onClose={onClose}
-        onRenameWorld={onRenameWorld} onLeave={onLeave} onRelease={onRelease} onList={onList}
+        onRenameWorld={onRenameWorld} onExpand={onExpand} onLeave={onLeave} onRelease={onRelease} onList={onList}
       />
     );
   }

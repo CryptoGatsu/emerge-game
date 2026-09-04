@@ -546,12 +546,16 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
   );
 }
 
-export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
+export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect }: {
   player: PlayerRecord;
   onPlayer: (record: PlayerRecord) => void;
   onEnter: (world: ClaimedWorld) => void;
   /** Go and look at somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
+  /** Back to the front page. */
+  onHome: () => void;
+  /** Let go of the wallet, staying on the map as a spectator. */
+  onDisconnect: () => void;
 }) {
   const [chart, setChart] = useState(HOME_CHART_INDEX);
   const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
@@ -1020,7 +1024,15 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit }: {
             {t('Every plot is a world waiting to happen, and no two are the same land. Claim one with {ticker}, give it a name, and the beings who live there will call it that.', { ticker: TOKEN.ticker })}
           </p>
           <div className="land-head-side">
-            <LanguageSwitch />
+            <div className="map-nav">
+              <button className="ghost" onClick={onHome}>{t('← Home')}</button>
+              {wallet.address && (
+                <button className="ghost" onClick={onDisconnect} title={t('Your plots and balance stay with the address; connect again any time.')}>
+                  {t('Disconnect wallet')}
+                </button>
+              )}
+              <LanguageSwitch />
+            </div>
             <div className="land-balance">
               <span>{t('YOUR BALANCE')}</span>
               <b>{Math.floor(player.ledger.balance).toLocaleString()}</b>

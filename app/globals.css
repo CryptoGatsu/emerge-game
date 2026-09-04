@@ -1945,6 +1945,33 @@ button.fold:hover { color: var(--emerald); }
 .chat-row.spectator b { color: var(--muted); }
 .spectate-button { width: 100%; padding: 11px 18px; font-size: 12.5px; }
 
+/* Home and disconnect, above the balance on the world map. */
+.map-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.map-nav .ghost { white-space: nowrap; font-size: 11.5px; padding: 7px 12px; }
+
+/* What changed, on the front page. */
+.updates { width: min(760px, 100%); margin: 0 auto 44px; display: flex; flex-direction: column; gap: 8px; }
+.updates > .eyebrow { margin-bottom: 4px; }
+.update { border: 1px solid var(--panel-edge-soft); border-radius: 12px; background: rgba(1, 26, 17, 0.55); padding: 0 16px; }
+.update summary { display: flex; gap: 12px; align-items: baseline; padding: 13px 0; cursor: pointer; list-style: none; }
+.update summary::-webkit-details-marker { display: none; }
+.update summary b { color: var(--emerald); font-size: 13px; }
+.update summary span { flex: 1; color: var(--cream); font-size: 13.5px; }
+.update summary em { font-style: normal; font-size: 11px; color: var(--muted); }
+.update ul { margin: 0 0 14px; padding-left: 18px; }
+.update li { margin: 6px 0; font-size: 13px; line-height: 1.55; color: #a9c19d; }
+.wiki-update { margin: 18px 0 26px; }
+.wiki-update h3 em { font-style: normal; font-size: 12px; color: var(--muted); margin-left: 8px; }
+.wiki-update ul { padding-left: 20px; }
+.wiki-update li { margin: 6px 0; line-height: 1.55; }
+
+/* Pictures in the guide. */
+.wiki-figure { margin: 18px 0 22px; }
+.wiki-figure img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--panel-edge-soft); image-rendering: auto; }
+.wiki-figure figcaption { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.wiki-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 640px) { .wiki-figures { grid-template-columns: 1fr; } .update summary { flex-wrap: wrap; } }
+
 /* The alerts switch, beside the name button. */
 .chat-tabs button.bell { font-size: 10.5px; padding: 6px 11px; }
 .chat-tabs button.bell.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); }

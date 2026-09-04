@@ -42,14 +42,14 @@
 
 import { NextResponse } from 'next/server';
 import {
-  allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, placeOffer,
+  allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
   type Claim,
 } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { HAND_MIN_EMERGE } from '@/lib/chain/vault';
+import { EXPAND_COST_EMERGE, HAND_MIN_EMERGE } from '@/lib/chain/vault';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { ownerOnChain, registryConfigured } from '@/lib/server/land';
@@ -106,6 +106,8 @@ export async function POST(request: Request) {
     /** The owner answers a bidder's offer. */
     answer?: 'accept' | 'decline';
     bidder?: string;
+    /** Expand the plot, once; `burnTx` paid for it where the token is live. */
+    expand?: boolean;
     /** Hired hands: the owner opens or closes the job; a player takes, keeps or leaves it. */
     hire?: boolean;
     takeJob?: boolean;
@@ -237,6 +239,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
   }
+  /*
+   * Expanding a plot.
+   *
+   * Once per plot, and the charge is checked the same way a survey's is: a
+   * real burn from this wallet, settled, worth the price, and single-use. A
+   * plot already expanded answers with its row rather than a refusal, so a
+   * device that paid and then lost the reply can ask again and be told.
+   */
+  if (body.expand) {
+    let claim: Claim | null;
+    try {
+      claim = await claimOf(seed);
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+      return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+    }
+    if (claim.expandedAt) return NextResponse.json({ claim, already: true });
+    if (tokenLive()) {
+      const burnTx = String(body.burnTx ?? '');
+      const paid = await verifyBurn(burnTx, owner, EXPAND_COST_EMERGE);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(burnTx, `expand:${seed}`))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
+    try {
+      const result = await markExpanded(seed, owner);
+      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      return NextResponse.json({ claim: result.claim, already: result.already });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
   /*
    * Hired hands.
    *

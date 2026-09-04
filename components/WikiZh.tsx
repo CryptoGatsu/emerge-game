@@ -1,5 +1,7 @@
 'use client';
 
+import { UPDATES_ZH } from '@/lib/updates';
+
 /**
  * 指南（中文版）。
  *
@@ -12,7 +14,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
-  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, EXPAND_COST_EMERGE
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
@@ -41,6 +43,7 @@ const CHARGES = [
   { what: '给一位居民改名', cost: n(RENAME_CITIZEN_EMERGE), note: '用勘探得到的命名权则免费' },
   { what: '给自己改名', cost: n(RENAME_PLAYER_EMERGE), note: '第一次免费' },
   { what: '派出勘探队', cost: n(DIG_COST_EMERGE), note: '' },
+  { what: '扩建地块', cost: n(EXPAND_COST_EMERGE), note: '每块地一次；开放外圈' },
 ];
 
 const yieldFor = (score: number, attention: number) => Math.round(STEWARDSHIP_DAILY_CAP * score * attention);
@@ -148,6 +151,7 @@ const SECTIONS = [
   ['world', '世界本身'],
   ['arena', '竞技场'],
   ['together', '其他玩家'],
+  ['updates', '更新记录'],
   ['honest', '哪些已定，哪些未定'],
 ] as const;
 
@@ -176,6 +180,11 @@ export function WikiZh() {
 
         <section id="start">
           <h2>入门</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/settlement.jpg" alt="第四十一天的聚落：广场、周围的行当，以及各自忙碌的居民。右侧栏读出这个地方的状况，并说下一步该建什么。" loading="lazy" />
+            <figcaption>第四十一天的聚落：广场、周围的行当，以及各自忙碌的居民。右侧栏读出这个地方的状况，并说下一步该建什么。</figcaption>
+          </figure>
           <ol className="wiki-steps">
             <li><b>连接钱包。</b>MetaMask 或 Trust Wallet，在 {ACTIVE_CHAIN.label}{ACTIVE_CHAIN.chainId ? `（链 ${ACTIVE_CHAIN.chainId}）` : ''} 上。如果你装了不止一个钱包，选你想用的那个——游戏会问，而不是猜。</li>
             <li><b>登录。</b>对一句普通的话做一次免费签名，一天有效。它不是交易，不移动任何东西；它证明钱包是你的，这样别人就不能以你的名义花钱、认领或发言。</li>
@@ -187,6 +196,11 @@ export function WikiZh() {
 
         <section id="land">
           <h2>土地与所有权</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/world-map.jpg" alt="世界地图：每张海图、每座岛、谁持有什么。点一个标记查看土地、拜访、出价或认领。" loading="lazy" />
+            <figcaption>世界地图：每张海图、每座岛、谁持有什么。点一个标记查看土地、拜访、出价或认领。</figcaption>
+          </figure>
           <p>一块地就是一个种子。生成它的河流、山丘和林地的那个数字，也是识别它的数字，所以没有两块地是同一片土地，你买之前看到的地面就是你得到的地面。</p>
           <p><b>每块地永远只有一个主人。</b>认领只写一次，不能覆盖；两个人在同一瞬间抢同一块地，恰好一人得到，另一人在付款前被拒绝。你的土地记在钱包地址名下，所以清掉浏览器、换设备、几个月后回来，它都还在。</p>
           <p><b>付清之前什么都不记录。</b>登记处在写下地契之前会从链上读你的销毁——钱包对、金额对、已确认、没有花在别的事上。没有办法不付钱拿到地，也没有办法付了钱拿不到。</p>
@@ -223,6 +237,8 @@ export function WikiZh() {
             </tbody>
           </table>
           <p className="wiki-note">建造、拆除、搬动人，以及聚落内部的其他一切花的是金币，不是 {T}。金币是聚落自己的钱，永远不会离开它。</p>
+          <h3>扩建地块</h3>
+          <p>每块地勘测时都留有一圈不建造的边缘。扩建会开放这圈外围——四周约多五分之一的土地——让建筑、小路和居民可以一直建到土地的边缘。费用 {n(EXPAND_COST_EMERGE)} {T}，和其他收费一样销毁，<b>每块地只能买一次</b>，在世界里的"链上"面板购买。登记处会把它记在地块上，所以它跟着土地走到任何设备，地块出售时也跟着新主人。</p>
         </section>
 
         <section id="earning">
@@ -261,6 +277,11 @@ export function WikiZh() {
 
         <section id="economy">
           <h2>聚落自己的钱</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/market.jpg" alt="所有世界共用一个市场。价格处处相同；你的仓库买卖什么是你自己的事。" loading="lazy" />
+            <figcaption>所有世界共用一个市场。价格处处相同；你的仓库买卖什么是你自己的事。</figcaption>
+          </figure>
           <p>Emerge 里有两种钱，各司其职。<b>{T}</b> 是你的：它在你钱包里，用来买地，每笔收费销毁它。<b>金币</b>是镇子的：付给住在那里的人，买他们造不出的东西。你的居民一整天赚它、花它、领它，不管你看不看。</p>
           <h3>聚落怎么赚钱</h3>
           <p>四条路，其中三条靠镇民而不是你：</p>
@@ -325,6 +346,11 @@ export function WikiZh() {
 
         <section id="vault">
           <h2>存款与取款</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/bank.jpg" alt="银行：金库、工资和当天的账目。进出金库的门在同一面板的下方。" loading="lazy" />
+            <figcaption>银行：金库、管理收益，以及进出金库的门。</figcaption>
+          </figure>
           <p>金币为你的聚落供血；{T} 是它背后的代币。你可以把自己的钱双向移动。</p>
           <table className="wiki-table">
             <tbody>
@@ -341,6 +367,11 @@ export function WikiZh() {
 
         <section id="buildings">
           <h2>建筑</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/build.jpg" alt="建造面板：每座建筑要花多少金币、木材和石料，以及堆场里有多少。" loading="lazy" />
+            <figcaption>建造面板：每座建筑要花多少金币、木材和石料，以及堆场里有多少。</figcaption>
+          </figure>
           <p>你不能命令任何人，所以建筑是你表达聚落需要什么的方式。盖一栋，就会有人决定那是自己的——如果它空着，那是立刻。每栋容纳<b>两名工人</b>，矿井三名。</p>
           <p>一切都花金币<em>和</em>堆场里的材料，所以你能盖什么取决于伐木工砍了多少、采石场切了多少。每栋建筑立着就每天花金币，立多久花多久。</p>
           <p><b>聚落会自己建造。</b>当金库持有一栋建筑价格的两倍、外加两周的工资和维护费，且堆场有木料和石头时，它会不经吩咐就盖起短缺的东西：先给露宿的人一个屋顶，库存薄了就盖农场或伐木小屋，然后是地块助手本来会建议你的下一样——仓库、咖啡馆、学校、诊所、实验室、土地支持的手艺。每天最多一栋，动态会说它建了什么、为什么。</p>
@@ -409,6 +440,11 @@ export function WikiZh() {
 
         <section id="danger">
           <h2>可能出的岔子</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/danger.jpg" alt="西侧上空的龙卷风，两座建筑已成废墟。横幅说明它在做什么、风暴队要多少钱。" loading="lazy" />
+            <figcaption>西侧上空的龙卷风。横幅说明它在做什么、风暴队要多少钱；角落的提示卡说聚落有危险。</figcaption>
+          </figure>
           <p>四件事，没有一件是随机惩罚：每一件都需要特定的条件，每一件都有应对的办法。落在有准备的聚落上的灾害几乎不花什么；落在没准备的聚落上的，可能带走一栋建筑、一季收成，或者一条人命。</p>
           <p>其中三种是按小时推进、能亲眼看着的灾难。<b>地震</b>让整块地摇晃数小时，墙开裂，有的倒塌，余震接连而来。<b>龙卷风</b>在地图边缘落下、横穿而过，毁掉沿途的一切，直到升起消散。<b>洪水</b>数日内爬上河岸，淹没立在水中的建筑。<b>瘟疫</b>在站在一起的人之间传播，让病人行动迟缓，并夺走一些人的性命；库存的草药是药物，每位病人每天一份。</p>
           <p><b>你可以花金币对抗任何一种，只能一次。</b>时钟下方的红色横条和"可能出的岔子"面板会给出对应的办法：传水桶、烧掉染病的田垄、守夜、沿岸堆沙袋、加固墙体、防风队、隔离。价格随灾情和聚落规模而变，每一种都严格按面板说的做。被灾难毁掉的建筑成为<b>废墟</b>——不能用、冒着烟、一堆石头——直到你从建筑卡片以新建约六成的金币和材料重建。没到废墟程度的损坏由木匠自行修补，每天两份木料。</p>
@@ -447,11 +483,28 @@ export function WikiZh() {
 
         <section id="together">
           <h2>其他玩家</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/chat.jpg" alt="聊天：一个是你所在世界的频道，一个是全局频道。徽章表示钱包签了名；观众标记表示没有。" loading="lazy" />
+            <figcaption>聊天：一个是你所在世界的频道，一个是全局频道。徽章表示钱包签了名；观众标记表示没有。</figcaption>
+          </figure>
           <p>所有人认领过的每一块地都在同一张共享地图上。你可以拜访别人建的聚落——点标记，或在聊天里点某人的名字——看到他们最后离开时的世界。</p>
           <p>拜访就是拜访：你可以观看、跟着人走，但不能建造、拆除或在那里赚钱。你也看不到他们的金库。访客唯一能做的是<b>往看着顺眼的聚落里放金币</b>，一次最多 {n(MAX_GIFT_GOLD)} 金币，按通常汇率以 {T} 支付。</p>
           <p>聊天有一个全局频道和一个你所在世界的频道。以钱包发出的消息由该钱包签名——所以名字旁有徽章的真的就是那个地址，别人冒充不了。</p>
           <p><b>不连接任何东西也能先看看。</b>首页有一个<em>先看看再说</em>按钮：观众可以走遍世界地图、拜访任何聚落、在聊天里说话，每条消息都标着"观众"，不会被误认为地主。认领、建造和赚钱仍然需要钱包。</p>
           <p><b>你的聚落跟着你走。</b>它每十五秒存进浏览器，同时发布到服务器；无论在哪里打开，进度更靠前的那份继续；服务器拒绝任何会让世界倒退的副本——所以旧设备上开着的标签页不会抹掉你在新设备上一周的建设。</p>
+        </section>
+
+        <section id="updates">
+          <h2>更新记录</h2>
+          {UPDATES_ZH.map((u) => (
+            <div key={u.version} className="wiki-update">
+              <h3>v{u.version} — {u.title} <em>{u.date}</em></h3>
+              <ul>
+                {u.notes.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+          ))}
         </section>
 
         <section id="honest">

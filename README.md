@@ -380,6 +380,26 @@ contract is deployed, `claimPlot()` in `lib/chain/emerge.ts` is where the $EMERG
 transfer and on-chain registration go, and the chain's answer replaces the relay's
 without anything above this line changing.
 
+**Expanding a plot.** Every plot is surveyed with a margin round it — the last
+few units on each side — that nothing is built on. An expansion opens that
+outer belt for building, lanes and people: about a fifth more ground, all the
+way round. It costs 500,000 $EMERGE, burned like every other charge, once per
+plot, from the On-Chain panel. `buildBounds()` in the simulation is the one
+place that says where a plot ends, read by placement, construction and moves;
+the flag lives on the world save, is published with it, and is recorded on the
+claim row by `/api/plots` (`expand`) after the same burn check a survey gets,
+so a second device — or a buyer — picks it up from the registry rather than
+being sold it again.
+
+**The world map** has a Home button back to the front page and a Disconnect
+wallet button. Disconnecting forgets which wallet is remembered for the silent
+resume; nothing the address owns is touched.
+
+**Update notes** live in `lib/updates.ts`, newest first, and are shown on the
+front page (the newest open, the rest folded) and in the guide under
+`#updates`, in both languages. The guide also carries screenshots of the game,
+in `public/wiki/`.
+
 ## Room for two hundred settlements
 
 Twelve charts of seventeen berths — 204 plots in all — and the world map says

@@ -399,6 +399,15 @@ export interface World {
   artworks: Artwork[];
   unlockedAreas: string[];
   /**
+   * Whether the plot's outer belt has been opened for building.
+   *
+   * The survey leaves a margin round every plot — the last few units on each
+   * side — that nothing is built on. An expansion, bought once per plot,
+   * opens it: about a fifth more ground, and the settlement's roads and
+   * people follow the buildings out into it.
+   */
+  expanded?: boolean;
+  /**
    * What the settlement pays, as a multiple of each trade's standing wage.
    *
    * The one lever a player has over how hard people work. 1 is the going rate;
@@ -6648,8 +6657,38 @@ const WALK_GAP = 1.2;
  * same reason it always was — so the player is told no rather than having the
  * choice quietly moved.
  */
+/** The name the outer belt goes by once it is opened. */
+export const EXPAND_AREA = 'The Outer Belt';
+
+/**
+ * How far out a building may stand.
+ *
+ * The margin the survey leaves round a plot until its owner expands it, and
+ * the near-edge the expansion opens. Read here by everything that places or
+ * moves a building, so the two never disagree about where the plot ends.
+ */
+export function buildBounds(world: World): { x0: number; x1: number; y0: number; y1: number } {
+  return world.expanded ? { x0: 2, x1: 98, y0: 3, y1: 97 } : { x0: 6, x1: 94, y0: 8, y1: 92 };
+}
+
+/**
+ * Open the outer belt. Once per plot; the charge is the caller's business.
+ *
+ * Returns false when it was already open, so a second device that learns of
+ * the expansion from the registry can apply it without a second feed line.
+ */
+export function expandPlot(world: World): boolean {
+  if (world.expanded) return false;
+  world.expanded = true;
+  if (!world.unlockedAreas.includes(EXPAND_AREA)) world.unlockedAreas.push(EXPAND_AREA);
+  noteAttention(world);
+  pushFeed(world, 'build', `The plot was expanded: ${EXPAND_AREA.toLowerCase()} is open for building.`);
+  return true;
+}
+
 export function placementProblem(world: World, type: string, x: number, y: number, ignoreId?: string): string | null {
-  const px = clamp(x, 6, 94), py = clamp(y, 8, 92);
+  const bb = buildBounds(world);
+  const px = clamp(x, bb.x0, bb.x1), py = clamp(y, bb.y0, bb.y1);
   if (waterOf(world).blocks(px, py)) return 'Nothing can stand on the water.';
   const r = FOOTPRINTS[type] ?? 3.2;
   for (const b of world.buildings) {
@@ -6676,7 +6715,8 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   // silently overridden.
   if (waterOf(world).blocks(x, y)) return null;
   const need = buildMaterials(type);
-  const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, 6, 94), y: clamp(y, 8, 92), workers: [], active: true };
+  const bb = buildBounds(world);
+  const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, bb.x0, bb.x1), y: clamp(y, bb.y0, bb.y1), workers: [], active: true };
   noteAttention(world);
   spend(world, 'building', cost);
   drawMaterials(world, type);
@@ -6886,7 +6926,8 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
   }
   const problem = placementProblem(world, building.type, x, y, id);
   if (problem) return { ok: false, message: problem };
-  const to = { x: clamp(x, 6, 94), y: clamp(y, 8, 92) };
+  const bb = buildBounds(world);
+  const to = { x: clamp(x, bb.x0, bb.x1), y: clamp(y, bb.y0, bb.y1) };
   if (Math.hypot(to.x - building.x, to.y - building.y) < 2) {
     return { ok: false, message: 'That is where it already is.' };
   }

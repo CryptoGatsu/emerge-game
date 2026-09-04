@@ -21,8 +21,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  demolishBuilding, dropCitizen, drawFromTreasury, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, trial,
+  BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
+  demolishBuilding, dropCitizen, drawFromTreasury, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, trial,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees,
@@ -39,15 +39,15 @@ import {
 } from '@/lib/world/plots';
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
-  heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry,
+  heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
-import { useWallet } from './WalletPicker';
+import { disconnectWallet, useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
-  EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
+  EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger,
 } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
@@ -213,6 +213,24 @@ export default function EmergeClient() {
     try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }
     setSpectator(true);
     setEntered(true);
+  }, []);
+  /**
+   * Let go of the wallet from the world map.
+   *
+   * The map stays open, as a spectator: disconnecting is not leaving, and a
+   * player who wants the front page has a button for that beside this one.
+   */
+  const disconnectHere = useCallback(() => {
+    disconnectWallet();
+    try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }
+    setSpectator(true);
+    setEntered(true);
+  }, []);
+  /** Back to the front page from the world map. Nothing is forgotten but the way in. */
+  const goHome = useCallback(() => {
+    try { window.sessionStorage.removeItem(SPECTATOR_KEY); } catch { /* no storage */ }
+    setSpectator(false);
+    setEntered(false);
   }, []);
 
   useEffect(() => {
@@ -496,7 +514,7 @@ export default function EmergeClient() {
       )}
       {wantsLanding && <Landing onEnter={() => setEntered(true)} onSpectate={spectate} />}
       {claimed === null && !visit && !wantsLanding && (
-        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} />
+        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} />
       )}
     </>
   );
@@ -813,6 +831,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       const row = claims.find((c) => c.seed === seed);
       const hand = row?.hand ?? null;
       const world = worldRef.current;
+      // An expansion bought on another device: the registry row is the
+      // record, and this world catches up with it here.
+      if (row?.expandedAt && world && !world.expanded) { expandPlot(world); saveWorld(world); }
       if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
         world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
       }
@@ -1211,7 +1232,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null } }).__emerge = { world: () => worldRef.current };
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown } }).__emerge = {
+      world: () => worldRef.current,
+      construct: (type, x, y) => (worldRef.current ? constructBuilding(worldRef.current, type, BUILD_COSTS[type] ?? 0, x, y) : null),
+    };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
     const timer = window.setTimeout(() => {
@@ -1371,6 +1395,48 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     onRename({ ...claimed, name: world.name });
     refresh();
   }, [claimed, onRename, onPlayer, player, refresh, wallet.address]);
+
+  /**
+   * Expand the plot: open the outer belt for building, once.
+   *
+   * Paid first, then recorded. The registry will not mark a plot expanded
+   * without a burn it has read off the chain, so a dismissed wallet prompt
+   * costs nothing and changes nothing — and a plot already expanded on
+   * another device is answered with its row rather than charged twice.
+   */
+  const expandFor = useCallback(async (): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    if (world.expanded) return t('This plot is already expanded.');
+    if (!wallet.address) return t('Connect a wallet to expand the plot.');
+    const paid = await spend(player.ledger, EXPAND_COST_EMERGE, wallet.address);
+    if (!paid.ok) return paid.refused;
+    onPlayer({ ...player, ledger: paid.ledger });
+    let result = await expandOnRegistry(claimed.seed, wallet.address, paid.txHash ?? undefined);
+    // The chain takes a moment to show the burn; the registry says so, and is asked again.
+    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await expandOnRegistry(claimed.seed, wallet.address, paid.txHash ?? undefined);
+    }
+    if (!result.ok) {
+      return paid.txHash
+        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the expansion never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+        : result.reason;
+    }
+    expandPlot(world);
+    saveWorld(world);
+    refresh();
+    announce({
+      id: `expand-${claimed.seed}`,
+      kind: 'claim',
+      title: t('The plot is expanded'),
+      body: t('The outer belt is open: build right out to the edge of the land.'),
+      lifetime: 12_000,
+    });
+    return null;
+    // `announce` is stable for the life of the world.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
 
   const renameCitizenFor = useCallback(async (id: string, next: string) => {
     const world = worldRef.current;
@@ -1579,6 +1645,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onBuild={beginBuild}
             onClearTrees={beginClear}
             onRenameWorld={renameWorldFor}
+            onExpand={expandFor}
             onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}
             onRelease={onRelease}

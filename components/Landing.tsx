@@ -25,6 +25,7 @@ import TokenStats from './TokenStats';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { LanguageSwitch } from './LanguageSwitch';
 import { t, useLocale } from '@/lib/i18n';
+import { UPDATES, UPDATES_ZH } from '@/lib/updates';
 
 /** Where to find the project outside the game. */
 export const X_URL = 'https://x.com/emergerh';
@@ -123,10 +124,39 @@ function ContractAddress() {
  * badged as a spectator so nobody mistakes them for a landholder. Claiming,
  * building and earning still need an address, and the map says so.
  */
+/**
+ * What changed lately, on the front page.
+ *
+ * The newest build is open; the older ones fold. Somebody who plays every day
+ * wants the top three lines; somebody coming back after a month wants the
+ * lot, and both are here without a trip to another site.
+ */
+function UpdateNotes({ locale }: { locale: string }) {
+  const list = locale === 'zh' ? UPDATES_ZH : UPDATES;
+  return (
+    <section className="updates" id="updates">
+      <span className="eyebrow">{t('WHAT\u2019S NEW')}</span>
+      {list.map((u, i) => (
+        <details key={u.version} className="update" open={i === 0}>
+          <summary>
+            <b>v{u.version}</b>
+            <span>{u.title}</span>
+            <em>{u.date}</em>
+          </summary>
+          <ul>
+            {u.notes.map((line) => <li key={line}>{line}</li>)}
+          </ul>
+        </details>
+      ))}
+      <a className="gate-guide" href="/wiki#updates">{t('All update notes, in the guide')} &rarr;</a>
+    </section>
+  );
+}
+
 export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; onSpectate: () => void }) {
   const { wallet } = useWallet();
   const connected = wallet.status === 'connected' && !!wallet.address;
-  useLocale();
+  const locale = useLocale();
 
   return (
     <main className="landing">
@@ -189,6 +219,8 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
             </article>
           ))}
         </section>
+
+        <UpdateNotes locale={locale} />
 
         <footer className="landing-foot">
           <div className="foot-links">

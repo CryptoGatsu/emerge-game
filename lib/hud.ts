@@ -143,6 +143,8 @@ export interface Snapshot {
   production: Partial<Record<Resource, number>>;
   consumption: Partial<Record<Resource, number>>;
   unlockedAreas: string[];
+  /** The outer belt is open for building. */
+  expanded: boolean;
   projects: { id: string; name: string; owner: string; progress: number; length: number }[];
   focus: Focus | null;
 }
@@ -359,6 +361,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     production: { ...world.flow.produced },
     consumption: { ...world.flow.consumed },
     unlockedAreas: [...world.unlockedAreas],
+    expanded: !!world.expanded,
     projects: world.projects.map((p) => ({
       id: p.id, name: p.name, progress: p.progress, length: p.length,
       owner: world.citizens.find((c) => c.id === p.ownerId)?.name ?? 'Someone',

@@ -125,7 +125,20 @@ export function useWallet() {
     publish(state);
   }, []);
 
-  return { wallet, available, connect, setWallet: publish };
+  return { wallet, available, connect, disconnect: disconnectWallet, setWallet: publish };
+}
+
+/**
+ * Let go of the wallet.
+ *
+ * Forgets which wallet was remembered as well, or the silent resume on the
+ * next load would connect it straight back. Nothing the player owns is
+ * touched: the record is keyed by address and is still there when they
+ * connect again.
+ */
+export function disconnectWallet() {
+  rememberWallet(null);
+  publish(INITIAL_WALLET);
 }
 
 export function WalletPicker({ compact = false }: { compact?: boolean }) {

@@ -69,6 +69,8 @@ export interface Claim {
   hiring?: boolean;
   /** Whoever holds that job. */
   hand?: Hand;
+  /** When the owner expanded the plot. Once per plot, so this is the record that stops a second charge. */
+  expandedAt?: number;
 }
 
 /**
@@ -254,6 +256,22 @@ export async function setHiring(seed: number, owner: string, hiring: boolean): P
   const row: Claim = hiring ? { ...rest, hiring: true } : rest;
   await hset(CLAIMS, String(seed), JSON.stringify(row));
   return row;
+}
+
+/**
+ * Record that a plot was expanded.
+ *
+ * The row is what makes "once per plot" true across devices: the world save
+ * carries the flag too, but a browser that never saw the expansion would
+ * otherwise offer to sell it again.
+ */
+export async function markExpanded(seed: number, owner: string): Promise<{ claim: Claim; already: boolean } | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  if (existing.expandedAt) return { claim: existing, already: true };
+  const row: Claim = { ...existing, expandedAt: Date.now() };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return { claim: row, already: false };
 }
 
 /** The plot this wallet works at, if any. */

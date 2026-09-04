@@ -727,6 +727,25 @@ export const UI: Record<string, string> = {
   'hired hand · about {n} {ticker}/day': '雇工 · 约 {n} {ticker}/天',
   'You have a hired hand': '你有了一名雇工',
   '{who} took the job at {world}. While they are at work, the place counts as attended.': '{who} 接下了 {world} 的工作。他们上工时，这里算作有人照看。',
+  // ---- 扩建、地图按钮、更新 ----
+  'EXPAND THIS PLOT': '扩建这块地',
+  'Expanded': '已扩建',
+  'The outer belt is open. Buildings, lanes and people can go right out to the edge of the land.': '外圈已开放。建筑、小路和居民可以一直到土地边缘。',
+  'Open the outer belt': '开放外圈',
+  'Every plot is surveyed with a margin nobody builds on. Expanding opens it — about a fifth more ground, all the way round — for {cost} {ticker}, burned. Once per plot.': '每块地勘测时都留有一圈没人建造的边缘。扩建会把它开放——四周约多五分之一的土地——花费 {cost} {ticker}，销毁。每块地一次。',
+  'Expanding…': '扩建中…',
+  'Connect a wallet to expand': '连接钱包后可扩建',
+  'Expand for {cost} {ticker}': '扩建 · {cost} {ticker}',
+  'This plot is already expanded.': '这块地已经扩建过了。',
+  'Connect a wallet to expand the plot.': '连接钱包后才能扩建。',
+  'Your payment {tx}… was accepted by the chain — keep it, and tell us if the expansion never arrives.': '你的付款 {tx}… 已被链接受——请保留，如果扩建一直没到请告诉我们。',
+  'The plot is expanded': '地块已扩建',
+  'The outer belt is open: build right out to the edge of the land.': '外圈已开放：可以一直建到土地边缘。',
+  '← Home': '← 主页',
+  'Disconnect wallet': '断开钱包',
+  'Your plots and balance stay with the address; connect again any time.': '你的地块和余额留在地址上；随时可以重新连接。',
+  'WHAT’S NEW': '最近更新',
+  'All update notes, in the guide': '完整更新记录，见指南',
 };
 
 /** 模拟里用英文命名的事物。 */
@@ -1279,4 +1298,5 @@ export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
   [/^For the better, I hope\.$/, '但愿是变好。'],
   [/^Long enough here to know the shortcuts, then\.$/, '那你在这儿待得够久，认得近路了。'],
   [/^Ask me any time\.$/, '随时问我。'],
+  [/^The plot was expanded: the outer belt is open for building\.$/, '地块已扩建：外圈已开放建造。'],
 ];

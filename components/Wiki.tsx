@@ -1,5 +1,7 @@
 'use client';
 
+import { UPDATES } from '@/lib/updates';
+
 /**
  * The guide.
  *
@@ -19,7 +21,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
-  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, EXPAND_COST_EMERGE
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
@@ -50,6 +52,7 @@ const CHARGES = [
   { what: 'Rename a being', cost: n(RENAME_CITIZEN_EMERGE), note: 'free with a naming right from a dig' },
   { what: 'Rename yourself', cost: n(RENAME_PLAYER_EMERGE), note: 'the first change is free' },
   { what: 'Send a digging party', cost: n(DIG_COST_EMERGE), note: '' },
+  { what: 'Expand a plot', cost: n(EXPAND_COST_EMERGE), note: 'once per plot; opens the outer belt' },
 ];
 
 /**
@@ -184,6 +187,7 @@ const SECTIONS = [
   ['world', 'The world itself'],
   ['arena', 'The colosseum'],
   ['together', 'Other players'],
+  ['updates', 'Update notes'],
   ['honest', 'What is settled, and what is not'],
 ] as const;
 
@@ -216,6 +220,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="start">
           <h2>Getting started</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/settlement.jpg" alt="A settlement on day forty-one: the plaza, the trades round it, and people going about the day. The rail on the right reads the place and says what to build next." loading="lazy" />
+            <figcaption>A settlement on day forty-one: the plaza, the trades round it, and people going about the day. The rail on the right reads the place and says what to build next.</figcaption>
+          </figure>
           <ol className="wiki-steps">
             <li>
               <b>Connect a wallet.</b> MetaMask or Trust Wallet, on {ACTIVE_CHAIN.label}
@@ -246,6 +255,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="land">
           <h2>Land and ownership</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/world-map.jpg" alt="The world map: every chart, every island, who holds what. Tap a marker to inspect the land, visit it, make an offer, or claim it." loading="lazy" />
+            <figcaption>The world map: every chart, every island, who holds what. Tap a marker to inspect the land, visit it, make an offer, or claim it.</figcaption>
+          </figure>
           <p>
             A plot is a seed. The same number that generates its rivers, hills and woodland is the
             number that identifies it, so no two plots are the same land and the ground you see
@@ -335,6 +349,16 @@ export default function Wiki() {
             costs Gold, not {TOKEN.ticker}. Gold is the settlement&rsquo;s own money and never
             leaves it.
           </p>
+          <h3>Expanding a plot</h3>
+          <p>
+            Every plot is surveyed with a margin round it that nothing is built on. An expansion
+            opens that outer belt — about a fifth more ground, all the way round — so buildings,
+            lanes and people can go right out to the edge of the land. It costs
+            {' '}{n(EXPAND_COST_EMERGE)} {TOKEN.ticker}, burned like every other charge, and can be
+            bought <b>once per plot</b>, from the On-Chain panel inside the world. The registry
+            records it against the plot, so it follows the land to any device and to a new owner
+            if the plot is sold.
+          </p>
         </section>
 
         {/* ---------------------------------------------------------- */}
@@ -422,6 +446,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="economy">
           <h2>The settlement&rsquo;s own money</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/market.jpg" alt="One market across every world. Prices are the same everywhere; what your store buys and sells is its own." loading="lazy" />
+            <figcaption>One market across every world. Prices are the same everywhere; what your store buys and sells is its own.</figcaption>
+          </figure>
           <p>
             There are two moneys in Emerge and they do different jobs.
             {' '}<b>{TOKEN.ticker}</b> is yours: it lives in your wallet, it buys land, and every
@@ -550,6 +579,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="vault">
           <h2>Deposits and withdrawals</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/bank.jpg" alt="The Bank: the treasury, wages and the day’s books. The doors in and out of the vault are further down the same panel." loading="lazy" />
+            <figcaption>The Bank: the treasury, what stewardship has earned, and the doors in and out of the vault.</figcaption>
+          </figure>
           <p>
             Gold funds your settlement; {TOKEN.ticker} is the token behind it. You can move your own
             money both ways.
@@ -586,6 +620,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="buildings">
           <h2>Buildings</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/build.jpg" alt="The Build panel: what each building costs in Gold, timber and stone, and what the yard holds." loading="lazy" />
+            <figcaption>The Build panel: what each building costs in Gold, timber and stone, and what the yard holds.</figcaption>
+          </figure>
           <p>
             You cannot tell anybody what to do, so a building is how you say what the settlement
             needs. Raise one and somebody will decide it is theirs — immediately, if it is standing
@@ -758,6 +797,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="danger">
           <h2>What can go wrong</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/danger.jpg" alt="A tornado over the west side, and two buildings already in ruins. The banner says what it is doing and what the storm crews would cost." loading="lazy" />
+            <figcaption>A tornado over the west side. The banner says what it is doing and what the storm crews would cost; the card in the corner says the settlement is in danger.</figcaption>
+          </figure>
           <p>
             Seven things, and none of them is random punishment: each wants particular conditions,
             and each has something that answers it. A hazard that arrives at a settlement which is
@@ -890,6 +934,11 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="together">
           <h2>Other players</h2>
+          <figure className="wiki-figure">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wiki/chat.jpg" alt="Chat, with a channel for the world you are standing in and a global one. A badge means a wallet signed the message; a spectator tag means nobody did." loading="lazy" />
+            <figcaption>Chat, with a channel for the world you are standing in and a global one. A badge means a wallet signed the message; a spectator tag means nobody did.</figcaption>
+          </figure>
           <p>
             Every plot anybody has claimed sits on one shared map. You can visit the settlements
             other people have built — tap a marker, or tap somebody&rsquo;s name in chat — and see
@@ -919,6 +968,19 @@ export default function Wiki() {
             world backwards — so a tab left open on an old device cannot undo a week of building
             on a new one.
           </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="updates">
+          <h2>Update notes</h2>
+          {UPDATES.map((u) => (
+            <div key={u.version} className="wiki-update">
+              <h3>v{u.version} — {u.title} <em>{u.date}</em></h3>
+              <ul>
+                {u.notes.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+          ))}
         </section>
 
         {/* ---------------------------------------------------------- */}
