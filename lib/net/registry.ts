@@ -33,6 +33,7 @@ export interface Claim {
   eraAt?: number;
   charterUntil?: number;
   insuredUntil?: number;
+  buildersUntil?: number;
 }
 
 export interface Offer {
@@ -331,14 +332,14 @@ export async function boonPlot(seed: number, owner: string, kind: string, burnTx
   }
 }
 
-export async function coverPlot(seed: number, owner: string, kind: 'charter' | 'insurance', burnTx?: string): Promise<{ ok: true; claim: Claim; until: number } | { ok: false; reason: string; settling?: boolean }> {
+export async function coverPlot(seed: number, owner: string, kind: 'charter' | 'insurance' | 'builders', burnTx?: string): Promise<{ ok: true; claim: Claim; until: number } | { ok: false; reason: string; settling?: boolean }> {
   try {
     const response = await withSession(
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ seed, owner, [kind === 'charter' ? 'charter' : 'insure']: true, burnTx }),
+        body: JSON.stringify({ seed, owner, [kind === 'charter' ? 'charter' : kind === 'insurance' ? 'insure' : 'builders']: true, burnTx }),
       }),
       async (r) => r,
     );

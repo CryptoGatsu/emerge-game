@@ -135,7 +135,7 @@ export interface VaultLedger {
    * until that happens calling them burned would overstate the burn.
    */
   vaultBurn: number;
-  /** The half of this player's charges that stayed in the vault to pay withdrawals. */
+  /** The share of this player's charges that stayed in the vault to pay withdrawals. */
   fundedEmerge: number;
   /**
    * How much has been minted today, and which day that was.
@@ -173,9 +173,10 @@ export const DAILY_EARN_CEILING = WALLET_DAILY_CEILING;
  * vault then burns CHARGE_VAULT_SHARE's complement itself and keeps the rest,
  * so the same money that leaves players as charges is there to pay them as
  * withdrawals: a vault that only ever paid out would empty, and a game whose
- * charges only ever burned would have nothing to pay with. Half and half.
+ * charges only ever burned would have nothing to pay with. Three quarters
+ * burned, a quarter kept.
  */
-export const CHARGE_VAULT_SHARE = 0.5;
+export const CHARGE_VAULT_SHARE = 0.25;
 export const chargeSplit = (cost: number) => {
   const whole = Math.max(0, Math.floor(cost));
   const kept = Math.floor(whole * CHARGE_VAULT_SHARE);
@@ -199,6 +200,8 @@ export const BOON_COST_EMERGE: Record<BoonKind, number> = { settlers: 50_000, sh
 export { ERA_YIELD_STEP, eraYield };
 /** A charter on a plot: burned, for CHARTER_DAYS of a fifth more on its ceiling. */
 export const CHARTER_COST_EMERGE = 300_000;
+/** Master builders on a plot: burned like the rest, for BUILDERS_DAYS of cheaper building. */
+export const BUILDERS_COST_EMERGE = 120_000;
 /** Insurance on a plot: burned, for INSURANCE_DAYS of half damage from trouble. */
 export const INSURANCE_COST_EMERGE = 150_000;
 /** A wallet's daily ceiling across its earning plots, at the highest era it holds. */
@@ -655,7 +658,7 @@ export async function claimEarnings(
 export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
   if (!(cost > 0)) return ledger;
   if (ledger.balance < cost) return null;
-  // Booked the way the chain would book it: half burned, half kept.
+  // Booked the way the chain would book it: most burned, a share kept.
   const split = chargeSplit(cost);
   return {
     ...ledger,

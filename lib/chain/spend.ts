@@ -8,7 +8,7 @@
  * nothing to leave it. Every panel says so.
  *
  * **A token deployed.** The player signs one transfer into the vault. The vault
- * burns half of it itself and keeps the other half to pay withdrawals from —
+ * burns three quarters of it itself and keeps a quarter to pay withdrawals from —
  * both checkable on any explorer, with no contract of ours involved. Without a
  * vault configured the charge is burned outright, as it always was. The local
  * ledger stops being the record and becomes a cache of what the chain says.
@@ -69,7 +69,7 @@ export async function spend(
     };
   }
 
-  // Into the vault where there is one: half to burn, half to pay withdrawals.
+  // Into the vault where there is one: most to burn, a share to pay withdrawals.
   const burn = vaultLive()
     ? await transferTokens(address, VAULT_ADDRESS, cost)
     : await burnTokens(address, cost);

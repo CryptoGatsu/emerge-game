@@ -8,7 +8,7 @@
  */
 
 import { eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -152,7 +152,7 @@ export interface Snapshot {
   /** The city level and what the next one asks. */
   city: CityGate;
   /** Charter and insurance bought for the plot: when each runs out, in wall-clock ms, or 0. */
-  cover: { charterUntil: number; insuredUntil: number; insured: boolean };
+  cover: { charterUntil: number; insuredUntil: number; insured: boolean; buildersUntil: number; builders: boolean };
   /** Today's festival: what one costs, and whether one has been held. */
   festival: { cost: number; held: boolean };
   /**
@@ -452,7 +452,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     expanded: !!world.expanded,
     era: { id: eraOf(world), name: eraSpec(eraOf(world)).name, days: Math.max(0, world.day - (world.eraSince ?? 1)), gate: eraGate(world) },
     city: cityGate(world),
-    cover: { charterUntil: world.charterUntil ?? 0, insuredUntil: world.insuredUntil ?? 0, insured: insured(world) },
+    cover: { charterUntil: world.charterUntil ?? 0, insuredUntil: world.insuredUntil ?? 0, insured: insured(world), buildersUntil: world.buildersUntil ?? 0, builders: buildersHere(world) },
     festival: { cost: festivalCost(world), held: world.festivalDay === world.day },
     roster: rosterOf(world),
     projects: world.projects.map((p) => ({

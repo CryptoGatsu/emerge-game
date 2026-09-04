@@ -78,6 +78,8 @@ export interface Claim {
   charterUntil?: number;
   /** Insurance bought on the plot, as the time it runs out. */
   insuredUntil?: number;
+  /** Master builders hired for the plot, as the time they leave. */
+  buildersUntil?: number;
 }
 
 /**
@@ -298,10 +300,12 @@ export async function markEra(seed: number, owner: string, era: number): Promise
 }
 
 /** Record a charter or insurance on the plot: from now, or from the end of the one running, for `days`. */
-export async function markCover(seed: number, owner: string, kind: 'charter' | 'insurance', days: number): Promise<{ claim: Claim; until: number } | null> {
+export type CoverKind = 'charter' | 'insurance' | 'builders';
+export const COVER_KEY: Record<CoverKind, 'charterUntil' | 'insuredUntil' | 'buildersUntil'> = { charter: 'charterUntil', insurance: 'insuredUntil', builders: 'buildersUntil' };
+export async function markCover(seed: number, owner: string, kind: CoverKind, days: number): Promise<{ claim: Claim; until: number } | null> {
   const existing = await claimOf(seed);
   if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
-  const key = kind === 'charter' ? 'charterUntil' : 'insuredUntil';
+  const key = COVER_KEY[kind];
   const from = Math.max(Date.now(), existing[key] ?? 0);
   const until = from + days * 86_400_000;
   const row: Claim = { ...existing, [key]: until };

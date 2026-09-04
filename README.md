@@ -513,6 +513,15 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.2: `CHARGE_VAULT_SHARE` is a quarter. Master builders are a third cover
+(`buildersUntil`, `buildDiscount` applied in `constructBuilding` and
+`upgradeBuilding`). `isUnique`/`UNIQUE_BUILDINGS` (everything but houses,
+stores and the workplaces in `JOBS`): `placementProblem` refuses a second and
+the self-builder skips one. `rogueLimit` caps what one rogue can wreck (three
+with no jail; three, two or one by the jail's level), `cornerRogue` ends any
+rogue past it or loose a full day, `jailFactor` runs on the jail's level, and
+the chase rouses sleepers when nobody awake is near.
+
 Feedback fixes in the same release: `rehouse` fills houses to `houseRoom`
 with several families rather than one family per house; every Jail halves the
 rogue chance (`jailFactor`, floor a tenth) and cuts the escape chance to a
@@ -562,7 +571,7 @@ the vault and what has been burned.
 
 **Money moves in three directions and they are deliberately different.**
 
-*Charges go into the vault, and half of them are burned from there.* Claiming,
+*Charges go into the vault, and three quarters of them are burned from there.* Claiming,
 surveying, renaming, digging, charters, insurance, boons: every one of them is
 one transfer into the vault (`spend()` in `lib/chain/spend.ts`, to
 `VAULT_ADDRESS` when a vault is configured, to the burn address otherwise).

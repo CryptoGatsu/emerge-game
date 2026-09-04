@@ -3148,3 +3148,10 @@ button.fold:hover { color: var(--emerald); }
 .boon-row b { font-size: 13px; color: var(--cream); }
 .boon-row span { grid-column: 1; }
 .boon-row button { grid-row: 1 / span 2; grid-column: 2; margin: 0; white-space: nowrap; }
+
+.flywheel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.flywheel-grid div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }
+.flywheel-grid span { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); }
+.flywheel-grid b { font-size: 16px; color: var(--cream); }
+.build-card.built { opacity: 0.55; }
+.build-discount { font-style: normal; font-size: 10px; color: var(--lime, #b8e756); margin-left: 4px; }

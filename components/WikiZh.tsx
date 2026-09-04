@@ -1,6 +1,6 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
@@ -50,6 +50,7 @@ const CHARGES = [
   { what: '推进时代', cost: n(ADVANCE_COST_EMERGE), note: '每一步一次，地块达成条件之后' },
   { what: '购买特许状', cost: n(CHARTER_COST_EMERGE), note: `地块收益上限提高五分之一，为期 ${CHARTER_DAYS} 天` },
   { what: '投保', cost: n(INSURANCE_COST_EMERGE), note: `任何灾难的损失减半，为期 ${INSURANCE_DAYS} 天` },
+  { what: '雇用建筑大师', cost: n(BUILDERS_COST_EMERGE), note: `建造和升级少花四分之一，为期 ${BUILDERS_DAYS} 天` },
   { what: '一队移民', cost: n(BOON_COST_EMERGE.settlers), note: '五人今天到达；房子要有空位' },
   { what: '一批货物', cost: n(BOON_COST_EMERGE.shipment), note: '400 木材、300 石料、240 份食物' },
   { what: '一次修复', cost: n(BOON_COST_EMERGE.restore), note: '重建全部废墟，完成在建的桥' },
@@ -237,7 +238,7 @@ export function WikiZh() {
 
         <section id="costs">
           <h2>各项费用</h2>
-          <p><b>每一笔收费都进入金库，其中一半在那里被销毁。</b>不是付给我们，不是被任何人收走：一笔转账进入金库，金库用自己的密钥销毁其中 {pct(1 - CHARGE_VAULT_SHARE)}，所以供应量随每笔收费下降，另外 {pct(CHARGE_VAULT_SHARE)} 留在金库用于支付提现。玩家花掉的就是支付玩家的来源，账本公开在 <code>/api/vault</code>：收入、留存、待销毁、已销毁，以及销毁交易。项目没有抽成的地址，因为没有抽成。</p>
+          <p><b>每一笔收费都进入金库，其中四分之三在那里被销毁。</b>不是付给我们，不是被任何人收走：一笔转账进入金库，金库用自己的密钥销毁其中 {pct(1 - CHARGE_VAULT_SHARE)}，所以供应量随每笔收费下降，另外 {pct(CHARGE_VAULT_SHARE)} 留在金库用于支付提现。玩家花掉的就是支付玩家的来源，账本公开在 <code>/api/vault</code>：收入、留存、待销毁、已销毁，以及销毁交易。项目没有抽成的地址，因为没有抽成。</p>
           <table className="wiki-table">
             <thead><tr><th>动作</th><th>费用</th><th /></tr></thead>
             <tbody>
@@ -446,6 +447,8 @@ export function WikiZh() {
               ))}
             </tbody>
           </table>
+          <h3>每样一座</h3>
+          <p>市政厅、监狱、酒馆、学校、港口：所有"有一座就起作用"的建筑都是<b>每块地唯一的</b>。建造面板把已有的标为"已建"，光标拒绝第二座，聚落自建也不会再盖；它的废墟会被重建而不是被替换。房屋、仓库和所有有岗位的工作场所仍然多多益善。升级已有的那座：升级后的监狱更能镇住镇子，升级后的房子住得下更多人。</p>
           <h3>手动架桥</h3>
           <p>聚落足够富裕、对岸值得去时会自己架桥；建造面板里的<b>桥梁</b>工具则是你自己选对岸。点击水对岸的陆地，工队就会勘定通往那里最窄的可靠渡口，先付 <b>{n(BRIDGE_GOLD)} 金币</b>，木材和工钱按天计。料场木材不够时，工队会按市价的一倍半用金币买进而不是停工，所以伐木工不够的镇子也能修成渡口。一次只能修一处。</p>
           <h3>清理树木</h3>
@@ -522,6 +525,7 @@ export function WikiZh() {
           <h3>作乱的人</h3>
           <p>偶尔会有人与聚落作对：苦闷的、无所寄托的，或与镇上某人结下深仇的。他们举起火把去毁最近的建筑，几小时内建筑就会倒下。<b>你插不了手。</b>你不能把他们提走，也不能提走追他们的人。最近的三名醒着的成年人会放下手头的事去追；有人追到跟前就会扭打，结局是作乱者被关进监狱，或者——最多两次——挣脱后去毁下一栋。已经毁了两栋建筑的人不会被活捉。<b>每一座监狱</b>都让作乱的频率减半，最低到十分之一；有监狱时，扭打中的作乱者十次只有一次挣脱，而不是三次一次；没有监狱时，用市场地窖关押。</p>
           <p><b>没有灾难能夷平一座城。</b>地震或龙卷风最多损坏现存建筑的 {Math.round(HAZARD_SHARE * 100)}%，最少三栋。<b>保险</b>——在"链上"面板销毁 {n(INSURANCE_COST_EMERGE)} {T}——让任何灾难的损失减半，为期 {INSURANCE_DAYS} 天。</p>
+          <p><b>一个暴徒也不能。</b>没有监狱时一个暴徒最多毁三栋建筑；有监狱时按等级为三、二、一栋，天亮时仍在逃的暴徒会被全聚落围住。算的是监狱的等级：三级监狱把有人作乱的几率降到八分之一。</p>
           <table className="wiki-table">
             <thead><tr><th>麻烦</th><th>由什么引起</th><th>用什么应对</th></tr></thead>
             <tbody>

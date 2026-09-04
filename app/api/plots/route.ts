@@ -45,14 +45,14 @@ import {
   allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
-  type Claim, markCover } from '@/lib/server/registry';
+  type Claim, type CoverKind, markCover } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
+import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
 import { readWorld } from '@/lib/server/registry';
 import { worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { eraGate, eraOf } from '@/lib/simulation';
-import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS } from '@/lib/world/eras';
+import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS } from '@/lib/world/eras';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { ownerOnChain, registryConfigured } from '@/lib/server/land';
@@ -115,6 +115,7 @@ export async function POST(request: Request) {
     advance?: boolean;
     charter?: boolean;
     insure?: boolean;
+    builders?: boolean;
     /** A boon bought for the plot: settlers, a shipment, a restoration. */
     boon?: string;
     era?: number;
@@ -328,8 +329,10 @@ export async function POST(request: Request) {
    * Verified like an expansion, and never refused for being bought again: a
    * second purchase runs on from the end of the first.
    */
-  if (body.charter || body.insure) {
-    const kind: 'charter' | 'insurance' = body.charter ? 'charter' : 'insurance';
+  if (body.charter || body.insure || body.builders) {
+    const kind: CoverKind = body.charter ? 'charter' : body.insure ? 'insurance' : 'builders';
+    const price = kind === 'charter' ? CHARTER_COST_EMERGE : kind === 'insurance' ? INSURANCE_COST_EMERGE : BUILDERS_COST_EMERGE;
+    const span = kind === 'charter' ? CHARTER_DAYS : kind === 'insurance' ? INSURANCE_DAYS : BUILDERS_DAYS;
     let claim: Claim | null;
     try {
       claim = await claimOf(seed);
@@ -341,7 +344,7 @@ export async function POST(request: Request) {
     }
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, kind === 'charter' ? CHARTER_COST_EMERGE : INSURANCE_COST_EMERGE);
+      const paid = await verifyBurn(burnTx, owner, price);
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
@@ -350,7 +353,7 @@ export async function POST(request: Request) {
       }
     }
     try {
-      const result = await markCover(seed, owner, kind, kind === 'charter' ? CHARTER_DAYS : INSURANCE_DAYS);
+      const result = await markCover(seed, owner, kind, span);
       if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
       return NextResponse.json({ claim: result.claim, until: result.until });
     } catch {

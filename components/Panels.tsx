@@ -11,8 +11,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE } from '@/lib/simulation';
-import { eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, MAX_CITY_LEVEL, PLOT_CEILING_MAX } from '@/lib/world/eras';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind } from '@/lib/simulation';
+import { eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
@@ -22,7 +22,7 @@ import {
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
-  CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, type BoonKind,
+  CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, type BoonKind,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import {
@@ -61,8 +61,8 @@ interface PanelsProps {
   onRaiseCity: () => string | null;
   /** Hold a festival; the refusal, or null. */
   onFestival: () => string | null;
-  /** Buy a charter or insurance for the plot; the refusal, or null. */
-  onCover: (kind: 'charter' | 'insurance') => Promise<string | null>;
+  /** Buy a charter, insurance or builders for the plot; the refusal, or null. */
+  onCover: (kind: CoverKind) => Promise<string | null>;
   /** Buy a boon for the plot; the refusal, or null. */
   onBoon: (kind: BoonKind) => Promise<string | null>;
   onRenameWorld: (name: string) => void;
@@ -596,9 +596,9 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
           <p>
             The game takes no cut of anything. There is no fee address, no treasury the developers
             draw from, and no tax on what you earn. Every {TOKEN.ticker} the game charges you — a
-            claim, a survey, a rename, a pull on the prospectors — is paid into the vault: half of
-            it the vault burns, so it leaves the supply for good, and half stays in the vault to
-            pay withdrawals from. What players spend is what players are paid from.
+            claim, a survey, a rename, a pull on the prospectors — is paid into the vault: three
+            quarters of it the vault burns, so it leaves the supply for good, and a quarter stays
+            in the vault to pay withdrawals from. What players spend is what players are paid from.
           </p>
           <p>
             The only money the project makes is the trading fee on the coin itself, which has
@@ -1368,6 +1368,14 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
 }) {
   const [cityNote, setCityNote] = useState<string | null>(null);
   const city = view.city;
+  // The vault's book, so the loop is visible: what players paid in, what the
+  // vault burned, what it keeps to pay withdrawals with.
+  const [book, setBook] = useState<{ received: number; kept: number; owed: number; burned: number; automatic: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch('/api/vault').then((r) => (r.ok ? r.json() : null)).then((b) => { if (live && b && typeof b.received === 'number') setBook(b); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [claimAmount, setClaimAmount] = useState('');
@@ -1538,11 +1546,27 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
         </div>
       </div>
 
+      <div className="connect-card flywheel-card">
+        <span className="eyebrow">{t('THE FLYWHEEL')}</span>
+        <h3>{t('What players spend is what players are paid from')}</h3>
+        <p className="muted small">
+          {t('Every {ticker} charged in the game is paid into the vault. The vault burns {burn}% of it, so the supply falls with every charge, and keeps {keep}% to pay withdrawals from. Stewardship is paid out of the same vault. The book is public.', { ticker: TOKEN.ticker, burn: Math.round((1 - CHARGE_VAULT_SHARE) * 100), keep: Math.round(CHARGE_VAULT_SHARE * 100) })}
+        </p>
+        {book && (
+          <div className="flywheel-grid">
+            <div><span>{t('PAID IN BY PLAYERS')}</span><b>{book.received.toLocaleString()}</b></div>
+            <div><span>{t('BURNED BY THE VAULT')}</span><b>{book.burned.toLocaleString()}</b></div>
+            <div><span>{t('KEPT FOR WITHDRAWALS')}</span><b>{book.kept.toLocaleString()}</b></div>
+            <div><span>{t('OWED TO THE BURN')}</span><b>{book.owed.toLocaleString()}</b></div>
+          </div>
+        )}
+      </div>
+
       <div className="connect-card city-card">
         <span className="eyebrow">{t('CITY LEVEL')}</span>
         <h3>{t('Level {n} of {max}', { n: city.level, max: MAX_CITY_LEVEL })}</h3>
         <p className="muted small">
-          {t('What the plot can earn runs on its level: a fresh claim earns a fraction of a city, and a level {max} city in the last era earns up to {top} {ticker} a day. Size earns the next level; Gold pays for it. This is where the treasury goes.', { max: MAX_CITY_LEVEL, top: PLOT_CEILING_MAX.toLocaleString(), ticker: TOKEN.ticker })}
+          {t('What the plot can earn runs on its level: a fresh claim earns a fraction of a city, and a level {max} city in the last era earns up to {top} {ticker} a day. Size earns the next level; Gold pays for it. This is where the treasury goes.', { max: MAX_CITY_LEVEL, top: plotCeiling(MAX_CITY_LEVEL, 5).toLocaleString(), ticker: TOKEN.ticker })}
         </p>
         {city.next ? (
           <>
@@ -1896,18 +1920,21 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
       <div className="build-grid">
         {shown.map((option) => {
           const need = buildMaterials(option.type);
-          const paid = view.treasury >= option.cost;
+          const price = Math.round(option.cost * (view.cover.builders ? 1 - BUILDERS_DISCOUNT : 1));
+          const paid = view.treasury >= price;
           const stocked = wood >= need.wood && stone >= need.stone;
           const minEra = BUILDING_ERA[option.type] ?? 1;
           const inEra = minEra <= view.era.id;
-          const ready = paid && stocked && inEra;
+          // One of each civic building: a second did nothing but cost upkeep.
+          const one = isUnique(option.type) ? view.roster.buildings.find((b) => b.type === option.type) : undefined;
+          const ready = paid && stocked && inEra && !one;
           return (
-            <div key={option.type} className={`build-card ${ready ? '' : 'locked'} ${inEra ? '' : 'later-era'}`}>
+            <div key={option.type} className={`build-card ${ready ? '' : 'locked'} ${inEra ? '' : 'later-era'} ${one ? 'built' : ''}`}>
               <div className="build-icon">{option.icon}</div>
-              <h3>{tn(option.type)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}</h3>
+              <h3>{tn(option.type)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}{one && <i className="era-lock">{one.ruined ? t('In ruins') : t('Built')}</i>}</h3>
               <p>{t(option.blurb)}</p>
               <div className="build-cost">
-                <b>{t('{n} Gold', { n: option.cost })}</b>
+                <b>{t('{n} Gold', { n: price })}{view.cover.builders && <em className="build-discount"> {t('builders’ price')}</em>}</b>
                 <small>{t('{n}/day upkeep', { n: maintenanceCost(option.type) })}</small>
               </div>
               <div className="build-materials">
@@ -1915,7 +1942,7 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
                 <span className={stone >= need.stone ? '' : 'short'}>{t('{n} stone', { n: need.stone })}</span>
               </div>
               <button disabled={!ready} onClick={() => onBuild(option.type, option.cost)}>
-                {ready ? t('Place') : !inEra ? t('{era} era', { era: tn(eraName(minEra)) }) : !paid ? t('Not enough Gold') : t('Not enough materials')}
+                {ready ? t('Place') : one ? (one.ruined ? t('Rebuild the one you have') : t('One per settlement')) : !inEra ? t('{era} era', { era: tn(eraName(minEra)) }) : !paid ? t('Not enough Gold') : t('Not enough materials')}
               </button>
             </div>
           );
@@ -1938,7 +1965,7 @@ function sinceWhen(at: number): string {
 function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onCover, onBoon, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
   onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onAdvance: () => Promise<string | null>;
-  onCover: (kind: 'charter' | 'insurance') => Promise<string | null>;
+  onCover: (kind: CoverKind) => Promise<string | null>;
   onBoon: (kind: BoonKind) => Promise<string | null>;
   onLeave: () => void; onRelease: () => void;
   onList: (price: number | null) => void;
@@ -1963,9 +1990,9 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
     setExpanding(false);
     setExpandNote(refused);
   };
-  const [covering, setCovering] = useState<'charter' | 'insurance' | null>(null);
+  const [covering, setCovering] = useState<CoverKind | null>(null);
   const [coverNote, setCoverNote] = useState<string | null>(null);
-  const cover = async (kind: 'charter' | 'insurance') => {
+  const cover = async (kind: CoverKind) => {
     setCovering(kind);
     setCoverNote(null);
     const refused = await onCover(kind);
@@ -2193,6 +2220,23 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
                   : t('Insure for {cost} {ticker}', { cost: INSURANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
           </button>
           {coverNote && <p className="muted small">{coverNote}</p>}
+        </div>
+
+        <div className="connect-card">
+          <span className="eyebrow">{t('MASTER BUILDERS')}</span>
+          <h3>{view.cover.builders ? t('In the square · {n} days left', { n: daysLeft(view.cover.buildersUntil) }) : t('A quarter off every build')}</h3>
+          <p className="muted small">
+            {t('A crew of master builders sets up in the square for {days} days: every building you raise and every improvement you pay for costs {pct}% less Gold. {cost} {ticker}. Buying again adds the days on.', { days: BUILDERS_DAYS, pct: Math.round(BUILDERS_DISCOUNT * 100), cost: BUILDERS_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+          </p>
+          <button onClick={() => cover('builders')} disabled={covering !== null || !wallet.address || player.ledger.balance < BUILDERS_COST_EMERGE}>
+            {covering === 'builders'
+              ? t('Buying…')
+              : !wallet.address
+                ? t('Connect a wallet first')
+                : player.ledger.balance < BUILDERS_COST_EMERGE
+                  ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                  : t('Hire for {cost} {ticker}', { cost: BUILDERS_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+          </button>
         </div>
 
         <div className="connect-card boon-card">

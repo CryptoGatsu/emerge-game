@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -49,7 +49,7 @@ import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
+  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
@@ -881,6 +881,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       // A charter or insurance bought on another device.
       if (world && row?.charterUntil && (world.charterUntil ?? 0) < row.charterUntil) { setCover(world, 'charter', row.charterUntil); saveWorld(world); }
       if (world && row?.insuredUntil && (world.insuredUntil ?? 0) < row.insuredUntil) { setCover(world, 'insurance', row.insuredUntil); saveWorld(world); }
+      if (world && row?.buildersUntil && (world.buildersUntil ?? 0) < row.buildersUntil) { setCover(world, 'builders', row.buildersUntil); saveWorld(world); }
       if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
         world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
       }
@@ -1220,7 +1221,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   const beginBuild = useCallback((type: string, cost: number) => {
     const world = worldRef.current;
     const scene = sceneRef.current;
-    if (!world || !scene || world.treasury < cost) return;
+    if (!world || !scene || world.treasury < Math.round(cost * buildDiscount(world))) return;
     setPanel(null);
     setPlacing(type);
     scene.startPlacement(type, (x, y) => {
@@ -1576,11 +1577,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * told, and only then does the world carry it. Another device picks it up
    * from the claim row.
    */
-  const coverFor = useCallback(async (kind: 'charter' | 'insurance'): Promise<string | null> => {
+  const coverFor = useCallback(async (kind: CoverKind): Promise<string | null> => {
     const world = worldRef.current;
     if (!world || spectating) return null;
     if (!wallet.address) return t('Connect a wallet first.');
-    const cost = kind === 'charter' ? CHARTER_COST_EMERGE : INSURANCE_COST_EMERGE;
+    const cost = kind === 'charter' ? CHARTER_COST_EMERGE : kind === 'insurance' ? INSURANCE_COST_EMERGE : BUILDERS_COST_EMERGE;
     const paid = await spend(player.ledger, cost, wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });

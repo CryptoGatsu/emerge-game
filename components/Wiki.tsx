@@ -1,6 +1,6 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
@@ -59,6 +59,7 @@ const CHARGES = [
   { what: 'Advance an era', cost: n(ADVANCE_COST_EMERGE), note: 'once per step, after the plot has earned it' },
   { what: 'Charter a plot', cost: n(CHARTER_COST_EMERGE), note: `a fifth more on the plot's ceiling for ${CHARTER_DAYS} days` },
   { what: 'Insure a plot', cost: n(INSURANCE_COST_EMERGE), note: `half the damage from any disaster for ${INSURANCE_DAYS} days` },
+  { what: 'Hire master builders', cost: n(BUILDERS_COST_EMERGE), note: `a quarter off every build and improvement for ${BUILDERS_DAYS} days` },
   { what: 'A party of settlers', cost: n(BOON_COST_EMERGE.settlers), note: 'five people arrive today; needs room in the houses' },
   { what: 'A shipment', cost: n(BOON_COST_EMERGE.shipment), note: '400 timber, 300 stone, 240 portions of food' },
   { what: 'A restoration', cost: n(BOON_COST_EMERGE.restore), note: 'every ruin rebuilt, the bridge under way finished' },
@@ -338,7 +339,7 @@ export default function Wiki() {
         <section id="costs">
           <h2>What things cost</h2>
           <p>
-            <b>Every charge goes into the vault, and half of it is burned there.</b> Not sent to
+            <b>Every charge goes into the vault, and three quarters of it is burned there.</b> Not sent to
             us, not collected by anybody: one transfer into the vault at {shortAddress(VAULT_ADDRESS)},
             of which the vault burns {pct(1 - CHARGE_VAULT_SHARE)} itself, from its own key, so the
             supply falls with every charge, and keeps {pct(CHARGE_VAULT_SHARE)} to pay withdrawals
@@ -820,6 +821,15 @@ export default function Wiki() {
               ))}
             </tbody>
           </table>
+          <h3>One of each</h3>
+          <p>
+            A town hall, a jail, a tavern, a school, a harbour: every building whose whole effect
+            is that one stands is <b>unique to the plot</b>. The Build panel marks the one you have
+            as Built, the cursor refuses a second, and the settlement&rsquo;s own builder never
+            raises one; a ruin of it is rebuilt rather than replaced. Houses, stores and every
+            workplace with posts in it are the ones worth more of. Improve the one you have: an
+            improved jail holds the town better, an improved house sleeps more.
+          </p>
           <h3>Bridges by hand</h3>
           <p>
             The settlement builds bridges on its own when it is rich enough and the far shore is
@@ -1027,8 +1037,14 @@ export default function Wiki() {
           <p>
             <b>No disaster can flatten a city.</b> An earthquake or a tornado can damage at most{' '}
             {Math.round(HAZARD_SHARE * 100)}% of what stands, and never fewer than three buildings.
-            <b> Insurance</b>, {n(INSURANCE_COST_EMERGE)} {TOKEN.ticker} burned on the On-Chain
+            <b> Insurance</b>, {n(INSURANCE_COST_EMERGE)} {TOKEN.ticker} on the On-Chain
             panel, halves whatever any of them does for {INSURANCE_DAYS} days.
+          </p>
+          <p>
+            <b>Nor can one rogue.</b> Without a jail a rogue brings down three buildings at most;
+            with one, three, two or one by the jail&rsquo;s level, and any rogue still loose by
+            morning is cornered by the whole settlement. The jail&rsquo;s level is what counts:
+            a level-three jail cuts the chance of anybody turning to an eighth.
           </p>
           <p className="wiki-note">
             Readiness is not a purchase. It is counted from what is actually there — wells within

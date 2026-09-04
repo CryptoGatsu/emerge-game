@@ -113,6 +113,9 @@ export const CHARTER_BONUS = 0.2;
 export const CHARTER_DAYS = 30;
 /** Insurance: $EMERGE burned so trouble does half the damage, for a while. */
 export const INSURANCE_DAYS = 30;
+/** Master builders: $EMERGE burned so building and improving cost less Gold, for a while. */
+export const BUILDERS_DAYS = 30;
+export const BUILDERS_DISCOUNT = 0.25;
 export const charterMultiplier = (charterUntil: number | undefined, now = Date.now()) => (charterUntil && charterUntil > now ? 1 + CHARTER_BONUS : 1);
 
 /** The city level each era asks for, on top of its own checklist. */

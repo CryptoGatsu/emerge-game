@@ -4,8 +4,8 @@ import 'server-only';
  * The vault's book: what charges have paid into it, what it owes the burn
  * address for them, and what it has burned.
  *
- * Since v2.1 a charge is one transfer into the vault rather than a burn. Half
- * stays to pay withdrawals with; the other half the vault burns itself, from
+ * Since v2.1 a charge is one transfer into the vault rather than a burn. A
+ * share stays to pay withdrawals with; the rest the vault burns itself, from
  * its own key, so the burn is as real and as checkable as it was when players
  * burned directly — it just happens a moment later and in one transaction for
  * many charges. The share owed accumulates here and is swept whenever it is

@@ -17,6 +17,17 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.2',
+    date: '2026-09-07',
+    title: 'The flywheel, one of each, and no more twenty-seven-building rogues',
+    notes: [
+      'The split on every charge is now three quarters burned and a quarter kept in the vault to pay withdrawals from. The Bank has a THE FLYWHEEL card showing the vault’s book: paid in by players, burned by the vault, kept for withdrawals, owed to the burn.',
+      'Master builders: 120,000 $EMERGE puts a crew in the square for thirty days, and every building you raise and every improvement you pay for costs a quarter less Gold. Buying again adds the days on. On the On-Chain panel with the charter and the insurance.',
+      'One of each. A town hall, a jail, a tavern, a school, a harbour: every building whose whole effect is that one stands is now unique to the plot. The Build panel marks the one you have as Built, the cursor refuses a second, and the settlement’s own builder never raises one. Houses, stores and every workplace with posts are still worth more of.',
+      'The jail’s level is what counts now, not how many jails: a level-three jail cuts the chance of anybody turning to an eighth, and a rogue is stopped at the first building. Without a jail a rogue can bring down three at most; with one, three, two or one by its level; and any rogue still loose by morning is cornered by the whole settlement. A rogue at night now wakes the nearest people rather than having the town to themselves. This closes the twenty-seven-buildings report.',
+    ],
+  },
+  {
     version: '2.1',
     date: '2026-09-07',
     title: 'Ten times the rewards, and charges that fund them',
@@ -120,6 +131,17 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.2',
+    date: '2026-09-07',
+    title: '飞轮、每样一座，再也没有毁掉二十七栋楼的暴徒',
+    notes: [
+      '每笔收费的分配改为四分之三销毁、四分之一留在金库用于支付提现。银行新增"飞轮"卡片，显示金库账本：玩家付入、金库已销毁、留作提现、待销毁。',
+      '建筑大师：120,000 $EMERGE 让一队工匠在广场驻扎三十天，你建造的每栋建筑和支付的每次升级都少花四分之一金币。再买会累加天数。在"链上"面板，与特许状和保险并列。',
+      '每样一座。市政厅、监狱、酒馆、学校、港口：所有"有一座就起作用"的建筑现在每块地只能有一座。建造面板把已有的标为"已建"，光标拒绝第二座，聚落自建也不会再盖。房屋、仓库和所有有岗位的工作场所仍然多多益善。',
+      '现在算的是监狱的等级而不是数量：三级监狱把有人作乱的几率降到八分之一，暴徒在第一栋楼前就被制止。没有监狱时一个暴徒最多毁三栋；有监狱时按等级为三、二、一栋；天亮时仍在逃的暴徒会被全聚落围住。夜里的暴徒现在会惊醒附近的人，而不是独占整座镇子。这关闭了"二十七栋楼"的反馈。',
+    ],
+  },
   {
     version: '2.1',
     date: '2026-09-07',

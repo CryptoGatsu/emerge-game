@@ -23,7 +23,7 @@ import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
 import {
   ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec,
-  MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, charterMultiplier, ERA_CITY_LEVEL,
+  MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, charterMultiplier, ERA_CITY_LEVEL, BUILDERS_DISCOUNT,
 } from './world/eras';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
@@ -447,6 +447,7 @@ export interface World {
   /** Wall-clock time until which a charter or insurance bought for this plot runs. */
   charterUntil?: number;
   insuredUntil?: number;
+  buildersUntil?: number;
   /** The last day the settlement held a festival, so there is one a day at most. */
   festivalDay?: number;
   /**
@@ -5210,8 +5211,42 @@ function unrest(world: World) {
 
 /** How much the jails hold trouble down: half per jail standing, never below a tenth. */
 export function jailFactor(world: World) {
-  const jails = world.buildings.filter((b) => b.type === 'Jail' && b.active && !b.ruined).length;
-  return Math.max(0.1, Math.pow(0.5, jails));
+  const jail = world.buildings.find((b) => b.type === 'Jail' && b.active && !b.ruined);
+  return jail ? Math.max(0.1, Math.pow(0.5, levelOf(jail))) : 1;
+}
+
+/**
+ * How many buildings one rogue can bring down before the whole settlement
+ * closes in on them: three with no jail, and fewer the better the jail — a
+ * level-three jail has a warden who stops them at the first.
+ */
+export function rogueLimit(world: World) {
+  const jail = world.buildings.find((b) => b.type === 'Jail' && b.active && !b.ruined);
+  return jail ? Math.max(1, 4 - levelOf(jail)) : 3;
+}
+
+/**
+ * The settlement corners a rogue without a chase: they have wrecked what the
+ * jail allows, or been loose a whole day. Jailed where a jail stands, killed
+ * past the kill mark otherwise. A rogue who wrecked twenty-seven buildings
+ * past a level-three jail was the single worst thing in the feedback.
+ */
+function cornerRogue(world: World, r: Citizen, why: string) {
+  if (!r.rogue) return;
+  const wrecked = r.rogue.damage;
+  for (const c of world.citizens) if (c.chasing === r.id) { c.chasing = undefined; c.scuffle = 0; c.dwell = 0; }
+  r.scuffle = 0;
+  const cell = findBuilding(world, 'Jail');
+  if (!cell && wrecked >= ROGUE_KILL_AT) {
+    bury(world, r, `${r.name} was cornered by the whole settlement ${why} and killed, after wrecking ${wrecked} buildings.`);
+    return;
+  }
+  r.rogue = undefined;
+  r.jailed = 4 + wrecked * 3;
+  r.happiness = 30;
+  r.chasing = undefined;
+  assignDestination(world, r, 'jailed');
+  pushFeed(world, 'social', `${r.name} was cornered by the whole settlement ${why} and thrown in the ${cell ? 'jail' : 'market cellar'}. ${r.jailed} days.`);
 }
 
 /** Somebody turns on the settlement. */
@@ -5280,14 +5315,20 @@ function unrestStep(world: World, hours: number) {
         r.rogue.targetId = undefined;
       }
     }
+    // Enough. The town does not need a chase to end this.
+    if (r.rogue.damage >= rogueLimit(world)) { cornerRogue(world, r, 'at the last building'); continue; }
+    if (world.day - r.rogue.since >= 1) { cornerRogue(world, r, 'by morning'); continue; }
     // The chase.
     const chasers = world.citizens.filter((c) => c.chasing === r.id);
     if (chasers.length < 3) {
-      const recruits = world.citizens
+      const able = world.citizens
         .filter((c) => c.id !== r.id && c.age >= 16 && !c.rogue && !c.chasing && !c.jailed && !c.sick && !c.carried && !c.swimming
-          && phaseFor(c, world.hour) !== 'sleeping' && Math.hypot(c.x - r.x, c.y - r.y) < 45)
-        .sort((a, b) => Math.hypot(a.x - r.x, a.y - r.y) - Math.hypot(b.x - r.x, b.y - r.y))
-        .slice(0, 3 - chasers.length);
+          && Math.hypot(c.x - r.x, c.y - r.y) < 45)
+        .sort((a, b) => Math.hypot(a.x - r.x, a.y - r.y) - Math.hypot(b.x - r.x, b.y - r.y));
+      // The awake first; failing anybody awake, the noise wakes the nearest.
+      // A rogue used to have the whole night to themselves.
+      const awake = able.filter((c) => phaseFor(c, world.hour) !== 'sleeping');
+      const recruits = (awake.length ? awake : able).slice(0, 3 - chasers.length);
       for (const c of recruits) {
         releaseAmenity(world, c);
         c.chasing = r.id;
@@ -6039,6 +6080,7 @@ function settlementBuilds(world: World) {
   // the town resolved on this in front of everybody, in which case it will
   // accept a thinner cushion for it. That is what a vote is worth: the same
   // settlement, slightly braver about the thing it agreed on.
+  if (uniqueStanding(world, want)) return;
   const reserveDays = bySay ? 10 : 14;
   const multiple = bySay ? 2 : 3;
   if (world.treasury < cost * multiple || world.treasury < (payroll + upkeep) * reserveDays) return;
@@ -7209,17 +7251,41 @@ export function raiseCity(world: World): { ok: boolean; message: string } {
 
 /** Whether insurance bought for this plot still runs. */
 export const insured = (world: World, now = Date.now()) => !!world.insuredUntil && world.insuredUntil > now;
+/** Whether master builders are on the plot. */
+export const buildersHere = (world: World, now = Date.now()) => !!world.buildersUntil && world.buildersUntil > now;
+/** What building and improving cost, as a multiple, with builders on the plot. */
+export const buildDiscount = (world: World) => (buildersHere(world) ? 1 - BUILDERS_DISCOUNT : 1);
 
-/** Record a charter or insurance the registry has accepted for this plot. */
-export function setCover(world: World, kind: 'charter' | 'insurance', until: number) {
+export type CoverKind = 'charter' | 'insurance' | 'builders';
+
+/** Record a charter, insurance or builders the registry has accepted for this plot. */
+export function setCover(world: World, kind: CoverKind, until: number) {
   useWorld(world);
   if (kind === 'charter') world.charterUntil = Math.max(world.charterUntil ?? 0, until);
-  else world.insuredUntil = Math.max(world.insuredUntil ?? 0, until);
+  else if (kind === 'insurance') world.insuredUntil = Math.max(world.insuredUntil ?? 0, until);
+  else world.buildersUntil = Math.max(world.buildersUntil ?? 0, until);
   noteAttention(world);
   pushFeed(world, 'build', kind === 'charter'
     ? 'A charter has been granted. The plot earns a fifth more while it runs.'
-    : 'The plot is insured. Whatever comes, half the damage is made good.');
+    : kind === 'insurance'
+      ? 'The plot is insured. Whatever comes, half the damage is made good.'
+      : 'Master builders have set up in the square. Building and improving cost a quarter less while they stay.');
 }
+
+/* ------------------------------------------------------------------ *
+ * Unique buildings
+ *
+ * A town hall, a jail, a tavern: buildings whose whole effect is that one
+ * stands. A second did nothing, cost upkeep, and confused everybody who
+ * built it — so the plot refuses it, and the panel says so. Houses, stores
+ * and every workplace with posts in it are the ones worth more of.
+ * ------------------------------------------------------------------ */
+const WORKPLACES = new Set(Object.values(JOBS).map((j) => j.building));
+export const isUnique = (type: string) => type !== 'House' && type !== 'Storage' && !WORKPLACES.has(type);
+export const UNIQUE_BUILDINGS = Object.keys(BUILD_COSTS).filter(isUnique);
+/** The one of a unique type this plot has, standing or in ruins. */
+export const uniqueStanding = (world: World, type: string, ignoreId?: string) =>
+  isUnique(type) ? world.buildings.find((b) => b.type === type && b.id !== ignoreId) : undefined;
 
 /**
  * A festival: Gold spent on the whole town's spirits, once a day at most.
@@ -7525,6 +7591,8 @@ function walkWater(world: World): WaterField {
 export function placementProblem(world: World, type: string, x: number, y: number, ignoreId?: string): string | null {
   useWorld(world);
   if (!allowedInEra(world, type)) return `A ${type.toLowerCase()} belongs to the ${eraSpec(BUILDING_ERA[type] ?? 1).name.toLowerCase()} era. Advance the plot first.`;
+  const one = uniqueStanding(world, type, ignoreId);
+  if (one) return one.ruined ? `The ${type.toLowerCase()} lies in ruins. Rebuild it rather than raising another.` : `A ${type.toLowerCase()} already stands here. A settlement keeps one; improve it instead.`;
   const bb = buildBounds(world);
   const px = clamp(x, bb.x0, bb.x1), py = clamp(y, bb.y0, bb.y1);
   if (waterOf(world).blocks(px, py)) return 'Nothing can stand on the water.';
@@ -7539,6 +7607,7 @@ export function placementProblem(world: World, type: string, x: number, y: numbe
 
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {
   useWorld(world);
+  cost = Math.round(cost * buildDiscount(world));
   if (world.treasury < cost) return null;
   const problem = placementProblem(world, type, x, y);
   if (problem) {
@@ -7807,6 +7876,7 @@ export function upgradeBuilding(world: World, id: string): { ok: boolean; messag
   if (!building) return { ok: false, message: 'That building is not there.' };
   const cost = upgradeCost(building);
   if (!cost) return { ok: false, message: 'That is as good as it gets.' };
+  cost.gold = Math.round(cost.gold * buildDiscount(world));
   if (world.treasury < cost.gold) {
     return { ok: false, message: `That costs ${cost.gold} Gold and the treasury cannot cover it.` };
   }
