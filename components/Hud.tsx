@@ -1,4 +1,5 @@
 'use client';
+import { FirstDay, type FirstGo, type FirstStep } from './FirstDay';
 import { EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
 
 /**
@@ -64,6 +65,10 @@ interface HudProps {
   visiting: { worldName: string; ownerName: string; owner: string; at: number; hand?: boolean } | null;
   /** Stop visiting and go back to the world map. */
   onEndVisit: () => void;
+  /** The first-day card, while there is one to show. */
+  firstDay: { steps: FirstStep[]; cap: number } | null;
+  onFirstDayGo: (go: FirstGo) => void;
+  onFirstDayDismiss: () => void;
 }
 
 /**
@@ -917,7 +922,9 @@ export function Hud(props: HudProps) {
               onMove={props.onMoveBuilding}
             />
           )
-          : (
+          : props.firstDay && !props.visiting
+            ? <FirstDay steps={props.firstDay.steps} cap={props.firstDay.cap} compact={compact} onGo={props.onFirstDayGo} onDismiss={props.onFirstDayDismiss} />
+            : (
             <section className="panel hint-card">
               <div className="being-eyebrow">{t('OBSERVE')}</div>
               <p>

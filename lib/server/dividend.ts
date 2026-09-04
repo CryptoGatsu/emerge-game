@@ -267,6 +267,15 @@ export async function standingOf(who: string | null, now = Date.now()): Promise<
   };
 }
 
+/** GLD booked to a wallet over its life, paid out and still to claim, in base units. */
+export async function gldBookedFor(who: string): Promise<bigint> {
+  const me = who.toLowerCase();
+  const [claimable, paidRaw] = await Promise.all([hget(CLAIMS, me), hget(PAID, me)]);
+  let paid = 0n;
+  try { for (const p of (paidRaw ? JSON.parse(paidRaw) : []) as { units?: string }[]) paid += BigInt(p.units ?? '0'); } catch { paid = 0n; }
+  return BigInt(claimable ?? '0') + paid;
+}
+
 export type Claimed = { ok: true; units: string; txHash: string | null; simulated: boolean } | { ok: false; reason: string };
 
 /** Send a wallet its GLD. Zeroed first, so a slow chain cannot pay twice; put back if the send fails. */

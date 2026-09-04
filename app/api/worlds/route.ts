@@ -25,6 +25,8 @@
 import { gunzipSync } from 'node:zlib';
 import { NextResponse } from 'next/server';
 import { claimOf, isBehind, publishWorld, readWorld } from '@/lib/server/registry';
+import { worldFromSave, type SavedWorld } from '@/lib/world/save';
+import { cityLevel, stewardshipScore } from '@/lib/simulation';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
@@ -166,8 +168,18 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
+    // The level and the score, read here off the copy rather than taken from
+    // the client, so the leaderboard ranks what was actually published.
+    let level: number | undefined, score: number | undefined;
+    try {
+      const world = worldFromSave(body.snapshot as SavedWorld, seed, String(body.worldName ?? claim.worldName ?? ''));
+      if (world) { level = cityLevel(world); score = Math.round(stewardshipScore(world) * 1000) / 1000; }
+    } catch { /* the headline goes without them */ }
+
     await publishWorld({
       seed,
+      level,
+      score,
       owner: owner.toLowerCase(),
       ownerName: String(body.ownerName ?? claim.ownerName ?? '').slice(0, 32),
       worldName: String(body.worldName ?? claim.worldName ?? '').slice(0, 32),

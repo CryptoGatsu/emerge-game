@@ -3174,3 +3174,53 @@ button.fold:hover { color: var(--emerald); }
 
 .dividend-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .flywheel-grid em { font-size: 10px; }
+
+
+/* ---- the first day ---- */
+.first-day .first-day-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.first-day-goal { margin: 4px 0 8px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.first-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.first-steps li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 9px; border: 1px solid var(--panel-edge-soft); border-radius: 10px; }
+.first-steps li.done { opacity: 0.55; }
+.first-steps .tick { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(184, 231, 86, 0.5); display: grid; place-items: center; font-size: 11px; color: var(--emerald); }
+.first-steps li.done .tick { background: rgba(184, 231, 86, 0.25); }
+.first-steps b { display: block; font-size: 12.5px; color: var(--cream); }
+.first-steps small { display: block; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.first-steps li > button { font: inherit; font-size: 11.5px; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(184, 231, 86, 0.45); background: rgba(184, 231, 86, 0.12); color: #e6f5c8; cursor: pointer; min-height: 34px; }
+.first-steps li > button:hover { background: rgba(184, 231, 86, 0.2); }
+button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
+.first-day-more { justify-self: start; margin-top: 8px; }
+
+/* ---- the leaderboard on the world map ---- */
+.leaders { margin: -4px 0 12px; display: grid; justify-items: center; gap: 8px; }
+.leaders-list { width: 100%; max-width: 760px; display: grid; gap: 6px; }
+.leaders-list > p { margin: 0; text-align: center; }
+.leader-row { display: grid; grid-template-columns: 28px 22px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; text-align: left; padding: 8px 12px; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 12px; background: rgba(1, 10, 6, 0.55); color: #e6f5c8; font: inherit; cursor: pointer; min-height: 46px; }
+.leader-row:hover { border-color: rgba(184, 231, 86, 0.45); }
+.leader-row.mine { border-color: rgba(240, 208, 94, 0.6); }
+.leader-row .rank { font-size: 14px; color: #f0d05e; text-align: center; }
+.leader-row .glyph { color: #b8e756; text-align: center; }
+.leader-row .who b, .leader-row .lvl b { display: block; font-size: 13px; }
+.leader-row .lvl { text-align: right; }
+.leader-row small { display: block; font-size: 11px; color: #9db89a; }
+.leader-row .gld { font-size: 12px; color: #f0d05e; }
+@media (max-width: 720px) {
+  .leader-row { grid-template-columns: 24px 18px minmax(0, 1fr) auto; gap: 8px; padding: 8px 10px; }
+  .leader-row .gld { display: none; }
+}
+
+/* ---- a phone, by touch ----
+   Anything a finger has to hit is at least 36px tall; the language switch
+   sat over the population pill and moves to the world map, one tap away. */
+@media (max-width: 780px) {
+  .hud .hud-lang { display: none; }
+  .panel-close { min-width: 40px; min-height: 40px; display: inline-grid; place-items: center; }
+  .demolish button { min-height: 40px; }
+  button.ghost { min-height: 36px; }
+  button.ghost.tiny { min-height: 32px; }
+  .lang-switch button { padding: 8px 12px; min-height: 36px; }
+  .region-pin::before { content: ''; position: absolute; inset: -8px; }
+  .gate-guide { display: inline-block; padding: 9px 0; }
+  .wiki-nav a { min-height: 36px; display: inline-flex; align-items: center; }
+  .overlay-panel button:not(.panel-close) { min-height: 34px; }
+}

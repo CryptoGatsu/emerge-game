@@ -41,7 +41,7 @@ import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, HAND_D
 import { pay, settleBurn, spend } from '@/lib/chain/spend';
 import {
   buyPlot, fetchClaims, placeOffer, priceFor, reservePlot, surveyPlot, takePlot, withdrawOffer,
-  type Claim, type Find, quitJob, takeJob,
+  type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { music } from '@/lib/audio/music';
@@ -1092,6 +1092,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
           <span><b>{claimedTotal.toLocaleString()}</b> {t('of {total} plots claimed', { total: worldTotal.toLocaleString() })}</span>
           <span><b>{Math.max(0, worldTotal - claimedTotal).toLocaleString()}</b> {t('left to claim')}</span>
         </div>
+        <Leaderboard me={wallet.address} onVisit={onVisit} onPick={(seed) => setSelectedSeed(seed)} />
 
         <div className="land-body">
           <RegionMap
@@ -1410,5 +1411,77 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
         </div>
       </div>
     </main>
+  );
+}
+
+
+/**
+ * The cities, ranked.
+ *
+ * By the level the vault judges each plot at, then by how well it is run.
+ * A banner bought in $EMERGE flies here, which is what a banner is for.
+ * Fetched when opened rather than with the map, and tapping a row goes to
+ * look at the place.
+ */
+function Leaderboard({ me, onVisit, onPick }: {
+  me: string | null;
+  onVisit: (seed: number) => Promise<string | null>;
+  onPick: (seed: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [board, setBoard] = useState<{ rows: Leader[]; total: number } | null | undefined>(undefined);
+  useEffect(() => {
+    if (!open || board !== undefined) return;
+    let live = true;
+    void fetchLeaderboard().then((b) => { if (live) setBoard(b); });
+    return () => { live = false; };
+  }, [open, board]);
+  const mine = me?.toLowerCase() ?? '';
+  const best = board?.rows.find((r) => r.owner === mine) ?? null;
+  const gld = (units: string) => { try { const n = Number(BigInt(units) / 10n ** 14n) / 10_000; return n > 0 ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ''; } catch { return ''; } };
+  return (
+    <section className={`leaders ${open ? 'open' : ''}`}>
+      <button className={`ghost leaders-toggle ${open ? 'on' : ''}`} onClick={() => setOpen((o) => !o)}>
+        {open ? t('Hide the leaderboard') : t('Leaderboard')}
+      </button>
+      {open && (
+        <div className="leaders-list">
+          <p className="muted small">
+            {t('Every city, by the level the vault judges it at and then by how well it is run. The level counts the days its owner was actually here, so a city cannot be talked up.')}
+          </p>
+          {board === undefined && <p className="muted small">{t('Reading the board…')}</p>}
+          {board === null && <p className="muted small">{t('The board could not be read just now.')}</p>}
+          {board && board.rows.length === 0 && <p className="muted small">{t('No city has been published yet. Open yours and it will be on the board within the hour.')}</p>}
+          {board && board.rows.map((r) => {
+            const yours = r.owner === mine;
+            const paid = gld(r.gld);
+            return (
+              <button key={r.seed} className={`leader-row ${yours ? 'mine' : ''}`} onClick={() => { if (yours) onPick(r.seed); else void onVisit(r.seed); }}>
+                <b className="rank">{r.rank}</b>
+                <span className="glyph" aria-hidden="true">{isEmblem(r.banner) ? EMBLEM_GLYPH[r.banner] : '·'}</span>
+                <span className="who">
+                  <b>{r.worldName}{yours ? ` · ${t('yours')}` : ''}</b>
+                  <small>{r.ownerName || r.owner.slice(0, 6)} · {tn(r.region)} · {t('{n} people', { n: r.population })}</small>
+                </span>
+                <span className="lvl">
+                  <b>{t('Level {n}', { n: r.level })}</b>
+                  <small>{t(eraName(r.era))} · {Math.round(r.score * 100)}%</small>
+                </span>
+                {paid && <span className="gld">{paid} GLD</span>}
+              </button>
+            );
+          })}
+          {board && board.rows.length > 0 && (
+            <p className="muted small">
+              {best
+                ? t('Your best stands at #{rank} of {total}.', { rank: best.rank, total: board.total })
+                : mine
+                  ? t('None of yours is in the top {n} yet, of {total} cities. Level and stewardship are what move it.', { n: board.rows.length, total: board.total })
+                  : t('Top {n} of {total} cities.', { n: board.rows.length, total: board.total })}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

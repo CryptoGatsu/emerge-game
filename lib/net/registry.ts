@@ -601,6 +601,27 @@ export async function collectGifts(seed: number, owner: string): Promise<Gift[]>
 export const GIFT_POLL = 25_000;
 
 /* ------------------------------------------------------------------ *
+ * The leaderboard
+ * ------------------------------------------------------------------ */
+
+export interface Leader {
+  rank: number; seed: number; worldName: string; region: string; owner: string; ownerName: string;
+  era: number; banner: string | null; level: number; score: number; population: number; day: number; gld: string;
+}
+
+/** The cities ranked by judged level, or null when the relay could not say. */
+export async function fetchLeaderboard(): Promise<{ rows: Leader[]; total: number } | null> {
+  try {
+    const response = await fetch('/api/leaderboard', { cache: 'no-store' });
+    if (!response.ok) return null;
+    const json = (await response.json()) as { rows?: Leader[]; total?: number };
+    return { rows: json.rows ?? [], total: json.total ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Presence
  * ------------------------------------------------------------------ */
 

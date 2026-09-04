@@ -733,8 +733,22 @@ export interface PublishedWorld {
   hour?: number;
   population: number;
   at: number;
+  /** The city level and stewardship score the server read off the copy when it was published. */
+  level?: number;
+  score?: number;
   /** The saved world, exactly as the owner's browser keeps it. */
   snapshot: unknown;
+}
+export type WorldHeadline = Omit<PublishedWorld, 'snapshot'>;
+
+/** Every published world's headline, without reading a single snapshot. */
+export async function worldHeadlines(): Promise<WorldHeadline[]> {
+  const rows = await hgetall(WORLDS_INDEX);
+  const out: WorldHeadline[] = [];
+  for (const raw of Object.values(rows)) {
+    try { out.push(JSON.parse(raw) as WorldHeadline); } catch { /* a bad row is nobody's headline */ }
+  }
+  return out;
 }
 
 /**

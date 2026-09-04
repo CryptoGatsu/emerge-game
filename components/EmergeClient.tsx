@@ -75,6 +75,23 @@ const HOURS_PER_SECOND = 0.15;
 
 /** How often the settlement is written down, in milliseconds. */
 const SAVE_INTERVAL = 15_000;
+
+/** What the first-day card has seen the player do, kept under the wallet in this browser. */
+interface FirstDayRecord { startedAt: number; person: boolean; house: boolean; bank: boolean; dismissed: boolean }
+/** "Come back tomorrow" is done once most of a real day has passed since the first open. */
+const FIRST_RETURN_MS = 20 * 3_600_000;
+function readFirstDay(key: string): FirstDayRecord {
+  const fresh: FirstDayRecord = { startedAt: Date.now(), person: false, house: false, bank: false, dismissed: false };
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) { window.localStorage.setItem(key, JSON.stringify(fresh)); return fresh; }
+    const held = JSON.parse(raw) as Partial<FirstDayRecord>;
+    return { ...fresh, ...held, startedAt: Number(held.startedAt) || fresh.startedAt };
+  } catch { return fresh; }
+}
+function keepFirstDay(key: string, record: FirstDayRecord) {
+  try { window.localStorage.setItem(key, JSON.stringify(record)); } catch { /* private mode */ }
+}
 /**
  * The wallet's last action on any of its plots, kept in this browser.
  *
@@ -607,6 +624,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   const [selected, setSelected] = useState<PickTarget>(null);
   const [hovered, setHovered] = useState<PickTarget>(null);
   const [panel, setPanel] = useState<PanelKey>(null);
+
   const [placing, setPlacing] = useState<string | null>(null);
   const [following, setFollowing] = useState<string | null>(null);
   const [view, setView] = useState<Snapshot | null>(null);
@@ -828,6 +846,28 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    */
   const [online, setOnline] = useState<number | null>(null);
   const { wallet } = useWallet();
+
+  /*
+   * The first day. A record under the wallet of what the player has done so
+   * far, kept in this browser; each flag is set by the thing itself — a
+   * person selected, a building placed, the Bank opened — never by the card.
+   */
+  const firstKey = `emerge:firstday:${wallet.address?.toLowerCase() ?? 'guest'}`;
+  const [firstDay, setFirstDay] = useState<FirstDayRecord | null>(null);
+  useEffect(() => {
+    if (visit) { setFirstDay(null); return; }
+    setFirstDay(readFirstDay(firstKey));
+  }, [firstKey, visit]);
+  const markFirst = useCallback((flag: 'person' | 'house' | 'bank' | 'dismissed') => {
+    setFirstDay((r) => {
+      if (!r || r[flag]) return r;
+      const next = { ...r, [flag]: true };
+      keepFirstDay(firstKey, next);
+      return next;
+    });
+  }, [firstKey]);
+  useEffect(() => { if (selected?.kind === 'citizen') markFirst('person'); }, [selected, markFirst]);
+  useEffect(() => { if (panel === 'bank') markFirst('bank'); }, [panel, markFirst]);
 
   /*
    * Say you are here, every so often, and read back how many others are.
@@ -1284,13 +1324,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       if (building) {
         scene.syncBuildings();
         setSelected({ kind: 'building', id: building.id });
+        markFirst('house');
       } else {
         // Refused — the feed says why. Too close to a neighbour, or on the water.
         soundRef.current?.tick('deny');
       }
       setView(snapshot(world, selectedRef.current));
     });
-  }, []);
+  }, [markFirst]);
 
   /** Retrain one person into a trade, for Gold. */
   const trainFor = useCallback((id: string, job: string): string | null => {
@@ -1936,6 +1977,24 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             online={online}
             visiting={visit ? { ...visit, hand: !!visit.hand } : null}
             onEndVisit={onLeave}
+            firstDay={firstDay && !firstDay.dismissed && !spectating ? {
+              cap: view.stewardship.cap,
+              steps: [
+                { key: 'person', done: firstDay.person },
+                { key: 'house', done: firstDay.house },
+                { key: 'bank', done: firstDay.bank },
+                // Any building, houses included: the roster leaves houses out.
+                { key: 'improve', done: !!worldRef.current?.buildings.some((b) => (b.level ?? 1) >= 2) },
+                { key: 'return', done: Date.now() - firstDay.startedAt > FIRST_RETURN_MS },
+              ],
+            } : null}
+            onFirstDayGo={(go) => {
+              if (go === 'person') {
+                const someone = worldRef.current?.citizens.find((c) => !c.inside) ?? worldRef.current?.citizens[0];
+                if (someone) focusOn({ kind: 'citizen', id: someone.id });
+              } else setPanel(go);
+            }}
+            onFirstDayDismiss={() => markFirst('dismissed')}
           />
           <Notices notices={notices} onDismiss={dismiss} />
           {panel === 'arena' && (

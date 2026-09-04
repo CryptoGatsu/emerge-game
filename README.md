@@ -513,6 +513,13 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.5 also: `components/FirstDay.tsx` (a first-day card under
+`emerge:firstday:<address>`, ticked by the things themselves), the
+leaderboard (`lib/server/leaderboard.ts` from the headline index, which now
+carries `level` and `score` read off the published copy, judged by presence
+and cached ten minutes; `GET /api/leaderboard`; the world map's LEADERBOARD),
+and a phone pass (tap targets, the in-world language switch hidden on phones).
+
 v2.5: hunting is paid like a trade and attention is the wallet's. `produce`
 runs the hunter recipe with the same modifiers as every other trade and books
 the difference over what the live kills already credited (`world.hunt.game`

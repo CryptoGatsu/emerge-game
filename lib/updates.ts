@@ -27,6 +27,9 @@ export const UPDATES: Update[] = [
       'The Town Hall can be built. It was in the Township’s conditions and in every list but the Build panel’s; it is on the Civic shelf now, for 480 Gold, 20 timber and 30 stone.',
       'Moving a building works on a phone. A tap places it where the finger is; before, the ghost only ever followed a mouse.',
       'A lived-in house can be pulled down. The family moves to another house with room, or sleeps rough until one is raised, and the card says so. The market, the bank and the town hall say why they cannot come down instead of hiding the button.',
+      'A first day. A new settlement opens with a card that says what the game pays you for and gives five things to do — a person, a house, the Bank, an improvement, and coming back — each ticked off by doing it. Skip it any time.',
+      'A leaderboard on the world map. Every city ranked by the level the vault judges it at, then by how well it is run, with its banner, era and GLD beside it. Tap a row to go and look.',
+      'A pass over the phone: every panel by touch. The language switch no longer sits over the population pill in the world, and everything a finger has to hit is big enough to hit.',
     ],
   },
   {
@@ -180,6 +183,9 @@ export const UPDATES_ZH: Update[] = [
       '市政厅可以建了。它在城镇时代的条件里、在每张清单上，唯独不在建造面板里；现在在"公共"一栏，480 金币、20 木材、30 石料。',
       '手机上可以搬建筑了。点一下就放在手指的位置；以前的虚影只跟着鼠标走。',
       '有人住的房子可以拆了。这家人会搬到有空位的房子，没有的话就露宿到新房建起，卡片上会说明。市场、银行和市政厅则会说明为什么不能拆，而不是把按钮藏起来。',
+      '第一天。新聚落打开时会有一张卡片，说明游戏为什么付你钱，并给出五件事——一个人、一座房子、银行、一次升级、明天再来——做了就自动打勾。随时可以跳过。',
+      '世界地图上的排行榜。每座城市按金库裁定的等级排名，再按经营好坏排，旁边是它的旗帜、时代和 GLD。点一行就去看看。',
+      '手机上过了一遍：每个面板都用手指点过。语言切换不再压在世界里的人口标签上，手指要点的东西都够大了。',
     ],
   },
   {
