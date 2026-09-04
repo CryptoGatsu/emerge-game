@@ -1,7 +1,7 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
+import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -703,8 +703,10 @@ export default function Wiki() {
             more per era it was raised in: a modern block costs more to keep than a cabin.
           </p>
           <p>
-            <b>A house sleeps as many people as it has room for</b>: {Math.round(HOUSE_ROOM)} at
-            level one and more with each improvement. Families share a roof when there is room,
+            <b>A house sleeps as many people as it has room for</b>: {HOUSE_ROOM} beds at
+            level one, {HOUSE_ROOM + HOUSE_ROOM_PER_LEVEL} at level two, {HOUSE_ROOM + 2 * HOUSE_ROOM_PER_LEVEL} at
+            level three, which is what improving a house is for; the house&rsquo;s card says
+            who sleeps there against the beds. Families share a roof when there is room,
             the largest family first, so a newcomer who came alone does not take a whole house for
             one bed. The feed says who moved in where.
           </p>

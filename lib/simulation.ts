@@ -6357,8 +6357,10 @@ const SETTLER_NAMES = [
 const LAST_RESORT_POPULATION = 3;
 
 /** How many people a house is thought to sleep, and what each improvement adds. */
-export const HOUSE_ROOM = 3.2;
-export const HOUSE_ROOM_PER_LEVEL = 0.8;
+// Three beds, and two more with every improvement: 3, 5, 7. Improving a house
+// used to add less than one bed, which left players asking what the point was.
+export const HOUSE_ROOM = 3;
+export const HOUSE_ROOM_PER_LEVEL = 2;
 /** How many people this one house sleeps, whole. */
 export const houseRoom = (b: Building) => Math.round(HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL);
 

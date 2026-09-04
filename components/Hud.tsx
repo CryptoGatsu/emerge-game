@@ -202,6 +202,12 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             <p className="muted small building-level">
               {t('Level {level} of {max} · {upkeep} Gold a day to keep', { level: focus.level, max: focus.maxLevel, upkeep: focus.upkeep })}
             </p>
+            {focus.beds && (
+              <p className="muted small building-level building-beds">
+                {t('Sleeps {n} of {room}', { n: focus.beds.sleeping, room: focus.beds.room })}
+                {focus.beds.next !== null && <> · {t('{n} beds when improved', { n: focus.beds.next })}</>}
+              </p>
+            )}
           </div>
         </div>
         <div className="being-people">

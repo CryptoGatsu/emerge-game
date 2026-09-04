@@ -1,7 +1,7 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
+import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
 
@@ -400,7 +400,7 @@ export function WikiZh() {
           </figure>
           <p>你不能命令任何人，所以建筑是你表达聚落需要什么的方式。盖一栋，就会有人决定那是自己的——如果它空着，那是立刻。每栋容纳<b>两名工人</b>，矿井三名。</p>
           <p>一切都花金币<em>和</em>堆场里的材料，所以你能盖什么取决于伐木工砍了多少、采石场切了多少。每栋建筑立着就每天花金币，立多久花多久，而且按所建时代每个时代多四分之一：现代楼房比木屋更贵养。</p>
-          <p><b>一栋房子按容量住人</b>：一级 {Math.round(HOUSE_ROOM)} 人，每次升级更多。有空位时几家人合住一个屋顶，大家庭优先，所以独自到来的新人不会一个人占一整栋。动态会说谁搬进了哪里。</p>
+          <p><b>一栋房子按容量住人</b>：一级 {HOUSE_ROOM} 张床，二级 {HOUSE_ROOM + HOUSE_ROOM_PER_LEVEL} 张，三级 {HOUSE_ROOM + 2 * HOUSE_ROOM_PER_LEVEL} 张——这就是升级房子的意义；房子的卡片会显示住了几人、共几张床。有空位时几家人合住一个屋顶，大家庭优先，所以独自到来的新人不会一个人占一整栋。动态会说谁搬进了哪里。</p>
           <p><b>节庆。</b>银行里的"城市"卡片每天可以办一次：每人 {FESTIVAL_GOLD_PER_HEAD} 金币，所有人回来都更快乐、邻里更亲近。这是提高经营评分最便宜的办法，金库就是干这个用的。</p>
           <p><b>聚落会自己建造。</b>当金库持有一栋建筑价格的两倍、外加两周的工资和维护费，且堆场有木料和石头时，它会不经吩咐就盖起短缺的东西：先给露宿的人一个屋顶，库存薄了就盖农场或伐木小屋，然后是地块助手本来会建议你的下一样——仓库、咖啡馆、学校、诊所、实验室、土地支持的手艺。每天最多一栋，动态会说它建了什么、为什么。</p>
           <h3>手艺</h3>

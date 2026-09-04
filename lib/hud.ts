@@ -8,7 +8,7 @@
  */
 
 import { eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -53,6 +53,8 @@ export interface FocusBuilding {
   upgrade: { gold: number; wood: number; stone: number; stocked: boolean } | null;
   /** What moving it costs, in Gold. */
   moveGold: number;
+  /** For a house: who sleeps here against the beds, and the beds an improvement would add. */
+  beds: { sleeping: number; room: number; next: number | null } | null;
 }
 
 export type Focus = FocusCitizen | FocusBuilding;
@@ -335,6 +337,13 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       };
     })(),
     moveGold: moveCost(b.type),
+    beds: b.type === 'House'
+      ? {
+        sleeping: world.families.filter((f) => f.homeId === b.id).reduce((s, f) => s + f.members.length, 0),
+        room: houseRoom(b),
+        next: levelOf(b) < MAX_BUILDING_LEVEL ? houseRoom({ ...b, level: levelOf(b) + 1 }) : null,
+      }
+      : null,
     active: b.active,
     people: b.workers.map((id) => {
       const c = world.citizens.find((x) => x.id === id);

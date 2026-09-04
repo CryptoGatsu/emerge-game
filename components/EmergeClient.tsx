@@ -1348,7 +1348,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown; select: (id: string) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1364,6 +1364,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       focus: (id: string, zoom = 2.4) => { sceneRef.current?.focus({ kind: 'citizen', id }); sceneRef.current?.zoomBy(zoom); },
       art: (key: string) => sceneRef.current?.artInfo(key) ?? null,
       sprites: () => sceneRef.current?.spriteInfo() ?? null,
+      // Open a building's card, as a tap on it would.
+      select: (id: string) => { setSelected({ kind: 'building', id }); },
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;

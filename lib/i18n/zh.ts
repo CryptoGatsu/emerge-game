@@ -869,6 +869,8 @@ export const UI: Record<string, string> = {
   'builders’ price': '大师价',
   'Rebuild the one you have': '重建已有的那栋',
   'One per settlement': '每个聚落一栋',
+  'Sleeps {n} of {room}': '住 {n} 人，共 {room} 张床',
+  '{n} beds when improved': '升级后 {n} 张床',
   'tap land across the water to stake out a crossing.': '点击水对岸的陆地勘定渡口。',
   'click land across the water to stake out a crossing, Esc to cancel.': '点击水对岸的陆地勘定渡口，按 Esc 取消。',
 };
