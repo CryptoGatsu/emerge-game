@@ -2246,6 +2246,16 @@ button.fold:hover { color: var(--emerald); }
   .build-cost small { font-size: 9.5px; }
   .build-materials { grid-area: mats; margin-top: 4px; }
   .build-card button { grid-area: place; margin-top: 4px; padding: 7px 16px; font-size: 12px; }
+  /* The two tools carry a long blurb and a wide price; side by side on a
+     phone the blurb was squeezed into a column four words wide. The price
+     goes under the blurb instead, next to its button. */
+  .build-card.tool {
+    grid-template-areas:
+      'icon name  name'
+      'icon blurb blurb'
+      'cost cost  place';
+  }
+  .build-card.tool .build-cost { text-align: left; }
   .token-grid { grid-template-columns: 1fr; }
   .resource-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
   .bank-balance { font-size: 32px; }
