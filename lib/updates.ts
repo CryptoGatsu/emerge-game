@@ -17,6 +17,16 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.5',
+    date: '2026-09-10',
+    title: 'The lodge, and plots you are not looking at',
+    notes: [
+      'Hunting is paid like every other trade. The stalking you can watch is the visible part of the day; the snares, the lines and the ground beyond the plot’s edge bring in the rest, so a lodge full of hunters no longer shares one herd of ten and reports 0 a day. An improved lodge and a full quiver raise the take as they should.',
+      'Animals now spread over the whole of an expanded plot, and the Lodge’s card says how many are on the land and in reach.',
+      'Attention is yours, not the plot’s. Acting on any of your plots keeps every plot you own attended, on this device, on another, and in what the vault judges. A plot you leave running earns at the shape you left it in, against the clock, whether or not it is open.',
+    ],
+  },
+  {
     version: '2.4',
     date: '2026-09-09',
     title: 'The GLD dividend',
@@ -156,6 +166,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.5',
+    date: '2026-09-10',
+    title: '猎人小屋，和你没在看的地块',
+    notes: [
+      '狩猎现在和其他行业一样计产。屏幕上能看到的追猎只是一天的可见部分；陷阱、绳套和地块边缘之外的猎场带回其余部分，所以满员的猎人小屋不再十个猎人分一群猎物、报出"每天 0"。升级的小屋和满满的箭筒会如期提高收获。',
+      '动物现在会分布在整块扩展后的土地上，猎人小屋的卡片会写明地上有多少猎物、多少在可及范围内。',
+      '注意力属于你，而不是地块。在任何一块地上做点什么，你名下的每块地都算被照看，本设备、其他设备和金库的裁定都一样。你留着运转的地块按你离开时的样子继续按时钟计收，开着与否都一样。',
+    ],
+  },
   {
     version: '2.4',
     date: '2026-09-09',

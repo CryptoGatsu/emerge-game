@@ -209,6 +209,13 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 {focus.beds.next !== null && <> · {t('{n} beds when improved', { n: focus.beds.next })}</>}
               </p>
             )}
+            {focus.herd && (
+              <p className="muted small building-level building-herd">
+                {focus.herd.land === 0
+                  ? t('The herd is thinned out; it comes back a little each day. The snares still bring some in.')
+                  : t('{n} animals on the land, {m} in reach · the snares bring in the rest', { n: focus.herd.land, m: focus.herd.reach })}
+              </p>
+            )}
           </div>
         </div>
         <div className="being-people">

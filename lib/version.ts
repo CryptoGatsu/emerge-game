@@ -8,4 +8,4 @@
  * Bump it when there is something a player would notice. It is not a
  * deployment counter.
  */
-export const VERSION = '2.4';
+export const VERSION = '2.5';

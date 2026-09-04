@@ -513,6 +513,17 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.5: hunting is paid like a trade and attention is the wallet's. `produce`
+runs the hunter recipe with the same modifiers as every other trade and books
+the difference over what the live kills already credited (`world.hunt.game`
+and `hides`, reset by `outfitHunters`); `wildGround` reads the active extent
+so an expanded plot spawns over its whole belt; `herdOf` feeds the Lodge card.
+`noteAttention` stamps a module-level wallet time, `setWalletAttention` and
+`attendedFrom` bring an owned world up to it (the client keeps it under
+`emerge:acted:<address>` and sends it with the heartbeat, which returns the
+latest the relay holds from any device via `noteActed`); `judgedFor` reads
+attention from `lastSeenAnywhere` as well as the plot's own presence.
+
 v2.4: the GLD dividend. `chargeSplit` is three-way (`CHARGE_BURN_SHARE` 60%,
 `CHARGE_VAULT_SHARE` 25%, `CHARGE_DIVIDEND_SHARE` 15%); `noteCharge` books the
 dividend share into `dividend:pool`. `lib/server/dividend.ts`: soft-stake

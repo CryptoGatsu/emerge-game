@@ -850,6 +850,35 @@ export async function lastSeenAt(seed: number, who: string): Promise<number> {
   const at = await hget(presenceKey(seed), who);
   return at ? Number(at) || 0 : 0;
 }
+/**
+ * When somebody last had any world open, in wall-clock ms, or 0.
+ *
+ * Attention is the player's, not the plot's: a wallet with two settlements
+ * can only look at one, and the other is not neglected while they do. Kept
+ * on its own key because the online hash is swept as it is read.
+ */
+/** A year and a bit: long past the point where either stamp still moves the figure. */
+const STAMP_TTL_S = 400 * 86_400;
+const seenLastKey = (who: string) => serverKey(`seen-last:${who.toLowerCase()}`);
+export async function lastSeenAnywhere(who: string): Promise<number> {
+  const at = await getValue(seenLastKey(who));
+  return at ? Number(at) || 0 : 0;
+}
+/**
+ * When the player last acted on any of their plots, by their own account.
+ *
+ * Only the client reads this back, to keep a second device's copy of a world
+ * as attended as the first's; what the vault pays is judged from presence,
+ * which the client cannot write.
+ */
+const actedKey = (who: string) => serverKey(`acted:${who.toLowerCase()}`);
+export async function noteActed(who: string, at: number): Promise<number> {
+  const held = Number(await getValue(actedKey(who))) || 0;
+  const now = Date.now();
+  const next = Math.max(held, Math.min(now, at || 0));
+  if (next > held) await setValue(actedKey(who), String(next), STAMP_TTL_S);
+  return next;
+}
 
 export async function heartbeat(seed: number, who: string): Promise<string[]> {
   const key = presenceKey(seed);
@@ -859,6 +888,7 @@ export async function heartbeat(seed: number, who: string): Promise<string[]> {
   // second heartbeat from the client, because a player is present in the game
   // exactly when they are present in a world.
   await hset(EVERYONE, who, String(Date.now()));
+  await setValue(seenLastKey(who), String(Date.now()), STAMP_TTL_S);
   const rows = await hgetall(key);
   const now = Date.now();
   const live: string[] = [];

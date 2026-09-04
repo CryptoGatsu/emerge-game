@@ -414,7 +414,7 @@ export interface World {
   /** The animals on the land, which the hunters go after. */
   wildlife: Animal[];
   /** The day's hunting so far: kills, how many the feed has told of, and whether the quiver is full. */
-  hunt: { today: number; lines: number; arrows: boolean };
+  hunt: { today: number; lines: number; arrows: boolean; game?: number; hides?: number };
   /** The standing decision of the last town meeting, if it is still in force. */
   resolution: Resolution | null;
   /** Everything the settlement's showcases have produced, newest first. */
@@ -4218,11 +4218,18 @@ function produce(world: World) {
     // What the day's fishing and hunting cost, and what it did to the catch.
     let gear = 1;
     if (wj === 'fisher') gear = outfitFishers(world, workers);
+    // What the hunters were seen to bring down today, kill by kill. The
+    // stalking on screen is the visible part of the day's hunting; the
+    // snares, the lines and the ground beyond the plot's edge bring in the
+    // rest, so the lodge is paid like any other trade and six hunters at an
+    // improved lodge are not left sharing one plot's herd of ten.
+    let taken: Partial<Record<Resource, number>> = {};
     if (wj === 'hunter') {
-      // Kills are credited as they happen, out in the wood, so the day's
-      // production is what the hunters actually brought down.
-      outfitHunters(world, workers);
-      continue;
+      const bag = outfitHunters(world, workers);
+      gear = bag.gear;
+      taken = { game: bag.game, hides: bag.hides };
+      // A wood hunted bare still feeds the snares, but thinly.
+      if (bag.herd === 0) seasonal *= 0.6;
     }
     // Blight is in the fields, not in the mine: it costs the farmers and only
     // the farmers, which is what makes a granary the answer to it.
@@ -4245,7 +4252,10 @@ function produce(world: World) {
       ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
       : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const made = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
+      const due = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
+      // Less what was already booked as it happened, never below nothing.
+      const made = Math.max(0, due - (taken[r as Resource] ?? 0));
+      if (made <= 0) continue;
       world.resources[r as Resource] += made;
       note(world, 'produced', r as Resource, made);
     }
@@ -4348,7 +4358,10 @@ function animalRand(world: World, a: Animal) {
 
 /** Whether an animal can stand here: dry, on land people can reach, and out of the village. */
 function wildGround(world: World, water: WaterField, kind: AnimalKind, x: number, y: number, clearance = 4): boolean {
-  if (x < 6 || x > 94 || y < 8 || y > 92) return false;
+  // A margin in from the plot's edge, whatever size the plot is: an expanded
+  // plot read the old 0–100 bounds here and threw away half its spawns.
+  const ext = activeExtent;
+  if (x < ext.x0 + 6 || x > ext.x1 - 6 || y < ext.y0 + 8 || y > ext.y1 - 8) return false;
   if (water.blocks(x, y)) return false;
   const land = water.landAt(x, y);
   if (!reachable(world, water, land)) return false;
@@ -4546,6 +4559,8 @@ function takeAnimal(world: World, c: Citizen, prey: Animal) {
   note(world, 'produced', 'game', game);
   note(world, 'produced', 'hides', hides);
   world.hunt.today++;
+  world.hunt.game = (world.hunt.game ?? 0) + game;
+  world.hunt.hides = (world.hunt.hides ?? 0) + hides;
   c.purpose = Math.min(100, c.purpose + 2);
   if (world.hunt.lines < 3) {
     world.hunt.lines++;
@@ -4584,15 +4599,22 @@ function outfitFishers(world: World, workers: number): number {
   return gear;
 }
 
-/** The hunters' day: arrows out of the yard, and the tally of what they brought in. */
-function outfitHunters(world: World, workers: number) {
+/**
+ * The hunters' day: arrows out of the yard, and the tally of what they brought in.
+ *
+ * Returns the multiplier the quiver puts on the day's take, what the live
+ * kills already booked, and how many animals are left on the land.
+ */
+function outfitHunters(world: World, workers: number): { gear: number; game: number; hides: number; herd: number } {
   const arrows = ARROW_WOOD * workers;
   const had = Math.min(world.resources.wood, arrows);
   world.resources.wood -= had;
   note(world, 'consumed', 'wood', had);
   world.hunt.arrows = had >= arrows;
   const took = world.hunt.today;
+  const bag = { gear: world.hunt.arrows ? 1 : 0.6, game: world.hunt.game ?? 0, hides: world.hunt.hides ?? 0, herd: 0 };
   const herd = world.wildlife.filter((a) => a.state !== 'down').length;
+  bag.herd = herd;
   if (took > 0) {
     pushFeed(world, 'work', `${workers} ${workers === 1 ? 'hunter' : 'hunters'} took ${took} ${took === 1 ? 'animal' : 'animals'} from the wild ground.`);
   } else if (herd === 0) {
@@ -4603,6 +4625,18 @@ function outfitHunters(world: World, workers: number) {
   if (!world.hunt.arrows) pushFeed(world, 'work', 'The hunters are short of arrows. Timber in the yard would fix it.');
   world.hunt.today = 0;
   world.hunt.lines = 0;
+  world.hunt.game = 0;
+  world.hunt.hides = 0;
+  return bag;
+}
+
+/** The animals alive on the land, and how many of them a lodge's hunters can reach. */
+export function herdOf(world: World, lodge?: Building): { land: number; reach: number } {
+  useWorld(world);
+  const alive = world.wildlife.filter((a) => a.state !== 'down');
+  const at = lodge ?? findBuilding(world, 'Lodge');
+  const reach = at ? alive.filter((a) => Math.hypot(a.x - at.x, a.y - at.y) <= HUNT_RANGE).length : 0;
+  return { land: alive.length, reach };
 }
 
 /** Extraction jobs occasionally turn up something rare, credited to a real worker. */
@@ -6749,6 +6783,26 @@ export function noteAttention(world: World) {
   useWorld(world);
   world.stewardship.lastActionDay = world.day;
   world.stewardship.lastActionAt = Date.now();
+  walletActionAt = Math.max(walletActionAt, world.stewardship.lastActionAt);
+}
+
+/**
+ * When the player last acted on any of their plots.
+ *
+ * Attention is the player's, not the plot's: somebody running two
+ * settlements can only have one open, and the one they are not looking at
+ * should not be counted as neglected while they are busy on the other. Every
+ * action stamps this, the client keeps it under the wallet, and each owned
+ * world is brought up to it before it is advanced.
+ */
+let walletActionAt = 0;
+export function setWalletAttention(at: number) {
+  if (Number.isFinite(at) && at > walletActionAt) walletActionAt = at;
+}
+export function walletAttentionAt() { return walletActionAt; }
+/** Count the wallet's last action as this world's, if it is the more recent. */
+export function attendedFrom(world: World, at: number) {
+  if (Number.isFinite(at) && at > world.stewardship.lastActionAt) world.stewardship.lastActionAt = at;
 }
 
 /** How well this settlement is being run, 0 to 1. */

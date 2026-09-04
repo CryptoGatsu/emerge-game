@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  advanceEra, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, trial,
+  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
@@ -75,6 +75,21 @@ const HOURS_PER_SECOND = 0.15;
 
 /** How often the settlement is written down, in milliseconds. */
 const SAVE_INTERVAL = 15_000;
+/**
+ * The wallet's last action on any of its plots, kept in this browser.
+ *
+ * Read when a world opens and written as it is saved, so a plot opened after
+ * an hour spent on another is as attended as the one that was open. The
+ * relay carries the same stamp between devices.
+ */
+const actedKey = (address: string) => `emerge:acted:${address.toLowerCase()}`;
+function readActed(address: string): number {
+  try { return Number(window.localStorage.getItem(actedKey(address))) || 0; } catch { return 0; }
+}
+function keepActed(address: string, at: number) {
+  if (!(at > 0) || at <= readActed(address)) return;
+  try { window.localStorage.setItem(actedKey(address), String(at)); } catch { /* private mode */ }
+}
 /** How often the interface refreshes from the world. */
 const HUD_INTERVAL = 180;
 
@@ -675,6 +690,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       // The real seconds are passed alongside the game hours: the yield is paid
       // against the wall clock, so running at 2x shows the player more of the
       // settlement's life without paying them twice as much for it.
+      // Acting on another of the wallet's plots counts here as well, so
+      // the settlement that is not open is never the neglected one.
+      if (live && !spectating) attendedFrom(live, walletAttentionAt());
       if (live && !pausedRef.current) advance(live, dt * HOURS_PER_SECOND * speedRef.current, dt);
     };
     frame = requestAnimationFrame(step);
@@ -687,6 +705,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // they ever claimed the same land, and would make a visit leave traces.
     const saveTimer = window.setInterval(() => {
       if (worldRef.current && !spectating) saveWorld(worldRef.current);
+      if (!spectating && wallet.address) keepActed(wallet.address, walletAttentionAt());
     }, SAVE_INTERVAL);
     const persist = () => { if (worldRef.current && !spectating) saveWorld(worldRef.current); };
     document.addEventListener('visibilitychange', persist);
@@ -817,6 +836,13 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * only definition of "watching" that survives a killed browser is "said
    * something in the last minute".
    */
+  // Attention is the wallet's, not the plot's. Whatever the player last did
+  // on any of their plots, on this device, counts for this one too; the
+  // frame loop brings the open world up to it.
+  useEffect(() => {
+    if (wallet.address && !spectating) setWalletAttention(readActed(wallet.address));
+  }, [wallet.address, spectating]);
+
   useEffect(() => {
     // Not while this view is behind something else. A player looking at
     // somebody else's settlement still has their own mounted underneath, and
@@ -827,8 +853,16 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const who = wallet.address ?? visitorId();
     let live = true;
     const beat = async () => {
-      const here = await heartbeat(seed, who);
+      // The wallet's last action goes with the beat and comes back as the
+      // latest the relay has seen from any device, so a plot opened on the
+      // phone is as attended as it was on the desktop.
+      const acted = wallet.address && !spectating ? walletAttentionAt() : 0;
+      const here = await heartbeat(seed, who, acted);
       if (!live) return;
+      if (here.acted > 0 && wallet.address && !spectating) {
+        setWalletAttention(here.acted);
+        if (worldRef.current) attendedFrom(worldRef.current, walletAttentionAt());
+      }
       setWatching(here.watching);
       // Left alone when the relay could not say, rather than reset to nothing:
       // one missed beat should not make the game look empty.

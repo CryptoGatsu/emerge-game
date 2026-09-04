@@ -913,6 +913,9 @@ export const UI: Record<string, string> = {
   'The Oak': '橡树', 'The Wave': '波浪', 'The Star': '星辰', 'The Sun': '太阳', 'The Stag': '雄鹿', 'The Tower': '高塔', 'The Wheat': '麦穗', 'The Flame': '火焰',
   'Sleeps {n} of {room}': '住 {n} 人，共 {room} 张床',
   '{n} beds when improved': '升级后 {n} 张床',
+  'The herd is thinned out; it comes back a little each day. The snares still bring some in.': '猎物已被打稀，每天会回来一些。陷阱仍有些收获。',
+  '{n} animals on the land, {m} in reach · the snares bring in the rest': '地上有 {n} 只猎物，{m} 只在可及范围内 · 其余由陷阱带回',
+  'Attention is yours, not the plot’s: acting on any of your plots keeps every plot you own attended, and each one goes on earning at the shape you left it in.': '注意力属于你，而不是地块：在任何一块地上做点什么，你名下的每块地都算被照看，各自按你离开时的样子继续赚取。',
   'tap land across the water to stake out a crossing.': '点击水对岸的陆地勘定渡口。',
   'click land across the water to stake out a crossing, Esc to cancel.': '点击水对岸的陆地勘定渡口，按 Esc 取消。',
 };

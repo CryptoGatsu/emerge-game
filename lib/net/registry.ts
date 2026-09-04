@@ -78,6 +78,8 @@ export interface Presence {
   watching: number;
   /** People playing anywhere, or null when the relay could not say. */
   online: number | null;
+  /** When this wallet last acted on any of its plots, as the relay has it, or 0. */
+  acted: number;
 }
 
 export interface PublishedWorld {
@@ -606,22 +608,23 @@ export const GIFT_POLL = 25_000;
 export const HEARTBEAT_INTERVAL = 15_000;
 
 /** Say you are here, and find out how many others are. */
-export async function heartbeat(seed: number, who: string): Promise<Presence> {
+export async function heartbeat(seed: number, who: string, acted = 0): Promise<Presence> {
   try {
     const response = await fetch('/api/presence', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ seed, who }),
+      body: JSON.stringify({ seed, who, acted }),
     });
-    const json = (await response.json()) as { count?: number; online?: number };
+    const json = (await response.json()) as { count?: number; online?: number; acted?: number };
     return {
       watching: Math.max(0, json.count ?? 0),
       // Null rather than nought when the relay did not say, so the interface
       // can leave the figure out instead of announcing that nobody is playing.
       online: typeof json.online === 'number' ? Math.max(0, json.online) : null,
+      acted: typeof json.acted === 'number' ? json.acted : 0,
     };
   } catch {
-    return { watching: 0, online: null };
+    return { watching: 0, online: null, acted: 0 };
   }
 }
 

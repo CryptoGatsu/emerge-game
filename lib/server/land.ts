@@ -36,7 +36,7 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
 import { HAND_MIN_EMERGE } from '../chain/vault';
-import { allClaims, jobOf, readWorld, type Claim, presenceDays, lastSeenAt } from './registry';
+import { allClaims, jobOf, readWorld, type Claim, presenceDays, lastSeenAt, lastSeenAnywhere } from './registry';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -129,6 +129,9 @@ export async function judgedFor(address: string): Promise<Judged> {
   const now = Date.now();
   let days = 0;
   try { days = await presenceDays(me); } catch { days = 0; }
+  // Attention is the wallet's: being on any of your plots attends them all.
+  let anywhere = 0;
+  try { anywhere = await lastSeenAnywhere(me); } catch { anywhere = 0; }
   const plots: Judged['plots'] = [];
   let ceiling = 0, yieldSum = 0;
   for (const row of mine) {
@@ -143,7 +146,7 @@ export async function judgedFor(address: string): Promise<Judged> {
     let score = 0;
     try { score = world ? stewardshipScore(world) : 0; } catch { score = 0; }
     let attention = ATTENTION_FLOOR;
-    try { attention = attentionFrom(await lastSeenAt(row.seed, me), now); } catch { attention = ATTENTION_FLOOR; }
+    try { attention = attentionFrom(Math.max(anywhere, await lastSeenAt(row.seed, me)), now); } catch { attention = attentionFrom(anywhere, now); }
     ceiling += cap;
     yieldSum += cap * score * attention;
     plots.push({ seed: row.seed, level, era, score, attention, ceiling: cap });

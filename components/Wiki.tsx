@@ -406,7 +406,10 @@ export default function Wiki() {
             (20%), content (20%) and safe (10%). <b>Attention</b> is how recently you did anything
             about it: full if you have just acted, sliding down over about a day and a half of
             silence to a floor of {pct(0.08)}. A world nobody touches earns a fraction of one that
-            is being run.
+            is being run. Attention is <em>yours</em>, not the plot&rsquo;s: with two or more plots
+            you can only have one open, so acting on any of them keeps every plot you own attended,
+            and the ones you are not looking at go on earning at the shape you left them in. The
+            vault judges it the same way, from your presence anywhere in the game.
           </p>
           <table className="wiki-table">
             <thead>

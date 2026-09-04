@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { depart, heartbeat, playersOnline, watchers } from '@/lib/server/registry';
+import { depart, heartbeat, noteActed, playersOnline, watchers } from '@/lib/server/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  let body: { seed?: number; who?: string; leaving?: boolean };
+  let body: { seed?: number; who?: string; leaving?: boolean; acted?: number };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -56,11 +56,17 @@ export async function POST(request: Request) {
       await depart(seed, who);
       return NextResponse.json({ count: (await watchers(seed)).length });
     }
-    const [here, online] = await Promise.all([heartbeat(seed, who), playersOnline()]);
+    // The wallet's last action, by its own account, kept so another device
+    // opens the same world as attended. A wallet address only: a visitor's
+    // random id has no plots to attend.
+    const acted = /^0x[0-9a-fA-F]{40}$/.test(who) && Number.isFinite(Number(body.acted))
+      ? noteActed(who, Number(body.acted))
+      : Promise.resolve(0);
+    const [here, online, actedAt] = await Promise.all([heartbeat(seed, who), playersOnline(), acted]);
     // The owner is never in this count. On your own world it reads as the
     // number of people who have come to look; on somebody else's, as how many
     // others are looking with you.
-    return NextResponse.json({ count: here.length, online });
+    return NextResponse.json({ count: here.length, online, acted: actedAt });
   } catch {
     return NextResponse.json({ count: 0, degraded: true });
   }

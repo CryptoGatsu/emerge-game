@@ -8,7 +8,7 @@
  */
 
 import { eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, upgradeEffect, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, upgradeEffect, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -57,6 +57,8 @@ export interface FocusBuilding {
   beds: { sleeping: number; room: number; next: number | null } | null;
   /** What the next improvement would do, in a line. */
   improves: string;
+  /** For a lodge: the animals alive on the land, and how many its hunters can reach. */
+  herd: { land: number; reach: number } | null;
 }
 
 export type Focus = FocusCitizen | FocusBuilding;
@@ -349,6 +351,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
         next: levelOf(b) < MAX_BUILDING_LEVEL ? houseRoom({ ...b, level: levelOf(b) + 1 }) : null,
       }
       : null,
+    herd: b.type === 'Lodge' ? herdOf(world, b) : null,
     active: b.active,
     people: b.workers.map((id) => {
       const c = world.citizens.find((x) => x.id === id);
