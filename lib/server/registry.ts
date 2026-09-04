@@ -71,6 +71,9 @@ export interface Claim {
   hand?: Hand;
   /** When the owner expanded the plot. Once per plot, so this is the record that stops a second charge. */
   expandedAt?: number;
+  /** Which era the plot has been advanced to, and when. Absent means the first. */
+  era?: number;
+  eraAt?: number;
 }
 
 /**
@@ -270,6 +273,22 @@ export async function markExpanded(seed: number, owner: string): Promise<{ claim
   if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
   if (existing.expandedAt) return { claim: existing, already: true };
   const row: Claim = { ...existing, expandedAt: Date.now() };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return { claim: row, already: false };
+}
+
+/**
+ * Record that a plot advanced to an era.
+ *
+ * Only ever forward, and only one step: the charge is per step, and a device
+ * that asks for an era the row already holds is told so rather than charged.
+ */
+export async function markEra(seed: number, owner: string, era: number): Promise<{ claim: Claim; already: boolean } | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const held = existing.era ?? 1;
+  if (held >= era) return { claim: existing, already: true };
+  const row: Claim = { ...existing, era, eraAt: Date.now() };
   await hset(CLAIMS, String(seed), JSON.stringify(row));
   return { claim: row, already: false };
 }

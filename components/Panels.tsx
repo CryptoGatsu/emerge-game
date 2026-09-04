@@ -10,15 +10,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
-  BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState,
+  BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
+  wageEffort, worldMarketState, type BuildingCategory,
 } from '@/lib/simulation';
+import { eraName } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
 } from '@/lib/chain/emerge';
 import {
-  DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
+  ADVANCE_COST_EMERGE, DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, PROSPECT_COST_EMERGE, RENAME_CITIZEN_EMERGE,
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
@@ -53,6 +54,8 @@ interface PanelsProps {
   onRenameWorld: (name: string) => void;
   /** Open the plot's outer belt, once, for $EMERGE. Resolves to a refusal, or null. */
   onExpand: () => Promise<string | null>;
+  /** Advance the plot to the next era, for $EMERGE. Resolves to a refusal, or null. */
+  onAdvance: () => Promise<string | null>;
   onRenameCitizen: (id: string, name: string) => void;
   onLeave: () => void;
   /** Give the plot up entirely, as opposed to stepping out of it. */
@@ -119,6 +122,13 @@ const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] =
   { type: 'Clinic', cost: BUILD_COSTS['Clinic'], icon: '✚', blurb: 'People survive what would have killed them.' },
   { type: 'Jail', cost: BUILD_COSTS['Jail'], icon: '▦', blurb: 'Somewhere to hold anyone who turns on the settlement. Fewer do, with one standing.' },
   { type: 'Bank', cost: BUILD_COSTS['Bank'], icon: '◈', blurb: 'A counting house for the treasury.' },
+  // The township.
+  { type: 'Chapel', cost: BUILD_COSTS['Chapel'], icon: '⛪', blurb: 'Somewhere to be quiet together. Company and purpose for everybody, a little each day.' },
+  { type: 'Guildhall', cost: BUILD_COSTS['Guildhall'], icon: '⚒', blurb: 'The trades organised. Everybody learns their craft faster.' },
+  { type: 'Brewery', cost: BUILD_COSTS['Brewery'], icon: '🍺', blurb: 'An evening with everybody in it. Company, more than the tavern gives.' },
+  { type: 'Printer', cost: BUILD_COSTS['Printer'], icon: '▤', blurb: 'Something to read. Purpose for everybody, and trades learned a little faster.' },
+  { type: 'Stables', cost: BUILD_COSTS['Stables'], icon: '🐎', blurb: 'Carts and horses. Everybody moves faster along the roads.' },
+  { type: 'Harbour', cost: BUILD_COSTS['Harbour'], icon: '⚓', blurb: 'A ferry across the water. Every shore counts as reached, bridge or no bridge. Build it on the bank.' },
 ];
 
 function Shell({ title, subtitle, onClose, children, wide }: {
@@ -1649,6 +1659,12 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
   const stone = stock('stone');
+  // Shelves, and what is on each. A shelf with nothing on it in this era is
+  // not shown; a building from a later era is shown greyed with the era's
+  // name, so the player can see what advancing would open.
+  const [shelf, setShelf] = useState<BuildingCategory | 'All'>('All');
+  const shelves = BUILDING_CATEGORIES.filter((c) => BUILDABLE.some((o) => BUILDING_CATEGORY[o.type] === c));
+  const shown = BUILDABLE.filter((o) => shelf === 'All' || BUILDING_CATEGORY[o.type] === shelf);
   useLocale();
   return (
     <Shell
@@ -1686,16 +1702,24 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
           </button>
         </div>
       </div>
+      <div className="build-shelves">
+        <button className={shelf === 'All' ? 'on' : ''} onClick={() => setShelf('All')}>{t('All')}</button>
+        {shelves.map((c) => (
+          <button key={c} className={shelf === c ? 'on' : ''} onClick={() => setShelf(c)}>{tn(c)}</button>
+        ))}
+      </div>
       <div className="build-grid">
-        {BUILDABLE.map((option) => {
+        {shown.map((option) => {
           const need = buildMaterials(option.type);
           const paid = view.treasury >= option.cost;
           const stocked = wood >= need.wood && stone >= need.stone;
-          const ready = paid && stocked;
+          const minEra = BUILDING_ERA[option.type] ?? 1;
+          const inEra = minEra <= view.era.id;
+          const ready = paid && stocked && inEra;
           return (
-            <div key={option.type} className={`build-card ${ready ? '' : 'locked'}`}>
+            <div key={option.type} className={`build-card ${ready ? '' : 'locked'} ${inEra ? '' : 'later-era'}`}>
               <div className="build-icon">{option.icon}</div>
-              <h3>{tn(option.type)}</h3>
+              <h3>{tn(option.type)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}</h3>
               <p>{t(option.blurb)}</p>
               <div className="build-cost">
                 <b>{t('{n} Gold', { n: option.cost })}</b>
@@ -1706,7 +1730,7 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
                 <span className={stone >= need.stone ? '' : 'short'}>{t('{n} stone', { n: need.stone })}</span>
               </div>
               <button disabled={!ready} onClick={() => onBuild(option.type, option.cost)}>
-                {ready ? t('Place') : !paid ? t('Not enough Gold') : t('Not enough materials')}
+                {ready ? t('Place') : !inEra ? t('{era} era', { era: tn(eraName(minEra)) }) : !paid ? t('Not enough Gold') : t('Not enough materials')}
               </button>
             </div>
           );
@@ -1726,12 +1750,23 @@ function sinceWhen(at: number): string {
   return t('{n} days ago', { n: Math.round(hours / 24) });
 }
 
-function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onLeave, onRelease, onList }: {
+function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
-  onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onLeave: () => void; onRelease: () => void;
+  onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onAdvance: () => Promise<string | null>;
+  onLeave: () => void; onRelease: () => void;
   onList: (price: number | null) => void;
 }) {
   const [releasing, setReleasing] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const [advanceNote, setAdvanceNote] = useState<string | null>(null);
+  const advance = async () => {
+    setAdvancing(true);
+    setAdvanceNote(null);
+    const refused = await onAdvance();
+    setAdvancing(false);
+    setAdvanceNote(refused);
+  };
+  const gate = view.era.gate;
   const [expanding, setExpanding] = useState(false);
   const [expandNote, setExpandNote] = useState<string | null>(null);
   const expand = async () => {
@@ -1843,6 +1878,48 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
           <button onClick={() => onRenameWorld(draftName)} disabled={!changed || !affordable}>
             {affordable ? t('Rename for {cost} {ticker}', { cost: RENAME_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker }) : t('Not enough {ticker}', { ticker: TOKEN.ticker })}
           </button>
+        </div>
+
+        <div className="connect-card era-card">
+          <span className="eyebrow">{t('ERA')}</span>
+          <h3>{tn(view.era.name)}</h3>
+          <p className="muted small">{tx(view.era.gate.era.look)} {t('{n} days in this era.', { n: view.era.days })}</p>
+          {gate.next ? (
+            <>
+              <div className="era-next">
+                <b>{t('Next: {era}', { era: tn(gate.next.name) })}</b>
+                <span className="muted small">{tx(gate.next.arrives)}</span>
+              </div>
+              <ul className="era-checks">
+                <li className={gate.days.have >= gate.days.need ? 'done' : ''}>
+                  <i>{gate.days.have >= gate.days.need ? '✓' : '·'}</i>
+                  {t('{have} of {need} days in the {era} era', { have: gate.days.have, need: gate.days.need, era: tn(gate.era.name).toLowerCase() })}
+                </li>
+                {gate.checks.map((c) => (
+                  <li key={c.label} className={c.done ? 'done' : ''}><i>{c.done ? '✓' : '·'}</i>{tx(c.label)}</li>
+                ))}
+              </ul>
+              {!gate.open ? (
+                <p className="muted small">{t('The {era} era is not built yet. It is coming; the checklist is what it will ask.', { era: tn(gate.next.name) })}</p>
+              ) : (
+                <button onClick={advance} disabled={advancing || !gate.ready || !wallet.address || player.ledger.balance < ADVANCE_COST_EMERGE}>
+                  {advancing
+                    ? t('Advancing…')
+                    : !gate.ready
+                      ? t('Not earned yet')
+                      : !wallet.address
+                        ? t('Connect a wallet to advance')
+                        : player.ledger.balance < ADVANCE_COST_EMERGE
+                          ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                          : t('Advance to {era} · {cost} {ticker}', { era: tn(gate.next.name), cost: ADVANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+                </button>
+              )}
+              <p className="muted small">{t('{cost} {ticker}, burned, once per step. The registry judges the checklist on the copy of your world it holds, so the world is published first.', { cost: ADVANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}</p>
+            </>
+          ) : (
+            <p className="muted small">{t('This is as far as the eras go.')}</p>
+          )}
+          {advanceNote && <p className="muted small">{advanceNote}</p>}
         </div>
 
         <div className="connect-card">
@@ -1983,7 +2060,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onClearTrees, onRenameWorld, onExpand, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onClearTrees, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2032,7 +2109,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onClear
     return (
       <ConnectPanel
         view={view} claimed={claimed} player={player} onClose={onClose}
-        onRenameWorld={onRenameWorld} onExpand={onExpand} onLeave={onLeave} onRelease={onRelease} onList={onList}
+        onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onLeave={onLeave} onRelease={onRelease} onList={onList}
       />
     );
   }

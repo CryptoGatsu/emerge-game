@@ -7,6 +7,7 @@
  * never holds a reference into mutable simulation state.
  */
 
+import { eraSpec } from './world/eras';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -15,7 +16,8 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type World, adviseBuild, foodInStore, type Advice } from './simulation';
+  type WorkingJob, type World, adviseBuild, foodInStore, type Advice, eraGate, eraOf, type EraGate
+} from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -145,6 +147,8 @@ export interface Snapshot {
   unlockedAreas: string[];
   /** The outer belt is open for building. */
   expanded: boolean;
+  /** Which era the plot is in, and what stands between it and the next. */
+  era: { id: number; name: string; days: number; gate: EraGate };
   projects: { id: string; name: string; owner: string; progress: number; length: number }[];
   focus: Focus | null;
 }
@@ -362,6 +366,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     consumption: { ...world.flow.consumed },
     unlockedAreas: [...world.unlockedAreas],
     expanded: !!world.expanded,
+    era: { id: eraOf(world), name: eraSpec(eraOf(world)).name, days: Math.max(0, world.day - (world.eraSince ?? 1)), gate: eraGate(world) },
     projects: world.projects.map((p) => ({
       id: p.id, name: p.name, progress: p.progress, length: p.length,
       owner: world.citizens.find((c) => c.id === p.ownerId)?.name ?? 'Someone',

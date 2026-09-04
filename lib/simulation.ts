@@ -21,6 +21,7 @@ import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './wor
 import { buildWater, type WaterField } from './world/water';
 import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
+import { ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec } from './world/eras';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -286,6 +287,13 @@ export interface Citizen {
    * and are cold and unhappy about it when they get there.
    */
   swimming?: boolean;
+  /**
+   * Crossing open water on the ferry, which a Harbour runs. The renderer puts
+   * a boat under them. Cleared the moment they step ashore.
+   */
+  afloat?: boolean;
+  /** On a cart from the Stables: a working adult on the move, drawn riding. */
+  riding?: boolean;
   /** True while sat on a bench or crouched at a fire, which the renderer draws. */
   seated: boolean;
   /**
@@ -342,6 +350,8 @@ export interface Building {
   damage?: number;
   /** Wrecked: out of use until the player rebuilds it. */
   ruined?: boolean;
+  /** The era it was raised in, which is the era its body is drawn in until it is improved. */
+  era?: number;
   /**
    * How far this building has been improved, 1 to `MAX_BUILDING_LEVEL`.
    *
@@ -408,6 +418,12 @@ export interface World {
    * people follow the buildings out into it.
    */
   expanded?: boolean;
+  /**
+   * Which era the plot is in, 1 for a settlement, and the day it entered it.
+   * Absent on a save from before eras existed, which reads as the first.
+   */
+  era?: number;
+  eraSince?: number;
   /**
    * What the settlement pays, as a multiple of each trade's standing wage.
    *
@@ -1101,6 +1117,7 @@ function footprintRadius(b: Building) {
 const FOOTPRINTS: Record<string, number> = {
   Market: 4.2, 'Town Hall': 4.2, House: 2.6, School: 3.8, Library: 3.6, Lab: 3.7, Cafe: 3.5,
   Fishery: 3.0, Forager: 2.6,
+  Chapel: 3.6, Guildhall: 4.0, Brewery: 3.4, Printer: 3.2, Stables: 3.8, Harbour: 3.6,
 };
 
 function buildObstacles(world: World): Obstacle[] {
@@ -1239,9 +1256,9 @@ function onBridge(layout: WorldLayout, x: number, y: number) {
   return onDeck(layout.bridges, x, y);
 }
 
-function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: WorldLayout, water: WaterField) {
+function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: WorldLayout, water: WaterField, pace = 1) {
   let blocked = false;
-  let budget = (c.age < 16 ? 9 : 12.5) * hours * (c.sick ? 0.65 : 1);
+  let budget = (c.age < 16 ? 9 : 12.5) * hours * (c.sick ? 0.65 : 1) * pace;
   const startX = c.x, startY = c.y;
   c.moving = false;
   let guard = 0;
@@ -1373,7 +1390,7 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
 /** The walkability grid for a world, rebuilt only when what it depends on has changed. */
 const navCache = new WeakMap<World, NavGrid>();
 function navOf(world: World, obstacles: Obstacle[], water: WaterField): NavGrid {
-  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}`;
+  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}${hasFerry(world) ? 'f' : ''}`;
   const held = navCache.get(world);
   if (held && held.key === key) return held;
   const built = buildNavGrid(water, world.layout, obstacles, key, extentOf(world));
@@ -1415,12 +1432,23 @@ function lookAhead(world: World, c: Citizen, nav: NavGrid, obstacles: Obstacle[]
 
 function moveCitizens(world: World, hours: number) {
   const obstacles = buildObstacles(world);
-  const water = waterOf(world);
+  const ferry = hasFerry(world);
+  const water = ferry ? ferried(waterOf(world)) : waterOf(world);
   const nav = navOf(world, obstacles, water);
+  const cart = hasStables(world) ? CART_PACE : 1;
   for (const c of world.citizens) {
     // Held by the player, or swimming for the bank: both are handled elsewhere
     // and every rule below is about walking on land.
     if (c.carried || c.swimming) continue;
+    // The ferry stopped running with them on it: a ruined Harbour leaves
+    // anyone out on the water swimming for the bank.
+    if (c.afloat && !ferry) {
+      c.afloat = false;
+      c.riding = false;
+      c.swimming = true;
+      c.happiness = Math.max(0, c.happiness - 6);
+      continue;
+    }
     if (c.age < 16) c.job = 'unemployed';
     // Nobody in a scuffle moves.
     if (c.scuffle && c.scuffle > 0) { c.moving = false; c.activity = 'idle'; continue; }
@@ -1470,7 +1498,7 @@ function moveCitizens(world: World, hours: number) {
     // running because the rescue skipped it. Half an hour of no progress is
     // the test that somebody is truly cut off.
     const standingOn = water.landAt(c.x, c.y);
-    if (standingOn >= 0 && standingOn !== water.mainland && !world.connectedIslands.includes(standingOn) && c.stalled > 0.5) {
+    if (standingOn >= 0 && !reachable(world, water, standingOn) && c.stalled > 0.5) {
       const back = water.toMainland(c.x, c.y);
       if (back.d > 0) {
         const stride = Math.min(back.d + 0.6, 14 * hours + 0.35);
@@ -1510,7 +1538,15 @@ function moveCitizens(world: World, hours: number) {
     }
 
     lookAhead(world, c, nav, obstacles, water, hours);
-    const blocked = stepCitizen(c, hours, obstacles, world.layout, water);
+    // A working adult rides the cart when there is a Stables; nobody rides
+    // it onto the ferry.
+    const rides = cart > 1 && c.age >= 16 && phase === 'working' && !c.afloat;
+    const blocked = stepCitizen(c, hours, obstacles, world.layout, water, rides ? cart : 1);
+    if (ferry) {
+      const wet = waterOf(world).isWater(c.x, c.y) && !onBridge(world.layout, c.x, c.y);
+      c.afloat = wet;
+    } else if (c.afloat) c.afloat = false;
+    c.riding = rides && c.moving && !c.afloat;
     // Water stopped them dead. Sliding along the bank cannot solve this — the
     // way round is the road, and the road graph knows where the bridges are —
     // so re-route now rather than shuffling until the stall detector notices.
@@ -2689,6 +2725,8 @@ export function createWorld(seed = 481516, name?: string): World {
     feed: [], gatherings: [], bonds: {}, projects: [], conversations: [], hazards: [],
     resolution: null, artworks: [],
     unlockedAreas: ['Settlement'],
+    era: 1,
+    eraSince: 1,
     wageRate: WAGE_STANDARD,
     sales: { gold: 0, units: 0, best: null, bestUnits: 0 },
     marketClock: 0, flow: { produced: {}, consumed: {} },
@@ -3560,7 +3598,8 @@ export const SCHOOL_LEARNING = 0.35;
 export const LIBRARY_LEARNING = 0.15;
 export function learningRate(world: World): number {
   useWorld(world);
-  return 1 + (hasCivic(world, 'School') ? SCHOOL_LEARNING : 0) + (hasCivic(world, 'Library') ? LIBRARY_LEARNING : 0);
+  return 1 + (hasCivic(world, 'School') ? SCHOOL_LEARNING : 0) + (hasCivic(world, 'Library') ? LIBRARY_LEARNING : 0)
+    + (hasCivic(world, 'Guildhall') ? GUILDHALL_LEARNING : 0) + (hasCivic(world, 'Printer') ? PRINTER_LEARNING : 0);
 }
 
 /** Lab: better methods, applied to every trade's output. */
@@ -3569,6 +3608,13 @@ export const methodBonus = (world: World) => 1 + (hasCivic(world, 'Lab') ? LAB_M
 
 /** Cafe, studio, library: what they put back into people, every day. */
 export const CAFE_SOCIAL = 1.6;
+export const CHAPEL_SOCIAL = 0.8;
+export const CHAPEL_PURPOSE = 0.6;
+export const BREWERY_SOCIAL = 1.4;
+export const PRINTER_PURPOSE = 0.5;
+/** How much faster a trade is learned with a guildhall or a printer in town. */
+export const GUILDHALL_LEARNING = 0.3;
+export const PRINTER_LEARNING = 0.1;
 export const STUDIO_PURPOSE = 1.5;
 export const LIBRARY_PURPOSE = 0.6;
 
@@ -3654,6 +3700,12 @@ export interface Advice {
 
 export function adviseBuild(world: World): Advice[] {
   useWorld(world);
+  // Nothing from an era the plot has not reached is suggested, or the
+  // settlement would keep asking for a chapel it cannot have.
+  return adviseBuildAll(world).filter((a) => a.kind !== 'build' || !a.type || allowedInEra(world, a.type));
+}
+
+function adviseBuildAll(world: World): Advice[] {
   const out: Advice[] = [];
   const adults = world.citizens.filter((c) => c.age >= 16);
   const people = world.citizens.length;
@@ -3990,7 +4042,7 @@ export function fishingSpotsOf(world: World): [number, number][] {
       const dw = water.distanceToWater(px, py);
       if (dw > 2.6) continue;
       const land = water.landAt(px, py);
-      if (land !== water.mainland && !world.connectedIslands.includes(land)) continue;
+      if (!reachable(world, water, land)) continue;
       if (world.buildings.some((b) => Math.hypot(b.x - px, b.y - py) < footprintRadius(b) + 1.6)) continue;
       found.push({ x: px, y: py, d: Math.hypot(px - ax, py - ay) });
     }
@@ -4024,7 +4076,7 @@ export function forageSpotsOf(world: World): [number, number][] {
     for (let px = 8; px <= 92; px += 3) {
       if (water.blocks(px, py) || water.distanceToWater(px, py) < 3) continue;
       const land = water.landAt(px, py);
-      if (land !== water.mainland && !world.connectedIslands.includes(land)) continue;
+      if (!reachable(world, water, land)) continue;
       if (world.buildings.some((b) => Math.hypot(b.x - px, b.y - py) < footprintRadius(b) + 5)) continue;
       const d = Math.hypot(px - ax, py - ay);
       if (d < 6 || d > 34) continue;
@@ -4055,7 +4107,7 @@ function wildGround(world: World, water: WaterField, kind: AnimalKind, x: number
   if (x < 6 || x > 94 || y < 8 || y > 92) return false;
   if (water.blocks(x, y)) return false;
   const land = water.landAt(x, y);
-  if (land !== water.mainland && !world.connectedIslands.includes(land)) return false;
+  if (!reachable(world, water, land)) return false;
   const dw = water.distanceToWater(x, y);
   if (WATERSIDE.includes(kind) ? dw > 6 : dw < 2.4) return false;
   for (const b of world.buildings) if (Math.hypot(b.x - x, b.y - y) < footprintRadius(b) + clearance) return false;
@@ -4200,7 +4252,7 @@ function pickPrey(world: World, c: Citizen, lodge: Building | undefined): Animal
     if (a.state === 'down') continue;
     if (a.stalkedBy && a.stalkedBy !== c.id && world.citizens.some((o) => o.id === a.stalkedBy && o.hunting === a.id)) continue;
     const land = water.landAt(a.x, a.y);
-    if (land !== water.mainland && !world.connectedIslands.includes(land)) continue;
+    if (!reachable(world, water, land)) continue;
     if (Math.hypot(a.x - fromX, a.y - fromY) > HUNT_RANGE) continue;
     const d = Math.hypot(a.x - c.x, a.y - c.y);
     if (d < bestD) { bestD = d; best = a; }
@@ -5560,6 +5612,11 @@ const TRADE_BUILD_COST: Record<string, number> = {
   // The civic buildings. None employs anybody; each changes how the town lives.
   Cafe: 300, School: 380, Library: 360, Studio: 340, Clinic: 420, Lab: 520,
   Jail: 220,
+  // The township. Stone and tile, and each one changes how the town moves
+  // or thinks: the stables put carts on the roads, the harbour a ferry on
+  // the water, the chapel and the brewery give people somewhere to be, the
+  // guildhall and the printer make them better at what they do.
+  Chapel: 380, Guildhall: 460, Brewery: 340, Printer: 360, Stables: 280, Harbour: 420,
 };
 
 /** What a building costs to raise, by type. Everything the panel shows comes from here. */
@@ -5603,6 +5660,12 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Clinic: { wood: 12, stone: 24 },
   Lab: { wood: 14, stone: 30 },
   Jail: { wood: 8, stone: 22 },
+  Chapel: { wood: 10, stone: 30 },
+  Guildhall: { wood: 16, stone: 28 },
+  Brewery: { wood: 20, stone: 14 },
+  Printer: { wood: 14, stone: 18 },
+  Stables: { wood: 24, stone: 6 },
+  Harbour: { wood: 30, stone: 12 },
 };
 
 /** What this kind of building takes to raise. Anything unlisted is a modest shed. */
@@ -5722,7 +5785,7 @@ function settlementBuilds(world: World) {
 
   spend(world, 'building', cost);
   drawMaterials(world, want);
-  const raised: Building = { id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true };
+  const raised: Building = { id: `b${world.counter++}`, type: want, x: site[0], y: site[1], workers: [], active: true, era: eraOf(world) };
   world.buildings.push(raised);
   if (raised.type === 'House') rehouse(world);
   linkToRoads(world, raised);
@@ -5806,7 +5869,7 @@ function freeSite(world: World, housing: boolean): [number, number] | null {
     // The far shore counts as buildable once a bridge reaches it. That is the
     // point of having built one.
     const on = water.landAt(x, y);
-    if (on !== water.mainland && !world.connectedIslands.includes(on)) continue;
+    if (!reachable(world, water, on)) continue;
     let clear = true;
     for (const b of world.buildings) {
       const gap = radius + footprintRadius(b) + 0.8;
@@ -6210,6 +6273,7 @@ export function maintenanceCost(type: string) {
     Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Fishery: 2, Lodge: 3, Forager: 1, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
     Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
     Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9, Jail: 3,
+    Chapel: 4, Guildhall: 7, Brewery: 6, Printer: 6, Stables: 5, Harbour: 8,
   } as Record<string, number>)[type] ?? 2;
 }
 
@@ -6448,6 +6512,12 @@ function daily(world: World) {
     if (hasCivic(world, 'Cafe')) c.social = Math.min(100, c.social + CAFE_SOCIAL);
     if (hasCivic(world, 'Studio')) c.purpose = Math.min(100, c.purpose + STUDIO_PURPOSE);
     if (hasCivic(world, 'Library')) c.purpose = Math.min(100, c.purpose + LIBRARY_PURPOSE);
+    // The township's own: a chapel is somewhere to be quiet together, a
+    // brewery is an evening with everybody in it, a printer is something
+    // to read.
+    if (hasCivic(world, 'Chapel')) { c.social = Math.min(100, c.social + CHAPEL_SOCIAL); c.purpose = Math.min(100, c.purpose + CHAPEL_PURPOSE); }
+    if (hasCivic(world, 'Brewery')) c.social = Math.min(100, c.social + BREWERY_SOCIAL);
+    if (hasCivic(world, 'Printer')) c.purpose = Math.min(100, c.purpose + PRINTER_PURPOSE);
     // Unpaid work erodes a sense of purpose; paid work slowly builds it — and
     // what the work is worth is felt on top of whether it was paid at all.
     // This is the half of the wage lever that stewardship is actually scored
@@ -6740,6 +6810,106 @@ export function buildBounds(world: World): { x0: number; x1: number; y0: number;
   return inset(extentOf(world), 6, 8);
 }
 
+/* ------------------------------------------------------------------ *
+ * Eras
+ * ------------------------------------------------------------------ */
+
+export interface EraCheck { label: string; done: boolean }
+export interface EraGate {
+  /** The era the plot is in. */
+  era: EraSpec;
+  /** The one it could advance to, or null at the end of what is built. */
+  next: EraSpec | null;
+  /** Whether the next era exists in the game yet. */
+  open: boolean;
+  /** Days lived in the current era, against what the step needs. */
+  days: { have: number; need: number };
+  checks: EraCheck[];
+  /** Every check met and the days served. */
+  ready: boolean;
+}
+
+/**
+ * What stands between this settlement and the next era.
+ *
+ * Two gates, both required: days lived in the era, and a checklist drawn
+ * from things the simulation already measures. The list is shown to the
+ * player exactly as it is judged here, so there is never a "why not?".
+ */
+export function eraGate(world: World): EraGate {
+  const era = eraSpec(eraOf(world));
+  const next = nextEra(era.id);
+  const have = Math.max(0, world.day - (world.eraSince ?? 1));
+  if (!next) return { era, next: null, open: false, days: { have, need: 0 }, checks: [], ready: false };
+  const open = next.id <= OPEN_ERA;
+  const has = (type: string) => world.buildings.some((b) => b.type === type && !b.ruined);
+  const count = world.buildings.filter((b) => !b.ruined).length;
+  const ruins = world.buildings.filter((b) => b.ruined).length;
+  let checks: EraCheck[];
+  if (next.id === 2) {
+    checks = [
+      { label: `${world.population} of 40 people`, done: world.population >= 40 },
+      { label: `${count} of 30 buildings standing`, done: count >= 30 },
+      { label: 'A Town Hall, a Bank, a School and a Jail', done: has('Town Hall') && has('Bank') && has('School') && has('Jail') },
+      { label: `${Math.floor(world.treasury).toLocaleString()} of 20,000 Gold in the treasury`, done: world.treasury >= 20_000 },
+      { label: ruins ? `${ruins} ruin${ruins === 1 ? '' : 's'} still standing` : 'No ruins standing', done: ruins === 0 },
+    ];
+  } else if (next.id === 3) {
+    checks = [
+      { label: `${world.population} of 70 people`, done: world.population >= 70 },
+      { label: `${count} of 50 buildings standing`, done: count >= 50 },
+      { label: 'A Lab and a Library', done: has('Lab') && has('Library') },
+      { label: `${Math.floor(world.resources.ironOre ?? 0)} of 300 iron ore in the store`, done: (world.resources.ironOre ?? 0) >= 300 },
+      { label: 'The plot expanded', done: !!world.expanded },
+    ];
+  } else if (next.id === 4) {
+    checks = [
+      { label: `${world.population} of 110 people`, done: world.population >= 110 },
+      { label: `${count} of 75 buildings standing`, done: count >= 75 },
+      { label: 'A Hospital and a Stadium', done: has('Hospital') && has('Stadium') },
+      { label: 'The plot expanded', done: !!world.expanded },
+    ];
+  } else {
+    checks = [
+      { label: `${world.population} of 160 people`, done: world.population >= 160 },
+      { label: `${count} of 100 buildings standing`, done: count >= 100 },
+      { label: 'A Research Campus and a Power Plant', done: has('Research Campus') && has('Power Plant') },
+      { label: 'The plot expanded', done: !!world.expanded },
+      { label: 'Stewardship above 0.7', done: world.stewardship.score >= 0.7 },
+    ];
+  }
+  const daysDone = have >= next.days;
+  const ready = open && daysDone && checks.every((c) => c.done);
+  return { era, next, open, days: { have, need: next.days }, checks, ready };
+}
+
+/**
+ * Advance the plot one era. Only when the gate says so; the charge is the
+ * caller's business, and the registry checks the gate again on its own copy.
+ */
+export function advanceEra(world: World): boolean {
+  const gate = eraGate(world);
+  if (!gate.ready || !gate.next) return false;
+  setEra(world, gate.next.id);
+  return true;
+}
+
+/**
+ * Put the plot in an era without asking. For a device catching up with the
+ * registry's row, which already paid and passed the gate elsewhere.
+ */
+export function setEra(world: World, era: number): boolean {
+  const target = Math.max(1, Math.min(ERAS.length, Math.round(era)));
+  if (target <= eraOf(world)) return false;
+  world.era = target;
+  world.eraSince = world.day;
+  noteAttention(world);
+  const spec = eraSpec(target);
+  if (!world.unlockedAreas.includes(spec.name)) world.unlockedAreas.push(spec.name);
+  pushFeed(world, 'build', `The settlement has entered the ${spec.name.toLowerCase()} era. ${spec.arrives}`);
+  return true;
+}
+
 /**
  * Open the outer belt. Once per plot; the charge is the caller's business.
  *
@@ -6756,8 +6926,77 @@ export function expandPlot(world: World): boolean {
   return true;
 }
 
+/**
+ * The earliest era each building may be raised in. Anything not listed is
+ * there from the start.
+ */
+export const BUILDING_ERA: Record<string, number> = {
+  Chapel: 2, Guildhall: 2, Brewery: 2, Printer: 2, Stables: 2, Harbour: 2,
+};
+
+/** Which shelf of the Build panel a building sits on. */
+export type BuildingCategory = 'Homes' | 'Food' | 'Materials' | 'Civic' | 'Care & learning' | 'Leisure' | 'Transport' | 'Utilities';
+export const BUILDING_CATEGORY: Record<string, BuildingCategory> = {
+  House: 'Homes',
+  Farm: 'Food', Fishery: 'Food', Lodge: 'Food', Forager: 'Food', Mill: 'Food', Bakery: 'Food', Brewery: 'Food',
+  Woodcutter: 'Materials', Quarry: 'Materials', Mine: 'Materials', Carpenter: 'Materials', Blacksmith: 'Materials', Tailor: 'Materials',
+  'Town Hall': 'Civic', Jail: 'Civic', Storage: 'Civic', Market: 'Civic', Bank: 'Civic', Guildhall: 'Civic', Chapel: 'Civic',
+  School: 'Care & learning', Clinic: 'Care & learning', Library: 'Care & learning', Lab: 'Care & learning', Printer: 'Care & learning',
+  Tavern: 'Leisure', Cafe: 'Leisure', Studio: 'Leisure',
+  Stables: 'Transport', Harbour: 'Transport',
+};
+export const BUILDING_CATEGORIES: BuildingCategory[] = ['Homes', 'Food', 'Materials', 'Civic', 'Care & learning', 'Leisure', 'Transport', 'Utilities'];
+
+/** The era a plot is in. Saves from before eras read as the first. */
+export const eraOf = (world: { era?: number }) => Math.max(1, Math.min(ERAS.length, world.era ?? 1));
+
+/** Whether a building type may be raised in this plot's era. */
+export const allowedInEra = (world: { era?: number }, type: string) => (BUILDING_ERA[type] ?? 1) <= eraOf(world);
+
+/** Whether a building of this type stands and is not a ruin. */
+export const hasWorking = (world: { buildings: Building[] }, type: string) =>
+  world.buildings.some((b) => b.type === type && !b.ruined);
+
+/**
+ * The ferry. A Harbour puts a boat on every channel: people cross open water
+ * where there is no bridge, and an islet with no bridge counts as connected.
+ * Bridges stay, and are still where the roads go.
+ */
+export const hasFerry = (world: { buildings: Building[] }) => hasWorking(world, 'Harbour');
+
+/** Carts. A Stables puts every working adult on wheels while they are on the move. */
+export const hasStables = (world: { buildings: Building[] }) => hasWorking(world, 'Stables');
+/** How much faster a cart is than walking. */
+export const CART_PACE = 1.4;
+
+/** Whether people may stand on this landmass without a bridge to it. */
+function reachable(world: { buildings: Building[]; connectedIslands: number[] }, water: WaterField, land: number) {
+  return land === water.mainland || world.connectedIslands.includes(land) || hasFerry(world);
+}
+
+/**
+ * The water as the ferry sees it: the same field, but nothing blocks. Every
+ * movement rule reads `blocks`, so a plot with a Harbour hands this view to
+ * them and leaves the real one to placement, spawning and the renderer.
+ */
+const ferryViews = new WeakMap<WaterField, WaterField>();
+function ferried(water: WaterField): WaterField {
+  let view = ferryViews.get(water);
+  if (!view) {
+    view = { ...water, blocks: () => false, toClear: () => ({ x: 0, y: 0, d: 0 }), toLand: () => ({ x: 0, y: 0, d: 0 }) };
+    ferryViews.set(water, view);
+  }
+  return view;
+}
+/** The field people walk on: the real one, or the ferry's view of it. */
+function walkWater(world: World): WaterField {
+  const water = waterOf(world);
+  return hasFerry(world) ? ferried(water) : water;
+}
+
 export function placementProblem(world: World, type: string, x: number, y: number, ignoreId?: string): string | null {
   useWorld(world);
+  if (!allowedInEra(world, type)) return `A ${type.toLowerCase()} belongs to the ${eraSpec(BUILDING_ERA[type] ?? 1).name.toLowerCase()} era. Advance the plot first.`;
   const bb = buildBounds(world);
   const px = clamp(x, bb.x0, bb.x1), py = clamp(y, bb.y0, bb.y1);
   if (waterOf(world).blocks(px, py)) return 'Nothing can stand on the water.';
@@ -6788,7 +7027,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   if (waterOf(world).blocks(x, y)) return null;
   const need = buildMaterials(type);
   const bb = buildBounds(world);
-  const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, bb.x0, bb.x1), y: clamp(y, bb.y0, bb.y1), workers: [], active: true };
+  const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, bb.x0, bb.x1), y: clamp(y, bb.y0, bb.y1), workers: [], active: true, era: eraOf(world) };
   noteAttention(world);
   spend(world, 'building', cost);
   drawMaterials(world, type);

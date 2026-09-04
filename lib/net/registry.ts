@@ -28,6 +28,9 @@ export interface Claim {
   hand?: { address: string; name: string; since: number; lastSeen: number };
   /** When the owner expanded the plot. */
   expandedAt?: number;
+  /** Which era the plot is in, as the registry has it. Absent means the first. */
+  era?: number;
+  eraAt?: number;
 }
 
 export interface Offer {
@@ -298,6 +301,34 @@ export async function expandPlot(seed: number, owner: string, burnTx?: string): 
     const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean };
     if (!response.ok || !json.claim) {
       return { ok: false, reason: json.error ?? 'The registry refused the expansion.', settling: json.retry === true };
+    }
+    return { ok: true, claim: json.claim, already: json.already === true };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+/**
+ * Advance a plot to the next era.
+ *
+ * The server judges the gate on the published copy, so the world is
+ * published just before this is called. Pay first, then ask; a plot already
+ * in the era comes back `already`.
+ */
+export async function advancePlot(seed: number, owner: string, era: number, burnTx?: string): Promise<ExpandResult> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, advance: true, era, burnTx }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean };
+    if (!response.ok || !json.claim) {
+      return { ok: false, reason: json.error ?? 'The registry refused the advance.', settling: json.retry === true };
     }
     return { ok: true, claim: json.claim, already: json.already === true };
   } catch {

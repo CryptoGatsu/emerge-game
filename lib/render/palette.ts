@@ -176,6 +176,23 @@ export const PEOPLE = {
 } as const;
 
 /**
+ * What a township wears: wool coats in bottle green, navy, burgundy and
+ * brown, brass and cream at the collar, dark trousers and leather. The same
+ * faces, better cloth.
+ */
+export const PEOPLE_TOWNSHIP = {
+  skin: PEOPLE.skin,
+  hair: PEOPLE.hair,
+  shirt: [
+    '#2e4a3a', '#243a58', '#5a2a30', '#4a3826', '#3a3a4a', '#2f4a44', '#563a2a',
+    '#2a3a2a', '#44304a', '#34424a', '#4a4030', '#2c3c50',
+  ],
+  accent: ['#e8d8a8', '#c9a552', '#b8c8d0', '#d8a878', '#e8e0c8', '#a8b890', '#d0b060', '#c8a0a0'],
+  pants: ['#1e2228', '#26201c', '#1c2822', '#241e28', '#181e24', '#2e2820'],
+  shoes: ['#241c16', '#1b1b20', '#2e241a', '#3a2a1c'],
+} as const;
+
+/**
  * Ambient light by hour, applied as a full-scene tint.
  *
  * Night is teal-green rather than blue — a forest at night, lit by what the

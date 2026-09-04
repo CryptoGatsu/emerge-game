@@ -174,6 +174,47 @@ function activityIcon(kind: 'work' | 'eat' | 'social' | 'sleep' | 'trade'): Pixe
   return p;
 }
 
+/**
+ * The cart a Stables puts under a working adult. Side-on, drawn under the
+ * body: a plank bed on two spoked wheels, the shafts reaching forward.
+ */
+function cart(): Pixels {
+  const p = surface(22, 12);
+  // Shafts, then the bed, then the wheels over the bed so the axle reads.
+  rect(p, 15, 5, 7, 1, BUILD.timberDark);
+  rect(p, 2, 3, 14, 4, BUILD.timber);
+  rect(p, 2, 3, 14, 1, BUILD.timberLight);
+  rect(p, 2, 6, 14, 1, BUILD.timberDark);
+  rect(p, 3, 1, 3, 2, '#c9b47a');
+  rect(p, 7, 1, 4, 2, '#8f7f4a');
+  for (const cx of [5, 13]) {
+    rect(p, cx - 2, 6, 5, 5, '#3a2a1a');
+    rect(p, cx - 1, 7, 3, 3, '#6b4a2e');
+    rect(p, cx, 8, 1, 1, '#d8b24a');
+  }
+  return p;
+}
+
+/**
+ * The ferry's boat, drawn under anyone crossing the water: a clinker hull
+ * with a pale gunwale and a dark waterline, wide enough to sit a person in.
+ */
+function boat(): Pixels {
+  const p = surface(32, 14);
+  // Hull, waterline, then the pale gunwale and the thwart the passenger sits on.
+  rect(p, 4, 5, 24, 6, '#7a4e2a');
+  rect(p, 2, 6, 28, 4, '#7a4e2a');
+  rect(p, 5, 11, 22, 1, '#4a2e18');
+  rect(p, 8, 12, 16, 1, '#2f3f4a');
+  rect(p, 4, 5, 24, 1, '#c99a5e');
+  rect(p, 1, 6, 3, 2, '#c99a5e');
+  rect(p, 28, 6, 3, 2, '#c99a5e');
+  rect(p, 6, 7, 20, 1, '#5e3a20');
+  rect(p, 10, 8, 12, 1, '#5e3a20');
+  rect(p, 14, 3, 4, 2, '#a8843a');
+  return p;
+}
+
 /** Something a citizen is carrying, held in front of them as they walk. */
 function carried(kind: 'crate' | 'sack' | 'log' | 'loaf' | 'cloth' | 'fish' | 'game' | 'basket'): Pixels {
   const p = surface(12, 10);
@@ -373,6 +414,8 @@ export function loadAssets(): AssetLibrary {
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
   for (const kind of ['crate', 'sack', 'log', 'loaf', 'cloth', 'fish', 'game', 'basket'] as const) put(`fx.carry.${kind}`, carried(kind));
   put('fx.rod', fishingRod());
+  put('fx.cart', cart());
+  put('fx.boat', boat());
   for (let f = 0; f < 4; f++) put(`fx.funnel.${f}`, funnel(f));
   put('fx.torch.0', torch(0));
   put('fx.torch.1', torch(1));

@@ -3019,6 +3019,19 @@ button.fold:hover { color: var(--emerald); }
 .job-box { margin-top: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(184, 231, 86, 0.22); background: rgba(184, 231, 86, 0.05); display: flex; flex-direction: column; gap: 6px; }
 .job-box .offer-row { display: flex; gap: 8px; }
 .visiting-bar.at-work { border-color: rgba(184, 231, 86, 0.45); }
+.region-pin .era-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; background: rgba(95, 214, 200, 0.18); color: #5fd6c8; }
+.era-card .era-next { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 8px; }
+.era-card .era-next b { color: var(--cream); font-size: 13px; }
+.era-checks { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.era-checks li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
+.era-checks li i { font-style: normal; width: 12px; color: var(--muted); }
+.era-checks li.done { color: var(--cream); }
+.era-checks li.done i { color: var(--emerald); }
+.build-shelves { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
+.build-shelves button { padding: 6px 11px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--panel-edge-soft); }
+.build-shelves button.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); background: rgba(184, 231, 86, 0.08); }
+.build-card.later-era { opacity: 0.55; }
+.era-lock { font-style: normal; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; background: rgba(95, 214, 200, 0.18); color: #5fd6c8; vertical-align: middle; }
 .visiting-bar.at-work .eyebrow { color: var(--emerald); }
 .region-pin.settled .pin-dot { box-shadow: 0 0 0 2px rgba(240, 208, 94, 0); }
 .sale-tag-big { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; background: rgba(240, 208, 94, 0.2); color: #f0d05e; }

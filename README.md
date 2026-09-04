@@ -409,6 +409,34 @@ front page (the newest open, the rest folded) and in the guide under
 `#updates`, in both languages. The guide also carries screenshots of the game,
 in `public/wiki/`.
 
+## Eras
+
+A plot starts in the Settlement era and can be advanced one era at a time, for
+1,000,000 $EMERGE burned per step, once the settlement has earned it: days lived
+in the era plus a checklist drawn from what the simulation already measures
+(`eraGate` in `lib/simulation.ts`; the table in `lib/world/eras.ts`). Township
+asks for sixty days, forty people, thirty buildings, a Town Hall, a Bank, a
+School and a Jail, 20,000 Gold and no ruins. Industrial, Modern and AI are named
+and gated but not yet built (`OPEN_ERA`).
+
+The era lives on the world (saved and published), on the claim row (`Claim.era`)
+and in the snapshot, so it follows the plot to any device and to a buyer. The
+registry re-runs the gate on the published copy before it records the step, the
+same posture as the payout route: nothing edited on a client can become an era.
+
+A township changes four things. Buildings raised or improved after the step use
+the era-2 recipes in `lib/render/buildings.ts` (stone walls, tiled roofs) while
+older ones keep their timber until improved; roads are drawn as cobbles; people
+are dressed from the Township palette. A **Stables** puts working adults on a
+cart (`CART_PACE`, drawn under the walker). A **Harbour** runs a ferry: the
+movement code takes a view of the water field in which nothing blocks
+(`ferried`), the nav grid stops marking water, every island counts as reachable,
+and a citizen over water is drawn on a boat. If the Harbour is ruined, anyone
+afloat swims for the bank. Six Township buildings arrive: Chapel, Guildhall,
+Brewery, Printer, Stables and Harbour; every building carries a category
+(`BUILDING_CATEGORY`) and a minimum era (`BUILDING_ERA`), which the Build panel
+uses for its shelves and locks and the self-builder uses as a filter.
+
 ## Room for two hundred settlements
 
 Twelve charts of seventeen berths — 204 plots in all — and the world map says

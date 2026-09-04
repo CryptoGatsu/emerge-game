@@ -975,12 +975,122 @@ function millWheel(frame: number): Pixels {
 
 export const ART_LEVELS: ArtLevel[] = [1, 2, 3];
 
+/*
+ * The township.
+ *
+ * Six buildings that only exist from the second era, drawn in stone and
+ * tile from the start, and one dressing that puts every earlier recipe in
+ * the same material: a house raised in the settlement era keeps its timber
+ * until it is improved, but the atlas carries the stone version so a
+ * township's new streets are stone from the day they are laid.
+ */
+const TOWNSHIP: Record<string, Recipe> = {
+  Chapel: {
+    bw: 84, wallH: 40, roofH: 34, roof: 'gable', wall: 'stone', roofColor: 'slate', overhang: 6,
+    windows: [['left', 0.18, 0.14], ['left', 0.44, 0.14], ['left', 0.7, 0.14], ['right', 0.62, 0.3]],
+    door: ['right', 0.28],
+    extras: (p, lit, g) => {
+      // A bell tower on the far corner, with a lit lancet.
+      const x = g.cx + Math.round(g.bw * 0.34), top = g.wallTopY - 30;
+      rect(p, x - 6, top, 12, g.wallH + 30, BUILD.stoneWallDark);
+      rect(p, x - 5, top + 1, 5, g.wallH + 28, BUILD.stoneWall);
+      rect(p, x - 8, top - 8, 16, 8, BUILD.roofSlateDark);
+      rect(p, x - 4, top - 14, 8, 6, BUILD.roofSlate);
+      rect(p, x - 2, top + 6, 4, 8, BUILD.glassDark);
+      rect(lit, x - 2, top + 6, 4, 8, BUILD.glassLit);
+      rect(p, x - 1, top - 20, 2, 6, BUILD.gold);
+    },
+  },
+  Guildhall: {
+    bw: 104, wallH: 40, roofH: 26, roof: 'hip', wall: 'stone', roofColor: 'red', overhang: 8,
+    windows: [['left', 0.16, 0.16], ['left', 0.4, 0.16], ['left', 0.64, 0.16], ['right', 0.3, 0.16], ['right', 0.62, 0.16], ['left', 0.16, 0.56], ['left', 0.64, 0.56]],
+    door: ['right', 0.44], sign: 'GUILD',
+    extras: (p, _lit, g) => {
+      // Banners between the upper windows.
+      for (const t of [0.3, 0.52]) {
+        wallPatch(p, g, 'left', t, 0.12, 6, Math.round(g.wallH * 0.36), BUILD.roofRedDark);
+        wallPatch(p, g, 'left', t + 0.01, 0.14, 4, Math.round(g.wallH * 0.3), BUILD.gold);
+      }
+    },
+  },
+  Brewery: {
+    bw: 96, wallH: 30, roofH: 26, roof: 'gable', wall: 'stone', roofColor: 'red', overhang: 8,
+    windows: [['left', 0.22, 0.28], ['left', 0.6, 0.28], ['right', 0.7, 0.28]],
+    door: ['right', 0.3], sign: 'BREW', chimneyAt: -26, chimneyH: 26,
+    extras: (p, _lit, g) => {
+      awning(p, g, 'right', BUILD.roofRedDark);
+      // Barrels stacked along the front.
+      for (let i = 0; i < 4; i++) {
+        wallPatch(p, g, 'right', 0.5 + i * 0.1, 0.7, 6, 8, BUILD.timber);
+        wallPatch(p, g, 'right', 0.5 + i * 0.1, 0.72, 6, 1, BUILD.metal);
+        wallPatch(p, g, 'right', 0.5 + i * 0.1, 0.84, 6, 1, BUILD.metal);
+      }
+    },
+  },
+  Printer: {
+    bw: 80, wallH: 32, roofH: 22, roof: 'hip', wall: 'stone', roofColor: 'slate', overhang: 6,
+    windows: [['left', 0.2, 0.2], ['left', 0.56, 0.2], ['right', 0.66, 0.2], ['left', 0.2, 0.58], ['left', 0.56, 0.58]],
+    door: ['right', 0.3], sign: 'PRESS',
+  },
+  Stables: {
+    bw: 110, wallH: 22, roofH: 24, roof: 'gable', wall: 'stone', roofColor: 'thatch', overhang: 10,
+    windows: [['left', 0.3, 0.3]],
+    door: ['right', 0.5],
+    extras: (p, _lit, g) => {
+      // Open stalls along the front, with a cart under the eave.
+      for (const t of [0.08, 0.26, 0.44, 0.62, 0.8]) wallPatch(p, g, 'left', t, 0.1, 2, Math.round(g.wallH * 0.9), BUILD.timberDark);
+      for (const t of [0.12, 0.3, 0.48]) wallPatch(p, g, 'left', t, 0.45, 12, 3, BUILD.timber);
+      const [wx, wy] = wallPoint(g, 'right', 0.78, 0.55);
+      rect(p, wx - 10, wy, 20, 6, BUILD.timber);
+      rect(p, wx - 11, wy + 6, 5, 5, BUILD.timberDark);
+      rect(p, wx + 6, wy + 6, 5, 5, BUILD.timberDark);
+      rect(p, wx - 10, wy + 7, 3, 3, BUILD.metal);
+      rect(p, wx + 7, wy + 7, 3, 3, BUILD.metal);
+    },
+  },
+  Harbour: {
+    bw: 92, wallH: 24, roofH: 22, roof: 'gable', wall: 'stone', roofColor: 'slate', overhang: 8,
+    windows: [['left', 0.24, 0.3], ['right', 0.66, 0.3]],
+    door: ['right', 0.3], sign: 'FERRY',
+    extras: (p, lit, g) => {
+      // A jetty running out from the near corner, and a lamp at the end.
+      const [jx, jy] = wallPoint(g, 'right', 0.98, 1);
+      for (let i = 0; i < 9; i++) rect(p, jx + i * 4, jy + 2 + i * 2, 5, 3, i % 2 ? BUILD.timber : BUILD.timberDark);
+      for (let i = 0; i < 9; i += 2) rect(p, jx + i * 4 + 1, jy + 5 + i * 2, 1, 4, BUILD.timberDark);
+      const lx = jx + 36, ly = jy + 18;
+      rect(p, lx, ly - 12, 2, 14, BUILD.metal);
+      rect(p, lx - 2, ly - 15, 6, 4, BUILD.gold);
+      rect(lit, lx - 3, ly - 16, 8, 6, BUILD.glassLit);
+    },
+  },
+};
+
+/**
+ * The same recipe, as a township would build it: stone in place of plaster,
+ * timber and logs, slate or tile in place of thatch. Stone and slate stay as
+ * they are.
+ */
+function townshipDress(r: Recipe): Recipe {
+  const wall: WallStyle = 'stone';
+  const roofColor: RoofColor = r.roofColor === 'thatch' ? 'red' : r.roofColor === 'green' ? 'slate' : r.roofColor;
+  return { ...r, wall, roofColor };
+}
+
 export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string; pixels: Pixels }[] } {
   const art: BuildingArt[] = [];
   let seed = 6000;
   for (const [name, recipe] of Object.entries(RECIPES)) {
     seed += 137;
     for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
+    // The township body of the same building, keyed `.E2`.
+    for (const level of ART_LEVELS) art.push(buildOne(`${name}.E2`, seed + 41, townshipDress(recipe), level));
+  }
+  for (const [name, recipe] of Object.entries(TOWNSHIP)) {
+    seed += 137;
+    // Township buildings are stone from the start; the plain key and the
+    // era key are the same body, so a lookup by either finds it.
+    for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
+    for (const level of ART_LEVELS) art.push(buildOne(`${name}.E2`, seed, recipe, level));
   }
   const overlays = [0, 1, 2, 3].map((f) => ({ name: `overlay.mill.wheel.${f}`, pixels: millWheel(f) }));
   return { art, overlays };
@@ -989,7 +1099,7 @@ export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string
 export const HOUSE_DESIGNS = 8;
 
 /** Every building type that has art of its own. */
-export const BUILDING_TYPES = Object.keys(RECIPES).filter((k) => !k.startsWith('House.'));
+export const BUILDING_TYPES = [...Object.keys(RECIPES).filter((k) => !k.startsWith('House.')), ...Object.keys(TOWNSHIP)];
 
 /**
  * Map a simulation building to its art.
@@ -998,14 +1108,18 @@ export const BUILDING_TYPES = Object.keys(RECIPES).filter((k) => !k.startsWith('
  * the list, so a home keeps its face when the settlement grows around it. The
  * level picks the dressed variant, so an improved building looks improved.
  */
-export function buildingArtKey(type: string, id: string, level = 1): string {
+export function buildingArtKey(type: string, id: string, level = 1, era = 1): string {
   let base: string;
-  if (type !== 'House') base = RECIPES[type] ? type : 'House.0';
+  if (type !== 'House') base = RECIPES[type] || TOWNSHIP[type] ? type : 'House.0';
   else {
     let h = 2166136261;
     for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
     base = `House.${Math.abs(h) % HOUSE_DESIGNS}`;
   }
+  // The era dresses the body: anything from the township on is stone and
+  // tile. A building raised earlier keeps its timber until it is improved,
+  // which is the caller's decision, made by passing the era it was built in.
+  if (era >= 2) base = `${base}.E2`;
   const lvl = Math.max(1, Math.min(3, Math.round(level)));
   return lvl === 1 ? base : `${base}.L${lvl}`;
 }

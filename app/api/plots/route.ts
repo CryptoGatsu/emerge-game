@@ -42,14 +42,18 @@
 
 import { NextResponse } from 'next/server';
 import {
-  allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markExpanded, placeOffer,
+  allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
   type Claim,
 } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { EXPAND_COST_EMERGE, HAND_MIN_EMERGE } from '@/lib/chain/vault';
+import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE } from '@/lib/chain/vault';
+import { readWorld } from '@/lib/server/registry';
+import { worldFromSave, type SavedWorld } from '@/lib/world/save';
+import { eraGate, eraOf } from '@/lib/simulation';
+import { OPEN_ERA } from '@/lib/world/eras';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { ownerOnChain, registryConfigured } from '@/lib/server/land';
@@ -108,6 +112,9 @@ export async function POST(request: Request) {
     bidder?: string;
     /** Expand the plot, once; `burnTx` paid for it where the token is live. */
     expand?: boolean;
+    /** Advance the plot to `era`; `burnTx` paid for it where the token is live. */
+    advance?: boolean;
+    era?: number;
     /** Hired hands: the owner opens or closes the job; a player takes, keeps or leaves it. */
     hire?: boolean;
     takeJob?: boolean;
@@ -270,6 +277,65 @@ export async function POST(request: Request) {
     }
     try {
       const result = await markExpanded(seed, owner);
+      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      return NextResponse.json({ claim: result.claim, already: result.already });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
+  /*
+   * Advancing an era.
+   *
+   * The gate is judged here, on the copy of the world the owner published,
+   * not on the client's say-so: a browser that claims to have forty people
+   * and a school is not evidence, but the snapshot every visitor sees is
+   * the same snapshot the owner has to stand behind. The charge is checked
+   * the way a survey's is. A plot already in the era answers with its row.
+   */
+  if (body.advance) {
+    const era = Math.round(Number(body.era) || 0);
+    let claim: Claim | null;
+    try {
+      claim = await claimOf(seed);
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+      return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+    }
+    const held = claim.era ?? 1;
+    if (era <= held) return NextResponse.json({ claim, already: true });
+    if (era !== held + 1) return NextResponse.json({ error: 'One era at a time.' }, { status: 400 });
+    if (era > OPEN_ERA) return NextResponse.json({ error: 'That era is not built yet.' }, { status: 409 });
+    const published = await readWorld(seed);
+    const world = published ? worldFromSave(published.snapshot as SavedWorld, seed, claim.worldName) : null;
+    if (!world) return NextResponse.json({ error: 'Publish the world first, then advance it.' }, { status: 409 });
+    if (eraOf(world) !== held) {
+      // The published copy and the row disagree; the row wins for the charge,
+      // the world for the checklist. Read the checklist as if the world were
+      // in the row's era.
+      world.era = held;
+    }
+    const gate = eraGate(world);
+    if (!gate.ready) {
+      return NextResponse.json({
+        error: 'The settlement has not earned the next era yet.',
+        gate: { days: gate.days, checks: gate.checks },
+      }, { status: 409 });
+    }
+    if (tokenLive()) {
+      const burnTx = String(body.burnTx ?? '');
+      const paid = await verifyBurn(burnTx, owner, ADVANCE_COST_EMERGE);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(burnTx, `era:${seed}:${era}`))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
+    try {
+      const result = await markEra(seed, owner, era);
       if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
       return NextResponse.json({ claim: result.claim, already: result.already });
     } catch {

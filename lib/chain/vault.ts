@@ -64,6 +64,12 @@ export const RENAME_PLAYER_EMERGE = 30_000;
  * decision rather than an upgrade.
  */
 export const EXPAND_COST_EMERGE = 500_000;
+/**
+ * What it costs to advance a plot to the next era. The same at every step,
+ * burned, and only ever payable once the settlement has earned the step:
+ * the gate is days lived and things built, and the charge is the last word.
+ */
+export const ADVANCE_COST_EMERGE = 1_000_000;
 
 /**
  * What a player starts with while there is no token to hold.

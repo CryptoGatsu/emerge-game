@@ -43,6 +43,7 @@ import {
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { music } from '@/lib/audio/music';
+import { eraName } from '@/lib/world/eras';
 import { BrandLine } from './Brand';
 import { LanguageSwitch } from './LanguageSwitch';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
@@ -487,6 +488,7 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
                 {theirs && !theirs.forSale && !(theirs.hiring && !theirs.hand) && <i className="settled-tag">{t('settled')}</i>}
                 {theirs && !!theirs.forSale && <i className="sale-tag">{t('for sale')}</i>}
                 {theirs && !theirs.forSale && theirs.hiring && !theirs.hand && <i className="hiring-tag">{t('hiring')}</i>}
+                {theirs && (theirs.era ?? 1) > 1 && <i className="era-tag">{tn(eraName(theirs.era ?? 1))}</i>}
               </b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}

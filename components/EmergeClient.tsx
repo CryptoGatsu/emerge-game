@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  demolishBuilding, dropCitizen, drawFromTreasury, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, trial,
+  advanceEra, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, trial,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees,
@@ -39,7 +39,7 @@ import {
 } from '@/lib/world/plots';
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
-  heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry,
+  heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -47,7 +47,7 @@ import { disconnectWallet, useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
-  EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
+  ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger,
 } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
@@ -867,6 +867,13 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         sceneRef.current?.reset(world);
         setView(snapshot(world, null));
       }
+      // An era paid for on another device, likewise.
+      if (row?.era && world && row.era > eraOf(world)) {
+        setEra(world, row.era);
+        saveWorld(world);
+        sceneRef.current?.reset(world);
+        setView(snapshot(world, null));
+      }
       if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
         world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
       }
@@ -1265,12 +1272,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => (worldRef.current ? constructBuilding(worldRef.current, type, BUILD_COSTS[type] ?? 0, x, y) : null),
       map: () => sceneRef.current?.mapSize() ?? null,
       spot: () => sceneRef.current?.spot ?? null,
       music: () => music.playing,
+      // Put the camera on a citizen, close, for a screenshot of what they ride.
+      focus: (id: string, zoom = 2.4) => { sceneRef.current?.focus({ kind: 'citizen', id }); sceneRef.current?.zoomBy(zoom); },
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
@@ -1473,6 +1482,66 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       title: t('The plot is expanded'),
       body: t('The land has grown on every side. Pan out: there is new ground beyond the old edge, and the wood on it is yours to clear.'),
       lifetime: 14_000,
+    });
+    return null;
+    // `announce` is stable for the life of the world.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
+
+  /**
+   * Advance the plot to the next era.
+   *
+   * The world is published first, because the registry judges the gate on
+   * the published copy and not on this browser's word; then paid; then
+   * recorded; and only then does this world change. A refusal at any step
+   * leaves it as it was, and a dismissed wallet prompt costs nothing.
+   */
+  const advanceFor = useCallback(async (): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    const gate = eraGate(world);
+    if (!gate.next) return t('This is as far as the eras go, for now.');
+    if (!gate.open) return t('The {era} era is not built yet. It is coming.', { era: gate.next.name });
+    if (!gate.ready) return t('The settlement has not earned the next era yet.');
+    if (!wallet.address) return t('Connect a wallet to advance the plot.');
+    const put = await publishWorld({
+      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
+      day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
+    });
+    if (!put.ok && !put.behind) return t('The world could not be published, and the registry judges the step on the published copy. Try again in a moment.');
+    const paid = await spend(player.ledger, ADVANCE_COST_EMERGE, wallet.address);
+    if (!paid.ok) return paid.refused;
+    onPlayer({ ...player, ledger: paid.ledger });
+    const target = gate.next.id;
+    let result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
+    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
+    }
+    if (!result.ok) {
+      return paid.txHash
+        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the era never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+        : result.reason;
+    }
+    if (!advanceEra(world)) setEra(world, target);
+    saveWorld(world);
+    // Publish again with the era on it, so another device reading the
+    // published copy opens a township rather than waiting for the claims
+    // poll to catch it up.
+    void publishWorld({
+      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
+      day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
+    });
+    selectedRef.current = null;
+    setSelected(null);
+    sceneRef.current?.reset(world);
+    refresh();
+    announce({
+      id: `era-${claimed.seed}-${target}`,
+      kind: 'claim',
+      title: t('A new era'),
+      body: t('{name} is a {era} now. {arrives}', { name: world.name, era: gate.next.name.toLowerCase(), arrives: tx(gate.next.arrives) }),
+      lifetime: 16_000,
     });
     return null;
     // `announce` is stable for the life of the world.
@@ -1687,6 +1756,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onClearTrees={beginClear}
             onRenameWorld={renameWorldFor}
             onExpand={expandFor}
+            onAdvance={advanceFor}
             onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}
             onRelease={onRelease}

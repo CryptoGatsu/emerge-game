@@ -17,6 +17,18 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '1.4',
+    date: '2026-09-04',
+    title: 'Eras: the Township',
+    notes: [
+      'A plot can advance from the Settlement era to the Township era. It has to earn it first: sixty days in the era, forty people, thirty buildings standing, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury and no ruins. Then 1,000,000 $EMERGE, burned, once per step. The ERA card in the On-Chain panel shows the checklist as it fills in.',
+      'A township looks like one: stone walls and tiled roofs on everything raised or improved after the step, cobbled streets in place of dirt, and people in wool coats and hats. What was built before keeps its timber until you improve it.',
+      'Six new buildings: Chapel, Guildhall, Brewery, Printer, Stables and Harbour. A Stables puts every working adult on a cart, faster than walking. A Harbour runs a ferry: people cross open water on a boat, and every island counts as reachable without a bridge.',
+      'The Build panel is sorted into shelves: Homes, Food, Materials, Civic, Care and learning, Leisure, Transport and Utilities. Buildings from a later era are shown greyed with the era they belong to. The settlement\u2019s own builder only raises what its era allows.',
+      'Three more eras are named and gated but not yet built: Industrial, Modern and AI. The checklist for each is already on the card, so a plot can start working toward it.',
+    ],
+  },
+  {
     version: '1.3',
     date: '2026-09-03',
     title: 'Your settlement can no longer be lost',
@@ -56,6 +68,18 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '1.4',
+    date: '2026-09-04',
+    title: '时代：城镇',
+    notes: [
+      '地块可以从聚落时代推进到城镇时代。必须先达成条件：在本时代满六十天、四十人、三十栋建筑、有镇公所、银行、学校和监狱、金库 20,000 金币、没有废墟。然后花 1,000,000 $EMERGE，销毁，每一步一次。"链上"面板的"时代"卡片会逐项显示清单。',
+      '城镇看起来就是城镇：推进之后新建或升级的建筑都是石墙瓦顶，泥路变成石板街，人们穿上羊毛外套、戴上帽子。之前建的保留木结构，直到你升级它。',
+      '六种新建筑：礼拜堂、行会大厅、酿酒坊、印刷所、马厩和港口。马厩让每个上班的成年人坐上马车，比步行快。港口开通渡船：人们乘船过水，每座岛无需桥梁即可到达。',
+      '建造面板按货架分类：住房、食物、材料、市政、照护与学习、休闲、交通和公用。后一个时代的建筑灰显并标出所属时代。聚落自建只会建当前时代允许的东西。',
+      '另外三个时代已经命名并设好门槛，但尚未建成：工业、现代和人工智能。每个的清单已经在卡片上，地块可以提前朝它努力。',
+    ],
+  },
   {
     version: '1.3',
     date: '2026-09-03',

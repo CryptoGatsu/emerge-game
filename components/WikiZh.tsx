@@ -14,7 +14,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
-  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, EXPAND_COST_EMERGE
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, EXPAND_COST_EMERGE, ADVANCE_COST_EMERGE
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
@@ -44,6 +44,7 @@ const CHARGES = [
   { what: '给自己改名', cost: n(RENAME_PLAYER_EMERGE), note: '第一次免费' },
   { what: '派出勘探队', cost: n(DIG_COST_EMERGE), note: '' },
   { what: '扩建地块', cost: n(EXPAND_COST_EMERGE), note: '每块地一次；约多一半土地' },
+  { what: '推进时代', cost: n(ADVANCE_COST_EMERGE), note: '每一步一次，地块达成条件之后' },
 ];
 
 const yieldFor = (score: number, attention: number) => Math.round(STEWARDSHIP_DAILY_CAP * score * attention);
@@ -146,6 +147,7 @@ const SECTIONS = [
   ['economy', '聚落自己的钱'],
   ['vault', '存款与取款'],
   ['buildings', '建筑'],
+  ['eras', '时代'],
   ['status', '读懂你的聚落'],
   ['danger', '可能出的岔子'],
   ['world', '世界本身'],
@@ -423,6 +425,33 @@ export function WikiZh() {
           <p className="wiki-note">除了市场、银行和镇公所——它们撑着整个聚落——以及还有人住的房子，任何建筑都可以从卡片上拆除。拆除回收<b>一半的木料和石头</b>进堆场。金币没了；你得到的是停掉的维护费，而那通常就是拆它的目的。</p>
         </section>
 
+        {/* ---------------------------------------------------------- */}
+        <section id="eras">
+          <h2>时代</h2>
+          <p>每块地都从<b>聚落</b>时代开始：木料和茅草、手工具、泥路、人人步行。达成条件后，地主可以一次推进一个时代。五个时代已命名；第二个已建成，其余设好了门槛、即将到来。</p>
+          <table className="wiki-table">
+            <thead><tr><th>时代</th><th>天数</th><th>要求</th><th>带来什么</th></tr></thead>
+            <tbody>
+              <tr><td>聚落</td><td className="num">—</td><td>—</td><td>每块地的起点。</td></tr>
+              <tr><td>城镇</td><td className="num">60</td><td>40 人、30 栋建筑、镇公所、银行、学校和监狱、金库 20,000 金币、没有废墟</td><td>石墙瓦顶、石板街、马车、渡船；礼拜堂、行会大厅、酿酒坊、印刷所、马厩、港口</td></tr>
+              <tr><td>工业</td><td className="num">90</td><td>70 人、50 栋建筑、实验室和图书馆、300 铁矿石、地块已扩建</td><td className="muted">尚未建成</td></tr>
+              <tr><td>现代</td><td className="num">120</td><td>110 人、75 栋建筑、医院和体育场、地块已扩建</td><td className="muted">尚未建成</td></tr>
+              <tr><td>人工智能</td><td className="num">150</td><td>160 人、100 栋建筑、研究园区和发电厂、地块已扩建、管理分高于 0.7</td><td className="muted">尚未建成</td></tr>
+            </tbody>
+          </table>
+          <p>天数按地块所在的时代计算，清单取自聚落本来就在衡量的东西。两者都显示在"链上"面板的<b>时代</b>卡片上，逐行列出，达成的打勾。全部达成后，按钮以 {n(ADVANCE_COST_EMERGE)} {T} 提供推进，和其他收费一样销毁。世界会先发布，登记处按它持有的副本判断清单，所以你自己设备上的任何改动都不能把地块改进一个时代。时代记在地块上，跟着它走到任何设备和买家手里。</p>
+          <h3>城镇改变了什么</h3>
+          <ul>
+            <li><b>外观。</b>推进之后新建或升级的建筑是石墙瓦顶；原有的保留木结构直到你升级它，所以现代城镇中央有一座旧石礼拜堂是对的画面。泥路变成石板路。人们穿羊毛外套、戴帽子。</li>
+            <li><b>马车。</b>马厩让每个上班的成年人在路上坐马车，比步行快四成。马车画在他们脚下。</li>
+            <li><b>渡船。</b>港口在每条水道上放一艘船。没有桥的地方人们乘船过水，每座岛都算能到达，被水围住的聚落可以铺满自己的全部土地。桥保留，道路仍从桥上过。港口成了废墟，水上的人就游回岸边。</li>
+            <li><b>六种建筑。</b>礼拜堂（陪伴与志向）、行会大厅（学习）、酿酒坊（陪伴）、印刷所（志向与学习）、马厩、港口。它们和其他建筑一样花金币、木料和石头，地块成为城镇后出现在建造面板对应的货架上。</li>
+          </ul>
+          <h3>货架</h3>
+          <p>建造面板把每种建筑放到一个货架上：住房、食物、材料、市政、照护与学习、休闲、交通和公用。后一个时代的建筑灰显并标出所属时代的名字，让你看到将要到来的东西。聚落自建只会建当前时代允许的东西。</p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
         <section id="status">
           <h2>读懂你的聚落</h2>
           <p>角落里的面板是聚落的生命体征。这些都不是给你的分数——每一项都从住在那里的人身上量出来，每一项你都能做点什么。</p>

@@ -27,6 +27,7 @@ import { CLEARING_DAYS, CLEAR_RADIUS } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
 import { extentOf } from '../world/extent';
+import { eraOf } from '../simulation';
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
 import type { ShoreEdge } from './tiles';
 import type { BiomeKind } from '../world/biomes';
@@ -344,7 +345,8 @@ export class EmergeScene {
           this.groundLayer.addChild(cliff);
         }
 
-        const art = TILE_ART[kind];
+        // A township's roads are cobbled where a settlement's were worn earth.
+        const art = kind === Tile.Path && eraOf(this.world) >= 2 ? { key: 'tile.cobble', variants: 3 } : TILE_ART[kind];
         if (kind === Tile.Water || kind === Tile.WaterShore) {
           const sprite = new Sprite(assets.get(`${art.key}.0`));
           sprite.position.set(pos.x - TILE_W / 2, pos.y);
@@ -620,7 +622,10 @@ export class EmergeScene {
     // stops on its own once the building is out of the list.
 
     this.world.buildings.forEach((building) => {
-      const artKey = buildingArtKey(building.type, building.id, levelOf(building));
+      // A building raised in an earlier era keeps its look until it is
+      // improved: the timber cottage in the middle of a stone town is right.
+      const bodyEra = Math.max(building.era ?? 1, levelOf(building) > 1 ? eraOf(this.world) : 1);
+      const artKey = buildingArtKey(building.type, building.id, levelOf(building), bodyEra);
       const seen = this.buildings.get(building.id);
       if (seen && seen.artKey === artKey) {
         seen.building = building;
@@ -717,7 +722,7 @@ export class EmergeScene {
     for (const citizen of this.world.citizens) {
       seen.add(citizen.id);
       if (this.citizens.has(citizen.id)) continue;
-      const sprite = new CitizenSprite(this.assets, citizen);
+      const sprite = new CitizenSprite(this.assets, citizen, eraOf(this.world));
       sprite.container.eventMode = 'static';
       sprite.container.cursor = 'pointer';
       sprite.container.hitArea = new Rectangle(-9, -32, 18, 34);
@@ -2347,7 +2352,7 @@ export class EmergeScene {
    */
   startPlacement(type: string, onPlace: (x: number, y: number) => void) {
     this.cancelPlacement();
-    const artKey = buildingArtKey(type, 'ghost');
+    const artKey = buildingArtKey(type, 'ghost', 1, eraOf(this.world));
     const meta = this.assets.buildingMeta.get(artKey);
     if (!meta) return;
     const ghost = new Sprite(this.assets.get(`building.${artKey}`));

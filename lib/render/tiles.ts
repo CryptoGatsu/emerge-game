@@ -177,6 +177,31 @@ function pathTile(seed: number): Pixels {
   return p;
 }
 
+/**
+ * A township street: close-set cobbles with the grass kept out, which is
+ * what separates a town's road from a settlement's worn track.
+ */
+function cobbleTile(seed: number): Pixels {
+  const p = tile();
+  fillDiamond(p, shade(GROUND.plaza, -0.06));
+  speckle(p, seed, 120, [shade(GROUND.plaza, 0.06), shade(GROUND.plaza, -0.14)], clip);
+  const r = rng(seed + 919);
+  for (let y = 2; y < TILE_H - 2; y += 3) {
+    const [x0, width] = diamondRow(y);
+    const offset = ((y / 3) | 0) % 2 ? 2 : 0;
+    for (let x = x0 + 1 + offset; x < x0 + width - 4; x += 5) {
+      if (!insideDiamond(x, y) || !insideDiamond(x + 3, y + 2)) continue;
+      const tone = r() < 0.5 ? GROUND.stone : GROUND.stoneLight;
+      rect(p, x, y, 4, 2, tone);
+      rect(p, x, y + 2, 4, 1, GROUND.stoneDark);
+      rect(p, x, y, 4, 1, shade(tone, 0.14));
+    }
+  }
+  scuff(p, seed + 615, shade(GROUND.plaza, -0.06));
+  ragged(p, seed + 715, 3);
+  return p;
+}
+
 function plazaTile(seed: number): Pixels {
   const p = tile();
   fillDiamond(p, GROUND.plaza);
@@ -445,6 +470,7 @@ export function buildTiles(): TileArt[] {
   add('tile.crop.veg', cropTile(2300, 'veg'));
   for (let i = 0; i < 3; i++) add(`tile.path.${i}`, pathTile(2400 + i * 43));
   for (let i = 0; i < 2; i++) add(`tile.plaza.${i}`, plazaTile(2600 + i * 31));
+  for (let i = 0; i < 3; i++) add(`tile.cobble.${i}`, cobbleTile(2700 + i * 37));
   for (let i = 0; i < 2; i++) add(`tile.rock.${i}`, rockTile(2800 + i * 47));
   add('tile.sand.0', sandTile(3000));
   add('tile.snow.0', snowTile(3100));

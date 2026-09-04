@@ -21,7 +21,7 @@ import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
-  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, EXPAND_COST_EMERGE
+  RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE, EXPAND_COST_EMERGE, ADVANCE_COST_EMERGE
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
@@ -53,6 +53,7 @@ const CHARGES = [
   { what: 'Rename yourself', cost: n(RENAME_PLAYER_EMERGE), note: 'the first change is free' },
   { what: 'Send a digging party', cost: n(DIG_COST_EMERGE), note: '' },
   { what: 'Expand a plot', cost: n(EXPAND_COST_EMERGE), note: 'once per plot; about half as much land again' },
+  { what: 'Advance an era', cost: n(ADVANCE_COST_EMERGE), note: 'once per step, after the plot has earned it' },
 ];
 
 /**
@@ -182,6 +183,7 @@ const SECTIONS = [
   ['economy', 'The settlement\u2019s own money'],
   ['vault', 'Deposits and withdrawals'],
   ['buildings', 'Buildings'],
+  ['eras', 'Eras'],
   ['status', 'Reading your settlement'],
   ['danger', 'What can go wrong'],
   ['world', 'The world itself'],
@@ -760,6 +762,49 @@ export default function Wiki() {
             — those hold the settlement together — and any house somebody still lives in. Pulling
             something down salvages <b>half the timber and stone</b> back into the yard. The Gold is
             gone; what you get is the upkeep stopped, and that is usually the point of doing it.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="eras">
+          <h2>Eras</h2>
+          <p>
+            Every plot begins in the <b>Settlement</b> era: timber and thatch, hand tools, dirt
+            lanes, everybody on foot. When it has earned it, the owner can advance it one era at a
+            time. Five are named; the second is built and the rest are gated and coming.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Era</th><th>Days</th><th>What it asks</th><th>What arrives</th></tr></thead>
+            <tbody>
+              <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts.</td></tr>
+              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 buildings, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Stone and tile, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
+              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 buildings, a Lab and a Library, 300 iron ore, the plot expanded</td><td className="muted">Not built yet</td></tr>
+              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 buildings, a Hospital and a Stadium, the plot expanded</td><td className="muted">Not built yet</td></tr>
+              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 buildings, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td className="muted">Not built yet</td></tr>
+            </tbody>
+          </table>
+          <p>
+            The days are counted in the era the plot is in, and the checklist is drawn from things
+            the settlement already measures. Both are shown on the <b>ERA</b> card in the On-Chain
+            panel, line by line, with a tick against each one met. When every line is met the
+            button offers the step for {n(ADVANCE_COST_EMERGE)} {TOKEN.ticker}, burned like every
+            other charge. The world is published first and the registry judges the checklist on the
+            copy it holds, so nothing on your own device can be edited into an era. The era is
+            recorded against the plot and follows it to any device and to a buyer.
+          </p>
+          <h3>What a township changes</h3>
+          <ul>
+            <li><b>The look.</b> Buildings raised or improved after the step are stone with tiled roofs; the ones you already had keep their timber until you improve them, so an old stone chapel in the middle of a modern town is the right picture. Dirt lanes become cobbles. People wear wool coats and hats.</li>
+            <li><b>Carts.</b> A Stables puts every working adult on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them.</li>
+            <li><b>The ferry.</b> A Harbour puts a boat on every channel. People cross open water on it where there is no bridge, and every island counts as reachable, so a settlement hemmed in by water can spread to all of its land. Bridges stay, and the roads still run over them. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
+            <li><b>Six buildings.</b> Chapel (company and purpose), Guildhall (learning), Brewery (company), Printer (purpose and learning), Stables, Harbour. They cost Gold, timber and stone like everything else and appear on their shelves in the Build panel once the plot is a township.</li>
+          </ul>
+          <h3>Shelves</h3>
+          <p>
+            The Build panel sorts every building onto a shelf: Homes, Food, Materials, Civic, Care
+            and learning, Leisure, Transport and Utilities. A building from a later era is shown
+            greyed with the name of the era it belongs to, so you can see what is coming. The
+            settlement&rsquo;s own builder raises only what the plot&rsquo;s era allows.
           </p>
         </section>
 

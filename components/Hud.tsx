@@ -423,6 +423,7 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
       <Stat icon="♥" label={t('Happiness')} value={`${view.happiness}%`} />
       <Stat icon="⚡" label={t('Energy')} value={`${view.energy}%`} />
       <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label={t('Day')} value={`${view.day} · ${view.clock}`} />
+      <Stat icon="⚑" label={t('Era')} value={view.era.gate.next ? t('{era} · {n} days', { era: tn(view.era.name), n: view.era.days }) : tn(view.era.name)} />
       <Stat
         icon={view.temperature <= 2 ? '❄' : view.temperature >= 30 ? '☼' : '🌡'}
         label={t('Temperature')}
