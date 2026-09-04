@@ -7,6 +7,8 @@
  * is drawn.
  */
 
+import { BASE_EXTENT, type Extent } from './extent';
+
 export const GRID = 48;
 export const TILE_W = 64;
 export const TILE_H = 32;
@@ -55,10 +57,36 @@ export function depthOf(wx: number, wy: number, bias = 0) {
   return worldToTile(wx) + worldToTile(wy) + bias;
 }
 
-/** Bounding box of the whole tile field in screen pixels. */
-export const SCENE_BOUNDS = {
-  minX: -GRID * (TILE_W / 2),
-  maxX: GRID * (TILE_W / 2),
-  minY: -ELEVATION - 80,
-  maxY: GRID * TILE_H + 80,
-};
+/**
+ * Bounding box of a plot's tile field in screen pixels, with where its tiles
+ * start in absolute tile space and how many there are across.
+ *
+ * An expanded plot has tiles at negative indices: the land grew outward and
+ * the old ground kept its coordinates, so the first row of an expanded plot
+ * is row −6. Everything that loops over tiles adds `t0` to the local index
+ * before projecting, and everything that clamps the camera or draws the
+ * minimap reads the box from here.
+ */
+export interface SceneBounds {
+  minX: number; maxX: number; minY: number; maxY: number;
+  /** Absolute tile index of the first column and row. */
+  t0: number;
+  /** Tiles across. */
+  grid: number;
+}
+
+export function sceneBoundsOf(extent: Extent): SceneBounds {
+  const t0 = worldToTile(extent.x0);
+  const t1 = worldToTile(extent.x1);
+  return {
+    minX: (t0 - t1) * (TILE_W / 2),
+    maxX: (t1 - t0) * (TILE_W / 2),
+    minY: (t0 + t0) * (TILE_H / 2) - ELEVATION - 80,
+    maxY: (t1 + t1) * (TILE_H / 2) + 80,
+    t0,
+    grid: Math.round(t1 - t0),
+  };
+}
+
+/** The base plot's box, for anything that has not asked for a world's own. */
+export const SCENE_BOUNDS: SceneBounds = sceneBoundsOf(BASE_EXTENT);

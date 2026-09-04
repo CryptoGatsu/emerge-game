@@ -43,7 +43,7 @@ const CHARGES = [
   { what: '给一位居民改名', cost: n(RENAME_CITIZEN_EMERGE), note: '用勘探得到的命名权则免费' },
   { what: '给自己改名', cost: n(RENAME_PLAYER_EMERGE), note: '第一次免费' },
   { what: '派出勘探队', cost: n(DIG_COST_EMERGE), note: '' },
-  { what: '扩建地块', cost: n(EXPAND_COST_EMERGE), note: '每块地一次；开放外圈' },
+  { what: '扩建地块', cost: n(EXPAND_COST_EMERGE), note: '每块地一次；约多一半土地' },
 ];
 
 const yieldFor = (score: number, attention: number) => Math.round(STEWARDSHIP_DAILY_CAP * score * attention);
@@ -238,7 +238,7 @@ export function WikiZh() {
           </table>
           <p className="wiki-note">建造、拆除、搬动人，以及聚落内部的其他一切花的是金币，不是 {T}。金币是聚落自己的钱，永远不会离开它。</p>
           <h3>扩建地块</h3>
-          <p>每块地勘测时都留有一圈不建造的边缘。扩建会开放这圈外围——四周约多五分之一的土地——让建筑、小路和居民可以一直建到土地的边缘。费用 {n(EXPAND_COST_EMERGE)} {T}，和其他收费一样销毁，<b>每块地只能买一次</b>，在世界里的"链上"面板购买。登记处会把它记在地块上，所以它跟着土地走到任何设备，地块出售时也跟着新主人。</p>
+          <p>扩建会让地块本身变大。你现有土地的四周会出现一圈新地——约多出一半的土地——河流延伸进去，上面有野生动物，树木任你清除或直接建在上面。你建的东西一样不动：聚落留在原地，边界向外推。费用 {n(EXPAND_COST_EMERGE)} {T}，和其他收费一样销毁，<b>每块地只能买一次</b>，在世界里的"链上"面板购买。登记处会把它记在地块上，所以它跟着土地走到任何设备，地块出售时也跟着新主人。</p>
         </section>
 
         <section id="earning">

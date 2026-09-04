@@ -52,7 +52,7 @@ const CHARGES = [
   { what: 'Rename a being', cost: n(RENAME_CITIZEN_EMERGE), note: 'free with a naming right from a dig' },
   { what: 'Rename yourself', cost: n(RENAME_PLAYER_EMERGE), note: 'the first change is free' },
   { what: 'Send a digging party', cost: n(DIG_COST_EMERGE), note: '' },
-  { what: 'Expand a plot', cost: n(EXPAND_COST_EMERGE), note: 'once per plot; opens the outer belt' },
+  { what: 'Expand a plot', cost: n(EXPAND_COST_EMERGE), note: 'once per plot; about half as much land again' },
 ];
 
 /**
@@ -351,9 +351,10 @@ export default function Wiki() {
           </p>
           <h3>Expanding a plot</h3>
           <p>
-            Every plot is surveyed with a margin round it that nothing is built on. An expansion
-            opens that outer belt — about a fifth more ground, all the way round — so buildings,
-            lanes and people can go right out to the edge of the land. It costs
+            An expansion makes the plot itself bigger. A ring of new ground appears on every side
+            of the land you have — about half as much land again — with the river running on into
+            it, wildlife on it, and the wood on it yours to clear or build over. Nothing you have
+            built moves: the settlement stays exactly where it is and the edge moves out. It costs
             {' '}{n(EXPAND_COST_EMERGE)} {TOKEN.ticker}, burned like every other charge, and can be
             bought <b>once per plot</b>, from the On-Chain panel inside the world. The registry
             records it against the plot, so it follows the land to any device and to a new owner

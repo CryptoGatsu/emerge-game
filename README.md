@@ -380,16 +380,25 @@ contract is deployed, `claimPlot()` in `lib/chain/emerge.ts` is where the $EMERG
 transfer and on-chain registration go, and the chain's answer replaces the relay's
 without anything above this line changing.
 
-**Expanding a plot.** Every plot is surveyed with a margin round it — the last
-few units on each side — that nothing is built on. An expansion opens that
-outer belt for building, lanes and people: about a fifth more ground, all the
-way round. It costs 500,000 $EMERGE, burned like every other charge, once per
-plot, from the On-Chain panel. `buildBounds()` in the simulation is the one
-place that says where a plot ends, read by placement, construction and moves;
-the flag lives on the world save, is published with it, and is recorded on the
-claim row by `/api/plots` (`expand`) after the same burn check a survey gets,
-so a second device — or a buyer — picks it up from the registry rather than
-being sold it again.
+**Expanding a plot.** An expansion makes the plot itself bigger. The land
+grows *outward*: every coordinate anybody saved stays where it was, and a ring
+of new ground 12.5 units deep appears beyond the old edge on every side — 125
+units across instead of 100, about 56% more land — with the river carried on
+into it, wildlife on it and the wood on it clearable. It costs 500,000 $EMERGE,
+burned like every other charge, once per plot, from the On-Chain panel.
+
+The plot's size is an *extent* (`lib/world/extent.ts`), and everything that
+used to assume 0–100 reads it instead: the terrain grid (48 tiles across a base
+plot, 60 across an expanded one, at the same tile size, with negative tile
+indices for the new ring), the water mask and its channels, the walking grid,
+the camera limits, the backdrop and the minimap. The simulation sets the
+active extent on the way into every exported entry point and clamps to it
+rather than to literals, so nobody walks past the edge and tornados still
+come in from the sides. `buildBounds()` is the one place that says where a
+building may stand. The flag lives on the world save, is published with it,
+and is recorded on the claim row by `/api/plots` (`expand`) after the same
+burn check a survey gets, so a second device — or a buyer — picks it up from
+the registry rather than being sold it again.
 
 **The world map** has a Home button back to the front page and a Disconnect
 wallet button. Disconnecting forgets which wallet is remembered for the silent

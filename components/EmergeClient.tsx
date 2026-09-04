@@ -833,7 +833,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       const world = worldRef.current;
       // An expansion bought on another device: the registry row is the
       // record, and this world catches up with it here.
-      if (row?.expandedAt && world && !world.expanded) { expandPlot(world); saveWorld(world); }
+      if (row?.expandedAt && world && !world.expanded) {
+        expandPlot(world);
+        saveWorld(world);
+        sceneRef.current?.reset(world);
+        setView(snapshot(world, null));
+      }
       if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
         world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
       }
@@ -1232,9 +1237,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => (worldRef.current ? constructBuilding(worldRef.current, type, BUILD_COSTS[type] ?? 0, x, y) : null),
+      map: () => sceneRef.current?.mapSize() ?? null,
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
@@ -1425,13 +1431,18 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     }
     expandPlot(world);
     saveWorld(world);
+    // The land itself grew: the ground, the water and the camera's limits are
+    // all rebuilt from the new extent.
+    selectedRef.current = null;
+    setSelected(null);
+    sceneRef.current?.reset(world);
     refresh();
     announce({
       id: `expand-${claimed.seed}`,
       kind: 'claim',
       title: t('The plot is expanded'),
-      body: t('The outer belt is open: build right out to the edge of the land.'),
-      lifetime: 12_000,
+      body: t('The land has grown on every side. Pan out: there is new ground beyond the old edge, and the wood on it is yours to clear.'),
+      lifetime: 14_000,
     });
     return null;
     // `announce` is stable for the life of the world.

@@ -1850,13 +1850,13 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
           {view.expanded ? (
             <>
               <h3>{t('Expanded')}</h3>
-              <p className="muted small">{t('The outer belt is open. Buildings, lanes and people can go right out to the edge of the land.')}</p>
+              <p className="muted small">{t('The land has grown on every side. Pan out to the new ground beyond the old edge; the wood on it is yours to clear and build on.')}</p>
             </>
           ) : (
             <>
-              <h3>{t('Open the outer belt')}</h3>
+              <h3>{t('Grow the land')}</h3>
               <p className="muted small">
-                {t('Every plot is surveyed with a margin nobody builds on. Expanding opens it — about a fifth more ground, all the way round — for {cost} {ticker}, burned. Once per plot.', { cost: EXPAND_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+                {t('Expanding makes the plot itself bigger: a ring of new ground on every side, about half as much land again, with the river running on into it. {cost} {ticker}, burned. Once per plot.', { cost: EXPAND_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
               </p>
               <button onClick={expand} disabled={expanding || !wallet.address || player.ledger.balance < EXPAND_COST_EMERGE}>
                 {expanding

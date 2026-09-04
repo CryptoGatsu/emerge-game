@@ -13,6 +13,7 @@
  */
 
 import { PONDS, WATER_ROUTES, type BiomeProfile } from './biomes';
+import { BASE_EXTENT, isBase, type Extent } from './extent';
 import { hash2, valueNoise } from './noise';
 import { heightField } from './relief';
 
@@ -44,6 +45,8 @@ export interface Polyline {
 }
 
 export interface WaterField {
+  /** The plot this field covers. */
+  extent: Extent;
   /** The channels, for the terrain generator to paint and meander. */
   river: Polyline;
   pond: { x: number; y: number; r: number };
@@ -109,24 +112,54 @@ function channelWidth(seed: number, t: number, scale: number) {
   return (2.5 + valueNoise(seed + 313, t * 2.4, 0) * 1.7) * scale;
 }
 
+/**
+ * A route as drawn for the base plot, carried on past its edge.
+ *
+ * The biome's routes end at the old map edge. On an expanded plot the river
+ * would stop dead at an invisible line a dozen units short of the new shore,
+ * so a route whose end sits at the old edge is continued in the direction it
+ * was already going until it is well outside the new extent.
+ */
+function carryOn(route: [number, number][], extent: Extent): { route: [number, number][]; lead: number } {
+  if (isBase(extent) || route.length < 2) return { route, lead: 0 };
+  const reach = Math.max(extent.x1 - 100, -extent.x0, extent.y1 - 100, -extent.y0) + 10;
+  const nearEdge = ([x, y]: [number, number]) => x < 8 || x > 92 || y < 8 || y > 92;
+  const beyond = (from: [number, number], toward: [number, number]): [number, number] => {
+    const dx = from[0] - toward[0], dy = from[1] - toward[1];
+    const d = Math.hypot(dx, dy) || 1;
+    return [from[0] + (dx / d) * reach, from[1] + (dy / d) * reach];
+  };
+  const out = route.slice();
+  let lead = 0;
+  if (nearEdge(route[0])) { out.unshift(beyond(route[0], route[1])); lead = 1; }
+  const last = route.length - 1;
+  if (nearEdge(route[last])) out.push(beyond(route[last], route[last - 1]));
+  return { route: out, lead };
+}
+
 /** Sample the biome's routes into a meandering polyline with per-sample width. */
-function buildChannels(seed: number, profile: BiomeProfile): Polyline {
+function buildChannels(seed: number, profile: BiomeProfile, extent: Extent): Polyline {
   const pts: [number, number][] = [];
   const widths: number[] = [];
-  for (const route of WATER_ROUTES[profile.water]) {
+  for (const base of WATER_ROUTES[profile.water]) {
+    const { route, lead } = carryOn(base, extent);
     for (let i = 0; i < route.length - 1; i++) {
       const [ax, ay] = route[i];
       const [bx, by] = route[i + 1];
       const steps = 14;
+      // The meander and the width are noise over the segment index. A segment
+      // added ahead of the route must not renumber the ones behind it, or
+      // every bank on the old ground would move the day the plot expanded.
+      const k = i - lead;
       for (let s = 0; s < steps; s++) {
         const t = s / steps;
         // Meander perpendicular to the run so the bank is never a straight edge.
         const dx = bx - ax, dy = by - ay;
         const len = Math.hypot(dx, dy) || 1;
         const nx = -dy / len, ny = dx / len;
-        const wobble = (valueNoise(seed + 71, (i + t) * 1.7, 0) - 0.5) * 3.2;
+        const wobble = (valueNoise(seed + 71, (k + t) * 1.7, 0) - 0.5) * 3.2;
         pts.push([ax + dx * t + nx * wobble, ay + dy * t + ny * wobble]);
-        widths.push(channelWidth(seed, i + t, profile.waterScale));
+        widths.push(channelWidth(seed, k + t, profile.waterScale));
       }
     }
   }
@@ -140,8 +173,8 @@ function buildChannels(seed: number, profile: BiomeProfile): Polyline {
  * privately, so the mask and the painted tiles agree by construction rather
  * than by two pieces of code happening to round the same way.
  */
-export function buildWater(seed: number, profile: BiomeProfile): WaterField {
-  const river = buildChannels(seed, profile);
+export function buildWater(seed: number, profile: BiomeProfile, extent: Extent = BASE_EXTENT): WaterField {
+  const river = buildChannels(seed, profile, extent);
   const base = PONDS[profile.water];
   const pond = { x: base.x, y: base.y, r: base.r * profile.pondScale };
 
@@ -161,14 +194,16 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
     return pondD < edge;
   };
 
-  // Sample once, then work from the grid.
-  const n = WATER_CELLS;
-  const cell = 100 / n;
+  // Sample once, then work from the grid. The cell is a fixed size in world
+  // units; an expanded plot has more of them.
+  const cell = 100 / WATER_CELLS;
+  const n = Math.round((extent.x1 - extent.x0) / cell);
+  const { x0, y0 } = extent;
   const mask = new Uint8Array(n * n);
   let wet = 0;
   for (let gy = 0; gy < n; gy++) {
     for (let gx = 0; gx < n; gx++) {
-      const on = wetAt((gx + 0.5) * cell, (gy + 0.5) * cell) ? 1 : 0;
+      const on = wetAt(x0 + (gx + 0.5) * cell, y0 + (gy + 0.5) * cell) ? 1 : 0;
       mask[gy * n + gx] = on;
       wet += on;
     }
@@ -184,8 +219,8 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
   for (let i = 0; i < mask.length; i++) {
     if (mask[i]) continue;
     dist[i] = 0;
-    fromX[i] = (i % n + 0.5) * cell;
-    fromY[i] = (Math.floor(i / n) + 0.5) * cell;
+    fromX[i] = x0 + (i % n + 0.5) * cell;
+    fromY[i] = y0 + (Math.floor(i / n) + 0.5) * cell;
     queue.push(i);
   }
   for (let head = 0; head < queue.length; head++) {
@@ -252,7 +287,7 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
         stack.push(j);
       }
     }
-    islands.push({ id, cells, x: (sx / cells + 0.5) * cell, y: (sy / cells + 0.5) * cell });
+    islands.push({ id, cells, x: x0 + (sx / cells + 0.5) * cell, y: y0 + (sy / cells + 0.5) * cell });
   }
   islands.sort((a, b) => b.cells - a.cells);
   const mainland = islands.length ? islands[0].id : -1;
@@ -267,8 +302,8 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
   for (let i = 0; i < land.length; i++) {
     if (land[i] !== mainland) continue;
     mainD[i] = 0;
-    mainX[i] = (i % n + 0.5) * cell;
-    mainY[i] = (Math.floor(i / n) + 0.5) * cell;
+    mainX[i] = x0 + (i % n + 0.5) * cell;
+    mainY[i] = y0 + (Math.floor(i / n) + 0.5) * cell;
     mainQueue.push(i);
   }
   for (let head = 0; head < mainQueue.length; head++) {
@@ -320,8 +355,8 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
   for (let i = 0; i < blocked.length; i++) {
     if (blocked[i]) continue;
     clearD[i] = 0;
-    clearX[i] = (i % n + 0.5) * cell;
-    clearY[i] = (Math.floor(i / n) + 0.5) * cell;
+    clearX[i] = x0 + (i % n + 0.5) * cell;
+    clearY[i] = y0 + (Math.floor(i / n) + 0.5) * cell;
     clearQueue.push(i);
   }
   for (let head = 0; head < clearQueue.length; head++) {
@@ -340,12 +375,13 @@ export function buildWater(seed: number, profile: BiomeProfile): WaterField {
   }
 
   const indexOf = (wx: number, wy: number) => {
-    const gx = Math.max(0, Math.min(n - 1, Math.floor(wx / cell)));
-    const gy = Math.max(0, Math.min(n - 1, Math.floor(wy / cell)));
+    const gx = Math.max(0, Math.min(n - 1, Math.floor((wx - x0) / cell)));
+    const gy = Math.max(0, Math.min(n - 1, Math.floor((wy - y0) / cell)));
     return gy * n + gx;
   };
 
   return {
+    extent,
     river,
     pond,
     coverage: wet / mask.length,

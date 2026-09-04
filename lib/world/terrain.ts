@@ -13,6 +13,7 @@
 
 import { waterOf, type Building, type World } from '../simulation';
 import { GRID, worldToTile } from './iso';
+import { extentOf } from './extent';
 import { biomeProfile, type BiomeProfile } from './biomes';
 import { onDeck, type WorldLayout } from './layout';
 import { fbm, heightField } from './relief';
@@ -83,7 +84,10 @@ export interface PropInstance {
 }
 
 export interface WorldMap {
+  /** Tiles across. */
   grid: number;
+  /** Absolute tile index of the first column and row: 0 for a base plot, negative once expanded. */
+  t0: number;
   tiles: Uint8Array;
   variants: Uint8Array;
   /** Quantised elevation step used to draw tiles. */
@@ -163,7 +167,9 @@ export interface MapOptions {
 
 export function generateWorldMap(world: World, options: MapOptions = {}): WorldMap {
   const seed = world.seed;
-  const grid = GRID;
+  const extent = extentOf(world);
+  const cell = 100 / GRID;
+  const grid = Math.round((extent.x1 - extent.x0) / cell);
   const n = grid * grid;
   const tiles = new Uint8Array(n);
   const variants = new Uint8Array(n);
@@ -180,8 +186,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   const props: PropInstance[] = [];
   const waterfalls: { tx: number; ty: number }[] = [];
 
-  const cell = 100 / grid;
-  const worldOf = (tx: number, ty: number): [number, number] => [(tx + 0.5) * cell, (ty + 0.5) * cell];
+  const worldOf = (tx: number, ty: number): [number, number] => [extent.x0 + (tx + 0.5) * cell, extent.y0 + (ty + 0.5) * cell];
 
   // Building footprints get a clear apron so props never grow through walls.
   const footprints = world.buildings.map((b) => ({ x: b.x, y: b.y, r: b.type === 'Market' || b.type === 'Town Hall' ? 7 : 5.5 }));
@@ -318,8 +323,8 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
 
   const heightAt = (wx: number, wy: number) => heightField(seed, wx, wy, profile.plateau);
   const tileAt = (wx: number, wy: number) => {
-    const tx = Math.max(0, Math.min(grid - 1, Math.floor(wx / cell)));
-    const ty = Math.max(0, Math.min(grid - 1, Math.floor(wy / cell)));
+    const tx = Math.max(0, Math.min(grid - 1, Math.floor((wx - extent.x0) / cell)));
+    const ty = Math.max(0, Math.min(grid - 1, Math.floor((wy - extent.y0) / cell)));
     return tiles[ty * grid + tx] as Tile;
   };
 
@@ -328,7 +333,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
     placeSettlementProps(props, world, roads, seed, water.pond, layout, profile.ground);
   }
 
-  return { grid, tiles, variants, steps, field, cliffs, tone, waterfalls, props, heightAt, tileAt };
+  return { grid, t0: worldToTile(extent.x0), tiles, variants, steps, field, cliffs, tone, waterfalls, props, heightAt, tileAt };
 }
 
 /* ------------------------------------------------------------------ *

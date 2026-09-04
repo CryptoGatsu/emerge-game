@@ -18,13 +18,14 @@
  * would, not the staircase a grid gives.
  */
 
+import { BASE_EXTENT, type Extent } from './extent';
 import { onDeck, type WorldLayout } from './layout';
 import type { WaterField } from './water';
 
 export interface NavObstacle { x: number; y: number; r: number; id: string }
 
-/** Cells across the plot. The world is 0–100, so one cell is one unit. */
-const N = 100;
+/** One cell is one world unit; an expanded plot simply has more of them. */
+const CELL = 1;
 /**
  * Kept clear round a footprint, in world units. More than half a cell's
  * diagonal, so that every point of a cell counted open really is outside the
@@ -40,6 +41,11 @@ const SHARED = -2;
 const NOBODY = -1;
 
 export interface NavGrid {
+  /** Cells across. */
+  n: number;
+  /** World position of the grid's corner, so a cell can be found from a coordinate. */
+  x0: number;
+  y0: number;
   /** Bit 1: water. Bit 2: inside a footprint. */
   blocked: Uint8Array;
   /** Which obstacle (index into the list the grid was built from) covers a cell, NOBODY or SHARED. */
@@ -55,12 +61,14 @@ export function navKey(obstacles: NavObstacle[], layout: WorldLayout): string {
   return key;
 }
 
-export function buildNavGrid(water: WaterField, layout: WorldLayout, obstacles: NavObstacle[], key: string): NavGrid {
+export function buildNavGrid(water: WaterField, layout: WorldLayout, obstacles: NavObstacle[], key: string, extent: Extent = BASE_EXTENT): NavGrid {
+  const N = Math.round((extent.x1 - extent.x0) / CELL);
+  const { x0, y0 } = extent;
   const blocked = new Uint8Array(N * N);
   const owner = new Int16Array(N * N).fill(NOBODY);
   for (let y = 0; y < N; y++) {
     for (let x = 0; x < N; x++) {
-      const cx = x + 0.5, cy = y + 0.5;
+      const cx = x0 + x + 0.5, cy = y0 + y + 0.5;
       // The centre and the four quarters: a cell with water in any corner is
       // not somewhere to route a straight line through.
       let wet = false;
@@ -73,11 +81,12 @@ export function buildNavGrid(water: WaterField, layout: WorldLayout, obstacles: 
   }
   obstacles.forEach((o, index) => {
     const r = o.r + MARGIN;
-    const x0 = Math.max(0, Math.floor(o.x - r)), x1 = Math.min(N - 1, Math.ceil(o.x + r));
-    const y0 = Math.max(0, Math.floor(o.y - r)), y1 = Math.min(N - 1, Math.ceil(o.y + r));
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const dx = x + 0.5 - o.x, dy = y + 0.5 - o.y;
+    const ox = o.x - x0, oy = o.y - y0;
+    const cx0 = Math.max(0, Math.floor(ox - r)), cx1 = Math.min(N - 1, Math.ceil(ox + r));
+    const cy0 = Math.max(0, Math.floor(oy - r)), cy1 = Math.min(N - 1, Math.ceil(oy + r));
+    for (let y = cy0; y <= cy1; y++) {
+      for (let x = cx0; x <= cx1; x++) {
+        const dx = x + 0.5 - ox, dy = y + 0.5 - oy;
         if (dx * dx + dy * dy >= r * r) continue;
         const i = y * N + x;
         blocked[i] |= 2;
@@ -85,12 +94,14 @@ export function buildNavGrid(water: WaterField, layout: WorldLayout, obstacles: 
       }
     }
   });
-  return { blocked, owner, key };
+  return { n: N, x0, y0, blocked, owner, key };
 }
 
 const QUARTERS: [number, number][] = [[0, 0], [-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]];
 
-const cellOf = (v: number) => Math.min(N - 1, Math.max(0, Math.floor(v)));
+const cellOf = (grid: NavGrid, v: number, origin: number) => Math.min(grid.n - 1, Math.max(0, Math.floor(v - origin)));
+const cellX = (grid: NavGrid, x: number) => cellOf(grid, x, grid.x0);
+const cellY = (grid: NavGrid, y: number) => cellOf(grid, y, grid.y0);
 
 /**
  * Whether a cell may be walked on, by somebody allowed inside one footprint —
@@ -113,14 +124,14 @@ export function lineClear(grid: NavGrid, ax: number, ay: number, bx: number, by:
   for (let s = 1; s <= steps; s++) {
     const t = s / steps;
     const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
-    if (!passable(grid, cellOf(y) * N + cellOf(x), allow)) return false;
+    if (!passable(grid, cellY(grid, y) * grid.n + cellX(grid, x), allow)) return false;
   }
   return true;
 }
 
 /** Whether a point stands on open ground. */
 export function openAt(grid: NavGrid, x: number, y: number, allow = NOBODY): boolean {
-  return passable(grid, cellOf(y) * N + cellOf(x), allow);
+  return passable(grid, cellY(grid, y) * grid.n + cellX(grid, x), allow);
 }
 
 /* A binary heap of cell indices ordered by f. */
@@ -162,7 +173,9 @@ class Heap {
 
 /** The nearest passable cell to (x, y) within `reach` cells, or -1. */
 function nearestOpen(grid: NavGrid, x: number, y: number, allow: number, reach: number): number {
-  const cx = cellOf(x), cy = cellOf(y);
+  const N = grid.n;
+  const cx = cellX(grid, x), cy = cellY(grid, y);
+  const lx = x - grid.x0, ly = y - grid.y0;
   let best = -1, bestD = Infinity;
   for (let dy = -reach; dy <= reach; dy++) {
     for (let dx = -reach; dx <= reach; dx++) {
@@ -170,7 +183,7 @@ function nearestOpen(grid: NavGrid, x: number, y: number, allow: number, reach: 
       if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
       const i = ny * N + nx;
       if (!passable(grid, i, allow)) continue;
-      const d = (nx + 0.5 - x) ** 2 + (ny + 0.5 - y) ** 2;
+      const d = (nx + 0.5 - lx) ** 2 + (ny + 0.5 - ly) ** 2;
       if (d < bestD) { bestD = d; best = i; }
     }
   }
@@ -191,6 +204,7 @@ export function findDetour(grid: NavGrid, ax: number, ay: number, bx: number, by
   if (start < 0 || goal < 0) return null;
   if (start === goal) return lineClear(grid, ax, ay, bx, by, allow) ? [[bx, by]] : null;
 
+  const N = grid.n;
   const g = new Float64Array(N * N).fill(Infinity);
   const f = new Float64Array(N * N).fill(Infinity);
   const came = new Int32Array(N * N).fill(-1);

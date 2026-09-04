@@ -20,6 +20,7 @@ import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLay
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
 import { buildWater, type WaterField } from './world/water';
 import { woodedAt } from './world/cover';
+import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -623,13 +624,16 @@ export const ARROW_WOOD = 1;
  * is what the water is a function of, and capped so a session that visits many
  * plots does not accumulate fields for all of them.
  */
-const waterCache = new Map<number, WaterField>();
-export function waterOf(world: { seed: number; biome: BiomeKind }): WaterField {
-  const cached = waterCache.get(world.seed);
+const waterCache = new Map<string, WaterField>();
+export function waterOf(world: { seed: number; biome: BiomeKind; expanded?: boolean }): WaterField {
+  // An expanded plot is a different field: the same channels, carried on
+  // into the new ground, over a bigger grid.
+  const key = `${world.seed}:${world.expanded ? 'x' : ''}`;
+  const cached = waterCache.get(key);
   if (cached) return cached;
-  const field = buildWater(world.seed, biomeProfile(world.biome));
-  if (waterCache.size >= 12) waterCache.delete(waterCache.keys().next().value as number);
-  waterCache.set(world.seed, field);
+  const field = buildWater(world.seed, biomeProfile(world.biome), extentOf(world));
+  if (waterCache.size >= 12) waterCache.delete(waterCache.keys().next().value as string);
+  waterCache.set(key, field);
   return field;
 }
 
@@ -637,6 +641,24 @@ export function mulberry32(seed: number) {
   return function () { let t = (seed += 0x6D2B79F5); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/*
+ * Where the land ends, for the world being worked on.
+ *
+ * Every edge in this file used to be a literal — nobody walks past 97, no
+ * animal spawns inside 8 of the side — and the plot was always 0–100. An
+ * expanded plot is bigger, so those edges come from its extent. Rather than
+ * thread the extent through two hundred call sites, the one world being
+ * advanced sets it here on the way in: the simulation only ever works on one
+ * world at a time, and every exported entry point sets it before it touches
+ * anything.
+ */
+let activeExtent: Extent = BASE_EXTENT;
+function useWorld(world: { expanded?: boolean }) { activeExtent = extentOf(world); }
+/** Clamp to the land, a margin in from each side. The plot is square, so one helper serves both axes. */
+const edge = (v: number, lo: number, hi: number) => clamp(v, activeExtent.x0 + lo, activeExtent.x1 - (100 - hi));
+/** A random position across the land, a margin in from each side. */
+const across = (rand: () => number, margin: number) => activeExtent.x0 + margin + rand() * (activeExtent.x1 - activeExtent.x0 - margin * 2);
 
 function pushFeed(world: World, kind: FeedKind, text: string) {
   world.feed.unshift({ id: `e${world.counter++}`, kind, text, day: world.day, hour: world.hour });
@@ -778,6 +800,7 @@ function jobBuilding(world: World, c: Citizen) { return c.job === 'unemployed' ?
 
 /** The gathering currently running, if any. Socialising citizens are drawn to it. */
 export function activeGathering(world: World): Gathering | undefined {
+  useWorld(world);
   return world.gatherings.find((g) => g.day === world.day && world.hour >= g.hour && world.hour < g.hour + g.duration);
 }
 
@@ -1002,8 +1025,8 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   }
 
   const [ox, oy] = exact ? [0, 0] : standingOffset(c.hash + c.wanderIdx, spread);
-  c.destX = clamp(target.x + ox, 3, 97);
-  c.destY = clamp(target.y + oy, 5, 95);
+  c.destX = edge(target.x + ox, 3, 97);
+  c.destY = edge(target.y + oy, 5, 95);
   c.destId = target.id;
   // Never send anyone to a spot inside someone else's wall. Left uncorrected,
   // they walk to it, get pushed off it, walk back, and spend the afternoon
@@ -1014,9 +1037,9 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     const dx = c.destX - b.x, dy = c.destY - b.y;
     const d = Math.hypot(dx, dy);
     if (d >= r) continue;
-    if (d < 0.0001) { c.destX = clamp(b.x + r, 3, 97); continue; }
-    c.destX = clamp(b.x + (dx / d) * r, 3, 97);
-    c.destY = clamp(b.y + (dy / d) * r, 5, 95);
+    if (d < 0.0001) { c.destX = edge(b.x + r, 3, 97); continue; }
+    c.destX = edge(b.x + (dx / d) * r, 3, 97);
+    c.destY = edge(b.y + (dy / d) * r, 5, 95);
   }
   // And not in the river. `standingOffset` scatters people in a ring around
   // their target, and on a fen or a coast that ring reaches the water; without
@@ -1025,8 +1048,8 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   const water = waterOf(world);
   if (water.blocks(c.destX, c.destY)) {
     const out = water.toLand(c.destX, c.destY);
-    c.destX = clamp(c.destX + out.x * (out.d + 1.2), 3, 97);
-    c.destY = clamp(c.destY + out.y * (out.d + 1.2), 5, 95);
+    c.destX = edge(c.destX + out.x * (out.d + 1.2), 3, 97);
+    c.destY = edge(c.destY + out.y * (out.d + 1.2), 5, 95);
   }
   const full = roadPath(
     world.layout,
@@ -1162,8 +1185,8 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
     const len = Math.hypot(pushX, pushY);
     const limit = Math.max(0.4, (c.age < 16 ? 9 : 12.5) * hours * 1.6);
     const k = len > limit ? limit / len : 1;
-    c.x = clamp(c.x + pushX * k, 2, 98);
-    c.y = clamp(c.y + pushY * k, 4, 96);
+    c.x = edge(c.x + pushX * k, 2, 98);
+    c.y = edge(c.y + pushY * k, 4, 96);
   }
 
   // And out of the river.
@@ -1188,14 +1211,14 @@ function resolveOverlap(c: Citizen, obstacles: Obstacle[], tx: number, ty: numbe
     const home = water.toMainland(c.x, c.y);
     const out = home.d > 0 && home.d < 14 ? home : water.toClear(c.x, c.y);
     const reach = out.d + 0.2;
-    let bestX = clamp(c.x + out.x * reach, 2, 98);
-    let bestY = clamp(c.y + out.y * reach, 4, 96);
+    let bestX = edge(c.x + out.x * reach, 2, 98);
+    let bestY = edge(c.y + out.y * reach, 4, 96);
     for (const turn of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
       const cos = Math.cos(turn), sin = Math.sin(turn);
       const nx = out.x * cos - out.y * sin;
       const ny = out.x * sin + out.y * cos;
-      const x = clamp(c.x + nx * reach, 2, 98);
-      const y = clamp(c.y + ny * reach, 4, 96);
+      const x = edge(c.x + nx * reach, 2, 98);
+      const y = edge(c.y + ny * reach, 4, 96);
       if (water.blocks(x, y)) continue;
       if (turn === 0) { bestX = x; bestY = y; }
       const clear = obstacles.every((o) => o.id === c.destId || (o.x - x) ** 2 + (o.y - y) ** 2 >= o.r * o.r);
@@ -1248,8 +1271,8 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
     }
 
     const step = Math.min(d, budget * crowding + 0.0001);
-    let nx = clamp(c.x + (dx / d) * step, 2, 98);
-    let ny = clamp(c.y + (dy / d) * step, 4, 96);
+    let nx = edge(c.x + (dx / d) * step, 2, 98);
+    let ny = edge(c.y + (dy / d) * step, 4, 96);
 
     // Do not step into the water in the first place.
     //
@@ -1272,8 +1295,8 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
       for (const turn of [0.35, 0.7, 1.05, 1.4, 1.75, 2.1]) {
         for (const sign of [side, -side]) {
           const a = heading + turn * sign;
-          const sx = clamp(c.x + Math.cos(a) * step, 2, 98);
-          const sy = clamp(c.y + Math.sin(a) * step, 4, 96);
+          const sx = edge(c.x + Math.cos(a) * step, 2, 98);
+          const sy = edge(c.y + Math.sin(a) * step, 4, 96);
           if (water.blocks(sx, sy) && !onBridge(layout, sx, sy)) continue;
           nx = sx; ny = sy; slid = true;
           break;
@@ -1292,8 +1315,8 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
         if (here) {
           const cos = Math.cos(here.bridge.angle), sin = Math.sin(here.bridge.angle);
           const forward = cos * dx + sin * dy >= 0 ? 1 : -1;
-          nx = clamp(c.x + cos * step * forward, 2, 98);
-          ny = clamp(c.y + sin * step * forward, 4, 96);
+          nx = edge(c.x + cos * step * forward, 2, 98);
+          ny = edge(c.y + sin * step * forward, 4, 96);
           slid = true;
         }
       }
@@ -1332,8 +1355,8 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
     if (deck && Math.abs(deck.across) > 0.35) {
       const pull = Math.min(Math.abs(deck.across) - 0.2, 0.25) * Math.sign(deck.across);
       const cos = Math.cos(deck.bridge.angle), sin = Math.sin(deck.bridge.angle);
-      c.x = clamp(c.x + sin * pull, 2, 98);
-      c.y = clamp(c.y - cos * pull, 4, 96);
+      c.x = edge(c.x + sin * pull, 2, 98);
+      c.y = edge(c.y - cos * pull, 4, 96);
     }
   }
 
@@ -1350,10 +1373,10 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
 /** The walkability grid for a world, rebuilt only when what it depends on has changed. */
 const navCache = new WeakMap<World, NavGrid>();
 function navOf(world: World, obstacles: Obstacle[], water: WaterField): NavGrid {
-  const key = navKey(obstacles, world.layout);
+  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}`;
   const held = navCache.get(world);
   if (held && held.key === key) return held;
-  const built = buildNavGrid(water, world.layout, obstacles, key);
+  const built = buildNavGrid(water, world.layout, obstacles, key, extentOf(world));
   navCache.set(world, built);
   return built;
 }
@@ -1451,8 +1474,8 @@ function moveCitizens(world: World, hours: number) {
       const back = water.toMainland(c.x, c.y);
       if (back.d > 0) {
         const stride = Math.min(back.d + 0.6, 14 * hours + 0.35);
-        c.x = clamp(c.x + back.x * stride, 2, 98);
-        c.y = clamp(c.y + back.y * stride, 4, 96);
+        c.x = edge(c.x + back.x * stride, 2, 98);
+        c.y = edge(c.y + back.y * stride, 4, 96);
         c.moving = true;
         c.activity = 'walking';
         c.stalled += hours;
@@ -1596,6 +1619,7 @@ function bondBetween(world: World, a: Citizen, b: Citizen): Bond {
 
 /** How these two feel about each other right now, whether or not they have met. */
 export function bondOf(world: World, a: string, b: string): Bond | undefined {
+  useWorld(world);
   return world.bonds[bondKey(a, b)];
 }
 
@@ -1624,8 +1648,8 @@ function socialStep(world: World, hours: number) {
       // Only good company is company. Being stuck next to somebody you cannot
       // stand does not meet anybody's need for society.
       const social = drift > 0 ? hours * 3 : hours * -1.2;
-      a.social = clamp(a.social + social, 0, 100);
-      b.social = clamp(b.social + social, 0, 100);
+      a.social = edge(a.social + social, 0, 100);
+      b.social = edge(b.social + social, 0, 100);
       if (!bond.friends && bond.strength >= 78) {
         bond.friends = true;
         pushFeed(world, 'social', `${a.name} and ${b.name} are now good friends.`);
@@ -1969,6 +1993,7 @@ function quarrels(world: World, hours: number) {
 
 /** A building by id, for anything that wants to name where somebody is going. */
 export function buildingOf(world: World, id: string | undefined): Building | undefined {
+  useWorld(world);
   return id ? world.buildings.find((b) => b.id === id) : undefined;
 }
 
@@ -1982,6 +2007,7 @@ export function buildingOf(world: World, id: string | undefined): Building | und
  * anything generic.
  */
 export function plannedDay(world: World, c: Citizen): { work: string; today: string; evening: string | null } {
+  useWorld(world);
   const res = world.resources;
   const short = (r: Resource, per: number) => res[r] < world.citizens.length * per;
   const gathering = world.gatherings.find((g) => g.day === world.day && world.hour < g.hour + g.duration);
@@ -2020,6 +2046,7 @@ export function plannedDay(world: World, c: Citizen): { work: string; today: str
 
 /** The line this citizen is speaking right now, if they are in a conversation. */
 export function spokenLine(world: World, id: string): { text: string; topic: string } | null {
+  useWorld(world);
   for (const talk of world.conversations) {
     const speaker = talk.index % 2 === 0 ? talk.a : talk.b;
     if (speaker !== id) continue;
@@ -2032,6 +2059,7 @@ export function spokenLine(world: World, id: string): { text: string; topic: str
 
 /** Who this citizen is talking to right now, for the inspector. */
 export function talkingWith(world: World, id: string): Citizen | null {
+  useWorld(world);
   const talk = world.conversations.find((t) => t.a === id || t.b === id);
   if (!talk) return null;
   return world.citizens.find((c) => c.id === (talk.a === id ? talk.b : talk.a)) ?? null;
@@ -2091,6 +2119,7 @@ function chemistry(a: Citizen, b: Citizen) {
 
 /** People this citizen cannot stand, worst first. */
 export function rivalsOf(world: World, id: string): { citizen: Citizen; strength: number }[] {
+  useWorld(world);
   const out: { citizen: Citizen; strength: number }[] = [];
   for (const bond of Object.values(world.bonds)) {
     if (!bond.rivals) continue;
@@ -2117,6 +2146,7 @@ export function rivalsOf(world: World, id: string): { citizen: Citizen; strength
  * everybody has.
  */
 export function companionFor(world: World, c: Citizen): Citizen | null {
+  useWorld(world);
   const reachable = (other: Citizen | undefined): other is Citizen =>
     !!other && other.id !== c.id && !other.inside && !other.carried && !other.swimming
     && other.age >= 12 && Math.hypot(other.x - c.x, other.y - c.y) < 34;
@@ -2143,6 +2173,7 @@ export function companionFor(world: World, c: Citizen): Citizen | null {
 }
 
 export function friendsOf(world: World, id: string): { citizen: Citizen; strength: number }[] {
+  useWorld(world);
   const out: { citizen: Citizen; strength: number }[] = [];
   for (const bond of Object.values(world.bonds)) {
     if (!bond.friends) continue;
@@ -2237,6 +2268,7 @@ export function defaultWorldName(seed: number) {
 
 /** Rename one citizen. Their handle follows the new name. */
 export function renameCitizen(world: World, id: string, name: string) {
+  useWorld(world);
   const trimmed = name.trim().slice(0, 18);
   const citizen = world.citizens.find((c) => c.id === id);
   if (!citizen || !trimmed || trimmed === citizen.name) return false;
@@ -2250,6 +2282,7 @@ export function renameCitizen(world: World, id: string, name: string) {
 
 /** Rename a world in place. Citizens refer to it by name when they speak. */
 export function renameWorld(world: World, name: string) {
+  useWorld(world);
   const trimmed = name.trim().slice(0, 24);
   if (!trimmed) return;
   world.name = trimmed;
@@ -2441,8 +2474,8 @@ function enforceSpacing(buildings: Building[], layout: WorldLayout, water: Water
     // Damped, because a full correction against several constraints at once
     // overshoots and the whole set oscillates.
     for (let i = 0; i < n; i++) {
-      buildings[i].x = clamp(buildings[i].x + dx[i] * 0.5, 6, 94);
-      buildings[i].y = clamp(buildings[i].y + dy[i] * 0.5, 8, 92);
+      buildings[i].x = edge(buildings[i].x + dx[i] * 0.5, 6, 94);
+      buildings[i].y = edge(buildings[i].y + dy[i] * 0.5, 8, 92);
     }
   }
 
@@ -2573,6 +2606,8 @@ function buildAmenities(buildings: Building[], layout: WorldLayout, water: Water
 }
 
 export function createWorld(seed = 481516, name?: string): World {
+  // A new world is the base plot; a save that was expanded says so afterwards.
+  useWorld({});
   const rand = mulberry32(seed);
   const profile = biomeFor(seed);
   const water = waterOf({ seed, biome: profile.kind });
@@ -2726,6 +2761,7 @@ function scheduleGatherings(world: World) {
 
 /** Is a market day running right now? Trade moves faster while one is. */
 export function marketDayRunning(world: World) {
+  useWorld(world);
   const live = activeGathering(world);
   return live?.kind === 'market';
 }
@@ -3051,6 +3087,7 @@ export function skillOutput(c: Citizen): number {
  * novices lifts the trade a little rather than a lot.
  */
 export function tradeSkill(world: World, job: WorkingJob): number {
+  useWorld(world);
   const hands = world.citizens.filter((c) => c.job === job && c.age >= 16);
   if (!hands.length) return 1;
   return hands.reduce((sum, c) => sum + skillOutput(c), 0) / hands.length;
@@ -3106,6 +3143,7 @@ export function wageEffort(rate: number): number {
 
 /** What a settlement pays. Refused outside the bounds rather than clamped silently. */
 export function setWageRate(world: World, rate: number): boolean {
+  useWorld(world);
   const next = cleanWageRate(rate);
   if (next === world.wageRate) return false;
   const raised = next > world.wageRate;
@@ -3248,6 +3286,7 @@ export function worldMarketState(): { live: boolean; traders: number; shared: bo
  * normalising would be a client that could choose the answer.
  */
 export function marketReport(world: World): Partial<Record<Resource, number>> {
+  useWorld(world);
   const stocks: Partial<Record<Resource, number>> = {};
   for (const r of RESOURCES) stocks[r] = Math.max(0, Math.round(world.resources[r]));
   return stocks;
@@ -3452,6 +3491,7 @@ function importReserve(world: World): number {
  * watching.
  */
 export function takeSales(world: World): { gold: number; units: number; best: Resource | null; bestUnits: number } {
+  useWorld(world);
   const held = world.sales ?? { gold: 0, units: 0, best: null, bestUnits: 0 };
   world.sales = { gold: 0, units: 0, best: null, bestUnits: 0 };
   return held;
@@ -3469,6 +3509,7 @@ export function takeSales(world: World): { gold: number; units: number; best: Re
  * only honest way to run a thing people bet on.
  */
 export function stakeOnBout(world: World, gold: number, on: string): boolean {
+  useWorld(world);
   const amount = Math.floor(gold);
   if (!(amount > 0) || world.treasury < amount) return false;
   noteAttention(world);
@@ -3479,6 +3520,7 @@ export function stakeOnBout(world: World, gold: number, on: string): boolean {
 
 /** Pay a winning bet back into the treasury. */
 export function settleBout(world: World, gold: number, note: string): void {
+  useWorld(world);
   const amount = Math.floor(gold);
   if (!(amount > 0)) return;
   earn(world, 'arena', amount);
@@ -3497,7 +3539,7 @@ export function settleBout(world: World, gold: number, note: string): void {
 export function vigourOf(c: Citizen): number {
   const prime = c.age < 16 ? 0.3 : c.age > 55 ? 0.62 : c.age > 42 ? 0.85 : 1;
   const body = (c.rest * 0.3 + c.hunger * 0.3 + c.warmth * 0.25 + c.clothing * 0.15) / 100;
-  return Math.round(clamp(body * prime * 100, 0, 100));
+  return Math.round(edge(body * prime * 100, 0, 100));
 }
 
 /* ------------------------------------------------------------------ *
@@ -3517,6 +3559,7 @@ export const hasCivic = (world: World, type: string) =>
 export const SCHOOL_LEARNING = 0.35;
 export const LIBRARY_LEARNING = 0.15;
 export function learningRate(world: World): number {
+  useWorld(world);
   return 1 + (hasCivic(world, 'School') ? SCHOOL_LEARNING : 0) + (hasCivic(world, 'Library') ? LIBRARY_LEARNING : 0);
 }
 
@@ -3541,6 +3584,7 @@ export const CLINIC_CARE = 0.15;
  * first, the cafe when there is no tavern.
  */
 export function gatheringPlace(world: World): Building | undefined {
+  useWorld(world);
   return findBuilding(world, 'Tavern') ?? findBuilding(world, 'Cafe');
 }
 
@@ -3562,6 +3606,7 @@ export function gatheringPlace(world: World): Building | undefined {
  * up first, or a town of ghosts would keep the living on the street.
  */
 export function rehouse(world: World): number {
+  useWorld(world);
   const alive = new Set(world.citizens.map((c) => c.id));
   for (const f of world.families) {
     f.members = f.members.filter((id) => alive.has(id));
@@ -3608,6 +3653,7 @@ export interface Advice {
 }
 
 export function adviseBuild(world: World): Advice[] {
+  useWorld(world);
   const out: Advice[] = [];
   const adults = world.citizens.filter((c) => c.age >= 16);
   const people = world.citizens.length;
@@ -3746,6 +3792,7 @@ const JOB_BUILDINGS = new Set(Object.values(JOBS).map((j) => j.building));
 
 /** Everybody a settlement could reasonably send to the arena, best first. */
 export function fightersOf(world: World): Citizen[] {
+  useWorld(world);
   return world.citizens
     .filter((c) => c.age >= 16 && !c.carried)
     .sort((a, b) => vigourOf(b) - vigourOf(a));
@@ -3929,6 +3976,7 @@ const spotCache = new Map<string, [number, number][]>();
  * few thousand samples.
  */
 export function fishingSpotsOf(world: World): [number, number][] {
+  useWorld(world);
   const hut = findBuilding(world, 'Fishery');
   const key = `${world.seed}:fish:${hut ? `${hut.x.toFixed(1)},${hut.y.toFixed(1)}` : 'none'}:${world.layout.bridges.length}:${world.buildings.length}`;
   const held = spotCache.get(key);
@@ -3964,6 +4012,7 @@ export function fishingSpotsOf(world: World): [number, number][] {
  * water, within a walk of the camp.
  */
 export function forageSpotsOf(world: World): [number, number][] {
+  useWorld(world);
   const camp = findBuilding(world, 'Forager');
   const key = `${world.seed}:forage:${camp ? `${camp.x.toFixed(1)},${camp.y.toFixed(1)}` : 'none'}:${world.buildings.length}`;
   const held = spotCache.get(key);
@@ -4031,7 +4080,7 @@ function spawnAnimal(world: World, rand: () => number): Animal | null {
   const kinds = WILDLIFE[world.biome];
   const kind = kinds[Math.floor(rand() * kinds.length)];
   for (let i = 0; i < 80; i++) {
-    const x = 8 + rand() * 84, y = 10 + rand() * 80;
+    const x = across(rand, 8), y = across(rand, 10);
     if (!wildGround(world, water, kind, x, y, 9)) continue;
     if (Math.hypot(x - world.layout.plaza.x, y - world.layout.plaza.y) < 16) continue;
     if (i < 40 && underCanopy(world, x, y)) continue;
@@ -4283,6 +4332,7 @@ function discoveries(world: World) {
  * what the hazard costs, and at full readiness the answer is close to nothing.
  */
 export function readiness(world: World): Record<HazardKind, number> {
+  useWorld(world);
   const wells = world.amenities.filter((a) => a.kind === 'well').length;
   const fires = world.amenities.filter((a) => a.kind === 'campfire').length;
   const stores = world.buildings.filter((b) => b.type === 'Storage' && b.active).length;
@@ -4355,6 +4405,7 @@ export const HAZARD_FIGHT: Record<HazardKind, { gold: number; title: string; blu
 
 /** What fighting this hazard costs, here and now. */
 export function fightCost(world: World, h: Hazard): number {
+  useWorld(world);
   return Math.round(HAZARD_FIGHT[h.kind].gold * (0.6 + (h.severity ?? 0.5)) * (1 + world.buildings.length / 24));
 }
 
@@ -4403,6 +4454,7 @@ export function rebuildCost(b: Building): { gold: number; wood: number; stone: n
 
 /** The player raises a ruin again, for Gold and materials. */
 export function rebuildBuilding(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
   const b = world.buildings.find((x) => x.id === id);
   if (!b) return { ok: false, message: 'That building is not there.' };
   if (!b.ruined) return { ok: false, message: 'It is standing. Nothing to rebuild.' };
@@ -4449,6 +4501,7 @@ function repairs(world: World) {
  * so the panel promises exactly what happens here.
  */
 export function fightHazard(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
   const h = world.hazards.find((x) => x.id === id);
   if (!h) return { ok: false, message: 'That has passed.' };
   if (h.fought) return { ok: false, message: 'Everything that can be done is being done.' };
@@ -4622,8 +4675,8 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     const plaza = world.layout.plaza;
     // In from an edge, aimed roughly at the square.
     const side = Math.floor(rand() * 4);
-    const x = side === 0 ? 4 : side === 1 ? 96 : 8 + rand() * 84;
-    const y = side === 2 ? 4 : side === 3 ? 96 : 8 + rand() * 84;
+    const x = side === 0 ? activeExtent.x0 + 4 : side === 1 ? activeExtent.x1 - 4 : across(rand, 8);
+    const y = side === 2 ? activeExtent.y0 + 4 : side === 3 ? activeExtent.y1 - 4 : across(rand, 8);
     const dx = plaza.x - x, dy = plaza.y - y, d = Math.max(1, Math.hypot(dx, dy));
     const pace = 7;
     const h = add('A funnel cloud is down and moving on the settlement.');
@@ -4774,8 +4827,8 @@ function hazardStep(world: World, hours: number) {
         h.vy += ((square.y - h.y) / toSquare * speed - h.vy) * k;
       }
       h.x += h.vx * hours; h.y += h.vy * hours;
-      if (h.x < 4 || h.x > 96) { h.vx = -h.vx; h.x = clamp(h.x, 4, 96); }
-      if (h.y < 4 || h.y > 96) { h.vy = -h.vy; h.y = clamp(h.y, 4, 96); }
+      if (h.x < activeExtent.x0 + 4 || h.x > activeExtent.x1 - 4) { h.vx = -h.vx; h.x = edge(h.x, 4, 96); }
+      if (h.y < activeExtent.y0 + 4 || h.y > activeExtent.y1 - 4) { h.vy = -h.vy; h.y = edge(h.y, 4, 96); }
       // Hard enough that a building the funnel passes straight over comes down
       // in the hour or so it is overhead, and one it only brushes is knocked about.
       const rate = 1.05 * severity * hours * (h.fought ? 0.35 : 1);
@@ -5050,6 +5103,7 @@ function resolveScuffle(world: World, r: Citizen) {
  * the unhappiest adult rogue.
  */
 export function trial(world: World, what: HazardKind | 'rogue', severity = 0.8) {
+  useWorld(world);
   if (what === 'rogue') {
     const c = [...world.citizens].filter((x) => x.age >= 16 && !x.rogue && !x.jailed).sort((a, b) => a.happiness - b.happiness)[0];
     if (c) turnRogue(world, c, 'misery');
@@ -5061,6 +5115,7 @@ export function trial(world: World, what: HazardKind | 'rogue', severity = 0.8) 
 
 /** Whether a hazard of this kind is running. Production and needs both ask. */
 export function hazardActive(world: World, kind: HazardKind) {
+  useWorld(world);
   return world.hazards.some((h) => h.kind === kind);
 }
 
@@ -5352,17 +5407,17 @@ function narrowestCrossing(world: World, island: number) {
       if (water.distanceToWater(x, y) < 3.2) continue;
       const back = water.toMainland(x, y);
       if (back.d <= 1 || back.d >= 26) continue;
-      const edge = Math.max(0, 12 - Math.min(x, y, 100 - x, 100 - y));
+      const rim = Math.max(0, 12 - Math.min(x - activeExtent.x0, y - activeExtent.y0, activeExtent.x1 - x, activeExtent.y1 - y));
       const inland = Math.hypot(x - centre.x, y - centre.y);
-      const score = back.d + edge * 1.4 + inland * 0.22;
+      const score = back.d + rim * 1.4 + inland * 0.22;
       if (score >= bestScore) continue;
       bestScore = score;
       best = {
         toX: x,
         toY: y,
         gap: back.d,
-        fromX: clamp(x + back.x * back.d, 2, 98),
-        fromY: clamp(y + back.y * back.d, 4, 96),
+        fromX: edge(x + back.x * back.d, 2, 98),
+        fromY: edge(y + back.y * back.d, 4, 96),
       };
     }
   }
@@ -5388,6 +5443,7 @@ export const CLEARING_DAYS = 12;
  * player can afford, which the renderer then actually fells.
  */
 export function clearTrees(world: World, x: number, y: number, standing: number): { felled: number; gold: number; wood: number } {
+  useWorld(world);
   const affordable = Math.floor(world.treasury / CLEAR_TREE_GOLD);
   const felled = Math.max(0, Math.min(standing, affordable));
   if (felled === 0) return { felled: 0, gold: 0, wood: 0 };
@@ -5420,7 +5476,7 @@ function completeBridge(world: World, works: BridgeWorks) {
   // Two new junctions, one either side, joined to each other and to whichever
   // existing junction is nearest the near bank.
   const addNode = (x: number, y: number): number => {
-    layout.nodes.push([clamp(x, 3, 97), clamp(y, 4, 96)]);
+    layout.nodes.push([edge(x, 3, 97), edge(y, 4, 96)]);
     layout.roles.push('street');
     layout.edges.push([]);
     return layout.nodes.length - 1;
@@ -5556,6 +5612,7 @@ export function buildMaterials(type: string) {
 
 /** Whether the stores can cover a building of this kind. */
 export function materialsInStore(world: World, type: string) {
+  useWorld(world);
   const need = buildMaterials(type);
   return world.resources.wood >= need.wood && world.resources.stone >= need.stone;
 }
@@ -5931,6 +5988,7 @@ export const HOUSE_ROOM_PER_LEVEL = 0.8;
  * since a house holds no workers to give more of.
  */
 export function housingRoom(world: World): number {
+  useWorld(world);
   return world.buildings
     .filter((b) => b.type === 'House' && b.active)
     .reduce((sum, b) => sum + HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL, 0);
@@ -6081,6 +6139,7 @@ function arriveOne(world: World, rand: () => number) {
  * chances with the winter.
  */
 export function addSettler(world: World, name?: string): Citizen {
+  useWorld(world);
   const rand = mulberry32(world.seed + world.counter * 7919);
   const hash = world.counter * 37 + 11;
   const plaza = world.layout.plaza;
@@ -6128,6 +6187,7 @@ export function addSettler(world: World, name?: string): Citizen {
 
 /** Put materials in the yard from outside the settlement's own production. */
 export function grantResource(world: World, key: Resource, amount: number) {
+  useWorld(world);
   if (!(amount > 0)) return;
   world.resources[key] += amount;
   note(world, 'produced', key, amount);
@@ -6222,12 +6282,14 @@ const ATTENTION_FLOOR = 0.08;
  * the simulation does by itself.
  */
 export function noteAttention(world: World) {
+  useWorld(world);
   world.stewardship.lastActionDay = world.day;
   world.stewardship.lastActionAt = Date.now();
 }
 
 /** How well this settlement is being run, 0 to 1. */
 export function stewardshipScore(world: World) {
+  useWorld(world);
   const adults = world.citizens.filter((c) => c.age >= 16);
   if (!adults.length) return 0;
   const housed = adults.filter((c) => homeOf(world, c)).length / adults.length;
@@ -6298,6 +6360,7 @@ function accrueYield(world: World, realSeconds: number) {
  * ledger, which is what persists.
  */
 export function collectYield(world: World) {
+  useWorld(world);
   const amount = Math.round(world.stewardship.pending);
   world.stewardship.pending = 0;
   return amount;
@@ -6390,7 +6453,7 @@ function daily(world: World) {
     // This is the half of the wage lever that stewardship is actually scored
     // on: a well-paid settlement is a contented one.
     const paid = ratio > 0.5 ? 0.5 : -1.5;
-    c.purpose = clamp(c.purpose + paid + (rate - WAGE_STANDARD) * 3, 0, 100);
+    c.purpose = edge(c.purpose + paid + (rate - WAGE_STANDARD) * 3, 0, 100);
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep);
@@ -6435,6 +6498,7 @@ function daily(world: World) {
  * frame by the client; safe to call with very small deltas.
  */
 export function advance(world: World, hours: number, realSeconds?: number): World {
+  useWorld(world);
   if (!(hours > 0)) return world;
   // Yield is paid against the wall clock. A caller that does not say how much
   // real time passed is assumed to be running at ordinary speed, which is what
@@ -6498,7 +6562,7 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
       c.warmth = Math.max(0, c.warmth - hours * chill * 0.07 / insulation * (c.roughSleeper ? 1.6 : 1));
     }
 
-    c.happiness = clamp((c.hunger + c.rest + c.social + c.clothing + c.purpose + c.warmth) / 6, 0, 100);
+    c.happiness = edge((c.hunger + c.rest + c.social + c.clothing + c.purpose + c.warmth) / 6, 0, 100);
   }
   return world;
 }
@@ -6509,6 +6573,7 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
 
 /** Lift a citizen out of their day. They stop where they are until set down. */
 export function pickUpCitizen(world: World, id: string) {
+  useWorld(world);
   const c = world.citizens.find((x) => x.id === id);
   if (!c) return false;
   // The settlement deals with its own rogues: nobody lifts one out of a
@@ -6527,10 +6592,11 @@ export function pickUpCitizen(world: World, id: string) {
 
 /** Move somebody who is being carried. Nothing else about them changes. */
 export function carryCitizenTo(world: World, id: string, x: number, y: number) {
+  useWorld(world);
   const c = world.citizens.find((x2) => x2.id === id);
   if (!c?.carried) return;
-  c.x = clamp(x, 2, 98);
-  c.y = clamp(y, 4, 96);
+  c.x = edge(x, 2, 98);
+  c.y = edge(y, 4, 96);
   c.destX = c.x;
   c.destY = c.y;
 }
@@ -6571,14 +6637,15 @@ function outsideBuildings(world: World, x: number, y: number) {
     }
     if (!moved) break;
   }
-  return { x: clamp(px, 2, 98), y: clamp(py, 4, 96) };
+  return { x: edge(px, 2, 98), y: edge(py, 4, 96) };
 }
 
 export function dropCitizen(world: World, id: string, x: number, y: number) {
+  useWorld(world);
   const c = world.citizens.find((x2) => x2.id === id);
   if (!c?.carried) return;
   c.carried = false;
-  const spot = outsideBuildings(world, clamp(x, 2, 98), clamp(y, 4, 96));
+  const spot = outsideBuildings(world, edge(x, 2, 98), edge(y, 4, 96));
   c.x = spot.x;
   c.y = spot.y;
   const water = waterOf(world);
@@ -6631,8 +6698,8 @@ function swimmers(world: World, hours: number) {
     const dir = out.d > 0 ? out : water.toLand(c.x, c.y);
     if (!(dir.d > 0)) { c.swimming = false; continue; }
     const stepLen = Math.min(SWIM_SPEED * hours, dir.d + 0.4);
-    c.x = clamp(c.x + dir.x * stepLen, 2, 98);
-    c.y = clamp(c.y + dir.y * stepLen, 4, 96);
+    c.x = edge(c.x + dir.x * stepLen, 2, 98);
+    c.y = edge(c.y + dir.y * stepLen, 4, 96);
     c.destX = c.x;
     c.destY = c.y;
     c.facing = Math.abs(dir.x) > Math.abs(dir.y) ? (dir.x > 0 ? 'e' : 'w') : (dir.y > 0 ? 's' : 'n');
@@ -6641,6 +6708,7 @@ function swimmers(world: World, hours: number) {
 
 /** Immutable wrapper around `advance`, kept for callers that want snapshots. */
 export function tick(world: World, hours = 1): World {
+  useWorld(world);
   return advance(structuredClone(world), hours);
 }
 
@@ -6668,7 +6736,8 @@ export const EXPAND_AREA = 'The Outer Belt';
  * moves a building, so the two never disagree about where the plot ends.
  */
 export function buildBounds(world: World): { x0: number; x1: number; y0: number; y1: number } {
-  return world.expanded ? { x0: 2, x1: 98, y0: 3, y1: 97 } : { x0: 6, x1: 94, y0: 8, y1: 92 };
+  useWorld(world);
+  return inset(extentOf(world), 6, 8);
 }
 
 /**
@@ -6678,6 +6747,7 @@ export function buildBounds(world: World): { x0: number; x1: number; y0: number;
  * the expansion from the registry can apply it without a second feed line.
  */
 export function expandPlot(world: World): boolean {
+  useWorld(world);
   if (world.expanded) return false;
   world.expanded = true;
   if (!world.unlockedAreas.includes(EXPAND_AREA)) world.unlockedAreas.push(EXPAND_AREA);
@@ -6687,6 +6757,7 @@ export function expandPlot(world: World): boolean {
 }
 
 export function placementProblem(world: World, type: string, x: number, y: number, ignoreId?: string): string | null {
+  useWorld(world);
   const bb = buildBounds(world);
   const px = clamp(x, bb.x0, bb.x1), py = clamp(y, bb.y0, bb.y1);
   if (waterOf(world).blocks(px, py)) return 'Nothing can stand on the water.';
@@ -6700,6 +6771,7 @@ export function placementProblem(world: World, type: string, x: number, y: numbe
 }
 
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {
+  useWorld(world);
   if (world.treasury < cost) return null;
   const problem = placementProblem(world, type, x, y);
   if (problem) {
@@ -6769,13 +6841,13 @@ function linkToRoads(world: World, building: Building) {
   // own junctions in the first place.
   const away = Math.atan2(layout.nodes[nearest][1] - building.y, layout.nodes[nearest][0] - building.x);
   const gap = (building.type === 'Market' || building.type === 'Town Hall' ? 4.2 : 3.2) + 1.6;
-  let nx = clamp(building.x + Math.cos(away) * gap, 3, 97);
-  let ny = clamp(building.y + Math.sin(away) * gap, 4, 96);
+  let nx = edge(building.x + Math.cos(away) * gap, 3, 97);
+  let ny = edge(building.y + Math.sin(away) * gap, 4, 96);
   if (water.blocks(nx, ny)) {
     const clear = water.toClear(nx, ny);
     if (!(clear.d > 0)) return false;
-    nx = clamp(nx + clear.x * (clear.d + 0.6), 3, 97);
-    ny = clamp(ny + clear.y * (clear.d + 0.6), 4, 96);
+    nx = edge(nx + clear.x * (clear.d + 0.6), 3, 97);
+    ny = edge(ny + clear.y * (clear.d + 0.6), 4, 96);
   }
 
   layout.nodes.push([nx, ny]);
@@ -6806,6 +6878,7 @@ function staffNow(world: World) {
 export const UNDEMOLISHABLE = ['Market', 'Bank', 'Town Hall'];
 
 export function demolishBuilding(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
   const building = world.buildings.find((b) => b.id === id);
   if (!building) return { ok: false, message: 'That building is not there.' };
   // The market is where the settlement eats and trades and the bank is where its
@@ -6918,6 +6991,7 @@ export function upgradeCost(b: Building): { gold: number; wood: number; stone: n
  * rather than continuing toward a patch of ground where it used to stand.
  */
 export function moveBuilding(world: World, id: string, x: number, y: number): { ok: boolean; message: string } {
+  useWorld(world);
   const building = world.buildings.find((b) => b.id === id);
   if (!building) return { ok: false, message: 'That building is not there.' };
   const cost = moveCost(building.type);
@@ -6961,6 +7035,7 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
  * with a daily bill it may not be able to meet.
  */
 export function upgradeBuilding(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
   const building = world.buildings.find((b) => b.id === id);
   if (!building) return { ok: false, message: 'That building is not there.' };
   const cost = upgradeCost(building);
@@ -6986,6 +7061,7 @@ export function upgradeBuilding(world: World, id: string): { ok: boolean; messag
 
 /** Add Gold to the treasury from outside the settlement's own economy. */
 export function fundTreasury(world: World, gold: number, note: string) {
+  useWorld(world);
   if (!(gold > 0)) return;
   noteAttention(world);
   earn(world, 'vault', gold);
@@ -6994,6 +7070,7 @@ export function fundTreasury(world: World, gold: number, note: string) {
 
 /** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
 export function drawFromTreasury(world: World, gold: number, note: string) {
+  useWorld(world);
   if (!(gold > 0) || world.treasury < gold) return false;
   noteAttention(world);
   spend(world, 'vault', gold);
@@ -7006,6 +7083,7 @@ export function drawFromTreasury(world: World, gold: number, note: string) {
  * whole settlement's mood and purpose and lets behaviour follow from that.
  */
 export function inspireWorld(world: World): FeedEntry | null {
+  useWorld(world);
   const rand = mulberry32(world.seed + world.counter * 13 + Math.floor(world.hour));
   const adults = world.citizens.filter((c) => c.age >= 16);
   if (!adults.length) return null;

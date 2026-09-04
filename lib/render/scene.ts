@@ -25,7 +25,8 @@ import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
 import { CLEARING_DAYS, CLEAR_RADIUS } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
-import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, screenToWorld, tileToScreen, tileToWorld, worldToScreen } from '../world/iso';
+import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
+import { extentOf } from '../world/extent';
 import { TILE_ART, TILE_COLOR, Tile, generateWorldMap, type PropInstance, type WorldMap } from '../world/terrain';
 import type { ShoreEdge } from './tiles';
 import type { BiomeKind } from '../world/biomes';
@@ -186,6 +187,22 @@ export class EmergeScene {
 
   private worldRoot = new Container();
   private backdrop: TilingSprite | null = null;
+  /** The screen box of the plot being drawn, from its extent. Base until a world says otherwise. */
+  private bounds: SceneBounds = SCENE_BOUNDS;
+
+  /**
+   * Size the distant forest to the plot.
+   *
+   * The backdrop rings the tile field so its diamond edge never shows as
+   * empty space; an expanded plot is a bigger diamond, so the ring follows.
+   */
+  private fitBackdrop() {
+    if (!this.backdrop) return;
+    const pad = 900;
+    this.backdrop.position.set(this.bounds.minX - pad, this.bounds.minY - pad);
+    this.backdrop.width = this.bounds.maxX - this.bounds.minX + pad * 2;
+    this.backdrop.height = this.bounds.maxY - this.bounds.minY + pad * 2;
+  }
   private groundLayer = new Container();
   private waterLayer = new Container();
   private objectLayer = new Container();
@@ -267,6 +284,7 @@ export class EmergeScene {
     // renderer was booting — the published copy arriving from another device
     // — has replaced it, and is the one to draw.
     this.map = generateWorldMap(this.world);
+    this.bounds = sceneBoundsOf(extentOf(this.world));
 
     this.vignette.texture = this.assets.get('fx.vignette');
     this.vignette.blendMode = 'multiply';
@@ -274,14 +292,8 @@ export class EmergeScene {
     this.app.stage.addChild(this.worldRoot, this.vignette, this.ambient, this.lightsRoot, this.weatherLayer, this.hudRoot);
     // Distant forest behind everything, so the diamond edge of the tile field
     // never shows as empty space at the corners of the viewport.
-    const pad = 900;
-    this.backdrop = new TilingSprite({
-      texture: backdropTexture(),
-      x: SCENE_BOUNDS.minX - pad,
-      y: SCENE_BOUNDS.minY - pad,
-      width: SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX + pad * 2,
-      height: SCENE_BOUNDS.maxY - SCENE_BOUNDS.minY + pad * 2,
-    });
+    this.backdrop = new TilingSprite({ texture: backdropTexture() });
+    this.fitBackdrop();
     // The distant land belongs to the same biome as the map: an unbroken green
     // forest ringing a desert made the plot look like a diorama on a lawn.
     this.backdrop.tint = BACKDROP_TINT[this.world.biome];
@@ -323,7 +335,7 @@ export class EmergeScene {
         const i = ty * map.grid + tx;
         const kind = map.tiles[i] as Tile;
         const step = map.steps[i];
-        const pos = tileToScreen(tx, ty, step);
+        const pos = tileToScreen(tx + map.t0, ty + map.t0, step);
 
         // Cliff face first, so the raised tile sits on top of its own rock wall.
         if (map.cliffs[i]) {
@@ -360,7 +372,7 @@ export class EmergeScene {
     }
 
     for (const { tx, ty } of map.waterfalls) {
-      const pos = tileToScreen(tx, ty, 1);
+      const pos = tileToScreen(tx + map.t0, ty + map.t0, 1);
       const sprite = new Sprite(assets.get('tile.waterfall.0'));
       sprite.position.set(pos.x - TILE_W / 2, pos.y);
       this.waterLayer.addChild(sprite);
@@ -802,8 +814,8 @@ export class EmergeScene {
   private onResize() {
     const w = this.app.renderer.width;
     const h = this.app.renderer.height;
-    const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
-    const sceneH = SCENE_BOUNDS.maxY - SCENE_BOUNDS.minY;
+    const sceneW = this.bounds.maxX - this.bounds.minX;
+    const sceneH = this.bounds.maxY - this.bounds.minY;
     // Never zoom out past the point where the world stops filling the viewport.
     this.minZoom = Math.max(w / sceneW, h / sceneH, 0.35);
     this.ambient.width = w; this.ambient.height = h;
@@ -819,7 +831,7 @@ export class EmergeScene {
     const zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.camera.zoom));
     const halfW = w / (2 * zoom);
     const halfH = h / (2 * zoom);
-    const { minX, maxX, minY, maxY } = SCENE_BOUNDS;
+    const { minX, maxX, minY, maxY } = this.bounds;
 
     this.camera.zoom = zoom;
     this.camera.x = maxX - minX <= halfW * 2 ? (minX + maxX) / 2 : Math.max(minX + halfW, Math.min(maxX - halfW, this.camera.x));
@@ -1134,12 +1146,21 @@ export class EmergeScene {
    * holding released GPU resources, and browsers cap how many live WebGL
    * contexts a page may have. So the scene graph is emptied and rebuilt instead.
    */
+  /** How big the drawn map is, for tests and the guide: tiles across and the first tile's index. */
+  mapSize(): { grid: number; t0: number } | null {
+    return this.map ? { grid: this.map.grid, t0: this.map.t0 } : null;
+  }
+
   reset(world: World) {
     this.world = world;
     // Still booting: there is no atlas to draw with and nothing on stage to
     // clear. init() finishes with the world set here.
     if (!this.assets) return;
     this.map = generateWorldMap(world);
+    this.bounds = sceneBoundsOf(extentOf(world));
+    this.minimapBase = null;
+    this.fitBackdrop();
+    this.onResize();
     // The backdrop survives the teardown below, so it is re-tinted here rather
     // than rebuilt — otherwise a desert claimed after a woodland keeps the
     // woodland's horizon.
@@ -1218,6 +1239,9 @@ export class EmergeScene {
   private rebuildGround() {
     if (!this.world) return;
     this.map = generateWorldMap(this.world);
+    this.bounds = sceneBoundsOf(extentOf(this.world));
+    this.minimapBase = null;
+    this.fitBackdrop();
     for (const layer of [this.groundLayer, this.waterLayer]) {
       for (const child of layer.removeChildren()) child.destroy({ children: true });
     }
@@ -1497,8 +1521,10 @@ export class EmergeScene {
     if (level <= 0) return;
     const water = waterOf(this.world);
     const reach = 2.5 + level * 5;
-    for (let ty = 0; ty < GRID; ty++) {
-      for (let tx = 0; tx < GRID; tx++) {
+    const t0 = this.map.t0;
+    for (let ly = 0; ly < this.map.grid; ly++) {
+      for (let lx = 0; lx < this.map.grid; lx++) {
+        const tx = lx + t0, ty = ly + t0;
         const wx = tileToWorld(tx + 0.5), wy = tileToWorld(ty + 0.5);
         if (water.isWater(wx, wy)) continue;
         const d = water.distanceToWater(wx, wy);
@@ -2246,14 +2272,19 @@ export class EmergeScene {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.minimapBase, 0, 0, w, h);
 
-    const project = (wx: number, wy: number) => {
-      const p = worldToScreen(wx, wy);
-      const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
+    // The base image is drawn in the plot's own tile space, so anything laid
+    // over it goes through the same mapping: local tile coordinates first.
+    const base = this.minimapBase;
+    const scale = 4;
+    const grid = this.map.grid, t0 = this.map.t0;
+    const toMap = (atx: number, aty: number) => {
+      const ltx = atx - t0, lty = aty - t0;
       return {
-        x: ((p.x - SCENE_BOUNDS.minX) / sceneW) * w,
-        y: (p.y / (GRID * TILE_H)) * h,
+        x: (((grid * scale) / 2 + (ltx - lty) * (scale / 2)) / base.width) * w,
+        y: (((ltx + lty) * (scale / 4)) / base.height) * h,
       };
     };
+    const project = (wx: number, wy: number) => toMap(worldToTile(wx), worldToTile(wy));
 
     ctx.fillStyle = '#e8c169';
     for (const b of this.world.buildings) {
@@ -2269,11 +2300,14 @@ export class EmergeScene {
     // Viewport frame.
     const tl = this.screenToScene(0, 0);
     const br = this.screenToScene(this.app.renderer.width, this.app.renderer.height);
-    const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
-    const x0 = ((tl.x - SCENE_BOUNDS.minX) / sceneW) * w;
-    const x1 = ((br.x - SCENE_BOUNDS.minX) / sceneW) * w;
-    const y0 = (tl.y / (GRID * TILE_H)) * h;
-    const y1 = (br.y / (GRID * TILE_H)) * h;
+    // Screen corners are not tile corners on an isometric map; the frame is
+    // the axis-aligned box the viewport's tile-space corners span.
+    const corners = [tl, { x: br.x, y: tl.y }, br, { x: tl.x, y: br.y }].map((p) => {
+      const t = screenToTile(p.x, p.y);
+      return toMap(t.x, t.y);
+    });
+    const x0 = Math.min(...corners.map((c) => c.x)), x1 = Math.max(...corners.map((c) => c.x));
+    const y0 = Math.min(...corners.map((c) => c.y)), y1 = Math.max(...corners.map((c) => c.y));
     ctx.strokeStyle = 'rgba(232,240,214,0.85)';
     ctx.lineWidth = 1;
     ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y0) + 0.5, Math.round(x1 - x0), Math.round(y1 - y0));
@@ -2281,9 +2315,17 @@ export class EmergeScene {
 
   /** Move the camera to the point clicked on the minimap. */
   minimapJump(u: number, v: number) {
-    const sceneW = SCENE_BOUNDS.maxX - SCENE_BOUNDS.minX;
-    this.camera.x = SCENE_BOUNDS.minX + u * sceneW;
-    this.camera.y = v * (GRID * TILE_H);
+    // Undo the minimap's own projection: a point on the image back to local
+    // tile space, then to absolute tiles, then to the screen.
+    const scale = 4;
+    const grid = this.map.grid, t0 = this.map.t0;
+    const bw = grid * scale, bh = grid * (scale / 2) + scale;
+    const px = u * bw - bw / 2, py = v * bh;
+    const diff = px / (scale / 2), sum = py / (scale / 4);
+    const ltx = (sum + diff) / 2, lty = (sum - diff) / 2;
+    const at = tileToScreen(ltx + t0, lty + t0);
+    this.camera.x = at.x;
+    this.camera.y = at.y;
     this.applyCamera();
   }
 
