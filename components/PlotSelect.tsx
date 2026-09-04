@@ -42,6 +42,7 @@ import {
   type Claim, type Find, quitJob, takeJob,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
+import { music } from '@/lib/audio/music';
 import { BrandLine } from './Brand';
 import { LanguageSwitch } from './LanguageSwitch';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
@@ -613,6 +614,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   const [offerAmount, setOfferAmount] = useState('');
   const [offering, setOffering] = useState(false);
   const [jobBusy, setJobBusy] = useState(false);
+  const [tune, setTune] = useState(false);
+  useEffect(() => { setTune(music.enabled); return music.subscribe(setTune); }, []);
   const me = wallet.address?.toLowerCase() ?? '';
   /** The plot this wallet works at, if any. */
   const myJob = useMemo(() => (me ? allClaims.find((c) => c.hand?.address === me) ?? null : null), [allClaims, me]);
@@ -1026,6 +1029,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
           <div className="land-head-side">
             <div className="map-nav">
               <button className="ghost" onClick={onHome}>{t('← Home')}</button>
+              <button className={`ghost ${tune ? 'on' : ''}`} onClick={() => music.toggle()} title={tune ? t('Music off') : t('Music on')}>
+                {tune ? '♪' : '♪̸'}
+              </button>
               {wallet.address && (
                 <button className="ghost" onClick={onDisconnect} title={t('Your plots and balance stay with the address; connect again any time.')}>
                   {t('Disconnect wallet')}

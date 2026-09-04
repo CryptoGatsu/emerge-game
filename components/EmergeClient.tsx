@@ -55,6 +55,7 @@ import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/re
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
+import { moodFor, music } from '@/lib/audio/music';
 import Arena from './Arena';
 import PlotSelect from './PlotSelect';
 import Landing from './Landing';
@@ -132,6 +133,9 @@ const SALE_NOTICE_GOLD = 20;
  * place. What is left is ordinary time and a gentle nudge.
  */
 export const SPEEDS = [1, 2] as const;
+
+/** Hazards that get the danger track while they are still doing harm. */
+const DIRE_KINDS = new Set(['fire', 'flood', 'earthquake', 'tornado', 'plague']);
 
 /** Where a tab remembers that it walked in as a spectator. */
 const SPECTATOR_KEY = 'emerge.spectator.v1';
@@ -458,6 +462,19 @@ export default function EmergeClient() {
     setClaimed(null);
   }, []);
 
+  /*
+   * The map has its own track and the front door is silent; a world decides
+   * for itself a few times a second, in its own view. Decided here, above the
+   * early return below, because a hook after it would change the hook count
+   * between renders.
+   */
+  const wantsLandingNow = !claimed && !visit && ((!address && !spectator) || !entered);
+  const onMap = claimed === null && !visit && !wantsLandingNow;
+  useEffect(() => {
+    if (wantsLandingNow) music.want('none');
+    else if (onMap) music.want('map');
+  }, [wantsLandingNow, onMap]);
+
   if (claimed === undefined || !player) return <main className="stage" />;
 
   /*
@@ -548,6 +565,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   // callback rather than the one that existed at mount.
   const onEarnRef = useRef(onEarn);
   onEarnRef.current = onEarn;
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
 
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -561,6 +580,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   const [woodland, setWoodland] = useState<{ standing: number; stumps: number; saplings: number; total: number } | null>(null);
   const soundRef = useRef<Soundscape | null>(null);
   const [sound, setSound] = useState(false);
+  // The note reads the remembered switch; the browser still needs a click
+  // before anything actually plays, which the note is.
+  useEffect(() => { setSound(music.enabled); }, []);
 
   // The settlement as it was left, or a new one if there is nothing to read.
   // A visit reads the owner's published snapshot instead: their settlement, not
@@ -663,6 +685,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         // somebody else's settlement is not stewarding it.
         const earned = collectYield(live);
         if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned);
+        // A danger that is still doing harm changes the music; a harmless
+        // one, or one already fought down, does not.
+        if (!hiddenRef.current) {
+          const dire = live.hazards.some((h) => (h.severity ?? 0) > 0 && DIRE_KINDS.has(h.kind));
+          music.want(moodFor(live.hour, dire, spectating));
+        }
       }
       setWoodland(sceneRef.current?.woodland() ?? null);
     }, HUD_INTERVAL);
@@ -1237,10 +1265,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => (worldRef.current ? constructBuilding(worldRef.current, type, BUILD_COSTS[type] ?? 0, x, y) : null),
       map: () => sceneRef.current?.mapSize() ?? null,
+      spot: () => sceneRef.current?.spot ?? null,
+      music: () => music.playing,
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
@@ -1606,7 +1636,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             following={following}
             woodland={woodland}
             sound={sound}
-            onToggleSound={() => setSound((on) => !on)}
+            onToggleSound={() => { setSound((on) => { music.set(!on); return !on; }); }}
             player={player}
             onRenameCitizen={renameCitizenFor}
             onDemolish={demolish}

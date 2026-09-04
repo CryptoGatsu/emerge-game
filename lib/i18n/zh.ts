@@ -745,6 +745,8 @@ export const UI: Record<string, string> = {
   'Disconnect wallet': '断开钱包',
   'Your plots and balance stay with the address; connect again any time.': '你的地块和余额留在地址上；随时可以重新连接。',
   'WHAT’S NEW': '最近更新',
+  'Music off': '关闭音乐',
+  'Music on': '打开音乐',
   'All update notes, in the guide': '完整更新记录，见指南',
 };
 

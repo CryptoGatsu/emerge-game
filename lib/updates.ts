@@ -26,6 +26,7 @@ export const UPDATES: Update[] = [
       'Just watch: the front door opens the world map without a wallet. Spectators can visit any settlement and talk in chat, badged as spectators.',
       'Plot expansion: the land itself grows, a ring of new ground on every side, about half as much land again, for 500,000 $EMERGE, once per plot.',
       'The world map has a Home button and a Disconnect wallet button. The guide has pictures, and this list.',
+      'A soundtrack: six loops for the settlement by day, dusk, night, danger, the world map and visiting. Press the note to hear it.',
     ],
   },
   {
@@ -65,6 +66,7 @@ export const UPDATES_ZH: Update[] = [
       '先看看再说：首页不用钱包也能打开世界地图。观众可以拜访任何聚落、在聊天里说话，带着观众标记。',
       '扩建地块：土地本身变大，四周多出一圈新地，约多一半土地，花费 500,000 $EMERGE，每块地一次。',
       '世界地图上有了"主页"和"断开钱包"按钮。指南加了图片，还有这份更新记录。',
+      '配乐：白天的聚落、黄昏、夜晚、危险、世界地图和拜访，六段循环。按音符键即可听到。',
     ],
   },
   {

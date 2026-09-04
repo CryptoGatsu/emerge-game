@@ -1146,6 +1146,9 @@ export class EmergeScene {
    * holding released GPU resources, and browsers cap how many live WebGL
    * contexts a page may have. So the scene graph is emptied and rebuilt instead.
    */
+  /** Where the placement ghost stands, for tests. */
+  get spot() { return this.placementSpot; }
+
   /** How big the drawn map is, for tests and the guide: tiles across and the first tile's index. */
   mapSize(): { grid: number; t0: number } | null {
     return this.map ? { grid: this.map.grid, t0: this.map.t0 } : null;
@@ -2419,8 +2422,11 @@ export class EmergeScene {
     const rect = this.app.canvas.getBoundingClientRect();
     const scene = this.screenToScene(e.clientX - rect.left, e.clientY - rect.top);
     const world = screenToWorld(scene.x, scene.y);
-    const wx = Math.max(4, Math.min(96, world.x));
-    const wy = Math.max(6, Math.min(94, world.y));
+    // Held inside the land, a little in from the edge — the plot's own edge,
+    // which is further out once it has been expanded.
+    const ext = extentOf(this.world);
+    const wx = Math.max(ext.x0 + 4, Math.min(ext.x1 - 4, world.x));
+    const wy = Math.max(ext.y0 + 6, Math.min(ext.y1 - 6, world.y));
     this.placementSpot = { x: wx, y: wy };
     // Clearing is allowed anywhere there is a tree to clear; the ring says
     // whether there is one under it.

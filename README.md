@@ -738,6 +738,16 @@ Nothing starts until you press the note in the top bar: browsers refuse to run a
 context before a gesture, and a world that starts making noise on its own is worse than
 a silent one.
 
+**The soundtrack.** Six loops in `public/music/` — the settlement by day, dusk
+round the fire, night, danger, the world map and somebody else's town — played
+by one shared `Music` player (`lib/audio/music.ts`) that crossfades when the
+mood changes. The mood is decided a few times a second from where the player
+is and what the world is doing: a hazard still doing harm gets the danger
+track, a visit gets its own, the map gets its own, and the hour decides
+between day, dusk and night. Nothing plays until the player presses the note,
+because browsers will not start audio unprompted; the choice is remembered.
+
+
 ## Wallets
 
 Wallets are discovered through EIP-6963, so a browser with both MetaMask and Trust
