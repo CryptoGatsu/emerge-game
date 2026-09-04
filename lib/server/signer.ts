@@ -30,7 +30,7 @@ import 'server-only';
 
 import { createPublicClient, createWalletClient, defineChain, http, parseUnits, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { ACTIVE_CHAIN, TOKEN } from '../chain/emerge';
+import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
 
@@ -79,6 +79,10 @@ const ERC20 = [
     type: 'function', name: 'transfer', stateMutability: 'nonpayable',
     inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }],
     outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function', name: 'burn', stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }], outputs: [],
   },
   {
     type: 'function', name: 'balanceOf', stateMutability: 'view',
@@ -206,6 +210,44 @@ export async function sendFromVault(to: string, whole: number): Promise<SendResu
     return { ok: true, txHash };
   } catch {
     return { ok: false, problem: 'The transfer could not be sent. Nothing has been taken from your balance.' };
+  } finally {
+    await releaseLock(NONCE_LOCK);
+  }
+}
+
+/**
+ * Burn $EMERGE out of the vault: the share of every charge the vault owes the
+ * burn address. `burn(uint256)` where the token has it, a transfer to the burn
+ * address otherwise, and a refusal rather than a reverting transaction when
+ * neither would work.
+ */
+export async function burnFromVault(whole: number): Promise<SendResult> {
+  const key = vaultKey();
+  if (!key) return { ok: false, problem: 'The vault is not configured to sign.' };
+  if (!token()) return { ok: false, problem: `No ${TOKEN.ticker} contract is configured.` };
+  const amount = Math.floor(whole);
+  if (!(amount > 0)) return { ok: false, problem: 'There is nothing to burn.' };
+  if (!tokenBurnable() && burnTargetBroken()) {
+    return { ok: false, problem: 'This build has no working burn target.' };
+  }
+  if (!(await takeLock(NONCE_LOCK, LOCK_SECONDS))) {
+    return { ok: false, problem: 'The vault is sending something else. Try again in a moment.' };
+  }
+  try {
+    const account = privateKeyToAccount(key);
+    const client = reader();
+    const wallet = createWalletClient({ account, chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+    const decimals = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' });
+    const units = parseUnits(String(amount), Number(decimals));
+    const held = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
+    if (held < units) return { ok: false, problem: 'The vault holds less than it owes the burn address.' };
+    const nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
+    const txHash = tokenBurnable()
+      ? await wallet.writeContract({ address: token() as Hex, abi: ERC20, functionName: 'burn', args: [units], nonce })
+      : await wallet.writeContract({ address: token() as Hex, abi: ERC20, functionName: 'transfer', args: [BURN_ADDRESS as Hex, units], nonce });
+    return { ok: true, txHash };
+  } catch {
+    return { ok: false, problem: 'The burn could not be sent.' };
   } finally {
     await releaseLock(NONCE_LOCK);
   }

@@ -17,6 +17,17 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.1',
+    date: '2026-09-07',
+    title: 'Ten times the rewards, and charges that fund them',
+    notes: [
+      'Rewards are ten times what they were. A plot’s daily ceiling now runs from 60,000 $EMERGE at level one to 250,000 for a level-ten city in the AI era. Five plots earn instead of four, and a wallet can collect up to 1,000,000 a day across them. A single withdrawal can be up to 1,000,000.',
+      'Every charge now goes into the vault instead of straight to the burn address. The vault burns half of it itself, from its own key, in one transaction for many charges; the other half stays in the vault to pay withdrawals from. Same one signature for you; what players spend is what players are paid from, and the vault can cover what it owes. The book is public at /api/vault: paid in, kept, owed to the burn, burned, with the burn transactions.',
+      'Three more things to spend on, from the SUPPLIES card on the On-Chain panel, delivered the moment the payment settles: a party of five settlers (50,000, needs room in the houses), a shipment of 400 timber, 300 stone and 240 portions of food (40,000), and a restoration that rebuilds every ruin and finishes the bridge under way (100,000).',
+      'Charters and insurance repriced for the new ceilings: 300,000 and 150,000.',
+    ],
+  },
+  {
     version: '2.0',
     date: '2026-09-06',
     title: 'City levels, Gold with somewhere to go, and $EMERGE worth holding',
@@ -109,6 +120,17 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.1',
+    date: '2026-09-07',
+    title: '十倍的收益，以及为它买单的收费',
+    notes: [
+      '收益是原来的十倍。地块的每日上限从一级的 60,000 $EMERGE 到人工智能时代十级城市的 250,000。五块地可以赚而不是四块，一个钱包每天最多可收取 1,000,000。单笔提现最多 1,000,000。',
+      '每一笔收费现在进入金库，而不是直接到销毁地址。金库用自己的密钥销毁其中一半，多笔收费合并为一笔交易；另一半留在金库用于支付提现。你仍然只签一次名；玩家花掉的就是支付玩家的来源，金库付得起它欠的。账本公开在 /api/vault：收入、留存、待销毁、已销毁，以及销毁交易。',
+      '"链上"面板新增"补给"卡片，三样东西付款到账即送达：一队五名移民（50,000，房子要有空位）、一批 400 木材、300 石料和 240 份食物的货物（40,000）、一次重建全部废墟并完成在建桥梁的修复（100,000）。',
+      '特许状和保险按新上限重新定价：300,000 和 150,000。',
+    ],
+  },
   {
     version: '2.0',
     date: '2026-09-06',

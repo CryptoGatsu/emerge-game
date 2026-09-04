@@ -1,6 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
+import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
@@ -50,9 +50,12 @@ const CHARGES = [
   { what: '推进时代', cost: n(ADVANCE_COST_EMERGE), note: '每一步一次，地块达成条件之后' },
   { what: '购买特许状', cost: n(CHARTER_COST_EMERGE), note: `地块收益上限提高五分之一，为期 ${CHARTER_DAYS} 天` },
   { what: '投保', cost: n(INSURANCE_COST_EMERGE), note: `任何灾难的损失减半，为期 ${INSURANCE_DAYS} 天` },
+  { what: '一队移民', cost: n(BOON_COST_EMERGE.settlers), note: '五人今天到达；房子要有空位' },
+  { what: '一批货物', cost: n(BOON_COST_EMERGE.shipment), note: '400 木材、300 石料、240 份食物' },
+  { what: '一次修复', cost: n(BOON_COST_EMERGE.restore), note: '重建全部废墟，完成在建的桥' },
 ];
 
-const yieldFor = (score: number, attention: number) => Math.round(STEWARDSHIP_DAILY_CAP * score * attention);
+const yieldFor = (score: number, attention: number, ceiling = plotCeiling(1, 1)) => Math.round(ceiling * score * attention);
 
 const EXAMPLES = [
   { how: '经营良好，每天照看', score: 0.95, attention: 0.9 },
@@ -234,7 +237,7 @@ export function WikiZh() {
 
         <section id="costs">
           <h2>各项费用</h2>
-          <p><b>每一笔收费都被销毁。</b>不是付给我们，不是被任何人收走，不是存在某个金库里——是销毁，所以供应量每次都下降。项目没有抽成的地址，因为没有抽成。</p>
+          <p><b>每一笔收费都进入金库，其中一半在那里被销毁。</b>不是付给我们，不是被任何人收走：一笔转账进入金库，金库用自己的密钥销毁其中 {pct(1 - CHARGE_VAULT_SHARE)}，所以供应量随每笔收费下降，另外 {pct(CHARGE_VAULT_SHARE)} 留在金库用于支付提现。玩家花掉的就是支付玩家的来源，账本公开在 <code>/api/vault</code>：收入、留存、待销毁、已销毁，以及销毁交易。项目没有抽成的地址，因为没有抽成。</p>
           <table className="wiki-table">
             <thead><tr><th>动作</th><th>费用</th><th /></tr></thead>
             <tbody>
@@ -266,24 +269,25 @@ export function WikiZh() {
           <h2>收益</h2>
           <p>你不是因为持有土地而获得报酬，而是因为把它经营好，费率每天根据聚落的状态重新计算。这一节讲的是进入<em>你钱包</em>的 {T}；居民赚的金币是另一回事，<a href="#economy">下面有单独一节</a>。</p>
           <div className="wiki-formula">
-            <code>每日收益 = {n(STEWARDSHIP_DAILY_CAP)} × 质量 × 关注</code>
-            <span>每块地，每个真实日</span>
+            <code>每日收益 = 上限(等级, 时代) × 质量 × 关注</code>
+            <span>每块地，每个真实日：一级 {n(plotCeiling(1, 1))}，人工智能时代的十级城市 {n(plotCeiling(10, 5))}</span>
           </div>
           <p><b>质量</b>是这个地方实际的状况——有房（25%）、有饭（25%）、有活（20%）、满足（20%）、安全（10%）。<b>关注</b>是你最近有没有做什么：刚做过就是满值，沉默大约一天半后滑到 {pct(0.08)} 的底线。没人碰的世界只能赚到经营中的世界的一小部分。</p>
           <table className="wiki-table">
-            <thead><tr><th>状况</th><th>一块地</th><th>{EARNING_PLOT_LIMIT} 块地</th></tr></thead>
+            <thead><tr><th>状况</th><th>一级地块</th><th>人工智能时代十级城市</th><th>{EARNING_PLOT_LIMIT} 座这样的城市</th></tr></thead>
             <tbody>
               {EXAMPLES.map((row) => (
                 <tr key={row.how}>
                   <td>{row.how}</td>
                   <td className="num">{n(yieldFor(row.score, row.attention))}</td>
-                  <td className="num">{n(yieldFor(row.score, row.attention) * EARNING_PLOT_LIMIT)}</td>
+                  <td className="num">{n(yieldFor(row.score, row.attention, plotCeiling(10, 5)))}</td>
+                  <td className="num">{n(Math.min(WALLET_DAILY_CEILING, yieldFor(row.score, row.attention, plotCeiling(10, 5)) * EARNING_PLOT_LIMIT))}</td>
                 </tr>
               ))}
-              <tr className="wiki-total"><td>绝对上限</td><td className="num">{n(STEWARDSHIP_DAILY_CAP)}</td><td className="num">{n(DAILY_EARN_CEILING)}</td></tr>
+              <tr className="wiki-total"><td>绝对上限</td><td className="num">{n(plotCeiling(1, 1))}</td><td className="num">{n(plotCeiling(10, 5))}</td><td className="num">{n(WALLET_DAILY_CEILING)}</td></tr>
             </tbody>
           </table>
-          <p className="wiki-note">所有数字都是每个真实日的 {T}。只有你最先的 {EARNING_PLOT_LIMIT} 块地付钱，每个钱包每天 {n(DAILY_EARN_CEILING)} 是硬上限——再多的钱也买不过去。这是有意的：上限就是阻止游戏变成资本换代币机器的东西。</p>
+          <p className="wiki-note">所有数字都是每个真实日的 {T}。只有你最先的 {EARNING_PLOT_LIMIT} 块地付钱，每个钱包每天 {n(WALLET_DAILY_CEILING)} 是硬上限——再多的钱也买不过去。这是有意的：上限就是阻止游戏变成资本换代币机器的东西。</p>
           {!landOnChain && (
             <div className="wiki-callout warn">
               <b>经营收益还不能提取。</b>

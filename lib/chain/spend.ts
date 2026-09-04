@@ -7,18 +7,19 @@
  * adds it to a burn total. Nothing leaves anybody's wallet because there is
  * nothing to leave it. Every panel says so.
  *
- * **A token deployed.** The player signs a transfer to the burn address and the
- * tokens are gone — checkable on any explorer, with no contract of ours
- * involved. The local ledger stops being the record and becomes a cache of what
- * the chain says.
+ * **A token deployed.** The player signs one transfer into the vault. The vault
+ * burns half of it itself and keeps the other half to pay withdrawals from —
+ * both checkable on any explorer, with no contract of ours involved. Without a
+ * vault configured the charge is burned outright, as it always was. The local
+ * ledger stops being the record and becomes a cache of what the chain says.
  *
  * Everything that costs $EMERGE goes through here so the two paths can never
  * drift apart, and so that adding the contract is one variable rather than
  * seven edits.
  */
 
-import { burnTokens, tokenBalance, tokenLive, transferTokens } from './emerge';
-import { charge, type VaultLedger } from './vault';
+import { VAULT_ADDRESS, burnTokens, tokenBalance, tokenLive, transferTokens, vaultLive } from './emerge';
+import { charge, chargeSplit, type VaultLedger } from './vault';
 
 export interface SpendResult {
   ok: boolean;
@@ -68,7 +69,10 @@ export async function spend(
     };
   }
 
-  const burn = await burnTokens(address, cost);
+  // Into the vault where there is one: half to burn, half to pay withdrawals.
+  const burn = vaultLive()
+    ? await transferTokens(address, VAULT_ADDRESS, cost)
+    : await burnTokens(address, cost);
   if (!burn.ok) return { ok: false, ledger, refused: burn.message, txHash: null };
 
   /*
@@ -80,7 +84,7 @@ export async function spend(
    */
   return {
     ok: true,
-    ledger: await settleBurn(ledger, cost, address),
+    ledger: await settleBurn(ledger, cost, address, vaultLive() ? chargeSplit(cost) : undefined),
     refused: null,
     txHash: burn.txHash,
   };
@@ -142,11 +146,13 @@ export async function settleBurn(
   ledger: VaultLedger,
   cost: number,
   address: string,
+  split?: { kept: number; burned: number },
 ): Promise<VaultLedger> {
   const fresh = await tokenBalance(address);
   return {
     ...ledger,
     balance: fresh ?? Math.max(0, ledger.balance - cost),
-    burnedEmerge: ledger.burnedEmerge + cost,
+    burnedEmerge: ledger.burnedEmerge + (split ? split.burned : cost),
+    fundedEmerge: (ledger.fundedEmerge ?? 0) + (split ? split.kept : 0),
   };
 }

@@ -22,7 +22,7 @@ import {
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
-  CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE,
+  CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, type BoonKind,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import {
@@ -63,6 +63,8 @@ interface PanelsProps {
   onFestival: () => string | null;
   /** Buy a charter or insurance for the plot; the refusal, or null. */
   onCover: (kind: 'charter' | 'insurance') => Promise<string | null>;
+  /** Buy a boon for the plot; the refusal, or null. */
+  onBoon: (kind: BoonKind) => Promise<string | null>;
   onRenameWorld: (name: string) => void;
   /** Open the plot's outer belt, once, for $EMERGE. Resolves to a refusal, or null. */
   onExpand: () => Promise<string | null>;
@@ -590,12 +592,13 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         </section>
 
         <section className="earn">
-          <h4>Nothing is taken — everything is burned</h4>
+          <h4>Nothing is taken — charges go to the vault</h4>
           <p>
             The game takes no cut of anything. There is no fee address, no treasury the developers
             draw from, and no tax on what you earn. Every {TOKEN.ticker} the game charges you — a
-            claim, a survey, a rename, a pull on the prospectors — is destroyed. It leaves your
-            balance and it leaves the supply, permanently.
+            claim, a survey, a rename, a pull on the prospectors — is paid into the vault: half of
+            it the vault burns, so it leaves the supply for good, and half stays in the vault to
+            pay withdrawals from. What players spend is what players are paid from.
           </p>
           <p>
             The only money the project makes is the trading fee on the coin itself, which has
@@ -1932,10 +1935,11 @@ function sinceWhen(at: number): string {
   return t('{n} days ago', { n: Math.round(hours / 24) });
 }
 
-function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onCover, onLeave, onRelease, onList }: {
+function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onCover, onBoon, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
   onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onAdvance: () => Promise<string | null>;
   onCover: (kind: 'charter' | 'insurance') => Promise<string | null>;
+  onBoon: (kind: BoonKind) => Promise<string | null>;
   onLeave: () => void; onRelease: () => void;
   onList: (price: number | null) => void;
 }) {
@@ -1969,6 +1973,20 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
     setCoverNote(refused);
   };
   const daysLeft = (until: number) => Math.max(0, Math.ceil((until - Date.now()) / 86_400_000));
+  const [buying, setBuying] = useState<BoonKind | null>(null);
+  const [boonNote, setBoonNote] = useState<string | null>(null);
+  const buy = async (kind: BoonKind) => {
+    setBuying(kind);
+    setBoonNote(null);
+    const refused = await onBoon(kind);
+    setBuying(null);
+    setBoonNote(refused);
+  };
+  const BOONS: { kind: BoonKind; title: string; blurb: string }[] = [
+    { kind: 'settlers', title: t('A party of settlers'), blurb: t('Five people arrive today and take houses. There has to be room for them first.') },
+    { kind: 'shipment', title: t('A shipment'), blurb: t('400 timber, 300 stone and 240 portions of food, straight into the yard.') },
+    { kind: 'restore', title: t('A restoration'), blurb: t('Every ruin rebuilt and the bridge under way finished, within the hour.') },
+  ];
   const [draftName, setDraftName] = useState(view.name);
   const [askPrice, setAskPrice] = useState(String(Math.round(claimed.price * 1.25)));
   const configured = tokenLive();
@@ -2177,6 +2195,32 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
           {coverNote && <p className="muted small">{coverNote}</p>}
         </div>
 
+        <div className="connect-card boon-card">
+          <span className="eyebrow">{t('SUPPLIES')}</span>
+          <h3>{t('Paid in {ticker}, delivered at once', { ticker: TOKEN.ticker })}</h3>
+          <p className="muted small">
+            {t('Every charge in the game goes into the vault: {pct}% is burned by the vault and the rest stays there to pay withdrawals, so what players spend is what players are paid from.', { pct: Math.round((1 - CHARGE_VAULT_SHARE) * 100) })}
+          </p>
+          <div className="boon-rows">
+            {BOONS.map((b) => (
+              <div key={b.kind} className="boon-row">
+                <b>{b.title}</b>
+                <span className="muted small">{b.blurb}</span>
+                <button onClick={() => buy(b.kind)} disabled={buying !== null || !wallet.address || player.ledger.balance < BOON_COST_EMERGE[b.kind]}>
+                  {buying === b.kind
+                    ? t('Buying…')
+                    : !wallet.address
+                      ? t('Connect a wallet first')
+                      : player.ledger.balance < BOON_COST_EMERGE[b.kind]
+                        ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                        : t('{cost} {ticker}', { cost: BOON_COST_EMERGE[b.kind].toLocaleString(), ticker: TOKEN.ticker })}
+                </button>
+              </div>
+            ))}
+          </div>
+          {boonNote && <p className="muted small">{tx(boonNote)}</p>}
+        </div>
+
         <div className="connect-card">
           <span className="eyebrow">{t('HIRED HANDS')}</span>
           {row?.hand ? (
@@ -2288,7 +2332,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2338,7 +2382,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     return (
       <ConnectPanel
         view={view} claimed={claimed} player={player} onClose={onClose}
-        onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onCover={onCover} onLeave={onLeave} onRelease={onRelease} onList={onList}
+        onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onCover={onCover} onBoon={onBoon} onLeave={onLeave} onRelease={onRelease} onList={onList}
       />
     );
   }

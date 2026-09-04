@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -40,7 +40,7 @@ import {
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
-  coverPlot,
+  coverPlot, boonPlot,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -49,7 +49,7 @@ import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
+  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
@@ -343,7 +343,7 @@ export default function EmergeClient() {
       // plots that pay; the payout route judges the same from the published
       // copies, so this is a display of the rule and not the rule itself.
       const plots = Math.max(1, Math.min(EARNING_PLOT_LIMIT, prev.claims.length));
-      const next = { ...prev, ledger: accrue(prev.ledger, emerge, ceiling * plots) };
+      const next = { ...prev, ledger: accrue(prev.ledger, emerge, Math.min(WALLET_DAILY_CEILING, ceiling * plots)) };
       savePlayer(next, addressRef.current);
       return next;
     });
@@ -1601,6 +1601,41 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
 
   /**
+   * Buy a boon: checked against the world first so nobody pays for settlers
+   * with nowhere to sleep, then paid, then verified by the registry, and only
+   * then delivered.
+   */
+  const boonFor = useCallback(async (kind: BoonKind): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    const check = boonCheck(world, kind);
+    if (!check.ok) return check.message;
+    if (!wallet.address) return t('Connect a wallet first.');
+    const paid = await spend(player.ledger, BOON_COST_EMERGE[kind], wallet.address);
+    if (!paid.ok) return paid.refused;
+    onPlayer({ ...player, ledger: paid.ledger });
+    let result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
+    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
+    }
+    if (!result.ok) {
+      return paid.txHash
+        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+        : result.reason;
+    }
+    const done = applyBoon(world, kind);
+    if (!done.ok) return done.message;
+    saveWorld(world);
+    // A finished bridge changes the ground; ruins and settlers only the sprites.
+    if (kind === 'restore') sceneRef.current?.reset(world);
+    else sceneRef.current?.syncBuildings();
+    soundRef.current?.cue(kind === 'settlers' ? 'bell' : 'hammer');
+    refresh();
+    return null;
+  }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
+
+  /**
    * Advance the plot to the next era.
    *
    * The world is published first, because the registry judges the gate on
@@ -1872,6 +1907,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onRaiseCity={raiseCityFor}
             onFestival={festivalFor}
             onCover={coverFor}
+            onBoon={boonFor}
             onRenameWorld={renameWorldFor}
             onExpand={expandFor}
             onAdvance={advanceFor}

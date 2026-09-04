@@ -3141,3 +3141,10 @@ button.fold:hover { color: var(--emerald); }
 .city-festival { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 4px; }
 .city-festival b { font-size: 13px; color: var(--cream); }
 .city-festival .city-festival-btn { margin-top: 6px; }
+
+/* Boons on the On-Chain panel: three rows, each with its own button. */
+.boon-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.boon-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.boon-row b { font-size: 13px; color: var(--cream); }
+.boon-row span { grid-column: 1; }
+.boon-row button { grid-row: 1 / span 2; grid-column: 2; margin: 0; white-space: nowrap; }

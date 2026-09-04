@@ -24,9 +24,10 @@ import 'server-only';
  */
 
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
-import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN } from '../chain/emerge';
+import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN, VAULT_ADDRESS } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { hsetnx } from './kv';
+import { noteCharge } from './treasury';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -155,7 +156,9 @@ async function verifyPayment(
     const to = log.topics[2];
     if (!to) continue;
     const target = `0x${to.slice(-40)}`;
-    if (recipient ? !same(target, recipient) : (!same(target, ZERO) && !same(target, BURN_ADDRESS))) continue;
+    // A charge is paid into the vault since v2.1; a burn from an older client
+    // still counts, and so does a token that burns by calling `burn`.
+    if (recipient ? !same(target, recipient) : (!same(target, ZERO) && !same(target, BURN_ADDRESS) && !same(target, VAULT_ADDRESS))) continue;
     try {
       burned += BigInt(log.data);
     } catch {
@@ -168,7 +171,7 @@ async function verifyPayment(
       ok: false,
       reason: recipient
         ? `That transaction did not send any ${TOKEN.ticker} to the seller.`
-        : `That transaction did not burn any ${TOKEN.ticker}.`,
+        : `That transaction did not pay any ${TOKEN.ticker} into the vault.`,
       retry: false,
     };
   }
@@ -199,5 +202,10 @@ const SPENT = serverKey('burns');
  * Answers true for the first caller and false for every other, so one burn
  * cannot buy two plots however many times it is submitted.
  */
-export const spendBurn = (txHash: string, forWhat: string) =>
-  hsetnx(SPENT, txHash.toLowerCase(), `${forWhat}:${Date.now()}`);
+export async function spendBurn(txHash: string, forWhat: string, whole?: number): Promise<boolean> {
+  const first = await hsetnx(SPENT, txHash.toLowerCase(), `${forWhat}:${Date.now()}`);
+  // The first use of a payment is the one that books it: what the vault
+  // received, and what it owes the burn address for it.
+  if (first && whole && whole > 0) await noteCharge(whole).catch(() => {});
+  return first;
+}

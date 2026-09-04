@@ -469,7 +469,16 @@ then over-capacity trades, then the least skilled, never the last hand in a
 food trade.
 
 Rewards grow with the era: `eraYield` in `lib/world/eras.ts` lifts the daily
-ceiling by `ERA_YIELD_STEP` per era.
+ceiling by `ERA_YIELD_STEP` per era. Since v2.1 the ceilings are ten times
+what they were: `PLOT_CEILING_MIN` 60,000 at level one, 250,000 for a level-ten
+city in the AI era, `EARNING_PLOT_LIMIT` five plots, and `WALLET_DAILY_CEILING`
+of 1,000,000 a day per wallet enforced by `ceilingHeldBy` and the client alike.
+
+Boons (`applyBoon` in `lib/simulation.ts`, `BOON_COST_EMERGE` in
+`lib/chain/vault.ts`): settlers, a shipment, a restoration. `boonCheck` refuses
+before anybody pays (no room for settlers, nothing to restore); the client pays
+through `spend()`, `/api/plots` with `boon` verifies and spends the payment,
+and only then is the boon applied to the world and published.
 
 ## City levels, Gold sinks, charters and insurance (v2.0)
 
@@ -553,9 +562,22 @@ the vault and what has been burned.
 
 **Money moves in three directions and they are deliberately different.**
 
-*Charges are burned.* Claiming, surveying, renaming, digging: every one of them
-sends $EMERGE to `0x0000000000000000000000000000000000000000` and nothing comes
-back. The project takes no cut and there is no address for one to accumulate in.
+*Charges go into the vault, and half of them are burned from there.* Claiming,
+surveying, renaming, digging, charters, insurance, boons: every one of them is
+one transfer into the vault (`spend()` in `lib/chain/spend.ts`, to
+`VAULT_ADDRESS` when a vault is configured, to the burn address otherwise).
+The server accepts either target when it verifies a payment (`verifyBurn`),
+and the first use of a payment books it (`noteCharge` in
+`lib/server/treasury.ts`): what the vault received, and the
+`1 - CHARGE_VAULT_SHARE` of it the vault owes the burn address. A sweep
+(`sweepBurn`, after each charge and on `POST /api/vault`) burns what is owed
+from the vault's own key (`burnFromVault`: `burn(uint256)` where the token
+has it, a transfer to the burn address otherwise), so the burn is as real as
+it was when players burned directly, in one transaction for many charges.
+The rest stays to pay withdrawals with: what players spend is what players are
+paid from, and the vault can cover what it owes. `GET /api/vault` is the
+public book. The project takes no cut and there is no address for one to
+accumulate in.
 
 *Deposits are vaulted.* A deposit is the player's own money and the withdrawal
 door has to be able to give it back, so burning it would mean taking a deposit

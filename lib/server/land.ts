@@ -1,4 +1,4 @@
-import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT } from '../chain/vault';
+import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, WALLET_DAILY_CEILING } from '../chain/vault';
 import { charterMultiplier, plotCeiling } from '../world/eras';
 import { cityLevel } from '../simulation';
 import { worldFromSave, type SavedWorld } from '../world/save';
@@ -78,8 +78,8 @@ export async function eraHeldBy(address: string): Promise<number> {
  * What this wallet may collect in a day: the ceilings of its earning plots
  * added up. Each plot's ceiling comes from the level of the world its owner
  * published and the era and charter on its claim row. A plot with no
- * published world counts at level one. Never more than the old flat ceiling
- * lifted by era and charter, and less for anything not yet developed.
+ * published world counts at level one. Never more than WALLET_DAILY_CEILING,
+ * and less for anything not yet developed.
  */
 export async function ceilingHeldBy(address: string): Promise<number> {
   const me = address.toLowerCase();
@@ -100,7 +100,8 @@ export async function ceilingHeldBy(address: string): Promise<number> {
     }
     total += Math.round(plotCeiling(level, row.era ?? 1) * charterMultiplier(row.charterUntil, now));
   }
-  return Math.max(1, total);
+  // Five plots at the top would come to more than a wallet may take in a day.
+  return Math.max(1, Math.min(WALLET_DAILY_CEILING, total));
 }
 
 async function claimsHeldBy(address: string): Promise<boolean> {

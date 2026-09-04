@@ -99,8 +99,9 @@ export const cityLevelSpec = (level: number): CityLevel => CITY_LEVELS[Math.max(
  * multiplies that. This is what makes developing a city worth more than
  * claiming another.
  */
-export const PLOT_CEILING_MIN = 6_000;
-export const PLOT_CEILING_MAX = 25_000;
+export const PLOT_CEILING_MIN = 60_000;
+/** Level ten, before the era: times the AI era's yield this is exactly 250,000 a day. */
+export const PLOT_CEILING_MAX = 156_250;
 export function plotCeiling(level: number, era: number): number {
   const l = Math.max(1, Math.min(MAX_CITY_LEVEL, Math.round(level)));
   const base = PLOT_CEILING_MIN + (PLOT_CEILING_MAX - PLOT_CEILING_MIN) * ((l - 1) / (MAX_CITY_LEVEL - 1));

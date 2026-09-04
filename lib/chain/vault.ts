@@ -135,6 +135,8 @@ export interface VaultLedger {
    * until that happens calling them burned would overstate the burn.
    */
   vaultBurn: number;
+  /** The half of this player's charges that stayed in the vault to pay withdrawals. */
+  fundedEmerge: number;
   /**
    * How much has been minted today, and which day that was.
    *
@@ -155,13 +157,34 @@ export interface VaultLedger {
  * settlement rather than scaling with the size of a wallet. Give one up and
  * the next in line starts earning.
  */
-export const EARNING_PLOT_LIMIT = 4;
+export const EARNING_PLOT_LIMIT = 5;
 
 /**
  * The most one player can mint in a real day, across every world they hold:
  * four settlements' worth, which is the same limit stated as a number.
  */
-export const DAILY_EARN_CEILING = 25_000 * EARNING_PLOT_LIMIT;
+export const WALLET_DAILY_CEILING = 1_000_000;
+export const DAILY_EARN_CEILING = WALLET_DAILY_CEILING;
+
+/**
+ * Where a charge goes.
+ *
+ * Every $EMERGE the game charges is paid into the vault in one transfer. The
+ * vault then burns CHARGE_VAULT_SHARE's complement itself and keeps the rest,
+ * so the same money that leaves players as charges is there to pay them as
+ * withdrawals: a vault that only ever paid out would empty, and a game whose
+ * charges only ever burned would have nothing to pay with. Half and half.
+ */
+export const CHARGE_VAULT_SHARE = 0.5;
+export const chargeSplit = (cost: number) => {
+  const whole = Math.max(0, Math.floor(cost));
+  const kept = Math.floor(whole * CHARGE_VAULT_SHARE);
+  return { whole, kept, burned: whole - kept };
+};
+
+/** Boons: paid for in $EMERGE, applied to the world at once. */
+export type BoonKind = 'settlers' | 'shipment' | 'restore';
+export const BOON_COST_EMERGE: Record<BoonKind, number> = { settlers: 50_000, shipment: 40_000, restore: 100_000 };
 
 /**
  * Rewards grow with the era.
@@ -175,9 +198,9 @@ export const DAILY_EARN_CEILING = 25_000 * EARNING_PLOT_LIMIT;
  */
 export { ERA_YIELD_STEP, eraYield };
 /** A charter on a plot: burned, for CHARTER_DAYS of a fifth more on its ceiling. */
-export const CHARTER_COST_EMERGE = 100_000;
+export const CHARTER_COST_EMERGE = 300_000;
 /** Insurance on a plot: burned, for INSURANCE_DAYS of half damage from trouble. */
-export const INSURANCE_COST_EMERGE = 50_000;
+export const INSURANCE_COST_EMERGE = 150_000;
 /** A wallet's daily ceiling across its earning plots, at the highest era it holds. */
 export const eraCeiling = (era: number) => Math.round(DAILY_EARN_CEILING * eraYield(era));
 
@@ -196,7 +219,7 @@ export const eraCeiling = (era: number) => Math.round(DAILY_EARN_CEILING * eraYi
  */
 export const HAND_MIN_EMERGE = 1_000;
 export const HAND_SHARE = 0.1;
-export const HAND_DAILY_CEILING = Math.round(25_000 * HAND_SHARE);
+export const HAND_DAILY_CEILING = 25_000;
 
 /** Today, as a plain date key in the player's own timezone. */
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -211,6 +234,7 @@ export const NEW_LEDGER: VaultLedger = {
   burnedEmerge: 0,
   pendingEmerge: 0,
   vaultBurn: 0,
+  fundedEmerge: 0,
   earnedToday: 0,
   earnedOn: '',
 };
@@ -231,6 +255,7 @@ export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null)
     burnedEmerge: Number(ledger?.burnedEmerge) || 0,
     pendingEmerge: Number(ledger?.pendingEmerge) || 0,
     vaultBurn: Number(ledger?.vaultBurn) || 0,
+    fundedEmerge: Number(ledger?.fundedEmerge) || 0,
     earnedToday: Number(ledger?.earnedToday) || 0,
     earnedOn: typeof ledger?.earnedOn === 'string' ? ledger.earnedOn : '',
   };
@@ -630,10 +655,13 @@ export async function claimEarnings(
 export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
   if (!(cost > 0)) return ledger;
   if (ledger.balance < cost) return null;
+  // Booked the way the chain would book it: half burned, half kept.
+  const split = chargeSplit(cost);
   return {
     ...ledger,
     balance: ledger.balance - cost,
-    burnedEmerge: ledger.burnedEmerge + cost,
+    burnedEmerge: ledger.burnedEmerge + split.burned,
+    fundedEmerge: (ledger.fundedEmerge ?? 0) + split.kept,
   };
 }
 

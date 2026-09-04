@@ -117,7 +117,7 @@ export async function POST(request: Request) {
     if (!paid.ok) {
       return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
     }
-    if (!(await spendBurn(burnTx, `gift:${seed}`))) {
+    if (!(await spendBurn(burnTx, `gift:${seed}`, paid.whole))) {
       return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
     }
   }

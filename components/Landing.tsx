@@ -60,8 +60,8 @@ const notesFor = (onChainLand: boolean) => [
         body: t('Running a settlement well earns {ticker}; neglecting it earns almost nothing. Only your first {limit} plots pay, so no wallet is large enough to buy past the ceiling.', { ticker: TOKEN.ticker, limit: EARNING_PLOT_LIMIT }),
       }
     : {
-        title: t('Every charge is burned'),
-        body: t('Claiming land, surveying it, renaming a world: each one destroys the {ticker} it costs, and the supply falls with it. Nothing the game charges is collected by anybody. Deposits are the one exception, because the withdrawal door has to be able to give them back.', { ticker: TOKEN.ticker }),
+        title: t('Every charge feeds the vault'),
+        body: t('Claiming land, surveying it, renaming a world: each one pays its {ticker} into the vault. The vault burns half, so the supply falls with every charge, and keeps half to pay withdrawals from. Nothing is collected by anybody; what players spend is what players are paid from.', { ticker: TOKEN.ticker }),
       },
 ];
 
@@ -236,9 +236,9 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
           </div>
           <p className="muted small">
             {onChainClaimsLive()
-              ? t('Land is an ERC-721 token whose id is the plot’s own seed, so ownership is readable on any explorer without asking us. Every {ticker} the game charges is burned; deposits are held in the vault so they can be given back.', { ticker: TOKEN.ticker })
+              ? t('Land is an ERC-721 token whose id is the plot’s own seed, so ownership is readable on any explorer without asking us. Every {ticker} the game charges goes into the vault, half of it burned from there; deposits are held in the vault so they can be given back.', { ticker: TOKEN.ticker })
               : tokenLive()
-                ? t('Balances are read from the {ticker} contract and every charge is burned on chain. The land registry contract is not deployed yet, so ownership is held in the shared registry — enforced for every player, but not yet an on-chain title.', { ticker: TOKEN.ticker })
+                ? t('Balances are read from the {ticker} contract and every charge is paid into the vault on chain, half of it burned from there. The land registry contract is not deployed yet, so ownership is held in the shared registry — enforced for every player, but not yet an on-chain title.', { ticker: TOKEN.ticker })
                 : t('The {ticker} contract is not deployed yet, so balances are a local development allocation and nothing on this page moves a real token. Every panel says so where it matters.', { ticker: TOKEN.ticker })}
           </p>
         </footer>

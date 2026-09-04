@@ -7249,6 +7249,66 @@ export function holdFestival(world: World): { ok: boolean; message: string } {
   return { ok: true, message: 'The festival is on.' };
 }
 
+/* ------------------------------------------------------------------ *
+ * Boons: paid for in $EMERGE, delivered at once
+ * ------------------------------------------------------------------ */
+
+export type BoonKind = 'settlers' | 'shipment' | 'restore';
+export const BOON_SETTLERS = 5;
+export const BOON_SHIPMENT: Partial<Record<Resource, number>> = { wood: 400, stone: 300, bread: 120, vegetables: 120 };
+
+/** Whether a boon would do anything here, said before anybody pays for it. */
+export function boonCheck(world: World, kind: BoonKind): { ok: boolean; message: string } {
+  useWorld(world);
+  if (kind === 'settlers') {
+    const room = Math.floor(housingRoom(world) - world.citizens.length);
+    if (room < BOON_SETTLERS) return { ok: false, message: `There is room for ${Math.max(0, room)} more. Build houses for ${BOON_SETTLERS} before sending for settlers.` };
+    return { ok: true, message: '' };
+  }
+  if (kind === 'restore') {
+    const ruins = world.buildings.filter((b) => b.ruined).length;
+    if (!ruins && !world.bridgeWorks) return { ok: false, message: 'Nothing here needs restoring: no ruins, and no bridge under way.' };
+    return { ok: true, message: '' };
+  }
+  return { ok: true, message: '' };
+}
+
+/** Deliver a boon. The caller has checked it and paid for it. */
+export function applyBoon(world: World, kind: BoonKind): { ok: boolean; message: string } {
+  const check = boonCheck(world, kind);
+  if (!check.ok) return check;
+  if (kind === 'settlers') {
+    const names: string[] = [];
+    for (let i = 0; i < BOON_SETTLERS; i++) names.push(addSettler(world).name);
+    rehouse(world);
+    world.population = world.citizens.length;
+    noteAttention(world);
+    pushFeed(world, 'social', `A party of ${BOON_SETTLERS} settlers arrived together: ${names.slice(0, 3).join(', ')} and the others. They have taken houses.`);
+    return { ok: true, message: `${BOON_SETTLERS} settlers have arrived.` };
+  }
+  if (kind === 'shipment') {
+    for (const [key, amount] of Object.entries(BOON_SHIPMENT) as [Resource, number][]) grantResource(world, key, amount);
+    noteAttention(world);
+    pushFeed(world, 'market', 'A shipment came in: timber, stone and food, straight into the yard and the larder.');
+    return { ok: true, message: 'The shipment is in the yard.' };
+  }
+  let rebuilt = 0;
+  for (const b of world.buildings) {
+    if (!b.ruined) continue;
+    b.ruined = false; b.active = true; b.damage = 0;
+    rebuilt++;
+  }
+  let bridged = false;
+  if (world.bridgeWorks) {
+    completeBridge(world, world.bridgeWorks);
+    bridged = true;
+  }
+  if (rebuilt) rehouse(world);
+  noteAttention(world);
+  pushFeed(world, 'build', `The restoration crews were through in a day: ${rebuilt} ${rebuilt === 1 ? 'ruin' : 'ruins'} rebuilt${bridged ? ' and the bridge finished' : ''}.`);
+  return { ok: true, message: `${rebuilt} rebuilt${bridged ? ', the bridge finished' : ''}.` };
+}
+
 export interface EraCheck { label: string; done: boolean }
 export interface EraGate {
   /** The era the plot is in. */

@@ -48,7 +48,7 @@ import {
   type Claim, markCover } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
+import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
 import { readWorld } from '@/lib/server/registry';
 import { worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { eraGate, eraOf } from '@/lib/simulation';
@@ -115,6 +115,8 @@ export async function POST(request: Request) {
     advance?: boolean;
     charter?: boolean;
     insure?: boolean;
+    /** A boon bought for the plot: settlers, a shipment, a restoration. */
+    boon?: string;
     era?: number;
     /** Hired hands: the owner opens or closes the job; a player takes, keeps or leaves it. */
     hire?: boolean;
@@ -198,7 +200,7 @@ export async function POST(request: Request) {
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
-      if (!(await spendBurn(burnTx, `survey:${chart}`))) {
+      if (!(await spendBurn(burnTx, `survey:${chart}`, paid.whole))) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
@@ -272,7 +274,7 @@ export async function POST(request: Request) {
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
-      if (!(await spendBurn(burnTx, `expand:${seed}`))) {
+      if (!(await spendBurn(burnTx, `expand:${seed}`, paid.whole))) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
@@ -283,6 +285,39 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
+  }
+
+  /*
+   * A boon: paid in $EMERGE, applied to the world by the client that paid.
+   *
+   * The registry's part is the payment: that it happened, was this wallet's,
+   * was enough, and is used once. What the boon does happens in the world and
+   * is published like anything else the player does there.
+   */
+  if (body.boon) {
+    const kind = String(body.boon) as BoonKind;
+    const cost = BOON_COST_EMERGE[kind];
+    if (!cost) return NextResponse.json({ error: 'No such boon.' }, { status: 400 });
+    let claim: Claim | null;
+    try {
+      claim = await claimOf(seed);
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+      return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+    }
+    if (tokenLive()) {
+      const burnTx = String(body.burnTx ?? '');
+      const paid = await verifyBurn(burnTx, owner, cost);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(burnTx, `boon:${kind}:${seed}:${burnTx}`, paid.whole))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
+    return NextResponse.json({ ok: true, boon: kind, claim });
   }
 
   /*
@@ -310,7 +345,7 @@ export async function POST(request: Request) {
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
-      if (!(await spendBurn(burnTx, `${kind}:${seed}:${burnTx}`))) {
+      if (!(await spendBurn(burnTx, `${kind}:${seed}:${burnTx}`, paid.whole))) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
@@ -369,7 +404,7 @@ export async function POST(request: Request) {
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
-      if (!(await spendBurn(burnTx, `era:${seed}:${era}`))) {
+      if (!(await spendBurn(burnTx, `era:${seed}:${era}`, paid.whole))) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
@@ -576,7 +611,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
     }
     // Claim the payment before the plot, so one burn cannot buy two.
-    if (!(await spendBurn(burnTx, `plot:${seed}`))) {
+    if (!(await spendBurn(burnTx, `plot:${seed}`, paid.whole))) {
       return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
     }
   }

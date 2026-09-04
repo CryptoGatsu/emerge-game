@@ -311,6 +311,26 @@ export async function expandPlot(seed: number, owner: string, burnTx?: string): 
 }
 
 /** Buy a charter or insurance on the plot: burned $EMERGE for a span of days on the row. */
+/** Buy a boon for the plot: the registry verifies the payment; the world applies it. */
+export async function boonPlot(seed: number, owner: string, kind: string, burnTx?: string): Promise<{ ok: true } | { ok: false; reason: string; settling?: boolean }> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, boon: kind, burnTx }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { ok?: boolean; error?: string; retry?: boolean };
+    if (!response.ok || !json.ok) return { ok: false, reason: json.error ?? 'The registry refused.', settling: !!json.retry };
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'The registry could not be reached.' };
+  }
+}
+
 export async function coverPlot(seed: number, owner: string, kind: 'charter' | 'insurance', burnTx?: string): Promise<{ ok: true; claim: Claim; until: number } | { ok: false; reason: string; settling?: boolean }> {
   try {
     const response = await withSession(

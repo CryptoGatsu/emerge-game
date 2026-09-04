@@ -49,7 +49,7 @@ const PAYOUTS = serverKey('payouts');
  * vault one capped transfer at a time rather than in a single call, which is
  * the difference between noticing and not.
  */
-export const MAX_PAYOUT_EMERGE = 700_000;
+export const MAX_PAYOUT_EMERGE = 1_000_000;
 
 /** Write down a payout that has already been sent. */
 export async function recordPayout(

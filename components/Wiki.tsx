@@ -1,6 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
+import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
@@ -20,7 +20,7 @@ import { UPDATES } from '@/lib/updates';
  */
 
 import Link from 'next/link';
-import { ACTIVE_CHAIN, TOKEN, tokenLive } from '@/lib/chain/emerge';
+import { ACTIVE_CHAIN, TOKEN, tokenLive, shortAddress, VAULT_ADDRESS } from '@/lib/chain/emerge';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import {
   DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, PROSPECT_COST_EMERGE,
@@ -59,6 +59,9 @@ const CHARGES = [
   { what: 'Advance an era', cost: n(ADVANCE_COST_EMERGE), note: 'once per step, after the plot has earned it' },
   { what: 'Charter a plot', cost: n(CHARTER_COST_EMERGE), note: `a fifth more on the plot's ceiling for ${CHARTER_DAYS} days` },
   { what: 'Insure a plot', cost: n(INSURANCE_COST_EMERGE), note: `half the damage from any disaster for ${INSURANCE_DAYS} days` },
+  { what: 'A party of settlers', cost: n(BOON_COST_EMERGE.settlers), note: 'five people arrive today; needs room in the houses' },
+  { what: 'A shipment', cost: n(BOON_COST_EMERGE.shipment), note: '400 timber, 300 stone, 240 portions of food' },
+  { what: 'A restoration', cost: n(BOON_COST_EMERGE.restore), note: 'every ruin rebuilt, the bridge under way finished' },
 ];
 
 /**
@@ -68,8 +71,8 @@ const CHARGES = [
  * line the simulation runs, so these rows are the real function rather than an
  * illustration of it.
  */
-const yieldFor = (score: number, attention: number) =>
-  Math.round(STEWARDSHIP_DAILY_CAP * score * attention);
+const yieldFor = (score: number, attention: number, ceiling = plotCeiling(1, 1)) =>
+  Math.round(ceiling * score * attention);
 
 const EXAMPLES = [
   { how: 'Run well, looked after daily', score: 0.95, attention: 0.9 },
@@ -335,9 +338,13 @@ export default function Wiki() {
         <section id="costs">
           <h2>What things cost</h2>
           <p>
-            <b>Every charge is burned.</b> Not sent to us, not collected by anybody, not held in a
-            treasury — destroyed, so the supply falls each time. There is no address the project
-            takes a cut into, because there is no cut.
+            <b>Every charge goes into the vault, and half of it is burned there.</b> Not sent to
+            us, not collected by anybody: one transfer into the vault at {shortAddress(VAULT_ADDRESS)},
+            of which the vault burns {pct(1 - CHARGE_VAULT_SHARE)} itself, from its own key, so the
+            supply falls with every charge, and keeps {pct(CHARGE_VAULT_SHARE)} to pay withdrawals
+            from. What players spend is what players are paid from, and the book is public at{' '}
+            <code>/api/vault</code>: paid in, kept, owed to the burn address, burned, and the burn
+            transactions. There is no address the project takes a cut into, because there is no cut.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Action</th><th>Cost</th><th /></tr></thead>
@@ -379,8 +386,8 @@ export default function Wiki() {
             separate thing and has <a href="#economy">its own section below</a>.
           </p>
           <div className="wiki-formula">
-            <code>daily yield = {n(STEWARDSHIP_DAILY_CAP)} × quality × attention</code>
-            <span>per plot, per real day</span>
+            <code>daily yield = ceiling(level, era) × quality × attention</code>
+            <span>per plot, per real day: {n(plotCeiling(1, 1))} at level one, {n(plotCeiling(10, 5))} for a level-ten city in the AI era</span>
           </div>
           <p>
             <b>Quality</b> is how the place is actually doing — housed (25%), fed (25%), employed
@@ -391,26 +398,28 @@ export default function Wiki() {
           </p>
           <table className="wiki-table">
             <thead>
-              <tr><th>How it is going</th><th>One plot</th><th>{EARNING_PLOT_LIMIT} plots</th></tr>
+              <tr><th>How it is going</th><th>A level-one plot</th><th>A level-ten AI city</th><th>{EARNING_PLOT_LIMIT} such cities</th></tr>
             </thead>
             <tbody>
               {EXAMPLES.map((row) => (
                 <tr key={row.how}>
                   <td>{row.how}</td>
                   <td className="num">{n(yieldFor(row.score, row.attention))}</td>
-                  <td className="num">{n(yieldFor(row.score, row.attention) * EARNING_PLOT_LIMIT)}</td>
+                  <td className="num">{n(yieldFor(row.score, row.attention, plotCeiling(10, 5)))}</td>
+                  <td className="num">{n(Math.min(WALLET_DAILY_CEILING, yieldFor(row.score, row.attention, plotCeiling(10, 5)) * EARNING_PLOT_LIMIT))}</td>
                 </tr>
               ))}
               <tr className="wiki-total">
                 <td>Absolute ceiling</td>
-                <td className="num">{n(STEWARDSHIP_DAILY_CAP)}</td>
-                <td className="num">{n(DAILY_EARN_CEILING)}</td>
+                <td className="num">{n(plotCeiling(1, 1))}</td>
+                <td className="num">{n(plotCeiling(10, 5))}</td>
+                <td className="num">{n(WALLET_DAILY_CEILING)}</td>
               </tr>
             </tbody>
           </table>
           <p className="wiki-note">
             All figures are {TOKEN.ticker} per real day. Only your first {EARNING_PLOT_LIMIT} plots
-            pay, and {n(DAILY_EARN_CEILING)} a day is a hard ceiling per wallet — so no amount of
+            pay, and {n(WALLET_DAILY_CEILING)} a day is a hard ceiling per wallet — so no amount of
             money buys past it. That is deliberate: the cap is what stops the game being a machine
             for turning capital into tokens.
           </p>
