@@ -68,7 +68,12 @@ export class Soundscape {
   private lastCue = new Map<string, number>();
   private timer = 0;
   private state: SoundState = { hour: 12, weather: 'Clear', activity: 0 };
-  private volume = 0.55;
+  /**
+   * Quiet on purpose. The wind, the rain and the murmur of the square sit
+   * under the soundtrack, and at the old level they fought it: the music was
+   * mixed to be heard over a settlement, not through one.
+   */
+  private volume = 0.28;
 
   get running() { return this.ctx !== null && this.ctx.state === 'running'; }
 
