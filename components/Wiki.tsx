@@ -1,4 +1,7 @@
 'use client';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
+import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -54,6 +57,8 @@ const CHARGES = [
   { what: 'Send a digging party', cost: n(DIG_COST_EMERGE), note: '' },
   { what: 'Expand a plot', cost: n(EXPAND_COST_EMERGE), note: 'once per plot; about half as much land again' },
   { what: 'Advance an era', cost: n(ADVANCE_COST_EMERGE), note: 'once per step, after the plot has earned it' },
+  { what: 'Charter a plot', cost: n(CHARTER_COST_EMERGE), note: `a fifth more on the plot's ceiling for ${CHARTER_DAYS} days` },
+  { what: 'Insure a plot', cost: n(INSURANCE_COST_EMERGE), note: `half the damage from any disaster for ${INSURANCE_DAYS} days` },
 ];
 
 /**
@@ -453,6 +458,45 @@ export default function Wiki() {
             from the claim row, which only the gated, burn-verified advance can raise, so the
             higher ceiling cannot be reached by editing a save.
           </p>
+
+          <h3>City levels</h3>
+          <p>
+            Since v2.0 the ceiling runs on what the plot has become, not only on its era. Every
+            plot has a <b>city level</b>, one to ten, read from the people living there and the
+            buildings standing. Size earns the next level; Gold pays for the public works that
+            confirm it. The CITY card in the Bank shows the level, what the next asks, and the
+            button. A plot&rsquo;s daily ceiling runs from <b>{n(PLOT_CEILING_MIN)}</b> at level
+            one to <b>{n(PLOT_CEILING_MAX)}</b> at level ten, times the era, so a level-ten city in
+            the AI era can earn up to {n(plotCeiling(10, 5))} a day and a fresh claim earns a
+            fraction of it. Growing what you have is worth more than claiming another plot.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Level</th><th>People</th><th>Buildings</th><th>Public works</th><th>Ceiling (era 1)</th></tr></thead>
+            <tbody>
+              {CITY_LEVELS.map((row) => (
+                <tr key={row.level}>
+                  <td>{row.level}</td>
+                  <td className="num">{row.people}</td>
+                  <td className="num">{row.buildings}</td>
+                  <td className="num">{row.works ? `${n(row.works)} Gold` : '—'}</td>
+                  <td className="num">{n(plotCeiling(row.level, 1))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            The payout route reads the level from the copy of your world the registry holds, the
+            same way it reads the era, so the ceiling cannot be reached by editing a save. A city
+            that was already the size of a level-four town when v2.0 arrived is a level-four town,
+            with nothing to pay for the levels it had grown into. The level is also on the era
+            gate: three for the township, five for industrial, seven for modern, nine for AI.
+          </p>
+          <p>
+            <b>A charter</b> lifts the ceiling by {Math.round(CHARTER_BONUS * 100)}% for{' '}
+            {CHARTER_DAYS} days, for {n(CHARTER_COST_EMERGE)} {TOKEN.ticker} burned, from the
+            On-Chain panel. Buying another while one runs adds the days on. It is recorded on the
+            claim row, so it follows the plot to any device and the payout route counts it.
+          </p>
         </section>
 
         {/* ---------------------------------------------------------- */}
@@ -645,7 +689,19 @@ export default function Wiki() {
           <p>
             Everything costs Gold <em>and</em> materials out of the yard, so what you can raise
             depends on what your woodcutters have felled and your quarry has cut. Every building
-            also costs Gold every day to keep standing, for as long as it stands.
+            also costs Gold every day to keep standing, for as long as it stands, and a quarter
+            more per era it was raised in: a modern block costs more to keep than a cabin.
+          </p>
+          <p>
+            <b>A house sleeps as many people as it has room for</b>: {Math.round(HOUSE_ROOM)} at
+            level one and more with each improvement. Families share a roof when there is room,
+            the largest family first, so a newcomer who came alone does not take a whole house for
+            one bed. The feed says who moved in where.
+          </p>
+          <p>
+            <b>Festivals.</b> The CITY card in the Bank can hold one a day: {FESTIVAL_GOLD_PER_HEAD}{' '}
+            Gold a head, and everybody comes back happier and closer to their neighbours. It is the
+            cheapest way to lift the stewardship score, and the treasury is what it is for.
           </p>
           <p>
             <b>The settlement builds for itself.</b> When the treasury holds twice a building&rsquo;s
@@ -755,6 +811,16 @@ export default function Wiki() {
               ))}
             </tbody>
           </table>
+          <h3>Bridges by hand</h3>
+          <p>
+            The settlement builds bridges on its own when it is rich enough and the far shore is
+            worth it; the Build panel&rsquo;s <b>Bridge</b> tool is you choosing the far shore. Tap
+            land across the water and the crew stakes out the narrowest sound crossing to it, for{' '}
+            <b>{n(BRIDGE_GOLD)} Gold</b> up front and timber and wages by the day. When the yard
+            is short of timber the crew buys it in with Gold at the market&rsquo;s price and a half,
+            rather than standing idle, so a town that has run its woodcutters down still gets its
+            crossing. One crossing at a time.
+          </p>
           <h3>Clearing trees</h3>
           <p>
             The Build panel carries a tool for the wood: tap the ground with it and every standing
@@ -944,8 +1010,16 @@ export default function Wiki() {
             nearest adults awake drop what they are doing and give chase; when one gets within
             arm&rsquo;s reach there is a scuffle, and it ends with the rogue thrown in the jail, or
             &mdash; twice at most &mdash; broken free and off after the next building. Somebody
-            who has already brought two buildings down is not taken alive. A <b>Jail</b> halves
-            how often anybody turns, and holds them; without one, the market cellar does.
+            who has already brought two buildings down is not taken alive. <b>Every Jail</b>{' '}
+            standing halves how often anybody turns, down to a tenth, and with a jail a rogue in a
+            scuffle breaks free once in ten rather than once in three; without one, the market
+            cellar holds them.
+          </p>
+          <p>
+            <b>No disaster can flatten a city.</b> An earthquake or a tornado can damage at most{' '}
+            {Math.round(HAZARD_SHARE * 100)}% of what stands, and never fewer than three buildings.
+            <b> Insurance</b>, {n(INSURANCE_COST_EMERGE)} {TOKEN.ticker} burned on the On-Chain
+            panel, halves whatever any of them does for {INSURANCE_DAYS} days.
           </p>
           <p className="wiki-note">
             Readiness is not a purchase. It is counted from what is actually there — wells within

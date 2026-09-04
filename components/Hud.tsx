@@ -424,6 +424,7 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
       <Stat icon="⚡" label={t('Energy')} value={`${view.energy}%`} />
       <Stat icon={WEATHER_ICON[view.weather] ?? '☀'} label={t('Day')} value={`${view.day} · ${view.clock}`} />
       <Stat icon="⚑" label={t('Era')} value={view.era.gate.next ? t('{era} · {n} days', { era: tn(view.era.name), n: view.era.days }) : tn(view.era.name)} />
+      <Stat icon="◆" label={t('City')} value={t('Level {n}', { n: view.city.level })} />
       <Stat
         icon={view.temperature <= 2 ? '❄' : view.temperature >= 30 ? '☼' : '🌡'}
         label={t('Temperature')}
@@ -961,7 +962,9 @@ export function Hud(props: HudProps) {
           <span>
             {placing === 'Clear trees'
               ? <>{t('Clearing trees')} — {compact ? t('tap the wood to fell everything within reach.') : t('click the wood to fell everything within reach, Esc to cancel.')}</>
-              : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
+              : placing === 'Bridge'
+                ? <>{t('Bridge')} — {compact ? t('tap land across the water to stake out a crossing.') : t('click land across the water to stake out a crossing, Esc to cancel.')}</>
+                : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
           </span>
           <button onClick={props.onCancelBuild}>{t('Cancel')}</button>
         </div>

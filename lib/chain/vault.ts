@@ -174,6 +174,10 @@ export const DAILY_EARN_CEILING = 25_000 * EARNING_PLOT_LIMIT;
  * advance route can raise.
  */
 export { ERA_YIELD_STEP, eraYield };
+/** A charter on a plot: burned, for CHARTER_DAYS of a fifth more on its ceiling. */
+export const CHARTER_COST_EMERGE = 100_000;
+/** Insurance on a plot: burned, for INSURANCE_DAYS of half damage from trouble. */
+export const INSURANCE_COST_EMERGE = 50_000;
 /** A wallet's daily ceiling across its earning plots, at the highest era it holds. */
 export const eraCeiling = (era: number) => Math.round(DAILY_EARN_CEILING * eraYield(era));
 

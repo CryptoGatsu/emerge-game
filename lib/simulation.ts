@@ -21,7 +21,10 @@ import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './wor
 import { buildWater, type WaterField } from './world/water';
 import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
-import { ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec, eraYield } from './world/eras';
+import {
+  ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec,
+  MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, charterMultiplier, ERA_CITY_LEVEL,
+} from './world/eras';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -433,6 +436,20 @@ export interface World {
   era?: number;
   eraSince?: number;
   /**
+   * The public works the settlement has paid for: its city level.
+   *
+   * A city's level is the smaller of what it has paid for here and what its
+   * size has earned, plus one; so a town grows into a level and then buys it.
+   * Absent on a save from before levels existed, which is read as whatever the
+   * size has earned, so nobody who built a city before this loses it.
+   */
+  works?: { level: number };
+  /** Wall-clock time until which a charter or insurance bought for this plot runs. */
+  charterUntil?: number;
+  insuredUntil?: number;
+  /** The last day the settlement held a festival, so there is one a day at most. */
+  festivalDay?: number;
+  /**
    * What the settlement pays, as a multiple of each trade's standing wage.
    *
    * The one lever a player has over how hard people work. 1 is the going rate;
@@ -543,7 +560,7 @@ export interface Stewardship {
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
   | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
-  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training';
+  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
@@ -555,6 +572,7 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
   exports: 'Exports',
   households: 'Household spending',
   training: 'Training',
+  festival: 'Festivals',
   food: 'Food sales',
   vault: 'Vault',
   arena: 'The arena',
@@ -3706,20 +3724,31 @@ export function rehouse(world: World): number {
     f.members = f.members.filter((id) => alive.has(id));
     if (!f.members.length) f.homeId = '';
   }
-  const standing = (id: string) => world.buildings.some((b) => b.id === id && b.type === 'House');
-  const taken = new Set(world.families.filter((f) => f.members.length && standing(f.homeId)).map((f) => f.homeId));
-  const vacant = world.buildings.filter((b) => b.type === 'House' && b.active && !taken.has(b.id));
+  const standing = (id: string) => world.buildings.some((b) => b.id === id && b.type === 'House' && b.active);
+  // How many people each house already sleeps. A house is not one family's:
+  // it holds as many as it has room for, so a newcomer who came alone shares
+  // a roof rather than taking a whole house for one bed. "One house, one
+  // person" was the single most-asked question in the feedback.
+  const sleeping = new Map<string, number>();
+  for (const f of world.families) if (f.members.length && standing(f.homeId)) sleeping.set(f.homeId, (sleeping.get(f.homeId) ?? 0) + f.members.length);
+  const houses = world.buildings.filter((b) => b.type === 'House' && b.active);
+  const roomIn = (b: Building) => houseRoom(b) - (sleeping.get(b.id) ?? 0);
   // The largest family first: the most people off the street per house.
   const homeless = world.families
     .filter((f) => f.members.length && !standing(f.homeId))
     .sort((a, b) => b.members.length - a.members.length);
   let moved = 0;
   for (const family of homeless) {
-    const house = vacant.shift();
+    // The house with the least room that still fits them, so big families
+    // do not scatter the small ones. Failing that, the emptiest house that
+    // is not full: a family may squeeze in one over.
+    const fits = houses.filter((b) => roomIn(b) >= family.members.length).sort((a, b) => roomIn(a) - roomIn(b));
+    const house = fits[0] ?? houses.filter((b) => roomIn(b) > 0).sort((a, b) => roomIn(b) - roomIn(a))[0];
     if (!house) break;
     family.homeId = house.id;
+    sleeping.set(house.id, (sleeping.get(house.id) ?? 0) + family.members.length);
     moved += family.members.length;
-    pushFeed(world, 'social', `The ${family.name} family moved into the new house.`);
+    pushFeed(world, 'social', `The ${family.name} family moved into ${sleeping.get(house.id)! > family.members.length ? 'a shared house' : 'the new house'}.`);
   }
   return moved;
 }
@@ -4618,6 +4647,9 @@ function hazardSays(world: World, h: Hazard, text: string, limit = 4) {
  */
 function damageBuilding(world: World, b: Building, amount: number, cause: string, h?: Hazard): boolean {
   if (b.ruined || amount <= 0) return false;
+  // An insured plot takes half of everything: trouble still comes, and half
+  // as much of it sticks.
+  if (insured(world)) amount *= 0.5;
   const cap = UNDEMOLISHABLE.includes(b.type) ? 0.9 : 1;
   b.damage = Math.min(cap, (b.damage ?? 0) + amount);
   if (b.damage < 1) return false;
@@ -4836,6 +4868,13 @@ function hazards(world: World) {
   }
 }
 
+/** How many buildings one disaster may wreck: a quarter of what stands, and never fewer than three. */
+export function hazardBudget(world: World) {
+  const standing = world.buildings.filter((b) => !b.ruined).length;
+  return Math.max(3, Math.round(standing * HAZARD_SHARE));
+}
+export const HAZARD_SHARE = 0.25;
+
 function startHazard(world: World, kind: HazardKind, ready: number, rand: () => number) {
   // How badly it lands. Full readiness is not immunity — it is the difference
   // between a bad afternoon and a bad month.
@@ -4853,8 +4892,15 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     h.days = 2;
     h.hours = 2 + severity * 4;
     let damaged = 0, wrecked = 0;
-    for (const b of world.buildings) {
-      if (b.ruined || rand() > 0.4 + severity * 0.35) continue;
+    // A quake shakes the whole settlement, but it does not level it: at most
+    // a quarter of what stands is hit, however hard it comes. A player who
+    // came back to a city with two buildings left out of forty had not been
+    // given a setback, they had been given a reason to stop.
+    const standing = world.buildings.filter((b) => !b.ruined);
+    const most = hazardBudget(world);
+    for (const b of standing) {
+      if (damaged >= most) break;
+      if (rand() > 0.4 + severity * 0.35) continue;
       const before = b.ruined;
       damageBuilding(world, b, (0.2 + rand() * 0.7) * severity * 1.6, 'The earthquake', h);
       damaged++;
@@ -5026,10 +5072,14 @@ function hazardStep(world: World, hours: number) {
       // Hard enough that a building the funnel passes straight over comes down
       // in the hour or so it is overhead, and one it only brushes is knocked about.
       const rate = 1.05 * severity * hours * (h.fought ? 0.35 : 1);
+      // Once the funnel has taken its share of the settlement it only
+      // frightens people: the same quarter-of-the-town ceiling a quake has.
+      const most = hazardBudget(world);
       for (const b of world.buildings) {
         if (b.ruined) continue;
         const d = Math.hypot(b.x - h.x, b.y - h.y);
         if (d > 5.5) continue;
+        if (h.wrecked.length >= most && !b.damage) continue;
         damageBuilding(world, b, rate * (1 - d / 7), 'The tornado', h);
       }
       for (const c of world.citizens) {
@@ -5144,7 +5194,10 @@ function unrest(world: World) {
   }
   if (world.day < 6 || world.citizens.some((c) => c.rogue)) return;
   const rand = mulberry32(world.seed + world.day * 5573);
-  const chance = 0.05 * (hasCivic(world, 'Jail') ? 0.5 : 1);
+  // Every jail halves the chance of anybody turning, down to a tenth of it.
+  // Two jails in a town of a hundred and fifty used to make no more
+  // difference than one, and that one only halved a chance nobody could see.
+  const chance = 0.05 * jailFactor(world);
   for (const c of world.citizens) {
     if (c.age < 16 || c.jailed || c.sick || c.carried) continue;
     const enemy = rivalsOf(world, c.id).some((r) => r.strength < -65);
@@ -5153,6 +5206,12 @@ function unrest(world: World) {
     turnRogue(world, c, enemy ? 'a grudge that has been building for days' : c.happiness < 32 ? 'misery' : 'having nothing to live for');
     return;
   }
+}
+
+/** How much the jails hold trouble down: half per jail standing, never below a tenth. */
+export function jailFactor(world: World) {
+  const jails = world.buildings.filter((b) => b.type === 'Jail' && b.active && !b.ruined).length;
+  return Math.max(0.1, Math.pow(0.5, jails));
 }
 
 /** Somebody turns on the settlement. */
@@ -5267,7 +5326,10 @@ function resolveScuffle(world: World, r: Citizen) {
   const rand = mulberry32(world.seed + world.day * 811 + Math.floor(world.hour * 100));
   r.scuffle = 0;
   for (const c of chasers) c.scuffle = 0;
-  if (!chasers.length || (r.rogue.escapes < 2 && rand() < 0.3)) {
+  // With a jail standing there is a warden about, and a rogue in a scuffle is
+  // rarely off again: once in ten, against once in three without one.
+  const slip = hasCivic(world, 'Jail') ? 0.1 : 0.3;
+  if (!chasers.length || (r.rogue.escapes < 2 && rand() < slip)) {
     r.rogue.escapes += 1;
     r.rogue.targetId = undefined;
     pushFeed(world, 'social', `${r.name} broke free and ran.`);
@@ -5484,15 +5546,62 @@ function lifeAndDeath(world: World) {
  * visibly, with the feed reporting it. Once it stands, the far side joins the
  * road network and becomes ground the settlement and the player can build on.
  */
+const BRIDGE_TIMBER_PRICE = (world: World) => Math.max(3, Math.ceil((world.market.wood?.price ?? 3) * 1.5));
+
+/** What a crossing ordered by the player costs to start, in Gold. */
+export const BRIDGE_GOLD = 600;
+
+/**
+ * Start a bridge where the player pointed.
+ *
+ * The town builds bridges on its own when it is rich enough and the far
+ * shore is worth it; this is the player choosing the far shore themselves.
+ * The point is any land the settlement cannot walk to; the crossing is still
+ * the narrowest sound one to that island, so the deck lands somewhere useful.
+ * Gold up front, timber from the yard by the day, bought in when short.
+ */
+export function startBridgeAt(world: World, x: number, y: number): { ok: boolean; message: string } {
+  useWorld(world);
+  const water = waterOf(world);
+  if (world.bridgeWorks) return { ok: false, message: 'A bridge is already being built. One crossing at a time.' };
+  const island = water.landAt(x, y);
+  if (island < 0) return { ok: false, message: 'That is water. Point at the land you want to reach.' };
+  if (island === water.mainland || world.connectedIslands.includes(island)) return { ok: false, message: 'People can already walk there.' };
+  if (world.treasury < BRIDGE_GOLD) return { ok: false, message: `A crossing costs ${BRIDGE_GOLD.toLocaleString()} Gold to start.` };
+  const crossing = narrowestCrossing(world, island);
+  if (!crossing) return { ok: false, message: 'No sound crossing to that shore could be found.' };
+  spend(world, 'works', BRIDGE_GOLD);
+  world.bridgeWorks = {
+    island,
+    fromX: crossing.fromX, fromY: crossing.fromY,
+    toX: crossing.toX, toY: crossing.toY,
+    progress: 0,
+    length: Math.max(3, Math.round(crossing.gap / 2.5)),
+  };
+  noteAttention(world);
+  pushFeed(world, 'build', 'The crossing you ordered has been staked out. The bridge crew starts in the morning.');
+  return { ok: true, message: 'The bridge is staked out.' };
+}
+
 function bridgeBuilding(world: World) {
   const water = waterOf(world);
   const works = world.bridgeWorks;
 
   if (works) {
     // A day's work needs timber and wages. Short of either, the work waits.
-    const timber = Math.min(6, world.resources.wood);
+    let timber = Math.min(6, world.resources.wood);
+    // Short of timber, the treasury buys it in, at the market's price and a
+    // half. Players whose towns had stopped bridging had run their woodcutters
+    // down to nothing and had a hundred thousand Gold sitting idle.
+    if (timber < 4 && world.treasury >= 40 + BRIDGE_TIMBER_PRICE(world) * (6 - timber)) {
+      const bought = 6 - timber;
+      spend(world, 'imports', BRIDGE_TIMBER_PRICE(world) * bought);
+      world.resources.wood += bought;
+      timber = 6;
+      if (works.progress === 0) pushFeed(world, 'build', 'The bridge crew bought timber in for the crossing.');
+    }
     if (timber < 4 || world.treasury < 40) {
-      if (world.day % 3 === 0) pushFeed(world, 'build', 'Work on the bridge is held up for want of timber.');
+      if (world.day % 3 === 0) pushFeed(world, 'build', 'Work on the bridge is held up for want of timber and Gold.');
       return;
     }
     world.resources.wood -= timber;
@@ -6208,6 +6317,8 @@ const LAST_RESORT_POPULATION = 3;
 /** How many people a house is thought to sleep, and what each improvement adds. */
 export const HOUSE_ROOM = 3.2;
 export const HOUSE_ROOM_PER_LEVEL = 0.8;
+/** How many people this one house sleeps, whole. */
+export const houseRoom = (b: Building) => Math.round(HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL);
 
 /**
  * How many people the settlement's houses can sleep between them.
@@ -6430,8 +6541,11 @@ export function grantResource(world: World, key: Resource, amount: number) {
  * over — see `buildingCapacity` for what happened when it did.
  */
 export function upkeepOf(b: Building) {
-  return maintenanceCost(b.type) * (1 + (levelOf(b) - 1) * UPKEEP_PER_LEVEL);
+  // A later era's building is a dearer one to keep: a quarter more per era
+  // it was raised in. This is the Gold sink that scales with the city.
+  return maintenanceCost(b.type) * (1 + (levelOf(b) - 1) * UPKEEP_PER_LEVEL) * (1 + UPKEEP_PER_ERA * (Math.max(1, b.era ?? 1) - 1));
 }
+export const UPKEEP_PER_ERA = 0.25;
 
 export function maintenanceCost(type: string) {
   return ({
@@ -6574,7 +6688,7 @@ function accrueYield(world: World, realSeconds: number) {
   // What a full real day at this rate would come to, which is the figure worth
   // showing: "you are earning this much a day, if you keep this up".
   // Rewards grow with the era: the cap a plot can reach rises with each step.
-  s.dailyYield = Math.round(STEWARDSHIP_DAILY_CAP * eraYield(eraOf(world)) * s.score * s.attention);
+  s.dailyYield = Math.round(dailyCeiling(world) * s.score * s.attention);
   s.banked += (s.dailyYield * realSeconds) / REAL_DAY;
   // Hand over whole tokens only, and keep the remainder banked, so a tick of a
   // sixtieth of a second is not silently rounded away to nothing.
@@ -6583,6 +6697,15 @@ function accrueYield(world: World, realSeconds: number) {
   s.banked -= whole;
   s.pending += whole;
   s.lifetime += whole;
+}
+
+/**
+ * The most this plot can earn in a real day, from what it has become: its
+ * city level and its era, and a charter while one runs. The server judges the
+ * same figure from the published copy, so a client cannot talk it up.
+ */
+export function dailyCeiling(world: World, now = Date.now()) {
+  return Math.round(plotCeiling(cityLevel(world), eraOf(world)) * charterMultiplier(world.charterUntil, now));
 }
 
 /**
@@ -7000,6 +7123,132 @@ export function buildBounds(world: World): { x0: number; x1: number; y0: number;
  * Eras
  * ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ *
+ * City levels
+ *
+ * What a plot has become, one to ten. Size earns a level and Gold buys it:
+ * the level is the smaller of the works paid for and one past what the
+ * town's people and buildings have earned. The reward ceiling runs on it,
+ * so the Gold a city makes goes back into the city and comes out as
+ * $EMERGE. This is where the "too much Gold" and the "rewards fall as the
+ * city grows" complaints were both answered.
+ * ------------------------------------------------------------------ */
+
+/** The size that counts toward a level: people, and buildings that stand. */
+function citySize(world: World) {
+  return { people: world.citizens.length, buildings: world.buildings.filter((b) => !b.ruined).length };
+}
+
+/**
+ * Bring an old save up to the levels: a city that was already the size of a
+ * level four town is a level four town, with nothing to pay. Called before
+ * anything reads the level.
+ */
+export function ensureWorks(world: World) {
+  if (world.works) return world.works;
+  const { people, buildings } = citySize(world);
+  world.works = { level: levelForSize(people, buildings) };
+  return world.works;
+}
+
+/** The plot's city level, one to ten. */
+export function cityLevel(world: World): number {
+  const works = ensureWorks(world);
+  const { people, buildings } = citySize(world);
+  return Math.max(1, Math.min(MAX_CITY_LEVEL, works.level, levelForSize(people, buildings) + 1));
+}
+
+export interface CityGate {
+  level: number;
+  /** The next level, or null at the top. */
+  next: number | null;
+  /** What the next level asks, and what the town has. */
+  people: { have: number; need: number };
+  buildings: { have: number; need: number };
+  /** Gold the public works cost. */
+  cost: number;
+  /** The town is big enough; the town can pay; both. */
+  grown: boolean;
+  affordable: boolean;
+  ready: boolean;
+}
+
+/** What stands between this settlement and its next level. */
+export function cityGate(world: World): CityGate {
+  useWorld(world);
+  const level = cityLevel(world);
+  const { people, buildings } = citySize(world);
+  if (level >= MAX_CITY_LEVEL) {
+    return { level, next: null, people: { have: people, need: 0 }, buildings: { have: buildings, need: 0 }, cost: 0, grown: true, affordable: true, ready: false };
+  }
+  const spec = cityLevelSpec(level + 1);
+  const grown = people >= spec.people && buildings >= spec.buildings;
+  const affordable = world.treasury >= spec.works;
+  return {
+    level, next: level + 1,
+    people: { have: people, need: spec.people },
+    buildings: { have: buildings, need: spec.buildings },
+    cost: spec.works, grown, affordable, ready: grown && affordable,
+  };
+}
+
+/** Pay for the public works and raise the city a level. */
+export function raiseCity(world: World): { ok: boolean; message: string } {
+  useWorld(world);
+  const gate = cityGate(world);
+  const works = ensureWorks(world);
+  if (!gate.next) return { ok: false, message: 'The city is at the top level.' };
+  if (!gate.grown) return { ok: false, message: `Level ${gate.next} needs ${gate.people.need} people and ${gate.buildings.need} buildings standing.` };
+  if (!gate.affordable) return { ok: false, message: `The public works cost ${gate.cost.toLocaleString()} Gold.` };
+  spend(world, 'works', gate.cost);
+  works.level = gate.next;
+  noteAttention(world);
+  pushFeed(world, 'build', `The public works are done. ${world.name} is a level ${gate.next} city, and earns like one.`);
+  return { ok: true, message: `${world.name} is now level ${gate.next}.` };
+}
+
+/** Whether insurance bought for this plot still runs. */
+export const insured = (world: World, now = Date.now()) => !!world.insuredUntil && world.insuredUntil > now;
+
+/** Record a charter or insurance the registry has accepted for this plot. */
+export function setCover(world: World, kind: 'charter' | 'insurance', until: number) {
+  useWorld(world);
+  if (kind === 'charter') world.charterUntil = Math.max(world.charterUntil ?? 0, until);
+  else world.insuredUntil = Math.max(world.insuredUntil ?? 0, until);
+  noteAttention(world);
+  pushFeed(world, 'build', kind === 'charter'
+    ? 'A charter has been granted. The plot earns a fifth more while it runs.'
+    : 'The plot is insured. Whatever comes, half the damage is made good.');
+}
+
+/**
+ * A festival: Gold spent on the whole town's spirits, once a day at most.
+ *
+ * Costs by the head, so a big city pays a big city's price, and lifts
+ * everyone's happiness and the bonds between them. A Gold sink that is
+ * worth using, which is what the treasury was missing.
+ */
+export const FESTIVAL_GOLD_PER_HEAD = 25;
+export const FESTIVAL_MIN_GOLD = 400;
+export const festivalCost = (world: World) => Math.max(FESTIVAL_MIN_GOLD, FESTIVAL_GOLD_PER_HEAD * world.citizens.length);
+export function holdFestival(world: World): { ok: boolean; message: string } {
+  useWorld(world);
+  if (world.festivalDay === world.day) return { ok: false, message: 'There has already been a festival today.' };
+  const cost = festivalCost(world);
+  if (world.treasury < cost) return { ok: false, message: `A festival for ${world.citizens.length} people costs ${cost.toLocaleString()} Gold.` };
+  spend(world, 'festival', cost);
+  world.festivalDay = world.day;
+  for (const c of world.citizens) {
+    if (c.jailed || c.rogue) continue;
+    c.happiness = Math.min(100, c.happiness + 18);
+    c.social = Math.min(100, (c.social ?? 50) + 25);
+    c.purpose = Math.min(100, c.purpose + 6);
+  }
+  noteAttention(world);
+  pushFeed(world, 'social', `${world.name} held a festival in the square. Everyone went.`);
+  return { ok: true, message: 'The festival is on.' };
+}
+
 export interface EraCheck { label: string; done: boolean }
 export interface EraGate {
   /** The era the plot is in. */
@@ -7064,6 +7313,9 @@ export function eraGate(world: World): EraGate {
       { label: 'Stewardship above 0.7', done: world.stewardship.score >= 0.7 },
     ];
   }
+  const needLevel = ERA_CITY_LEVEL[next.id] ?? 1;
+  const level = cityLevel(world);
+  checks.push({ label: `City level ${level} of ${needLevel}`, done: level >= needLevel });
   const daysDone = have >= next.days;
   const ready = open && daysDone && checks.every((c) => c.done);
   return { era, next, open, days: { have, need: next.days }, checks, ready };

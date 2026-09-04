@@ -46,8 +46,8 @@ import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { handCheck, landCheck, eraHeldBy } from '@/lib/server/land';
-import { DAILY_EARN_CEILING, HAND_DAILY_CEILING, eraCeiling } from '@/lib/chain/vault';
+import { handCheck, landCheck, ceilingHeldBy } from '@/lib/server/land';
+import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
 
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
     } else if (land === 'holds') {
       // Rewards grow with the era: the ceiling is the base lifted by the
       // highest era this wallet's plots have reached, read from the rows.
-      ceiling = eraCeiling(await eraHeldBy(address));
+      ceiling = await ceilingHeldBy(address);
     } else {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.

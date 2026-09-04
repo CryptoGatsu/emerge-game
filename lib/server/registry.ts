@@ -74,6 +74,10 @@ export interface Claim {
   /** Which era the plot has been advanced to, and when. Absent means the first. */
   era?: number;
   eraAt?: number;
+  /** A charter bought on the plot, as the time it runs out. */
+  charterUntil?: number;
+  /** Insurance bought on the plot, as the time it runs out. */
+  insuredUntil?: number;
 }
 
 /**
@@ -291,6 +295,18 @@ export async function markEra(seed: number, owner: string, era: number): Promise
   const row: Claim = { ...existing, era, eraAt: Date.now() };
   await hset(CLAIMS, String(seed), JSON.stringify(row));
   return { claim: row, already: false };
+}
+
+/** Record a charter or insurance on the plot: from now, or from the end of the one running, for `days`. */
+export async function markCover(seed: number, owner: string, kind: 'charter' | 'insurance', days: number): Promise<{ claim: Claim; until: number } | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const key = kind === 'charter' ? 'charterUntil' : 'insuredUntil';
+  const from = Math.max(Date.now(), existing[key] ?? 0);
+  const until = from + days * 86_400_000;
+  const row: Claim = { ...existing, [key]: until };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return { claim: row, until };
 }
 
 /** The plot this wallet works at, if any. */

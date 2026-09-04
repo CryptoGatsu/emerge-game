@@ -17,6 +17,22 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.0',
+    date: '2026-09-06',
+    title: 'City levels, Gold with somewhere to go, and $EMERGE worth holding',
+    notes: [
+      'City levels. Every plot has a level, one to ten, read from its people and its buildings standing. Size earns the next level; Gold pays for the public works that confirm it, from 1,500 Gold at level two to 130,000 at level ten. The CITY card in the Bank shows the level, what the next one asks, and the button. An existing city is graded on what it already is, with nothing to pay for the levels it has grown into.',
+      'Rewards run on the level. A plot’s daily ceiling runs from 6,000 $EMERGE at level one to 25,000 at level ten, times the era: a level-ten city in the AI era can earn up to 40,000 a day. A fresh claim earns a fraction of a developed city, so growing what you have is worth more than claiming another. The payout route reads the level from your published world, so the ceiling cannot be reached by editing a save.',
+      'Gold has somewhere to go. Public works, festivals (Gold by the head for the whole town’s happiness, once a day), bridges you order yourself, and upkeep that rises a quarter per era a building was raised in. The treasury is for building a city with, not for counting.',
+      'Charters: 100,000 $EMERGE burned for a fifth more on the plot’s ceiling for thirty days. Insurance: 50,000 $EMERGE burned so the plot takes half of whatever a fire, a quake, a flood or a rogue does, for thirty days. Both on the On-Chain panel, recorded on the claim row, and both add days on if bought again while one runs.',
+      'No disaster can flatten a city. An earthquake or a tornado can damage at most a quarter of what stands (never fewer than three buildings). A player who came back to two buildings out of forty had not been set back, they had been given a reason to stop; that cannot happen now.',
+      'Jails work. Every jail standing halves how often anybody turns, down to a tenth, and with a jail a rogue in a scuffle breaks free once in ten rather than once in three. Two jails in a town of a hundred and fifty now make a visible difference.',
+      'Houses hold families. A house sleeps as many people as it has room for, three at level one and more with each improvement, so a newcomer who came alone shares a roof rather than taking a whole house for one bed. "One house, one person" is gone.',
+      'Bridges by hand. The Build panel has a Bridge tool: tap land across the water and the crew stakes out the narrowest sound crossing to it, 600 Gold to start, timber and wages by the day. When the yard is short of timber the crew buys it in with Gold rather than standing idle, which is why some towns had stopped bridging.',
+      'The era gate asks for a city level as well: level three for the township, five for industrial, seven for modern, nine for AI.',
+    ],
+  },
+  {
     version: '1.6',
     date: '2026-09-05',
     title: 'People, training, and rewards that grow with the city',
@@ -93,6 +109,22 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.0',
+    date: '2026-09-06',
+    title: '城市等级、有去处的金币，以及值得持有的 $EMERGE',
+    notes: [
+      '城市等级。每块地都有一个等级，一到十级，由人口和完好建筑数决定。规模让你有资格升级，金币支付确认升级的公共工程：二级 1,500 金币，十级 130,000 金币。银行里的"城市"卡片显示等级、下一级的要求和按钮。已有的城市按现状评级，已经长到的等级不用付钱。',
+      '收益随等级走。地块的每日上限从一级的 6,000 $EMERGE 到十级的 25,000，再乘以时代：人工智能时代的十级城市每天最多可赚 40,000。新认领的地块只能赚到成熟城市的零头，所以把手里的地块发展好比再认领一块更值。支付接口从你发布的世界读取等级，改存档得不到更高的上限。',
+      '金币有了去处。公共工程、节庆（按人头收费，让全城更快乐，每天一次）、你自己下令修的桥，以及按建筑所建时代每个时代增加四分之一的维护费。金库是用来建设城市的，不是用来数的。',
+      '特许状：销毁 100,000 $EMERGE，地块收益上限提高五分之一，为期三十天。保险：销毁 50,000 $EMERGE，火灾、地震、洪水或暴徒造成的损失减半，为期三十天。两者都在"链上"面板购买，记录在地块记录上，有效期内再买会累加天数。',
+      '没有灾难能夷平一座城。地震或龙卷风最多损坏现存建筑的四分之一（最少三栋）。有玩家回来时四十栋建筑只剩两栋——那不是挫折，而是放弃的理由；现在不会再发生。',
+      '监狱有用了。每座监狱把有人作乱的几率减半，最低到十分之一；有监狱时，扭打中的作乱者十次只有一次挣脱，而不是三次一次。一百五十人的镇子里两座监狱现在有明显的区别。',
+      '房子住得下一家人。一栋房子按容量住人，一级三人，每次升级更多，所以独自到来的新人会与人合住，而不是一个人占一整栋。"一栋房子只住一个人"的问题没有了。',
+      '手动架桥。建造面板新增"桥梁"工具：点击水对岸的陆地，工队就会勘定通往那里最窄的可靠渡口，开工 600 金币，木材和工钱按天计。料场木材不够时，工队会用金币买进而不是停工——这正是一些镇子不再架桥的原因。',
+      '时代门槛也要求城市等级：城镇三级、工业五级、现代七级、人工智能九级。',
+    ],
+  },
   {
     version: '1.6',
     date: '2026-09-05',

@@ -31,6 +31,8 @@ export interface Claim {
   /** Which era the plot is in, as the registry has it. Absent means the first. */
   era?: number;
   eraAt?: number;
+  charterUntil?: number;
+  insuredUntil?: number;
 }
 
 export interface Offer {
@@ -303,6 +305,28 @@ export async function expandPlot(seed: number, owner: string, burnTx?: string): 
       return { ok: false, reason: json.error ?? 'The registry refused the expansion.', settling: json.retry === true };
     }
     return { ok: true, claim: json.claim, already: json.already === true };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+/** Buy a charter or insurance on the plot: burned $EMERGE for a span of days on the row. */
+export async function coverPlot(seed: number, owner: string, kind: 'charter' | 'insurance', burnTx?: string): Promise<{ ok: true; claim: Claim; until: number } | { ok: false; reason: string; settling?: boolean }> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, [kind === 'charter' ? 'charter' : 'insure']: true, burnTx }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; until?: number; error?: string; retry?: boolean };
+    if (!response.ok || !json.claim) {
+      return { ok: false, reason: json.error ?? 'The registry refused it.', settling: json.retry === true };
+    }
+    return { ok: true, claim: json.claim, until: json.until ?? 0 };
   } catch {
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }

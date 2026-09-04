@@ -2443,6 +2443,27 @@ export class EmergeScene {
     window.addEventListener('keydown', this.onPlacementKey);
   }
 
+  /**
+   * Arm the bridge cursor: a ring, and a tap names the shore to reach. The
+   * simulation decides whether there is a crossing to be had; the cursor
+   * drops either way.
+   */
+  startBridging(onPick: (x: number, y: number) => void) {
+    this.cancelPlacement();
+    const ring = new Sprite(this.assets.get('fx.select'));
+    ring.anchor.set(0.5, 0.5);
+    ring.alpha = 0.8;
+    ring.scale.set(1.6);
+    ring.zIndex = 1e6;
+    this.objectLayer.addChild(ring);
+    this.ghost = ring;
+    this.placement = { type: 'Bridge', onPlace: (x, y) => onPick(x, y) };
+    this.app.canvas.style.cursor = 'crosshair';
+    this.app.canvas.addEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.addEventListener('pointerup', this.onPlacementCommit);
+    window.addEventListener('keydown', this.onPlacementKey);
+  }
+
   /** How many standing trees a clearing at this spot would take. */
   standingTreesNear(x: number, y: number) {
     return this.trees.filter((t) => t.state === 'standing' && (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS).length;
@@ -2476,7 +2497,9 @@ export class EmergeScene {
     // whether there is one under it.
     this.placementValid = this.placement?.type === 'Clear trees'
       ? this.standingTreesNear(wx, wy) > 0
-      : this.canBuildAt(wx, wy);
+      : this.placement?.type === 'Bridge'
+        ? this.map.tileAt(wx, wy) !== Tile.Water && this.map.tileAt(wx, wy) !== Tile.WaterShore
+        : this.canBuildAt(wx, wy);
     const height = this.map.heightAt(wx, wy);
     const pos = worldToScreen(wx, wy, height);
     this.ghost.position.set(pos.x, pos.y);

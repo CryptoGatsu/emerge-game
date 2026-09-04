@@ -45,15 +45,14 @@ import {
   allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
-  type Claim,
-} from '@/lib/server/registry';
+  type Claim, markCover } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE } from '@/lib/chain/vault';
+import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
 import { readWorld } from '@/lib/server/registry';
 import { worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { eraGate, eraOf } from '@/lib/simulation';
-import { OPEN_ERA } from '@/lib/world/eras';
+import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS } from '@/lib/world/eras';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { ownerOnChain, registryConfigured } from '@/lib/server/land';
@@ -114,6 +113,8 @@ export async function POST(request: Request) {
     expand?: boolean;
     /** Advance the plot to `era`; `burnTx` paid for it where the token is live. */
     advance?: boolean;
+    charter?: boolean;
+    insure?: boolean;
     era?: number;
     /** Hired hands: the owner opens or closes the job; a player takes, keeps or leaves it. */
     hire?: boolean;
@@ -279,6 +280,44 @@ export async function POST(request: Request) {
       const result = await markExpanded(seed, owner);
       if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
       return NextResponse.json({ claim: result.claim, already: result.already });
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+  }
+
+  /*
+   * A charter or insurance on the plot.
+   *
+   * Both are burned $EMERGE for a span of days recorded on the row: a charter
+   * lifts the plot's ceiling by a fifth, insurance halves what trouble does.
+   * Verified like an expansion, and never refused for being bought again: a
+   * second purchase runs on from the end of the first.
+   */
+  if (body.charter || body.insure) {
+    const kind: 'charter' | 'insurance' = body.charter ? 'charter' : 'insurance';
+    let claim: Claim | null;
+    try {
+      claim = await claimOf(seed);
+    } catch {
+      return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+    }
+    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+      return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+    }
+    if (tokenLive()) {
+      const burnTx = String(body.burnTx ?? '');
+      const paid = await verifyBurn(burnTx, owner, kind === 'charter' ? CHARTER_COST_EMERGE : INSURANCE_COST_EMERGE);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(burnTx, `${kind}:${seed}:${burnTx}`))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
+    try {
+      const result = await markCover(seed, owner, kind, kind === 'charter' ? CHARTER_DAYS : INSURANCE_DAYS);
+      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      return NextResponse.json({ claim: result.claim, until: result.until });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }

@@ -25,7 +25,8 @@ import {
   advanceEra, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, trial,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
-  type World, clearTrees, trainCitizen, trainTrade, type WorkingJob } from '@/lib/simulation';
+  type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -39,6 +40,7 @@ import {
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
+  coverPlot,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -47,7 +49,7 @@ import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  liveToken, type VaultLedger, eraCeiling } from '@/lib/chain/vault';
+  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
@@ -325,7 +327,7 @@ export default function EmergeClient() {
    * once at mount and would otherwise be adding to whichever ledger existed
    * then — every day's earnings landing on the same stale balance.
    */
-  const earn = useCallback((emerge: number, era = 1) => {
+  const earn = useCallback((emerge: number, ceiling = DAILY_EARN_CEILING) => {
     if (!(emerge > 0)) return;
     setPlayer((prev) => {
       if (!prev) return prev;
@@ -337,8 +339,11 @@ export default function EmergeClient() {
         .slice(0, EARNING_PLOT_LIMIT)
         .some((c) => c.seed === claimedSeedRef.current);
       if (!earning) return prev;
-      // The ceiling grows with the era the plot has reached; the payout route judges the same from the claim row.
-      const next = { ...prev, ledger: accrue(prev.ledger, emerge, eraCeiling(era)) };
+      // The ceiling is the plot's own, from its city level and era, times the
+      // plots that pay; the payout route judges the same from the published
+      // copies, so this is a display of the rule and not the rule itself.
+      const plots = Math.max(1, Math.min(EARNING_PLOT_LIMIT, prev.claims.length));
+      const next = { ...prev, ledger: accrue(prev.ledger, emerge, ceiling * plots) };
       savePlayer(next, addressRef.current);
       return next;
     });
@@ -549,7 +554,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   onRename: (world: ClaimedWorld) => void;
   onPlayer: (record: PlayerRecord) => void;
   /** Credit stewardship yield the simulation has accrued. */
-  onEarn: (emerge: number, era?: number) => void;
+  onEarn: (emerge: number, ceiling?: number) => void;
   /** Go and look at somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
 }) {
@@ -683,7 +688,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         // drained — so it cannot pile up — and then dropped, because watching
         // somebody else's settlement is not stewarding it.
         const earned = collectYield(live);
-        if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned, eraOf(live));
+        if (earned > 0 && (!spectating || visit?.hand)) onEarnRef.current(earned, dailyCeiling(live));
         // A danger that is still doing harm changes the music; a harmless
         // one, or one already fought down, does not.
         if (!hiddenRef.current) {
@@ -873,6 +878,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         sceneRef.current?.reset(world);
         setView(snapshot(world, null));
       }
+      // A charter or insurance bought on another device.
+      if (world && row?.charterUntil && (world.charterUntil ?? 0) < row.charterUntil) { setCover(world, 'charter', row.charterUntil); saveWorld(world); }
+      if (world && row?.insuredUntil && (world.insuredUntil ?? 0) < row.insuredUntil) { setCover(world, 'insurance', row.insuredUntil); saveWorld(world); }
       if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
         world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
       }
@@ -1251,6 +1259,52 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return null;
   }, []);
 
+  /** Pay the public works and raise the city a level. */
+  const raiseCityFor = useCallback((): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = raiseCity(world);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue('hammer');
+    saveWorld(world);
+    setView(snapshot(world, selectedRef.current));
+    announce({ id: `city-${world.id}-${world.works?.level ?? 0}`, kind: 'claim', title: t('A level {n} city', { n: world.works?.level ?? 1 }), body: t('The public works are done and the plot earns like a bigger place. Keep it fed, housed and busy and the ceiling is yours.'), lifetime: 12_000 });
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** A festival: Gold for the whole town's spirits. */
+  const festivalFor = useCallback((): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = holdFestival(world);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue('bell');
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+
+  /** Arm the bridge cursor: the next tap on far land stakes out a crossing. */
+  const beginBridge = useCallback(() => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    setPanel(null);
+    setPlacing('Bridge');
+    scene.startBridging((x, y) => {
+      setPlacing(null);
+      const result = startBridgeAt(world, x, y);
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `bridge-${Date.now()}`, kind: 'sync', title: t('No crossing'), body: result.message, lifetime: 8_000 });
+      } else {
+        soundRef.current?.cue('hammer');
+      }
+      setView(snapshot(world, selectedRef.current));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Pull a building down. Half the materials come back; the Gold does not. */
   const demolish = useCallback((id: string) => {
     const world = worldRef.current;
@@ -1515,6 +1569,35 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return null;
     // `announce` is stable for the life of the world.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
+
+  /**
+   * Buy a charter or insurance for the plot: $EMERGE burned, the registry
+   * told, and only then does the world carry it. Another device picks it up
+   * from the claim row.
+   */
+  const coverFor = useCallback(async (kind: 'charter' | 'insurance'): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    if (!wallet.address) return t('Connect a wallet first.');
+    const cost = kind === 'charter' ? CHARTER_COST_EMERGE : INSURANCE_COST_EMERGE;
+    const paid = await spend(player.ledger, cost, wallet.address);
+    if (!paid.ok) return paid.refused;
+    onPlayer({ ...player, ledger: paid.ledger });
+    let result = await coverPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
+    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await coverPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
+    }
+    if (!result.ok) {
+      return paid.txHash
+        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+        : result.reason;
+    }
+    setCover(world, kind, result.until);
+    saveWorld(world);
+    refresh();
+    return null;
   }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
 
   /**
@@ -1785,6 +1868,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onTrain={trainFor}
             onTrainTrade={trainTradeFor}
             onClearTrees={beginClear}
+            onBridge={beginBridge}
+            onRaiseCity={raiseCityFor}
+            onFestival={festivalFor}
+            onCover={coverFor}
             onRenameWorld={renameWorldFor}
             onExpand={expandFor}
             onAdvance={advanceFor}

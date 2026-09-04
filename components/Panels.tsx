@@ -11,8 +11,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS } from '@/lib/simulation';
-import { eraName } from '@/lib/world/eras';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE } from '@/lib/simulation';
+import { eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, MAX_CITY_LEVEL, PLOT_CEILING_MAX } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
@@ -22,6 +22,7 @@ import {
   RENAME_COST_EMERGE, RENAME_PLAYER_EMERGE, WITHDRAW_BURN_RATE,
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
+  CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE,
 } from '@/lib/chain/vault';
 import { Sparkline } from './Sparkline';
 import {
@@ -54,6 +55,14 @@ interface PanelsProps {
   onTrainTrade: (job: string, count: number) => string | null;
   /** Arm the clearing cursor. */
   onClearTrees: () => void;
+  /** Arm the bridge cursor. */
+  onBridge: () => void;
+  /** Pay the public works for the next city level; the refusal, or null. */
+  onRaiseCity: () => string | null;
+  /** Hold a festival; the refusal, or null. */
+  onFestival: () => string | null;
+  /** Buy a charter or insurance for the plot; the refusal, or null. */
+  onCover: (kind: 'charter' | 'insurance') => Promise<string | null>;
   onRenameWorld: (name: string) => void;
   /** Open the plot's outer belt, once, for $EMERGE. Resolves to a refusal, or null. */
   onExpand: () => Promise<string | null>;
@@ -1346,12 +1355,16 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
   );
 }
 
-function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }: {
+function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, onRaiseCity, onFestival }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
   onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
   onWages: (rate: number) => void;
+  onRaiseCity: () => string | null;
+  onFestival: () => string | null;
 }) {
+  const [cityNote, setCityNote] = useState<string | null>(null);
+  const city = view.city;
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [claimAmount, setClaimAmount] = useState('');
@@ -1519,6 +1532,38 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages }
           <span>{t('EARNED HERE')}</span>
           <b>{Math.floor(ledger.lifetimeEarned).toLocaleString()}</b>
           <em>{t('{n} uncollected', { n: Math.floor(ledger.earnedEmerge).toLocaleString() })}</em>
+        </div>
+      </div>
+
+      <div className="connect-card city-card">
+        <span className="eyebrow">{t('CITY LEVEL')}</span>
+        <h3>{t('Level {n} of {max}', { n: city.level, max: MAX_CITY_LEVEL })}</h3>
+        <p className="muted small">
+          {t('What the plot can earn runs on its level: a fresh claim earns a fraction of a city, and a level {max} city in the last era earns up to {top} {ticker} a day. Size earns the next level; Gold pays for it. This is where the treasury goes.', { max: MAX_CITY_LEVEL, top: PLOT_CEILING_MAX.toLocaleString(), ticker: TOKEN.ticker })}
+        </p>
+        {city.next ? (
+          <>
+            <ul className="era-checks">
+              <li className={city.people.have >= city.people.need ? 'done' : ''}><i>{city.people.have >= city.people.need ? '✓' : '·'}</i>{t('{have} of {need} people', { have: city.people.have, need: city.people.need })}</li>
+              <li className={city.buildings.have >= city.buildings.need ? 'done' : ''}><i>{city.buildings.have >= city.buildings.need ? '✓' : '·'}</i>{t('{have} of {need} buildings standing', { have: city.buildings.have, need: city.buildings.need })}</li>
+              <li className={city.affordable ? 'done' : ''}><i>{city.affordable ? '✓' : '·'}</i>{t('{have} of {need} Gold for the public works', { have: Math.floor(view.treasury).toLocaleString(), need: city.cost.toLocaleString() })}</li>
+            </ul>
+            <button className="city-raise" disabled={!city.ready} onClick={() => setCityNote(onRaiseCity())}>
+              {city.ready
+                ? t('Raise to level {n} · {cost} Gold', { n: city.next, cost: city.cost.toLocaleString() })
+                : !city.grown ? t('Not big enough yet') : t('Not enough Gold')}
+            </button>
+          </>
+        ) : (
+          <p className="muted small">{t('The city is at the top level.')}</p>
+        )}
+        {cityNote && <p className="muted small">{cityNote}</p>}
+        <div className="city-festival">
+          <b>{t('Festival')}</b>
+          <span className="muted small">{t('A day in the square for everyone: happier people, closer neighbours. {cost} Gold, once a day.', { cost: view.festival.cost.toLocaleString() })}</span>
+          <button className="city-festival-btn" disabled={view.festival.held || view.treasury < view.festival.cost} onClick={() => setCityNote(onFestival())}>
+            {view.festival.held ? t('Held today') : view.treasury < view.festival.cost ? t('Not enough Gold') : t('Hold a festival')}
+          </button>
         </div>
       </div>
 
@@ -1778,8 +1823,8 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
   );
 }
 
-function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
-  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void;
+function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
+  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void;
 }) {
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
@@ -1824,6 +1869,18 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees }: {
           </div>
           <button disabled={view.treasury < CLEAR_TREE_GOLD} onClick={onClearTrees}>
             {view.treasury < CLEAR_TREE_GOLD ? t('Not enough Gold') : t('Clear')}
+          </button>
+        </div>
+        <div className="build-card tool">
+          <div className="build-icon">🌉</div>
+          <h3>{t('Bridge')}</h3>
+          <p>{t('Tap land across the water and the crew stakes out the narrowest sound crossing to it. Timber comes from the yard by the day, and is bought in when the yard is short.')}</p>
+          <div className="build-cost">
+            <b>{t('{n} Gold to start', { n: BRIDGE_GOLD.toLocaleString() })}</b>
+            <small>{t('+ timber and wages by the day')}</small>
+          </div>
+          <button disabled={view.treasury < BRIDGE_GOLD} onClick={onBridge}>
+            {view.treasury < BRIDGE_GOLD ? t('Not enough Gold') : t('Stake out a crossing')}
           </button>
         </div>
       </div>
@@ -1875,9 +1932,10 @@ function sinceWhen(at: number): string {
   return t('{n} days ago', { n: Math.round(hours / 24) });
 }
 
-function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onList }: {
+function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onCover, onLeave, onRelease, onList }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
   onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onAdvance: () => Promise<string | null>;
+  onCover: (kind: 'charter' | 'insurance') => Promise<string | null>;
   onLeave: () => void; onRelease: () => void;
   onList: (price: number | null) => void;
 }) {
@@ -1901,6 +1959,16 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
     setExpanding(false);
     setExpandNote(refused);
   };
+  const [covering, setCovering] = useState<'charter' | 'insurance' | null>(null);
+  const [coverNote, setCoverNote] = useState<string | null>(null);
+  const cover = async (kind: 'charter' | 'insurance') => {
+    setCovering(kind);
+    setCoverNote(null);
+    const refused = await onCover(kind);
+    setCovering(null);
+    setCoverNote(refused);
+  };
+  const daysLeft = (until: number) => Math.max(0, Math.ceil((until - Date.now()) / 86_400_000));
   const [draftName, setDraftName] = useState(view.name);
   const [askPrice, setAskPrice] = useState(String(Math.round(claimed.price * 1.25)));
   const configured = tokenLive();
@@ -2075,6 +2143,41 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
         </div>
 
         <div className="connect-card">
+          <span className="eyebrow">{t('CHARTER')}</span>
+          <h3>{view.cover.charterUntil > Date.now() ? t('Chartered · {n} days left', { n: daysLeft(view.cover.charterUntil) }) : t('A fifth more on the ceiling')}</h3>
+          <p className="muted small">
+            {t('A charter raises what this plot can earn by {pct}% for {days} days. {cost} {ticker}, burned. Buying another while one runs adds the days on.', { pct: Math.round(CHARTER_BONUS * 100), days: CHARTER_DAYS, cost: CHARTER_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+          </p>
+          <button onClick={() => cover('charter')} disabled={covering !== null || !wallet.address || player.ledger.balance < CHARTER_COST_EMERGE}>
+            {covering === 'charter'
+              ? t('Buying…')
+              : !wallet.address
+                ? t('Connect a wallet first')
+                : player.ledger.balance < CHARTER_COST_EMERGE
+                  ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                  : t('Charter for {cost} {ticker}', { cost: CHARTER_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+          </button>
+        </div>
+
+        <div className="connect-card">
+          <span className="eyebrow">{t('INSURANCE')}</span>
+          <h3>{view.cover.insured ? t('Insured · {n} days left', { n: daysLeft(view.cover.insuredUntil) }) : t('Half the damage, made good')}</h3>
+          <p className="muted small">
+            {t('Insured, the plot takes half of whatever a fire, a quake, a flood or a rogue does, for {days} days. No disaster can wreck more than {pct}% of a settlement in any case. {cost} {ticker}, burned.', { days: INSURANCE_DAYS, pct: Math.round(HAZARD_SHARE * 100), cost: INSURANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+          </p>
+          <button onClick={() => cover('insurance')} disabled={covering !== null || !wallet.address || player.ledger.balance < INSURANCE_COST_EMERGE}>
+            {covering === 'insurance'
+              ? t('Buying…')
+              : !wallet.address
+                ? t('Connect a wallet first')
+                : player.ledger.balance < INSURANCE_COST_EMERGE
+                  ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
+                  : t('Insure for {cost} {ticker}', { cost: INSURANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+          </button>
+          {coverNote && <p className="muted small">{coverNote}</p>}
+        </div>
+
+        <div className="connect-card">
           <span className="eyebrow">{t('HIRED HANDS')}</span>
           {row?.hand ? (
             <>
@@ -2185,7 +2288,7 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2211,7 +2314,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     return (
       <BankPanel
         view={view} claimed={claimed} player={player} earning={earning}
-        onClose={onClose} onVault={onVault} onWages={onWages}
+        onClose={onClose} onVault={onVault} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival}
       />
     );
   }
@@ -2229,13 +2332,13 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     );
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
-  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} />;
+  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} />;
   if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} />;
   if (panel === 'connect') {
     return (
       <ConnectPanel
         view={view} claimed={claimed} player={player} onClose={onClose}
-        onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onLeave={onLeave} onRelease={onRelease} onList={onList}
+        onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onCover={onCover} onLeave={onLeave} onRelease={onRelease} onList={onList}
       />
     );
   }

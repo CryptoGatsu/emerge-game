@@ -173,7 +173,9 @@ finds the biggest piece of land it cannot walk to, picks a crossing that is both
 short and lands on ground worth having, and spends timber and gold getting a deck
 across over several days. Once it stands, the far side joins the road network and
 becomes ground to build on — and the renderer repaints the map, because the
-settlement has changed the shape of its own world.
+settlement has changed the shape of its own world. Since v2.0 the player can
+order a crossing too (`startBridgeAt`, from the Build panel's Bridge tool), and
+a crew short of timber buys it in with Gold rather than waiting.
 
 The settlement also builds for itself: a house when people have nowhere to live, a
 woodcutter when the hearths are going cold, a farm when the stores are thin, and a
@@ -467,9 +469,46 @@ then over-capacity trades, then the least skilled, never the last hand in a
 food trade.
 
 Rewards grow with the era: `eraYield` in `lib/world/eras.ts` lifts the daily
-stewardship cap by `ERA_YIELD_STEP` per era, the client accrues against
-`eraCeiling(era)`, and the payout route judges the same ceiling from the claim
-rows (`eraHeldBy`), which only the advance route can raise.
+ceiling by `ERA_YIELD_STEP` per era.
+
+## City levels, Gold sinks, charters and insurance (v2.0)
+
+A plot's **city level** (`cityLevel` in `lib/simulation.ts`) is the smaller of
+the public works it has paid for (`World.works.level`) and one past what its
+size has earned (`levelForSize` over `CITY_LEVELS` in `lib/world/eras.ts`:
+people and standing buildings per level). `cityGate` says what the next level
+asks; `raiseCity` spends the works cost under the `works` ledger line.
+`ensureWorks` grades a save from before levels on its size, so nobody pays for
+a level they had already grown into. The era gate asks for a level too
+(`ERA_CITY_LEVEL`).
+
+The daily ceiling is `plotCeiling(level, era)`: linear from
+`PLOT_CEILING_MIN` to `PLOT_CEILING_MAX` over the ten levels, times the era
+yield, times `charterMultiplier` while a charter runs. `dailyCeiling(world)`
+is what `accrueYield` and the Bank show; the payout route judges the same
+figure from the published snapshots of the wallet's four earning plots
+(`ceilingHeldBy` in `lib/server/land.ts`), so a client cannot talk it up.
+
+Gold sinks, because the feedback was "too much Gold and nothing to do with it":
+public works, festivals (`holdFestival`, Gold by the head, once a day, under
+the `festival` line), bridges ordered by hand (`startBridgeAt`, `BRIDGE_GOLD`
+up front; the crew buys timber with Gold when the yard is short), and upkeep
+that rises `UPKEEP_PER_ERA` per era a building was raised in.
+
+Token sinks with a reason to hold: a **charter** (`CHARTER_COST_EMERGE`
+burned, `CHARTER_BONUS` on the ceiling for `CHARTER_DAYS`) and **insurance**
+(`INSURANCE_COST_EMERGE` burned, `damageBuilding` halves everything for
+`INSURANCE_DAYS`). Both go through `/api/plots` with `charter: true` or
+`insure: true`, are burn-verified when the token is live, and are written to
+the claim row by `markCover` (extending from the later of now and the running
+cover); `setCover` puts them on the world, and the claims poll catches another
+device up.
+
+Feedback fixes in the same release: `rehouse` fills houses to `houseRoom`
+with several families rather than one family per house; every Jail halves the
+rogue chance (`jailFactor`, floor a tenth) and cuts the escape chance to a
+tenth; `hazardBudget` caps an earthquake or a tornado at `HAZARD_SHARE` of
+the standing buildings (never fewer than three).
 
 ## Room for two hundred settlements
 
@@ -991,8 +1030,9 @@ red trim, torch in hand, wrecking the nearest building in a few hours. The playe
 no hand in it — a rogue cannot be picked up, and neither can the people chasing them.
 The three nearest adults awake give chase; when one gets within reach there is a
 scuffle, animated, and it ends with the rogue thrown in the **Jail** (or the market
-cellar) — or killed on the spot if they have already brought two buildings down. A
-Jail halves how often anybody turns.
+cellar) — or killed on the spot if they have already brought two buildings down. Every
+Jail halves how often anybody turns, down to a tenth, and with one standing a rogue in a
+scuffle breaks free once in ten rather than once in three.
 
 ## Your world is saved
 

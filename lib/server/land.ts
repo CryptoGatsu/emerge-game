@@ -1,3 +1,7 @@
+import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT } from '../chain/vault';
+import { charterMultiplier, plotCeiling } from '../world/eras';
+import { cityLevel } from '../simulation';
+import { worldFromSave, type SavedWorld } from '../world/save';
 import 'server-only';
 
 /**
@@ -32,7 +36,7 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
 import { HAND_MIN_EMERGE } from '../chain/vault';
-import { allClaims, jobOf } from './registry';
+import { allClaims, jobOf, readWorld, type Claim } from './registry';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -68,6 +72,35 @@ export async function eraHeldBy(address: string): Promise<number> {
   } catch {
     return 1;
   }
+}
+
+/**
+ * What this wallet may collect in a day: the ceilings of its earning plots
+ * added up. Each plot's ceiling comes from the level of the world its owner
+ * published and the era and charter on its claim row. A plot with no
+ * published world counts at level one. Never more than the old flat ceiling
+ * lifted by era and charter, and less for anything not yet developed.
+ */
+export async function ceilingHeldBy(address: string): Promise<number> {
+  const me = address.toLowerCase();
+  let rows: Claim[];
+  try { rows = await allClaims(); } catch { return DAILY_EARN_CEILING; }
+  const mine = rows.filter((c) => c.owner.toLowerCase() === me).sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT);
+  if (!mine.length) return DAILY_EARN_CEILING;
+  const now = Date.now();
+  let total = 0;
+  for (const row of mine) {
+    let level = 1;
+    try {
+      const published = await readWorld(row.seed);
+      const world = published ? worldFromSave(published.snapshot as SavedWorld, row.seed, row.worldName) : null;
+      if (world) level = cityLevel(world);
+    } catch {
+      level = 1;
+    }
+    total += Math.round(plotCeiling(level, row.era ?? 1) * charterMultiplier(row.charterUntil, now));
+  }
+  return Math.max(1, total);
 }
 
 async function claimsHeldBy(address: string): Promise<boolean> {
