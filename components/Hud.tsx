@@ -1,4 +1,5 @@
 'use client';
+import { EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
 
 /**
  * The floating interface.
@@ -245,6 +246,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 <em>
                   {t('{wood} timber · {stone} stone', { wood: focus.upgrade.wood, stone: focus.upgrade.stone })}
                   {focus.upgrade.stocked ? '' : t(' — not in the yard')}
+                  {' · '}{tx(focus.improves)}
                 </em>
               </button>
             ) : (
@@ -767,7 +769,7 @@ export function Hud(props: HudProps) {
       {!introShown && (
         <button className="world-chip" onClick={() => setIntroShown(true)} title={t('About Emerge')}>
           <span>✦</span>
-          <b>{view.name}</b>
+          <b>{view.banner && isEmblem(view.banner) && <i className="banner-glyph" title={EMBLEM_NAME[view.banner]}>{EMBLEM_GLYPH[view.banner]}</i>}{view.name}</b>
         </button>
       )}
 

@@ -3155,3 +3155,9 @@ button.fold:hover { color: var(--emerald); }
 .flywheel-grid b { font-size: 16px; color: var(--cream); }
 .build-card.built { opacity: 0.55; }
 .build-discount { font-style: normal; font-size: 10px; color: var(--lime, #b8e756); margin-left: 4px; }
+
+.banner-glyph { display: inline-block; margin-right: 5px; color: var(--gold, #f0d05e); font-style: normal; }
+.boon-row select { background: rgba(0, 0, 0, 0.3); color: var(--cream); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
+
+.arena-bet-row.token { margin-top: 6px; padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.12); }
+.arena-bet-row.token label span { color: var(--gold, #f0d05e); }

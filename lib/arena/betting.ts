@@ -38,6 +38,24 @@ export const MAX_STAKE_PER_DAY = 3_000;
  * rather than a place to make it.
  */
 export const HOUSE_EDGE = 0.06;
+/**
+ * Token bets: real money against the vault.
+ *
+ * The stake is a transfer into the vault, a win is paid out of it by the
+ * vault's own key at the odds shown, and a loss stays. The house edge is the
+ * vault's, booked like a charge: three quarters burned, a quarter kept. Capped
+ * per bout and per day so the book is never large next to the vault.
+ */
+export const MAX_TOKEN_STAKE = 50_000;
+export const MAX_TOKEN_STAKE_PER_DAY = 250_000;
+export function refuseToken(stake: number, balance: number, stakedToday: number): string | null {
+  if (!Number.isFinite(stake) || stake <= 0) return 'Stake something first.';
+  if (!Number.isInteger(stake)) return 'Whole tokens only.';
+  if (stake > MAX_TOKEN_STAKE) return `${MAX_TOKEN_STAKE.toLocaleString()} is the most on one bout.`;
+  if (stake > balance) return 'Your balance cannot cover that.';
+  if (stakedToday + stake > MAX_TOKEN_STAKE_PER_DAY) return `That is over ${MAX_TOKEN_STAKE_PER_DAY.toLocaleString()} staked today.`;
+  return null;
+}
 
 /** What the board offers, after the house has taken its cut. */
 export function offered(trueOdds: number): number {

@@ -1,6 +1,6 @@
-import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, WALLET_DAILY_CEILING } from '../chain/vault';
+import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
 import { charterMultiplier, plotCeiling } from '../world/eras';
-import { cityLevel } from '../simulation';
+import { cityLevel, stewardshipScore, type World } from '../simulation';
 import { worldFromSave, type SavedWorld } from '../world/save';
 import 'server-only';
 
@@ -36,7 +36,7 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
 import { HAND_MIN_EMERGE } from '../chain/vault';
-import { allClaims, jobOf, readWorld, type Claim } from './registry';
+import { allClaims, jobOf, readWorld, type Claim, presenceDays, lastSeenAt } from './registry';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -75,33 +75,98 @@ export async function eraHeldBy(address: string): Promise<number> {
 }
 
 /**
- * What this wallet may collect in a day: the ceilings of its earning plots
- * added up. Each plot's ceiling comes from the level of the world its owner
- * published and the era and charter on its claim row. A plot with no
- * published world counts at level one. Never more than WALLET_DAILY_CEILING,
- * and less for anything not yet developed.
+ * The level a plot is paid on.
+ *
+ * The published world says what the city has become, and a published world
+ * is the client's word. What the client cannot write is the days its owner
+ * was actually present, which the heartbeat records; so the level is the
+ * smaller of the two, three present days per level. A day-old claim with a
+ * level-ten snapshot is paid as level one; a city somebody has looked in on
+ * for a month is paid as what it is.
  */
-export async function ceilingHeldBy(address: string): Promise<number> {
+export const LEVEL_PRESENCE_DAYS = 3;
+export function judgedLevel(world: World | null, presentDays: number): number {
+  const fromWorld = world ? cityLevel(world) : 1;
+  const fromPresence = 1 + Math.floor(Math.max(0, presentDays) / LEVEL_PRESENCE_DAYS);
+  return Math.max(1, Math.min(fromWorld, fromPresence));
+}
+
+/** The same attention rule the settlement runs, on the server's own record of the owner's presence. */
+const ATTENTION_HOURS = 36;
+const ATTENTION_FLOOR = 0.08;
+export const attentionFrom = (lastSeen: number, now = Date.now()) =>
+  lastSeen > 0 ? Math.max(ATTENTION_FLOOR, 1 - Math.max(0, now - lastSeen) / 3_600_000 / ATTENTION_HOURS) : ATTENTION_FLOOR;
+
+export interface Judged {
+  /** The wallet's earning plots' ceilings, added up. */
+  ceiling: number;
+  /** What those plots earn in a real day as the server sees them: ceiling times score times attention. */
+  yield: number;
+  plots: { seed: number; level: number; era: number; score: number; attention: number; ceiling: number }[];
+}
+
+/**
+ * What this wallet may collect in a day, judged here rather than reported.
+ *
+ * Each earning plot: its ceiling from the judged level, the era and charter
+ * on its claim row; its stewardship score computed from the published world
+ * with the same function the settlement runs; its attention from the owner's
+ * last heartbeat on it. The payout route pays the lesser of what the client
+ * claims and this. Never more than WALLET_DAILY_CEILING.
+ */
+export async function judgedFor(address: string): Promise<Judged> {
   const me = address.toLowerCase();
   let rows: Claim[];
-  try { rows = await allClaims(); } catch { return DAILY_EARN_CEILING; }
+  try { rows = await allClaims(); } catch { return { ceiling: DAILY_EARN_CEILING, yield: 0, plots: [] }; }
   const mine = rows.filter((c) => c.owner.toLowerCase() === me).sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT);
-  if (!mine.length) return DAILY_EARN_CEILING;
+  if (!mine.length) return { ceiling: DAILY_EARN_CEILING, yield: 0, plots: [] };
   const now = Date.now();
-  let total = 0;
+  let days = 0;
+  try { days = await presenceDays(me); } catch { days = 0; }
+  const plots: Judged['plots'] = [];
+  let ceiling = 0, yieldSum = 0;
   for (const row of mine) {
-    let level = 1;
+    let world: World | null = null;
     try {
       const published = await readWorld(row.seed);
-      const world = published ? worldFromSave(published.snapshot as SavedWorld, row.seed, row.worldName) : null;
-      if (world) level = cityLevel(world);
-    } catch {
-      level = 1;
-    }
-    total += Math.round(plotCeiling(level, row.era ?? 1) * charterMultiplier(row.charterUntil, now));
+      world = published ? worldFromSave(published.snapshot as SavedWorld, row.seed, row.worldName) : null;
+    } catch { world = null; }
+    const level = judgedLevel(world, days);
+    const era = row.era ?? 1;
+    const cap = Math.round(plotCeiling(level, era) * charterMultiplier(row.charterUntil, now));
+    let score = 0;
+    try { score = world ? stewardshipScore(world) : 0; } catch { score = 0; }
+    let attention = ATTENTION_FLOOR;
+    try { attention = attentionFrom(await lastSeenAt(row.seed, me), now); } catch { attention = ATTENTION_FLOOR; }
+    ceiling += cap;
+    yieldSum += cap * score * attention;
+    plots.push({ seed: row.seed, level, era, score, attention, ceiling: cap });
   }
   // Five plots at the top would come to more than a wallet may take in a day.
-  return Math.max(1, Math.min(WALLET_DAILY_CEILING, total));
+  return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), plots };
+}
+
+/** Kept for callers that only want the ceiling. */
+export async function ceilingHeldBy(address: string): Promise<number> {
+  return (await judgedFor(address)).ceiling;
+}
+
+/** A hand's ceiling: a tenth of the ceiling of the plot they work, judged the same way. */
+export async function handCeilingFor(address: string): Promise<number> {
+  try {
+    const job = await jobOf(address);
+    if (!job) return 0;
+    let world: World | null = null;
+    try {
+      const published = await readWorld(job.seed);
+      world = published ? worldFromSave(published.snapshot as SavedWorld, job.seed, job.worldName) : null;
+    } catch { world = null; }
+    const days = await presenceDays(job.owner).catch(() => 0);
+    const level = judgedLevel(world, days);
+    return Math.max(1, Math.round(plotCeiling(level, job.era ?? 1) * HAND_SHARE));
+  } catch {
+    return 0;
+  }
 }
 
 async function claimsHeldBy(address: string): Promise<boolean> {

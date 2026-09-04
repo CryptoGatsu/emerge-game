@@ -19,8 +19,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MAX_STAKE, MAX_STAKE_PER_DAY, offered, payout, refuse } from '@/lib/arena/betting';
-import { enterFighter, fetchArena, type ArenaState, type Bout, type Fighter } from '@/lib/net/arena';
+import { MAX_STAKE, MAX_STAKE_PER_DAY, MAX_TOKEN_STAKE, MAX_TOKEN_STAKE_PER_DAY, HOUSE_EDGE, offered, payout, refuse, refuseToken } from '@/lib/arena/betting';
+import { enterFighter, fetchArena, placeTokenBet, type ArenaState, type Bout, type Fighter } from '@/lib/net/arena';
+import { pay } from '@/lib/chain/spend';
+import { credit, type VaultLedger } from '@/lib/chain/vault';
+import { VAULT_ADDRESS, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { skillDays, skillLevel, vigourOf, type Citizen, type World, type WorkingJob } from '@/lib/simulation';
 import { t, tj, useLocale } from '@/lib/i18n';
 
@@ -76,7 +79,10 @@ function Corner({ fighter, side, odds, winner, health }: {
   );
 }
 
-export default function Arena({ world, seed, worldName, playerName, address, treasury, onStake, onCue, onClose }: {
+export default function Arena({ world, seed, worldName, playerName, address, treasury, ledger, onLedger, onStake, onCue, onClose }: {
+  /** The player's token ledger, for bets in {ticker}, and how to put it back. */
+  ledger: VaultLedger;
+  onLedger: (ledger: VaultLedger) => void;
   /** The player's own settlement, for picking a fighter out of it. */
   world: World | null;
   seed: number;
@@ -94,6 +100,11 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
   const [tick, setTick] = useState(Date.now());
   const [notice, setNotice] = useState<string | null>(null);
   const [stake, setStake] = useState('50');
+  const [tokenStake, setTokenStake] = useState('5000');
+  const [placing, setPlacing] = useState(false);
+  const tokenStakedToday = useRef(0);
+  /** Token bouts already credited locally, so a re-poll cannot credit a win twice. */
+  const creditedTokens = useRef(new Set<number>());
   const [entering, setEntering] = useState(false);
 
   /** The bet standing on the bout being fought, if any. */
@@ -204,6 +215,53 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
     return () => { live = false; };
   }, [bout?.id, bout?.reveal, bout?.commit]);
 
+  /* A token bet: the stake to the vault, then the book. */
+  const placeToken = async (on: 'red' | 'blue') => {
+    if (!bout || !address) { setNotice(t('Connect a wallet to bet {ticker}.', { ticker: TOKEN.ticker })); return; }
+    const amount = Number(tokenStake);
+    const refusal = refuseToken(amount, ledger.balance, tokenStakedToday.current);
+    if (refusal) { setNotice(t(refusal)); return; }
+    if (state?.tokenBets.some((b) => b.boutId === bout.id)) { setNotice(t('You already have a token bet on this bout.')); return; }
+    setPlacing(true);
+    const paid = await pay(ledger, amount, address, VAULT_ADDRESS);
+    if (!paid.ok) { setPlacing(false); setNotice(paid.refused); return; }
+    onLedger(paid.ledger);
+    let result = await placeTokenBet(address, bout.id, on, amount, paid.txHash);
+    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await placeTokenBet(address, bout.id, on, amount, paid.txHash);
+    }
+    setPlacing(false);
+    if (!result.ok) { setNotice(result.error); return; }
+    tokenStakedToday.current += amount;
+    onCue('coin');
+    const who = on === 'red' ? bout.red.name : bout.blue.name;
+    setNotice(t('{amount} {ticker} on {who}. The vault holds it until the bell.', { amount: amount.toLocaleString(), ticker: TOKEN.ticker, who }));
+    const next = await fetchArena();
+    if (next) setState(next);
+  };
+
+  /* Token results: a win the vault paid is in your wallet; one it could not pay is credited here, once. */
+  useEffect(() => {
+    if (!state) return;
+    for (const b of state.tokenBets) {
+      if (!b.result || creditedTokens.current.has(b.boutId)) continue;
+      creditedTokens.current.add(b.boutId);
+      if (b.result.won) {
+        onCue('win');
+        if (!b.result.paid && !tokenLive()) onLedger(credit(ledger, b.result.amount));
+        setNotice(b.result.paid
+          ? t('Your token bet won: {amount} {ticker} sent from the vault.', { amount: b.result.amount.toLocaleString(), ticker: TOKEN.ticker })
+          : t('Your token bet won: {amount} {ticker}.', { amount: b.result.amount.toLocaleString(), ticker: TOKEN.ticker }));
+      } else {
+        onCue('lose');
+        setNotice(t('Your token bet lost. The stake stays in the vault.'));
+      }
+    }
+    // The ledger is read at the moment of crediting; a stale closure would only re-credit an amount already guarded by the set above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
   const place = (on: 'red' | 'blue') => {
     if (!bout) return;
     const gold = Number(stake);
@@ -296,21 +354,41 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
               </div>
 
               {phase === 'betting' && (
-                <div className="arena-bet-row">
-                  <label>
-                    <span>{t('STAKE')}</span>
-                    <input
-                      type="number" min={1} max={MAX_STAKE} value={stake}
-                      onChange={(e) => setStake(e.target.value)}
-                    />
-                  </label>
-                  <button className="bet red" disabled={!!bet} onClick={() => place('red')}>
-                    {bout.red.name} · {offered(bout.odds.red).toFixed(2)}×
-                  </button>
-                  <button className="bet blue" disabled={!!bet} onClick={() => place('blue')}>
-                    {bout.blue.name} · {offered(bout.odds.blue).toFixed(2)}×
-                  </button>
-                </div>
+                <>
+                  <div className="arena-bet-row">
+                    <label>
+                      <span>{t('STAKE')}</span>
+                      <input
+                        type="number" min={1} max={MAX_STAKE} value={stake}
+                        onChange={(e) => setStake(e.target.value)}
+                      />
+                    </label>
+                    <button className="bet red" disabled={!!bet} onClick={() => place('red')}>
+                      {bout.red.name} · {offered(bout.odds.red).toFixed(2)}×
+                    </button>
+                    <button className="bet blue" disabled={!!bet} onClick={() => place('blue')}>
+                      {bout.blue.name} · {offered(bout.odds.blue).toFixed(2)}×
+                    </button>
+                  </div>
+                  <div className="arena-bet-row token">
+                    <label>
+                      <span>{t('{ticker} STAKE', { ticker: TOKEN.ticker })}</span>
+                      <input
+                        type="number" min={1} max={MAX_TOKEN_STAKE} value={tokenStake}
+                        onChange={(e) => setTokenStake(e.target.value)}
+                      />
+                    </label>
+                    <button className="bet red" disabled={placing || state?.tokenBets.some((b) => b.boutId === bout.id)} onClick={() => void placeToken('red')}>
+                      {bout.red.name} · {offered(bout.odds.red).toFixed(2)}×
+                    </button>
+                    <button className="bet blue" disabled={placing || state?.tokenBets.some((b) => b.boutId === bout.id)} onClick={() => void placeToken('blue')}>
+                      {bout.blue.name} · {offered(bout.odds.blue).toFixed(2)}×
+                    </button>
+                  </div>
+                  {state?.tokenBets.filter((b) => b.boutId === bout.id).map((b) => (
+                    <em key={b.boutId} className="arena-bet">{t('{amount} {ticker} on {side} at {odds}×', { amount: b.bet.stake.toLocaleString(), ticker: TOKEN.ticker, side: t(b.bet.side), odds: b.bet.odds.toFixed(2) })}</em>
+                  ))}
+                </>
               )}
 
               {(phase === 'fighting' || phase === 'settled') && (
@@ -394,6 +472,8 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
           {notice && <p className="arena-notice">{notice}</p>}
           <p className="muted small arena-rules">
             {t('Bets are with your own treasury at the odds shown, capped at {max} Gold a bout and {day} a day. They are not pooled against other players: Gold lives in your browser and the arena has no way to prove what anybody holds, so a pot would be a pot a dishonest client could take from honest ones. The fight is shared; the money stays at home.', { max: MAX_STAKE, day: MAX_STAKE_PER_DAY.toLocaleString() })}
+            {' '}
+            {t('{ticker} bets are real: the stake goes into the vault, a win is paid by the vault at the odds shown, and a loss stays there. Capped at {max} a bout and {day} a day. The house edge of {edge}% is booked like every charge: three quarters burned, a quarter kept.', { ticker: TOKEN.ticker, max: MAX_TOKEN_STAKE.toLocaleString(), day: MAX_TOKEN_STAKE_PER_DAY.toLocaleString(), edge: Math.round(HOUSE_EDGE * 100) })}
           </p>
         </div>
       </section>

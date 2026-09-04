@@ -22,7 +22,7 @@
 import type { Resource } from '../simulation';
 
 /** What a pull costs, and burns. */
-export const DIG_COST_EMERGE = 40_000;
+export const DIG_COST_EMERGE = 80_000;
 
 export type PrizeKind = 'gold' | 'resource' | 'naming' | 'settlers';
 

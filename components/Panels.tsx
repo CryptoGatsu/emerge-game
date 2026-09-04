@@ -23,7 +23,10 @@ import {
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
   CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, type BoonKind,
+  advanceCost, charterCost, HIRE_FEE_EMERGE,
 } from '@/lib/chain/vault';
+import { EMBLEMS, EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
+import { spend as spendEmerge } from '@/lib/chain/spend';
 import { Sparkline } from './Sparkline';
 import {
   MESSAGE_LIMIT, POLL_INTERVAL, channelOf, loadChat, poll, send, worldChannel,
@@ -64,7 +67,7 @@ interface PanelsProps {
   /** Buy a charter, insurance or builders for the plot; the refusal, or null. */
   onCover: (kind: CoverKind) => Promise<string | null>;
   /** Buy a boon for the plot; the refusal, or null. */
-  onBoon: (kind: BoonKind) => Promise<string | null>;
+  onBoon: (kind: BoonKind, emblem?: string) => Promise<string | null>;
   onRenameWorld: (name: string) => void;
   /** Open the plot's outer belt, once, for $EMERGE. Resolves to a refusal, or null. */
   onExpand: () => Promise<string | null>;
@@ -1962,11 +1965,11 @@ function sinceWhen(at: number): string {
   return t('{n} days ago', { n: Math.round(hours / 24) });
 }
 
-function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand, onAdvance, onCover, onBoon, onLeave, onRelease, onList }: {
-  view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onClose: () => void;
+function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld, onExpand, onAdvance, onCover, onBoon, onLeave, onRelease, onList }: {
+  view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onPlayer: (p: PlayerRecord) => void; onClose: () => void;
   onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onAdvance: () => Promise<string | null>;
   onCover: (kind: CoverKind) => Promise<string | null>;
-  onBoon: (kind: BoonKind) => Promise<string | null>;
+  onBoon: (kind: BoonKind, emblem?: string) => Promise<string | null>;
   onLeave: () => void; onRelease: () => void;
   onList: (price: number | null) => void;
 }) {
@@ -2000,16 +2003,18 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
     setCoverNote(refused);
   };
   const daysLeft = (until: number) => Math.max(0, Math.ceil((until - Date.now()) / 86_400_000));
+  const charterPrice = Math.max(CHARTER_COST_EMERGE, charterCost(view.city.level, view.era.id));
+  const [emblem, setEmblem] = useState<string>(EMBLEMS[0]);
   const [buying, setBuying] = useState<BoonKind | null>(null);
   const [boonNote, setBoonNote] = useState<string | null>(null);
-  const buy = async (kind: BoonKind) => {
+  const buy = async (kind: BoonKind, chosen?: string) => {
     setBuying(kind);
     setBoonNote(null);
-    const refused = await onBoon(kind);
+    const refused = await onBoon(kind, chosen);
     setBuying(null);
     setBoonNote(refused);
   };
-  const BOONS: { kind: BoonKind; title: string; blurb: string }[] = [
+  const BOONS: { kind: Exclude<BoonKind, 'monument' | 'banner'>; title: string; blurb: string }[] = [
     { kind: 'settlers', title: t('A party of settlers'), blurb: t('Five people arrive today and take houses. There has to be room for them first.') },
     { kind: 'shipment', title: t('A shipment'), blurb: t('400 timber, 300 stone and 240 portions of food, straight into the yard.') },
     { kind: 'restore', title: t('A restoration'), blurb: t('Every ruin rebuilt and the bridge under way finished, within the hour.') },
@@ -2054,7 +2059,15 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
   const hire = async (on: boolean) => {
     if (!wallet.address) return;
     setHiringBusy(true);
-    const result = await setHiring(claimed.seed, wallet.address, on);
+    // Opening the job costs a hiring fee, paid like any charge.
+    let feeTx: string | undefined;
+    if (on) {
+      const paid = await spendEmerge(player.ledger, HIRE_FEE_EMERGE, wallet.address);
+      if (!paid.ok) { setHiringBusy(false); setHiringNote(paid.refused); return; }
+      onPlayer({ ...player, ledger: paid.ledger });
+      feeTx = paid.txHash ?? undefined;
+    }
+    const result = await setHiring(claimed.seed, wallet.address, on, feeTx);
     setHiringBusy(false);
     if (!result.ok || !result.claim) { setHiringNote(result.reason ?? null); return; }
     setRow(result.claim);
@@ -2140,19 +2153,19 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
               {!gate.open ? (
                 <p className="muted small">{t('The {era} era is not built yet. It is coming; the checklist is what it will ask.', { era: tn(gate.next.name) })}</p>
               ) : (
-                <button onClick={advance} disabled={advancing || !gate.ready || !wallet.address || player.ledger.balance < ADVANCE_COST_EMERGE}>
+                <button onClick={advance} disabled={advancing || !gate.ready || !wallet.address || player.ledger.balance < advanceCost(gate.next.id)}>
                   {advancing
                     ? t('Advancing…')
                     : !gate.ready
                       ? t('Not earned yet')
                       : !wallet.address
                         ? t('Connect a wallet to advance')
-                        : player.ledger.balance < ADVANCE_COST_EMERGE
+                        : player.ledger.balance < advanceCost(gate.next.id)
                           ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
-                          : t('Advance to {era} · {cost} {ticker}', { era: tn(gate.next.name), cost: ADVANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+                          : t('Advance to {era} · {cost} {ticker}', { era: tn(gate.next.name), cost: advanceCost(gate.next.id).toLocaleString(), ticker: TOKEN.ticker })}
                 </button>
               )}
-              <p className="muted small">{t('{cost} {ticker}, burned, once per step. The registry judges the checklist on the copy of your world it holds, so the world is published first.', { cost: ADVANCE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}</p>
+              <p className="muted small">{t('{cost} {ticker} for this step: a million per step already taken. The registry judges the checklist on the copy of your world it holds, so the world is published first.', { cost: advanceCost(gate.next.id).toLocaleString(), ticker: TOKEN.ticker })}</p>
             </>
           ) : (
             <p className="muted small">{t('This is as far as the eras go.')}</p>
@@ -2191,16 +2204,16 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
           <span className="eyebrow">{t('CHARTER')}</span>
           <h3>{view.cover.charterUntil > Date.now() ? t('Chartered · {n} days left', { n: daysLeft(view.cover.charterUntil) }) : t('A fifth more on the ceiling')}</h3>
           <p className="muted small">
-            {t('A charter raises what this plot can earn by {pct}% for {days} days. {cost} {ticker}, burned. Buying another while one runs adds the days on.', { pct: Math.round(CHARTER_BONUS * 100), days: CHARTER_DAYS, cost: CHARTER_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+            {t('A charter raises what this plot can earn by {pct}% for {days} days, for four days of the plot’s own ceiling: {cost} {ticker} at this plot’s level. Buying another while one runs adds the days on.', { pct: Math.round(CHARTER_BONUS * 100), days: CHARTER_DAYS, cost: charterPrice.toLocaleString(), ticker: TOKEN.ticker })}
           </p>
-          <button onClick={() => cover('charter')} disabled={covering !== null || !wallet.address || player.ledger.balance < CHARTER_COST_EMERGE}>
+          <button onClick={() => cover('charter')} disabled={covering !== null || !wallet.address || player.ledger.balance < charterPrice}>
             {covering === 'charter'
               ? t('Buying…')
               : !wallet.address
                 ? t('Connect a wallet first')
-                : player.ledger.balance < CHARTER_COST_EMERGE
+                : player.ledger.balance < charterPrice
                   ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
-                  : t('Charter for {cost} {ticker}', { cost: CHARTER_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+                  : t('Charter for {cost} {ticker}', { cost: charterPrice.toLocaleString(), ticker: TOKEN.ticker })}
           </button>
         </div>
 
@@ -2263,6 +2276,32 @@ function ConnectPanel({ view, claimed, player, onClose, onRenameWorld, onExpand,
             ))}
           </div>
           {boonNote && <p className="muted small">{tx(boonNote)}</p>}
+        </div>
+
+        <div className="connect-card prestige-card">
+          <span className="eyebrow">{t('PRESTIGE')}</span>
+          <h3>{t('A monument, and a banner')}</h3>
+          <p className="muted small">{t('Nothing in the economy changes; that is the point. A monument stands in the square for as long as the city does and lifts everyone a little each day. A banner flies over your name and on every world map.')}</p>
+          <div className="boon-rows">
+            <div className="boon-row">
+              <b>{t('A monument')}</b>
+              <span className="muted small">{view.roster.buildings.some((b) => b.type === 'Monument') ? t('It stands in the square.') : t('An obelisk in the square, unique to the plot.')}</span>
+              <button onClick={() => buy('monument')} disabled={buying !== null || !wallet.address || player.ledger.balance < BOON_COST_EMERGE.monument || view.roster.buildings.some((b) => b.type === 'Monument')}>
+                {view.roster.buildings.some((b) => b.type === 'Monument') ? t('Built') : buying === 'monument' ? t('Buying…') : t('{cost} {ticker}', { cost: BOON_COST_EMERGE.monument.toLocaleString(), ticker: TOKEN.ticker })}
+              </button>
+            </div>
+            <div className="boon-row">
+              <b>{t('A banner')}{view.banner && isEmblem(view.banner) && <> · {EMBLEM_GLYPH[view.banner]} {t(EMBLEM_NAME[view.banner])}</>}</b>
+              <span className="muted small">
+                <select value={emblem} onChange={(e) => setEmblem(e.target.value)}>
+                  {EMBLEMS.map((e) => <option key={e} value={e}>{EMBLEM_GLYPH[e]} {t(EMBLEM_NAME[e])}</option>)}
+                </select>
+              </span>
+              <button onClick={() => buy('banner', emblem)} disabled={buying !== null || !wallet.address || player.ledger.balance < BOON_COST_EMERGE.banner || view.banner === emblem}>
+                {view.banner === emblem ? t('Flying') : buying === 'banner' ? t('Buying…') : t('{cost} {ticker}', { cost: BOON_COST_EMERGE.banner.toLocaleString(), ticker: TOKEN.ticker })}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="connect-card">
@@ -2425,7 +2464,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
   if (panel === 'connect') {
     return (
       <ConnectPanel
-        view={view} claimed={claimed} player={player} onClose={onClose}
+        view={view} claimed={claimed} player={player} onPlayer={onPlayer} onClose={onClose}
         onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onCover={onCover} onBoon={onBoon} onLeave={onLeave} onRelease={onRelease} onList={onList}
       />
     );

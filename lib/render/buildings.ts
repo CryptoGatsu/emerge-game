@@ -629,6 +629,22 @@ function umbrellaTable(p: Pixels, x: number, y: number, color: string) {
 }
 
 const RECIPES: Record<string, Recipe> = {
+  // A monument: a stone plinth with an obelisk, bought as prestige. Drawn
+  // narrow so it reads as a column in the square rather than a building.
+  Monument: {
+    bw: 44, wallH: 12, roofH: 6, roof: 'hip', wall: 'stone', roofColor: 'slate', overhang: 2,
+    windows: [], door: ['right', 0.5],
+    extras: (p, lit, g) => {
+      const x = g.cx, top = g.wallTopY - 58;
+      rect(p, x - 7, top + 10, 14, 48, BUILD.stoneWallDark);
+      rect(p, x - 6, top + 10, 6, 48, BUILD.stoneWall);
+      rect(p, x - 5, top + 2, 10, 8, BUILD.stoneWallDark);
+      rect(p, x - 4, top + 2, 4, 8, BUILD.stoneWall);
+      rect(p, x - 3, top - 4, 6, 6, BUILD.gold);
+      rect(p, x - 1, top - 8, 2, 4, BUILD.gold);
+      rect(lit, x - 3, top - 4, 6, 6, BUILD.glassLit);
+    },
+  },
   // Eight homes with genuinely different outlines: a settlement of twenty
   // houses built from three designs reads as a housing estate.
   'House.0': {

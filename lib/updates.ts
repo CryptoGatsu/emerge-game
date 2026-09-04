@@ -17,6 +17,18 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.3',
+    date: '2026-09-08',
+    title: 'The flywheel, judged: every improvement counts, every charge feeds the vault, and the vault pays what it can see',
+    notes: [
+      'Every improvement does something, and the building’s card says what. Workplaces make 22% more per level as before; a house adds two beds; a school, library, lab, clinic, hospital, cafe, tavern, chapel and the rest do their job a quarter more strongly per level; a market sells exports for 5% more per level; a bank makes every building’s upkeep 5% cheaper per level; a town hall lifts stewardship quality 2% per level; an improved store counts half again toward readiness; stables, stations, depots and pod hubs move people 10% faster per level; an improved jail halves the odds again and stops a rogue sooner.',
+      'Stewardship is now judged on the server. The level a plot is paid on is the smaller of what its published world shows and one level per three days its owner has actually been present, which the heartbeat records and the client cannot write. Its score is computed from the published world with the same function the settlement runs, and its attention from the owner’s last heartbeat. The payout route pays the lesser of what the client claims and that. Hands are paid a tenth of the plot’s judged ceiling.',
+      'Prices, for a game where a plot can earn 250,000 a day: plots cost about three times what they did; a fresh plot’s ceiling starts at 40,000; a charter is four days of the plot’s own ceiling (160,000 for a new plot, 1,000,000 for a top city), the same bargain at every level; eras cost a million per step already taken, 1M, 2M, 3M, 4M; expansion is 1,000,000; renames, surveys and digs are doubled; a withdrawal holds back 10%, half burned and half kept; a hand needs 50,000 to be hired and the owner pays 10,000 to open the job; a resale carries a 5% registry fee into the vault.',
+      'Bets in $EMERGE at the colosseum, beside the Gold ones. The stake goes into the vault, a win is paid by the vault at the odds shown, a loss stays. 50,000 a bout, 250,000 a day. The house edge is booked like every charge.',
+      'Prestige. A monument in the square, 250,000, unique to the plot, lifts everyone a little each day and stands as long as the city does. A banner, 100,000, an emblem of your choosing over your name and on every world map.',
+    ],
+  },
+  {
     version: '2.2',
     date: '2026-09-07',
     title: 'The flywheel, one of each, and no more twenty-seven-building rogues',
@@ -132,6 +144,18 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.3',
+    date: '2026-09-08',
+    title: '飞轮经过裁定：每次升级都有意义，每笔收费都进金库，金库只付它看得见的',
+    notes: [
+      '每次升级都有效果，建筑卡片会写明。工作场所仍是每级多 22% 产出；房子多两张床；学校、图书馆、实验室、诊所、医院、咖啡馆、酒馆、教堂等每级效果增强四分之一；市场每级出口多卖 5%；银行每级让所有建筑维护费便宜 5%；市政厅每级提高经营质量 2%；升级后的仓库在防备中算一个半；马厩、车站、公交站和出行舱站每级让人快 10%；升级后的监狱几率再减半并更早制止暴徒。',
+      '经营收益现在由服务器裁定。地块按较小者计等级：发布的世界显示的等级，或主人实际在场每三天一级——在场由心跳记录，客户端无法伪造。评分用聚落同一个函数从发布的世界算出，关注度取自主人最近一次心跳。支付接口按客户端申报与服务器裁定中较小者支付。雇工按地块裁定上限的十分之一支付。',
+      '为一块地每天可赚 250,000 的游戏重新定价：地块价格约为原来的三倍；新地块上限从 40,000 起；特许状为地块自身上限的四天（新地块 160,000，顶级城市 1,000,000），各等级同样划算；时代每已走一步一百万，即 1M、2M、3M、4M；扩建 1,000,000；改名、勘测和勘探翻倍；提现扣留 10%，一半销毁一半留存；雇工须持有 50,000，雇主开放职位付 10,000；转售收取 5% 登记费进入金库。',
+      '竞技场可用 $EMERGE 下注，与金币并列。赌注进入金库，赢家由金库按显示赔率支付，输了留在金库。每场 50,000，每天 250,000。庄家优势按收费方式记账。',
+      '声望。广场上的纪念碑，250,000，每块地一座，每天让所有人略微开心，城在碑在。旗帜，100,000，自选徽记，飘在你的名字上和每张世界地图上。',
+    ],
+  },
   {
     version: '2.2',
     date: '2026-09-07',

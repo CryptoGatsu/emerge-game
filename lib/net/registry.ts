@@ -34,6 +34,7 @@ export interface Claim {
   charterUntil?: number;
   insuredUntil?: number;
   buildersUntil?: number;
+  banner?: string;
 }
 
 export interface Offer {
@@ -313,14 +314,14 @@ export async function expandPlot(seed: number, owner: string, burnTx?: string): 
 
 /** Buy a charter or insurance on the plot: burned $EMERGE for a span of days on the row. */
 /** Buy a boon for the plot: the registry verifies the payment; the world applies it. */
-export async function boonPlot(seed: number, owner: string, kind: string, burnTx?: string): Promise<{ ok: true } | { ok: false; reason: string; settling?: boolean }> {
+export async function boonPlot(seed: number, owner: string, kind: string, burnTx?: string, emblem?: string): Promise<{ ok: true } | { ok: false; reason: string; settling?: boolean }> {
   try {
     const response = await withSession(
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ seed, owner, boon: kind, burnTx }),
+        body: JSON.stringify({ seed, owner, boon: kind, burnTx, emblem }),
       }),
       async (r) => r,
     );
@@ -382,8 +383,8 @@ export async function advancePlot(seed: number, owner: string, era: number, burn
 }
 
 /** As the owner: open the job at this plot, or close it and let the hand go. */
-export const setHiring = (seed: number, owner: string, hiring: boolean) =>
-  offerCall(owner, { seed, hire: hiring });
+export const setHiring = (seed: number, owner: string, hiring: boolean, burnTx?: string) =>
+  offerCall(owner, { seed, hire: hiring, burnTx });
 
 /** Take the job at somebody's plot. */
 export const takeJob = (seed: number, worker: string, name: string) =>
@@ -417,7 +418,7 @@ export type BuyResult =
  * the registry checks it before moving the title.
  */
 export async function buyPlot(input: {
-  seed: number; owner: string; ownerName: string; transferTx?: string;
+  seed: number; owner: string; ownerName: string; transferTx?: string; feeTx?: string;
 }): Promise<BuyResult> {
   try {
     const response = await withSession(

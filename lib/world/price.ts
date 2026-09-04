@@ -34,7 +34,7 @@ export const BIOME_PREMIUM: Record<PricedBiome, number> = {
 };
 
 export const BASE_PRICE = 180;
-export const PRICE_SCALE = 800;
+export const PRICE_SCALE = 2400;
 
 /**
  * Which biome a seed grows.

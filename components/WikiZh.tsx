@@ -1,6 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
@@ -47,13 +47,18 @@ const CHARGES = [
   { what: '给自己改名', cost: n(RENAME_PLAYER_EMERGE), note: '第一次免费' },
   { what: '派出勘探队', cost: n(DIG_COST_EMERGE), note: '' },
   { what: '扩建地块', cost: n(EXPAND_COST_EMERGE), note: '每块地一次；约多一半土地' },
-  { what: '推进时代', cost: n(ADVANCE_COST_EMERGE), note: '每一步一次，地块达成条件之后' },
-  { what: '购买特许状', cost: n(CHARTER_COST_EMERGE), note: `地块收益上限提高五分之一，为期 ${CHARTER_DAYS} 天` },
+  { what: '推进时代', cost: `${n(advanceCost(2))} – ${n(advanceCost(5))}`, note: '每已走一步一百万，地块达成条件之后' },
+  { what: '购买特许状', cost: `${n(charterCost(1, 1))} – ${n(charterCost(10, 5))}`, note: `地块自身上限的四天，换 ${CHARTER_DAYS} 天多五分之一` },
   { what: '投保', cost: n(INSURANCE_COST_EMERGE), note: `任何灾难的损失减半，为期 ${INSURANCE_DAYS} 天` },
   { what: '雇用建筑大师', cost: n(BUILDERS_COST_EMERGE), note: `建造和升级少花四分之一，为期 ${BUILDERS_DAYS} 天` },
   { what: '一队移民', cost: n(BOON_COST_EMERGE.settlers), note: '五人今天到达；房子要有空位' },
   { what: '一批货物', cost: n(BOON_COST_EMERGE.shipment), note: '400 木材、300 石料、240 份食物' },
   { what: '一次修复', cost: n(BOON_COST_EMERGE.restore), note: '重建全部废墟，完成在建的桥' },
+  { what: '纪念碑', cost: n(BOON_COST_EMERGE.monument), note: '声望：每块地一座，每天让所有人略微开心' },
+  { what: '旗帜', cost: n(BOON_COST_EMERGE.banner), note: '声望：你的徽记飘在名字上和每张世界地图上' },
+  { what: '开放雇工职位', cost: n(HIRE_FEE_EMERGE), note: '雇工须持有 50,000 才能接任' },
+  { what: '从玩家手里买地', cost: `要价 + ${Math.round(RESALE_FEE_RATE * 100)}%`, note: '价款给卖家；手续费进金库' },
+  { what: '竞技场代币下注', cost: '你的赌注', note: '进入金库；赢了由金库按显示赔率支付' },
 ];
 
 const yieldFor = (score: number, attention: number, ceiling = plotCeiling(1, 1)) => Math.round(ceiling * score * attention);
@@ -263,7 +268,9 @@ export function WikiZh() {
             </tbody>
           </table>
           <p className="wiki-note">支付接口从登记处保存的世界副本读取等级，和读取时代一样，所以改存档得不到更高的上限。v2.0 到来时已经有四级规模的城市就是四级城市，已经长到的等级不用付钱。时代门槛也要求等级：城镇三级、工业五级、现代七级、人工智能九级。</p>
-          <p><b>特许状</b>让上限提高 {Math.round(CHARTER_BONUS * 100)}%，为期 {CHARTER_DAYS} 天，销毁 {n(CHARTER_COST_EMERGE)} {T}，在"链上"面板购买。有效期内再买会累加天数。它记录在地块记录上，跟着地块走到任何设备，支付接口也会计入。</p>
+          <p><b>特许状</b>让上限提高 {Math.round(CHARTER_BONUS * 100)}%，为期 {CHARTER_DAYS} 天，价格是地块自身上限的四天：新地块 {n(charterCost(1, 1))} {T}，顶级城市 {n(charterCost(10, 5))}，各等级同样划算。有效期内再买会累加天数。它记录在地块记录上，跟着地块走到任何设备，支付接口也会计入。</p>
+          <h3>裁定，而非申报</h3>
+          <p>金库付多少由服务器根据三样浏览器无法伪造的东西决定。地块按<b>等级</b>支付，取发布世界显示的等级与"主人实际在场每三天一级"中的较小者，在场由心跳记录。<b>评分</b>用聚落同一个函数从发布的世界算出。<b>关注度</b>取主人在该地块的最近一次心跳。支付接口按客户端申报与"上限 × 评分 × 关注度"中的较小者支付，所以脚本客户端只能赚到一块在场且经营良好的地块能赚的，一天大的地块上传十级存档也只按一级支付。</p>
         </section>
 
         <section id="earning">
@@ -447,6 +454,8 @@ export function WikiZh() {
               ))}
             </tbody>
           </table>
+          <h3>升级有什么用</h3>
+          <p>每次升级都有效果，付钱前建筑卡片会写明。工作场所每级多 {Math.round(OUTPUT_PER_LEVEL * 100)}% 产出。房子多两张床。学校、图书馆、实验室、诊所、医院、咖啡馆、酒馆、教堂等每级效果增强四分之一。市场每级出口多卖 5%；银行每级让所有建筑维护费便宜 5%；市政厅每级提高经营质量 2%；升级后的仓库在防备中算一个半；马厩、车站、公交站和出行舱站每级让人快 10%；升级后的监狱几率再减半并更早制止暴徒。</p>
           <h3>每样一座</h3>
           <p>市政厅、监狱、酒馆、学校、港口：所有"有一座就起作用"的建筑都是<b>每块地唯一的</b>。建造面板把已有的标为"已建"，光标拒绝第二座，聚落自建也不会再盖；它的废墟会被重建而不是被替换。房屋、仓库和所有有岗位的工作场所仍然多多益善。升级已有的那座：升级后的监狱更能镇住镇子，升级后的房子住得下更多人。</p>
           <h3>手动架桥</h3>

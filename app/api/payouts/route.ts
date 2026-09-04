@@ -46,7 +46,8 @@ import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { handCheck, landCheck, ceilingHeldBy } from '@/lib/server/land';
+import { handCheck, landCheck, judgedFor, handCeilingFor } from '@/lib/server/land';
+import { noteHold } from '@/lib/server/treasury';
 import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
@@ -185,13 +186,21 @@ export async function POST(request: Request) {
     const land = await landCheck(address);
     // No land, but a job: a hired hand is paid up to a hand's ceiling.
     const hand = land === 'none' ? await handCheck(address) : 'none';
-    if (hand === 'hand') ceiling = HAND_DAILY_CEILING;
+    if (hand === 'hand') ceiling = Math.min(HAND_DAILY_CEILING, await handCeilingFor(address));
     else if (hand === 'unreachable') {
       return NextResponse.json({ error: 'We could not read this wallet\u2019s balance to confirm your job. Nothing was taken — try again in a minute.', land }, { status: 403 });
     } else if (land === 'holds') {
-      // Rewards grow with the era: the ceiling is the base lifted by the
-      // highest era this wallet's plots have reached, read from the rows.
-      ceiling = await ceilingHeldBy(address);
+      // Judged here, not reported: the ceiling from the judged level, era and
+      // charter of each plot, times the stewardship score of the published
+      // world, times the attention the heartbeats show. The client's figure
+      // is paid only up to this.
+      const judged = await judgedFor(address);
+      ceiling = judged.yield;
+      if (ceiling < 1) {
+        return NextResponse.json({
+          error: 'Nothing is judged earned yet: publish your world by opening it, and keep it well run and attended. Nothing was taken.', land, judged,
+        }, { status: 403 });
+      }
     } else {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.
@@ -252,6 +261,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: sent.problem }, { status: 502 });
   }
 
+  // The held share stayed in the vault; half of it is owed to the burn address.
+  if (money.burned > 0) await noteHold(money.burned).catch(() => {});
   const payout = await recordPayout({
     address,
     name: clean(String(body.name ?? ''), MAX_NAME),

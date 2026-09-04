@@ -35,6 +35,18 @@ export async function noteCharge(whole: number): Promise<void> {
   void sweepBurn().catch(() => {});
 }
 
+/**
+ * Book the share held back from a withdrawal: it stayed in the vault, and
+ * half of it is owed to the burn address like a charge's share is.
+ */
+export async function noteHold(whole: number): Promise<void> {
+  const held = Math.floor(whole);
+  if (held <= 0) return;
+  await incrBy(RECEIVED, held);
+  await incrBy(OWED, Math.floor(held / 2));
+  void sweepBurn().catch(() => {});
+}
+
 export interface VaultBook {
   /** Whole $EMERGE charges have paid into the vault, ever. */
   received: number;

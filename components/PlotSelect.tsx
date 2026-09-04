@@ -1,4 +1,6 @@
 'use client';
+import { EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
+import { resaleFee } from '@/lib/chain/vault';
 
 /**
  * The world map.
@@ -197,7 +199,9 @@ const MAX_MARKER_NUDGE = 0.09;
 /** Below this map width, in pixels, there is no room to lay names out at all. */
 const LABELS_NEED_WIDTH = 560;
 
-function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, taken, banners, claimedEverywhere, onSelect }: {
+  /** Which emblem each plot flies, by seed, mine and theirs alike. */
+  banners: Map<number, string>;
   plots: Plot[];
   selected: Plot | null;
   chart: number;
@@ -483,6 +487,7 @@ function RegionMap({ plots, selected, chart, owned, taken, claimedEverywhere, on
             <span className="pin-dot" aria-hidden />
             <span className="pin-label">
               <b>
+                {(() => { const flown = banners.get(plot.seed); return flown && isEmblem(flown) ? <i className="banner-glyph" title={EMBLEM_NAME[flown]}>{EMBLEM_GLYPH[flown]}</i> : null; })()}
                 {plot.region}
                 {mine && <i className="yours">{t('yours')}</i>}
                 {theirs && !theirs.forSale && !(theirs.hiring && !theirs.hand) && <i className="settled-tag">{t('settled')}</i>}
@@ -906,7 +911,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       return;
     }
     const askPrice = priceFor(listing, wallet.address) ?? 0;
-    if (player.ledger.balance < askPrice) {
+    if (player.ledger.balance < askPrice + resaleFee(askPrice)) {
       setNotice(t('{region} costs {price} {ticker}.', { region: listing.region, price: askPrice.toLocaleString(), ticker: TOKEN.ticker }));
       return;
     }
@@ -914,8 +919,12 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     setNotice(configured
       ? t('Paying {who} directly. Sign the transfer to their wallet.', { who: listing.ownerName || shortAddress(listing.owner) })
       : t('Paying {who}…', { who: listing.ownerName || shortAddress(listing.owner) }));
-    const paid = await pay(player.ledger, askPrice, wallet.address, listing.owner);
-    if (!paid.ok) { setBuying(false); setNotice(paid.refused); return; }
+    // The registry's fee first, into the vault; then the seller.
+    const fee = resaleFee(askPrice);
+    const feePaid = await spend(player.ledger, fee, wallet.address);
+    if (!feePaid.ok) { setBuying(false); setNotice(feePaid.refused); return; }
+    const paid = await pay(feePaid.ledger, askPrice, wallet.address, listing.owner);
+    if (!paid.ok) { setBuying(false); onPlayer({ ...player, ledger: feePaid.ledger }); setNotice(paid.refused); return; }
     onPlayer({ ...player, ledger: paid.ledger });
     setNotice(t('Payment sent. Waiting for the chain to settle it…'));
     const moved = await whileSettling(() => buyPlot({
@@ -923,6 +932,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       owner: wallet.address!,
       ownerName: player.name,
       transferTx: paid.txHash ?? undefined,
+      feeTx: feePaid.txHash ?? undefined,
     }));
     setBuying(false);
     if (!moved.ok) {
@@ -1086,7 +1096,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
         <div className="land-body">
           <RegionMap
             plots={plots} selected={selected} chart={chart} owned={ownedSeeds}
-            taken={takenByOthers} claimedEverywhere={allClaims.length} onSelect={choose}
+            taken={takenByOthers} banners={new Map(allClaims.filter((c) => c.banner).map((c) => [c.seed, c.banner as string]))} claimedEverywhere={allClaims.length} onSelect={choose}
           />
 
           {!selected ? (

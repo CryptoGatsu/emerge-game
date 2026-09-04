@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -49,7 +49,7 @@ import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
-  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
+  liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost } from '@/lib/chain/vault';
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
@@ -882,6 +882,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       if (world && row?.charterUntil && (world.charterUntil ?? 0) < row.charterUntil) { setCover(world, 'charter', row.charterUntil); saveWorld(world); }
       if (world && row?.insuredUntil && (world.insuredUntil ?? 0) < row.insuredUntil) { setCover(world, 'insurance', row.insuredUntil); saveWorld(world); }
       if (world && row?.buildersUntil && (world.buildersUntil ?? 0) < row.buildersUntil) { setCover(world, 'builders', row.buildersUntil); saveWorld(world); }
+      if (world && row?.banner && world.banner !== row.banner) { setBanner(world, row.banner); saveWorld(world); }
       if (hand && world && Date.now() - hand.lastSeen < HAND_PRESENT_MS) {
         world.stewardship.lastActionAt = Math.max(world.stewardship.lastActionAt, hand.lastSeen);
       }
@@ -1583,7 +1584,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const world = worldRef.current;
     if (!world || spectating) return null;
     if (!wallet.address) return t('Connect a wallet first.');
-    const cost = kind === 'charter' ? CHARTER_COST_EMERGE : kind === 'insurance' ? INSURANCE_COST_EMERGE : BUILDERS_COST_EMERGE;
+    const cost = kind === 'charter' ? Math.max(CHARTER_COST_EMERGE, charterCost(cityLevel(world), eraOf(world))) : kind === 'insurance' ? INSURANCE_COST_EMERGE : BUILDERS_COST_EMERGE;
     const paid = await spend(player.ledger, cost, wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
@@ -1608,29 +1609,30 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * with nowhere to sleep, then paid, then verified by the registry, and only
    * then delivered.
    */
-  const boonFor = useCallback(async (kind: BoonKind): Promise<string | null> => {
+  const boonFor = useCallback(async (kind: BoonKind, emblem?: string): Promise<string | null> => {
     const world = worldRef.current;
     if (!world || spectating) return null;
     const check = boonCheck(world, kind);
     if (!check.ok) return check.message;
+    if (kind === 'banner' && !emblem) return t('Choose an emblem.');
     if (!wallet.address) return t('Connect a wallet first.');
     const paid = await spend(player.ledger, BOON_COST_EMERGE[kind], wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
-    let result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
+    let result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined, emblem);
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
-      result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
+      result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined, emblem);
     }
     if (!result.ok) {
       return paid.txHash
         ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
         : result.reason;
     }
-    const done = applyBoon(world, kind);
+    const done = applyBoon(world, kind, emblem);
     if (!done.ok) return done.message;
     saveWorld(world);
-    // A finished bridge changes the ground; ruins and settlers only the sprites.
+    // A finished bridge changes the ground; ruins, settlers and a monument only the sprites.
     if (kind === 'restore') sceneRef.current?.reset(world);
     else sceneRef.current?.syncBuildings();
     soundRef.current?.cue(kind === 'settlers' ? 'bell' : 'hammer');
@@ -1659,10 +1661,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
     });
     if (!put.ok && !put.behind) return t('The world could not be published, and the registry judges the step on the published copy. Try again in a moment.');
-    const paid = await spend(player.ledger, ADVANCE_COST_EMERGE, wallet.address);
+    const target = gate.next.id;
+    const paid = await spend(player.ledger, advanceCost(target), wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
-    const target = gate.next.id;
     let result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
@@ -1891,6 +1893,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
               playerName={player.name}
               address={wallet.address}
               treasury={view.treasury}
+              ledger={player.ledger}
+              onLedger={(ledger) => onPlayer({ ...player, ledger })}
               onStake={stakeAtArena}
               onCue={(kind) => soundRef.current?.cue(kind)}
               onClose={() => setPanel(null)}

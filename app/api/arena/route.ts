@@ -17,6 +17,10 @@ import {
 } from '@/lib/server/arena';
 import { claimOf } from '@/lib/server/registry';
 import { sessionAddress } from '@/lib/server/session';
+import { betOf, placeTokenBet, settleTokenBets } from '@/lib/server/book';
+import { spendBurn, verifyTransfer } from '@/lib/server/burns';
+import { VAULT_ADDRESS, tokenLive, vaultLive } from '@/lib/chain/emerge';
+import { vaultCanSign } from '@/lib/server/signer';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +36,7 @@ const clean = (value: string, limit: number) =>
     .trim()
     .slice(0, limit);
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     /*
      * Settle before reading the board, not alongside it.
@@ -45,7 +49,14 @@ export async function GET() {
      */
     const [bout, previous] = await Promise.all([currentBout(), lastBout()]);
     const [entrants, results] = await Promise.all([roster(), recentResults()]);
+    // Token bets on anything revealed are settled here, once each, by
+    // whichever poll gets there first.
+    for (const b of [bout, previous]) if (b?.winner) await settleTokenBets(b).catch(() => {});
+    const me = sessionAddress(request);
+    const mine = me ? await Promise.all([bout, previous].map((b) => (b ? betOf(b.id, me).then((r) => (r ? { boutId: b.id, ...r } : null)) : Promise.resolve(null)))) : [];
     return NextResponse.json({
+      tokenBets: mine.filter(Boolean),
+      vaultPays: vaultCanSign(),
       now: Date.now(),
       boutMs: BOUT_MS,
       bettingMs: BETTING_MS,
@@ -65,6 +76,8 @@ export async function POST(request: Request) {
   let body: {
     seed?: number; citizenId?: string; name?: string; worldName?: string;
     job?: string; level?: number; vigour?: number; ownerName?: string;
+    /** A token bet: the stake already sent to the vault. */
+    bet?: { boutId?: number; side?: string; stake?: number; txHash?: string };
   };
   try {
     body = (await request.json()) as typeof body;
@@ -77,6 +90,36 @@ export async function POST(request: Request) {
     return NextResponse.json({
       error: 'Sign in with your wallet to enter a fighter.', needsSession: true,
     }, { status: 401 });
+  }
+
+  /*
+   * A token bet. The stake has to be in the vault before the book holds it:
+   * verified on chain where the token is live, from this wallet, and used
+   * once. Then it rides the bout like a Gold bet, at the odds the bout was
+   * made with.
+   */
+  if (body.bet) {
+    const side = body.bet.side === 'red' ? 'red' : body.bet.side === 'blue' ? 'blue' : null;
+    const stake = Math.floor(Number(body.bet.stake) || 0);
+    if (!side || !(stake > 0)) return NextResponse.json({ error: 'That is not a bet.' }, { status: 400 });
+    try {
+      const running = await currentBout();
+      if (!running || running.id !== Number(body.bet.boutId)) return NextResponse.json({ error: 'That bout is not open.' }, { status: 409 });
+      if (Date.now() >= running.closesAt) return NextResponse.json({ error: 'Betting has closed on this bout.' }, { status: 409 });
+      let txHash: string | null = null;
+      if (tokenLive()) {
+        if (!vaultLive()) return NextResponse.json({ error: 'No vault is configured to hold stakes.' }, { status: 503 });
+        txHash = String(body.bet.txHash ?? '');
+        const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, stake);
+        if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+        if (!(await spendBurn(txHash, `bet:${running.id}:${txHash}`))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+      const placed = await placeTokenBet(running, address, side, stake, txHash);
+      if (!placed.ok) return NextResponse.json({ error: placed.reason }, { status: 409 });
+      return NextResponse.json({ ok: true, bet: placed.bet, boutId: running.id });
+    } catch {
+      return NextResponse.json({ error: 'The arena is not reachable.' }, { status: 502 });
+    }
   }
 
   const seed = Number(body.seed);

@@ -448,6 +448,8 @@ export interface World {
   charterUntil?: number;
   insuredUntil?: number;
   buildersUntil?: number;
+  /** The banner the plot flies: an emblem, bought as prestige. */
+  banner?: string;
   /** The last day the settlement held a festival, so there is one a day at most. */
   festivalDay?: number;
   /**
@@ -1145,7 +1147,7 @@ function footprintRadius(b: Building) {
 const FOOTPRINTS: Record<string, number> = {
   Market: 4.2, 'Town Hall': 4.2, House: 2.6, School: 3.8, Library: 3.6, Lab: 3.7, Cafe: 3.5,
   Fishery: 3.0, Forager: 2.6,
-  Chapel: 3.6, Guildhall: 4.0, Brewery: 3.4, Printer: 3.2, Stables: 3.8, Harbour: 3.6,
+  Chapel: 3.6, Guildhall: 4.0, Brewery: 3.4, Printer: 3.2, Stables: 3.8, Harbour: 3.6, Monument: 2.6,
   Factory: 4.4, Foundry: 4.0, 'Railway Station': 4.4, Telegraph: 2.8, Gasworks: 4.0,
   Hospital: 4.2, Stadium: 4.8, Supermarket: 4.2, Office: 3.8, 'Bus Depot': 4.2, 'Power Plant': 4.4,
   'Data Centre': 4.2, 'Research Campus': 4.6, 'Vertical Farm': 3.8, 'Pod Hub': 4.0, 'Drone Port': 4.0,
@@ -1467,6 +1469,7 @@ function moveCitizens(world: World, hours: number) {
   const water = ferry ? ferried(waterOf(world)) : waterOf(world);
   const nav = navOf(world, obstacles, water);
   const ride = rideOf(world);
+  const pace = transportBoost(world);
   for (const c of world.citizens) {
     // Held by the player, or swimming for the bank: both are handled elsewhere
     // and every rule below is about walking on land.
@@ -1573,7 +1576,7 @@ function moveCitizens(world: World, hours: number) {
     // A working adult rides whatever the town offers; nobody rides it onto
     // the ferry.
     const own = ride && c.age >= 16 && phase === 'working' && !c.afloat ? rideFor(ride, c) : null;
-    const blocked = stepCitizen(c, hours, obstacles, world.layout, water, own ? RIDE_PACE[own] : 1);
+    const blocked = stepCitizen(c, hours, obstacles, world.layout, water, own ? RIDE_PACE[own] * pace : 1);
     if (ferry) {
       const wet = waterOf(world).isWater(c.x, c.y) && !onBridge(world.layout, c.x, c.y);
       c.afloat = wet;
@@ -3437,7 +3440,7 @@ function marketStep(world: World, hours: number) {
     } else if (stock > buffer * 1.2) {
       const qty = Math.min(Math.max(1, Math.round((stock - buffer) * .25 * pace * hours)), Math.floor(stock - buffer));
       if (qty > 0) {
-        const revenue = qty * q.price; world.resources[r] -= qty; earn(world, 'exports', revenue); q.volume += qty;
+        const revenue = qty * q.price * marketEdge(world); world.resources[r] -= qty; earn(world, 'exports', revenue); q.volume += qty;
         // Tallied rather than announced one at a time: the market trades every
         // game hour, and a card per sale would be a card every few seconds.
         const tally = world.sales;
@@ -3628,13 +3631,43 @@ export const hasCivic = (world: World, type: string) =>
 
 /** School and library: how much faster a day at the bench teaches. */
 export const SCHOOL_LEARNING = 0.35;
+/** A tavern is an evening with the town in it; a monument is something to be proud of. */
+export const TAVERN_SOCIAL = 2;
+export const MONUMENT_PRIDE = 2;
 export const LIBRARY_LEARNING = 0.15;
+/**
+ * How strongly a civic building does its job: nothing without one, its full
+ * effect at level one, and a quarter more with every improvement. This is
+ * what improving a school, a clinic or a cafe is for.
+ */
+export const LEVEL_BOOST = 0.25;
+export function civicStrength(world: World, type: string): number {
+  const b = world.buildings.find((x) => x.type === type && x.active && !x.ruined);
+  return b ? 1 + LEVEL_BOOST * (levelOf(b) - 1) : 0;
+}
+/** The highest level among buildings of these types that stand, or 0. */
+const bestLevelOf = (world: World, types: string[]) =>
+  world.buildings.filter((b) => types.includes(b.type) && b.active && !b.ruined).reduce((m, b) => Math.max(m, levelOf(b)), 0);
+/** Exports sell for MARKET_EDGE more per level of the market. */
+export const MARKET_EDGE = 0.05;
+export const marketEdge = (world: World) => 1 + MARKET_EDGE * Math.max(0, bestLevelOf(world, ['Market']) - 1);
+/** The bank keeps the books: every building's upkeep BANK_RELIEF cheaper per level. */
+export const BANK_RELIEF = 0.05;
+export const bankRelief = (world: World) => 1 - BANK_RELIEF * Math.max(0, bestLevelOf(world, ['Bank']) - 1);
+/** The town hall keeps order: stewardship quality TOWN_HALL_ORDER better per level. */
+export const TOWN_HALL_ORDER = 0.02;
+export const townHallOrder = (world: World) => TOWN_HALL_ORDER * Math.max(0, bestLevelOf(world, ['Town Hall']) - 1);
+/** Transport: whatever people ride goes TRANSPORT_PACE faster per level of the building that provides it. */
+export const TRANSPORT_PACE = 0.1;
+export const TRANSPORT_TYPES = ['Stables', 'Railway Station', 'Bus Depot', 'Pod Hub'];
+export const transportBoost = (world: World) => 1 + TRANSPORT_PACE * Math.max(0, bestLevelOf(world, TRANSPORT_TYPES) - 1);
+
 export function learningRate(world: World): number {
   useWorld(world);
-  return 1 + (hasCivic(world, 'School') ? SCHOOL_LEARNING : 0) + (hasCivic(world, 'Library') ? LIBRARY_LEARNING : 0)
-    + (hasCivic(world, 'Guildhall') ? GUILDHALL_LEARNING : 0) + (hasCivic(world, 'Printer') ? PRINTER_LEARNING : 0)
-    + (hasCivic(world, 'Telegraph') ? TELEGRAPH_LEARNING : 0) + (hasCivic(world, 'Data Centre') ? DATA_CENTRE_LEARNING : 0)
-    + (hasCivic(world, 'Research Campus') ? CAMPUS_LEARNING : 0);
+  return 1 + SCHOOL_LEARNING * civicStrength(world, 'School') + LIBRARY_LEARNING * civicStrength(world, 'Library')
+    + GUILDHALL_LEARNING * civicStrength(world, 'Guildhall') + PRINTER_LEARNING * civicStrength(world, 'Printer')
+    + TELEGRAPH_LEARNING * civicStrength(world, 'Telegraph') + DATA_CENTRE_LEARNING * civicStrength(world, 'Data Centre')
+    + CAMPUS_LEARNING * civicStrength(world, 'Research Campus');
 }
 
 /** Lab: better methods, applied to every trade's output. */
@@ -3644,9 +3677,9 @@ export const FACTORY_METHODS = 0.15;
 export const FOUNDRY_METHODS = 0.1;
 export const POWER_METHODS = 0.15;
 export const CAMPUS_METHODS = 0.2;
-export const methodBonus = (world: World) => 1 + (hasCivic(world, 'Lab') ? LAB_METHODS : 0)
-  + (hasCivic(world, 'Factory') ? FACTORY_METHODS : 0) + (hasCivic(world, 'Foundry') ? FOUNDRY_METHODS : 0)
-  + (hasCivic(world, 'Power Plant') ? POWER_METHODS : 0) + (hasCivic(world, 'Research Campus') ? CAMPUS_METHODS : 0);
+export const methodBonus = (world: World) => 1 + LAB_METHODS * civicStrength(world, 'Lab')
+  + FACTORY_METHODS * civicStrength(world, 'Factory') + FOUNDRY_METHODS * civicStrength(world, 'Foundry')
+  + POWER_METHODS * civicStrength(world, 'Power Plant') + CAMPUS_METHODS * civicStrength(world, 'Research Campus');
 
 /** Cafe, studio, library: what they put back into people, every day. */
 export const CAFE_SOCIAL = 1.6;
@@ -3685,8 +3718,8 @@ export const HOSPITAL_SURVIVAL = 0.65;
 export const HOSPITAL_CARE = 0.25;
 /** Whether the town has somewhere to be treated, and how well. */
 export const hasCare = (world: World) => hasCivic(world, 'Clinic') || hasCivic(world, 'Hospital');
-export const careOf = (world: World) => hasCivic(world, 'Hospital') ? HOSPITAL_CARE : hasCivic(world, 'Clinic') ? CLINIC_CARE : 0;
-export const survivalOf = (world: World) => hasCivic(world, 'Hospital') ? HOSPITAL_SURVIVAL : hasCivic(world, 'Clinic') ? CLINIC_SURVIVAL : 0;
+export const careOf = (world: World) => Math.min(0.6, hasCivic(world, 'Hospital') ? HOSPITAL_CARE * civicStrength(world, 'Hospital') : hasCivic(world, 'Clinic') ? CLINIC_CARE * civicStrength(world, 'Clinic') : 0);
+export const survivalOf = (world: World) => Math.min(0.9, hasCivic(world, 'Hospital') ? HOSPITAL_SURVIVAL * civicStrength(world, 'Hospital') : hasCivic(world, 'Clinic') ? CLINIC_SURVIVAL * civicStrength(world, 'Clinic') : 0);
 
 /** Lab and clinic: what they add to readiness for the hazards they can see coming. */
 export const LAB_WARNING = 0.12;
@@ -4005,6 +4038,35 @@ function jobCapacity(world: World, j: WorkingJob) {
   return world.buildings
     .filter((b) => b.type === jobs[j].building && b.active)
     .reduce((room, b) => room + buildingCapacity(b, base), 0);
+}
+
+/**
+ * What improving a building does, said in one line on its card. Every type
+ * has an answer: a player who pays for an improvement is owed one.
+ */
+export function upgradeEffect(type: string): string {
+  if (type === 'House') return `${HOUSE_ROOM_PER_LEVEL} more beds`;
+  if (WORKPLACES.has(type)) return `${Math.round(OUTPUT_PER_LEVEL * 100)}% more output`;
+  const quarter = `a quarter stronger`;
+  const effects: Record<string, string> = {
+    Storage: 'half again the readiness a store gives',
+    Market: `exports sell for ${Math.round(MARKET_EDGE * 100)}% more`,
+    Bank: `every building's upkeep ${Math.round(BANK_RELIEF * 100)}% cheaper`,
+    'Town Hall': `stewardship quality ${Math.round(TOWN_HALL_ORDER * 100)}% better`,
+    Jail: 'rogue odds halved again, one fewer building a rogue can wreck',
+    School: `learning ${quarter}`, Library: `learning and its daily lift ${quarter}`, Guildhall: `learning ${quarter}`,
+    Printer: `learning and its daily lift ${quarter}`, Telegraph: `learning and its daily lift ${quarter}`,
+    'Data Centre': `learning ${quarter}`, 'Research Campus': `learning and methods ${quarter}`,
+    Lab: `methods ${quarter}`, Factory: `methods ${quarter}`, Foundry: `methods ${quarter}`, 'Power Plant': `methods ${quarter}`,
+    Clinic: `care ${quarter}`, Hospital: `care ${quarter}`,
+    Cafe: `its daily lift ${quarter}`, Tavern: `its daily lift ${quarter}`, Studio: `its daily lift ${quarter}`, Chapel: `its daily lift ${quarter}`,
+    Brewery: `its daily lift ${quarter}`, Stadium: `its daily lift ${quarter}`, Supermarket: `its daily lift ${quarter}`, Office: `its daily lift ${quarter}`,
+    'Vertical Farm': `its daily lift ${quarter}`, 'Drone Port': `its daily lift ${quarter}`, Monument: `its daily pride ${quarter}`,
+    Stables: `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`, 'Railway Station': `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`,
+    'Bus Depot': `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`, 'Pod Hub': `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`,
+    Harbour: 'nothing yet: the ferry does its one job', Gasworks: 'nothing yet: it keeps the smog off and that is all',
+  };
+  return effects[type] ?? 'nothing yet';
 }
 
 /** Posts at one workplace, by its level. Three at a mine, two elsewhere. */
@@ -4559,7 +4621,8 @@ export function readiness(world: World): Record<HazardKind, number> {
   useWorld(world);
   const wells = world.amenities.filter((a) => a.kind === 'well').length;
   const fires = world.amenities.filter((a) => a.kind === 'campfire').length;
-  const stores = world.buildings.filter((b) => b.type === 'Storage' && b.active).length;
+  // An improved store is half again the store: sturdier, drier, fuller.
+  const stores = world.buildings.filter((b) => b.type === 'Storage' && b.active).reduce((s, b) => s + 1 + 0.5 * (levelOf(b) - 1), 0);
   const food = foodInStore(world);
   const mouths = Math.max(1, world.citizens.length);
   const water = waterOf(world);
@@ -5908,7 +5971,7 @@ const TRADE_BUILD_COST: Record<string, number> = {
   // or thinks: the stables put carts on the roads, the harbour a ferry on
   // the water, the chapel and the brewery give people somewhere to be, the
   // guildhall and the printer make them better at what they do.
-  Chapel: 380, Guildhall: 460, Brewery: 340, Printer: 360, Stables: 280, Harbour: 420,
+  Chapel: 380, Guildhall: 460, Brewery: 340, Printer: 360, Stables: 280, Harbour: 420, Monument: 0,
   // The industrial era: brick and iron, and the first machines.
   Factory: 640, Foundry: 600, 'Railway Station': 720, Telegraph: 380, Gasworks: 560,
   // The modern era: concrete and glass, and the roads fill up.
@@ -5959,6 +6022,7 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Lab: { wood: 14, stone: 30 },
   Jail: { wood: 8, stone: 22 },
   Chapel: { wood: 10, stone: 30 },
+  Monument: { wood: 0, stone: 0 },
   Guildhall: { wood: 16, stone: 28 },
   Brewery: { wood: 20, stone: 14 },
   Printer: { wood: 14, stone: 18 },
@@ -6596,7 +6660,7 @@ export function maintenanceCost(type: string) {
     Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Fishery: 2, Lodge: 3, Forager: 1, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
     Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
     Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9, Jail: 3,
-    Chapel: 4, Guildhall: 7, Brewery: 6, Printer: 6, Stables: 5, Harbour: 8,
+    Chapel: 4, Guildhall: 7, Brewery: 6, Printer: 6, Stables: 5, Harbour: 8, Monument: 2,
     Factory: 12, Foundry: 11, 'Railway Station': 12, Telegraph: 5, Gasworks: 10,
     Hospital: 14, Stadium: 16, Supermarket: 10, Office: 9, 'Bus Depot': 10, 'Power Plant': 15,
     'Data Centre': 18, 'Research Campus': 20, 'Vertical Farm': 14, 'Pod Hub': 14, 'Drone Port': 12,
@@ -6711,7 +6775,8 @@ export function stewardshipScore(world: World) {
   const safe = world.hazards.length
     ? world.hazards.reduce((s, h) => s + ready[h.kind], 0) / world.hazards.length
     : 1;
-  const quality = housed * 0.25 + fed * 0.25 + employed * 0.2 + content * 0.2 + safe * 0.1;
+  // An improved town hall keeps order: a little on top, before the square.
+  const quality = clamp(housed * 0.25 + fed * 0.25 + employed * 0.2 + content * 0.2 + safe * 0.1 + townHallOrder(world), 0, 1);
   // Squared, so running a place well is worth much more than running it.
   return clamp(quality * quality, 0, 1);
 }
@@ -6851,24 +6916,27 @@ function daily(world: World) {
     // What the town's civic buildings put back. Small, daily, and for
     // everybody: a cafe is an evening out, a studio is something to make,
     // a library is somewhere to sit with a thought.
-    if (hasCivic(world, 'Cafe')) c.social = Math.min(100, c.social + CAFE_SOCIAL);
-    if (hasCivic(world, 'Studio')) c.purpose = Math.min(100, c.purpose + STUDIO_PURPOSE);
-    if (hasCivic(world, 'Library')) c.purpose = Math.min(100, c.purpose + LIBRARY_PURPOSE);
+    // Each a quarter stronger per level of the building: see civicStrength.
+    if (hasCivic(world, 'Cafe')) c.social = Math.min(100, c.social + CAFE_SOCIAL * civicStrength(world, 'Cafe'));
+    if (hasCivic(world, 'Tavern')) c.social = Math.min(100, c.social + TAVERN_SOCIAL * civicStrength(world, 'Tavern'));
+    if (hasCivic(world, 'Studio')) c.purpose = Math.min(100, c.purpose + STUDIO_PURPOSE * civicStrength(world, 'Studio'));
+    if (hasCivic(world, 'Library')) c.purpose = Math.min(100, c.purpose + LIBRARY_PURPOSE * civicStrength(world, 'Library'));
     // The township's own: a chapel is somewhere to be quiet together, a
     // brewery is an evening with everybody in it, a printer is something
     // to read.
-    if (hasCivic(world, 'Chapel')) { c.social = Math.min(100, c.social + CHAPEL_SOCIAL); c.purpose = Math.min(100, c.purpose + CHAPEL_PURPOSE); }
-    if (hasCivic(world, 'Brewery')) c.social = Math.min(100, c.social + BREWERY_SOCIAL);
-    if (hasCivic(world, 'Printer')) c.purpose = Math.min(100, c.purpose + PRINTER_PURPOSE);
+    if (hasCivic(world, 'Chapel')) { c.social = Math.min(100, c.social + CHAPEL_SOCIAL * civicStrength(world, 'Chapel')); c.purpose = Math.min(100, c.purpose + CHAPEL_PURPOSE * civicStrength(world, 'Chapel')); }
+    if (hasCivic(world, 'Brewery')) c.social = Math.min(100, c.social + BREWERY_SOCIAL * civicStrength(world, 'Brewery'));
+    if (hasCivic(world, 'Printer')) c.purpose = Math.min(100, c.purpose + PRINTER_PURPOSE * civicStrength(world, 'Printer'));
     // The later eras'. A telegraph is news from everywhere; a stadium is a
     // crowd; a supermarket and a vertical farm keep the larder full; an office
     // is work that means something; a drone port brings things to the door.
-    if (hasCivic(world, 'Telegraph')) { c.social = Math.min(100, c.social + TELEGRAPH_SOCIAL); c.purpose = Math.min(100, c.purpose + TELEGRAPH_PURPOSE); }
-    if (hasCivic(world, 'Stadium')) c.social = Math.min(100, c.social + STADIUM_SOCIAL);
-    if (hasCivic(world, 'Supermarket')) c.hunger = Math.min(100, c.hunger + SUPERMARKET_HUNGER);
-    if (hasCivic(world, 'Office')) c.purpose = Math.min(100, c.purpose + OFFICE_PURPOSE);
-    if (hasCivic(world, 'Vertical Farm')) c.hunger = Math.min(100, c.hunger + VERTICAL_FARM_HUNGER);
-    if (hasCivic(world, 'Drone Port')) { c.social = Math.min(100, c.social + DRONE_PORT_SOCIAL); c.purpose = Math.min(100, c.purpose + DRONE_PORT_PURPOSE); }
+    if (hasCivic(world, 'Telegraph')) { c.social = Math.min(100, c.social + TELEGRAPH_SOCIAL * civicStrength(world, 'Telegraph')); c.purpose = Math.min(100, c.purpose + TELEGRAPH_PURPOSE * civicStrength(world, 'Telegraph')); }
+    if (hasCivic(world, 'Stadium')) c.social = Math.min(100, c.social + STADIUM_SOCIAL * civicStrength(world, 'Stadium'));
+    if (hasCivic(world, 'Supermarket')) c.hunger = Math.min(100, c.hunger + SUPERMARKET_HUNGER * civicStrength(world, 'Supermarket'));
+    if (hasCivic(world, 'Office')) c.purpose = Math.min(100, c.purpose + OFFICE_PURPOSE * civicStrength(world, 'Office'));
+    if (hasCivic(world, 'Vertical Farm')) c.hunger = Math.min(100, c.hunger + VERTICAL_FARM_HUNGER * civicStrength(world, 'Vertical Farm'));
+    if (hasCivic(world, 'Drone Port')) { c.social = Math.min(100, c.social + DRONE_PORT_SOCIAL * civicStrength(world, 'Drone Port')); c.purpose = Math.min(100, c.purpose + DRONE_PORT_PURPOSE * civicStrength(world, 'Drone Port')); }
+    if (hasCivic(world, 'Monument')) c.happiness = Math.min(100, c.happiness + MONUMENT_PRIDE * civicStrength(world, 'Monument'));
     // Smog, until the town lights its gas.
     if (smogged(world)) c.happiness = Math.max(0, c.happiness - SMOG_HAPPINESS);
     // Unpaid work erodes a sense of purpose; paid work slowly builds it — and
@@ -6879,7 +6947,7 @@ function daily(world: World) {
     c.purpose = edge(c.purpose + paid + (rate - WAGE_STANDARD) * 3, 0, 100);
   }
   spend(world, 'wages', payroll * ratio);
-  spend(world, 'upkeep', upkeep);
+  spend(world, 'upkeep', upkeep * bankRelief(world));
   // Paid in the morning, spent through the day: what people do not need to
   // keep by them goes back into the settlement rather than sitting in a purse.
   householdSpending(world);
@@ -7321,7 +7389,7 @@ export function holdFestival(world: World): { ok: boolean; message: string } {
  * Boons: paid for in $EMERGE, delivered at once
  * ------------------------------------------------------------------ */
 
-export type BoonKind = 'settlers' | 'shipment' | 'restore';
+export type BoonKind = 'settlers' | 'shipment' | 'restore' | 'monument' | 'banner';
 export const BOON_SETTLERS = 5;
 export const BOON_SHIPMENT: Partial<Record<Resource, number>> = { wood: 400, stone: 300, bread: 120, vegetables: 120 };
 
@@ -7338,13 +7406,41 @@ export function boonCheck(world: World, kind: BoonKind): { ok: boolean; message:
     if (!ruins && !world.bridgeWorks) return { ok: false, message: 'Nothing here needs restoring: no ruins, and no bridge under way.' };
     return { ok: true, message: '' };
   }
+  if (kind === 'monument') {
+    if (uniqueStanding(world, 'Monument')) return { ok: false, message: 'A monument already stands in the square.' };
+    if (!freeSite(world, false)) return { ok: false, message: 'There is no open ground near the square for a monument.' };
+    return { ok: true, message: '' };
+  }
   return { ok: true, message: '' };
 }
 
+/** Fly a banner: prestige, recorded on the claim row by the registry. */
+export function setBanner(world: World, emblem: string) {
+  useWorld(world);
+  world.banner = emblem;
+  noteAttention(world);
+  pushFeed(world, 'build', 'A banner was raised over the square. Every map now shows it.');
+}
+
 /** Deliver a boon. The caller has checked it and paid for it. */
-export function applyBoon(world: World, kind: BoonKind): { ok: boolean; message: string } {
+export function applyBoon(world: World, kind: BoonKind, emblem?: string): { ok: boolean; message: string } {
   const check = boonCheck(world, kind);
   if (!check.ok) return check;
+  if (kind === 'banner') {
+    if (!emblem) return { ok: false, message: 'Choose an emblem.' };
+    setBanner(world, emblem);
+    return { ok: true, message: 'The banner flies.' };
+  }
+  if (kind === 'monument') {
+    const site = freeSite(world, false);
+    if (!site) return { ok: false, message: 'There is no open ground near the square for a monument.' };
+    const gold = world.treasury;
+    const raised = constructBuilding(world, 'Monument', 0, site[0], site[1]);
+    world.treasury = gold;
+    if (!raised) return { ok: false, message: 'The monument could not be raised there.' };
+    pushFeed(world, 'build', `A monument was raised in ${world.name}. People will be proud of this place for as long as it stands.`);
+    return { ok: true, message: 'The monument stands.' };
+  }
   if (kind === 'settlers') {
     const names: string[] = [];
     for (let i = 0; i < BOON_SETTLERS; i++) names.push(addSettler(world).name);
@@ -7509,7 +7605,7 @@ export const BUILDING_CATEGORY: Record<string, BuildingCategory> = {
   House: 'Homes',
   Farm: 'Food', Fishery: 'Food', Lodge: 'Food', Forager: 'Food', Mill: 'Food', Bakery: 'Food', Brewery: 'Food',
   Woodcutter: 'Materials', Quarry: 'Materials', Mine: 'Materials', Carpenter: 'Materials', Blacksmith: 'Materials', Tailor: 'Materials',
-  'Town Hall': 'Civic', Jail: 'Civic', Storage: 'Civic', Market: 'Civic', Bank: 'Civic', Guildhall: 'Civic', Chapel: 'Civic',
+  'Town Hall': 'Civic', Jail: 'Civic', Storage: 'Civic', Market: 'Civic', Bank: 'Civic', Guildhall: 'Civic', Chapel: 'Civic', Monument: 'Civic',
   School: 'Care & learning', Clinic: 'Care & learning', Library: 'Care & learning', Lab: 'Care & learning', Printer: 'Care & learning',
   Tavern: 'Leisure', Cafe: 'Leisure', Studio: 'Leisure', Stadium: 'Leisure',
   Stables: 'Transport', Harbour: 'Transport', 'Railway Station': 'Transport', 'Bus Depot': 'Transport', 'Pod Hub': 'Transport', 'Drone Port': 'Transport',

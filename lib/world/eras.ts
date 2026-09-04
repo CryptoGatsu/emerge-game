@@ -99,7 +99,7 @@ export const cityLevelSpec = (level: number): CityLevel => CITY_LEVELS[Math.max(
  * multiplies that. This is what makes developing a city worth more than
  * claiming another.
  */
-export const PLOT_CEILING_MIN = 60_000;
+export const PLOT_CEILING_MIN = 40_000;
 /** Level ten, before the era: times the AI era's yield this is exactly 250,000 a day. */
 export const PLOT_CEILING_MAX = 156_250;
 export function plotCeiling(level: number, era: number): number {
@@ -108,9 +108,19 @@ export function plotCeiling(level: number, era: number): number {
   return Math.round(base * eraYield(era));
 }
 
-/** A charter: $EMERGE burned for a share more on the plot's ceiling, for a while. */
+/** A charter: $EMERGE for a share more on the plot's ceiling, for a while. */
 export const CHARTER_BONUS = 0.2;
 export const CHARTER_DAYS = 30;
+/**
+ * A charter costs CHARTER_CEILING_DAYS of the plot's own ceiling, so it is
+ * the same bargain at every level: thirty days of a fifth more, for four
+ * days' worth. A flat price was break-even for a new plot and five to one
+ * for a city.
+ */
+export const CHARTER_CEILING_DAYS = 4;
+export const charterCost = (level: number, era: number) => CHARTER_CEILING_DAYS * plotCeiling(level, era);
+/** What the step into an era costs: a million per step already taken. */
+export const advanceCost = (targetEra: number) => Math.max(1, Math.round(targetEra) - 1) * 1_000_000;
 /** Insurance: $EMERGE burned so trouble does half the damage, for a while. */
 export const INSURANCE_DAYS = 30;
 /** Master builders: $EMERGE burned so building and improving cost less Gold, for a while. */

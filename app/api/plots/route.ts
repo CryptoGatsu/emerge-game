@@ -55,7 +55,11 @@ import { eraGate, eraOf } from '@/lib/simulation';
 import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS } from '@/lib/world/eras';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
-import { ownerOnChain, registryConfigured } from '@/lib/server/land';
+import { ownerOnChain, registryConfigured, judgedLevel } from '@/lib/server/land';
+import { presenceDays, markBanner } from '@/lib/server/registry';
+import { isEmblem } from '@/lib/world/emblems';
+import { advanceCost, charterCost } from '@/lib/world/eras';
+import { HIRE_FEE_EMERGE, resaleFee } from '@/lib/chain/vault';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
@@ -116,8 +120,11 @@ export async function POST(request: Request) {
     charter?: boolean;
     insure?: boolean;
     builders?: boolean;
-    /** A boon bought for the plot: settlers, a shipment, a restoration. */
+    /** A boon bought for the plot: settlers, a shipment, a restoration, a monument, a banner. */
     boon?: string;
+    emblem?: string;
+    /** The registry fee on a resale, and the hiring fee, paid like any charge. */
+    feeTx?: string;
     era?: number;
     /** Hired hands: the owner opens or closes the job; a player takes, keeps or leaves it. */
     hire?: boolean;
@@ -318,6 +325,16 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
+    // A banner is recorded on the row, so the world map flies it.
+    if (kind === 'banner') {
+      if (!isEmblem(body.emblem)) return NextResponse.json({ error: 'Choose an emblem.' }, { status: 400 });
+      try {
+        const flown = await markBanner(seed, owner, body.emblem);
+        return NextResponse.json({ ok: true, boon: kind, claim: flown ?? claim });
+      } catch {
+        return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+      }
+    }
     return NextResponse.json({ ok: true, boon: kind, claim });
   }
 
@@ -331,7 +348,6 @@ export async function POST(request: Request) {
    */
   if (body.charter || body.insure || body.builders) {
     const kind: CoverKind = body.charter ? 'charter' : body.insure ? 'insurance' : 'builders';
-    const price = kind === 'charter' ? CHARTER_COST_EMERGE : kind === 'insurance' ? INSURANCE_COST_EMERGE : BUILDERS_COST_EMERGE;
     const span = kind === 'charter' ? CHARTER_DAYS : kind === 'insurance' ? INSURANCE_DAYS : BUILDERS_DAYS;
     let claim: Claim | null;
     try {
@@ -341,6 +357,18 @@ export async function POST(request: Request) {
     }
     if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+    }
+    // A charter costs four days of the plot's own ceiling, at the level the
+    // server judges it, never below the floor.
+    let price = kind === 'insurance' ? INSURANCE_COST_EMERGE : BUILDERS_COST_EMERGE;
+    if (kind === 'charter') {
+      let world = null;
+      try {
+        const published = await readWorld(seed);
+        world = published ? worldFromSave(published.snapshot as SavedWorld, seed, claim.worldName) : null;
+      } catch { world = null; }
+      const days = await presenceDays(owner).catch(() => 0);
+      price = Math.max(CHARTER_COST_EMERGE, charterCost(judgedLevel(world, days), claim.era ?? 1));
     }
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
@@ -403,7 +431,7 @@ export async function POST(request: Request) {
     }
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, ADVANCE_COST_EMERGE);
+      const paid = await verifyBurn(burnTx, owner, advanceCost(era));
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
@@ -429,6 +457,17 @@ export async function POST(request: Request) {
    * check.
    */
   if (body.hire !== undefined) {
+    // Opening a job costs a hiring fee, paid like any charge.
+    if (body.hire === true && tokenLive()) {
+      const burnTx = String(body.burnTx ?? '');
+      const paid = await verifyBurn(burnTx, owner, HIRE_FEE_EMERGE);
+      if (!paid.ok) {
+        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(burnTx, `hire:${seed}:${burnTx}`, paid.whole))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+    }
     try {
       const row = await setHiring(seed, owner, body.hire === true);
       return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
@@ -543,6 +582,15 @@ export async function POST(request: Request) {
       }
       if (!(await spendBurn(transferTx, `resale:${seed}`))) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+      // The registry's fee, into the vault, from the buyer.
+      const feeTx = String(body.feeTx ?? '');
+      const fee = await verifyBurn(feeTx, owner, resaleFee(due));
+      if (!fee.ok) {
+        return NextResponse.json({ error: `The registry fee: ${fee.reason}`, retry: fee.retry }, { status: fee.retry ? 202 : 402 });
+      }
+      if (!(await spendBurn(feeTx, `resale-fee:${seed}`, fee.whole))) {
+        return NextResponse.json({ error: 'That fee has already been used.' }, { status: 409 });
       }
     }
     try {

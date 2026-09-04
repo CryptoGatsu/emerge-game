@@ -1,6 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
@@ -56,13 +56,18 @@ const CHARGES = [
   { what: 'Rename yourself', cost: n(RENAME_PLAYER_EMERGE), note: 'the first change is free' },
   { what: 'Send a digging party', cost: n(DIG_COST_EMERGE), note: '' },
   { what: 'Expand a plot', cost: n(EXPAND_COST_EMERGE), note: 'once per plot; about half as much land again' },
-  { what: 'Advance an era', cost: n(ADVANCE_COST_EMERGE), note: 'once per step, after the plot has earned it' },
-  { what: 'Charter a plot', cost: n(CHARTER_COST_EMERGE), note: `a fifth more on the plot's ceiling for ${CHARTER_DAYS} days` },
+  { what: 'Advance an era', cost: `${n(advanceCost(2))} – ${n(advanceCost(5))}`, note: 'a million per step already taken, after the plot has earned it' },
+  { what: 'Charter a plot', cost: `${n(charterCost(1, 1))} – ${n(charterCost(10, 5))}`, note: `four days of the plot's own ceiling, for ${CHARTER_DAYS} days of a fifth more` },
   { what: 'Insure a plot', cost: n(INSURANCE_COST_EMERGE), note: `half the damage from any disaster for ${INSURANCE_DAYS} days` },
   { what: 'Hire master builders', cost: n(BUILDERS_COST_EMERGE), note: `a quarter off every build and improvement for ${BUILDERS_DAYS} days` },
   { what: 'A party of settlers', cost: n(BOON_COST_EMERGE.settlers), note: 'five people arrive today; needs room in the houses' },
   { what: 'A shipment', cost: n(BOON_COST_EMERGE.shipment), note: '400 timber, 300 stone, 240 portions of food' },
   { what: 'A restoration', cost: n(BOON_COST_EMERGE.restore), note: 'every ruin rebuilt, the bridge under way finished' },
+  { what: 'A monument', cost: n(BOON_COST_EMERGE.monument), note: 'prestige: unique to the plot, a daily lift for everyone' },
+  { what: 'A banner', cost: n(BOON_COST_EMERGE.banner), note: 'prestige: your emblem over your name and on every world map' },
+  { what: 'Open a job for a hand', cost: n(HIRE_FEE_EMERGE), note: 'a hand must hold 50,000 to take it' },
+  { what: 'Buy a plot from a player', cost: `the asking price + ${Math.round(RESALE_FEE_RATE * 100)}%`, note: 'the price to the seller; the fee into the vault' },
+  { what: 'A token bet at the colosseum', cost: 'your stake', note: 'into the vault; a win paid by the vault at the odds shown' },
 ];
 
 /**
@@ -503,9 +508,21 @@ export default function Wiki() {
           </p>
           <p>
             <b>A charter</b> lifts the ceiling by {Math.round(CHARTER_BONUS * 100)}% for{' '}
-            {CHARTER_DAYS} days, for {n(CHARTER_COST_EMERGE)} {TOKEN.ticker} burned, from the
-            On-Chain panel. Buying another while one runs adds the days on. It is recorded on the
-            claim row, so it follows the plot to any device and the payout route counts it.
+            {CHARTER_DAYS} days, for four days of the plot&rsquo;s own ceiling: {n(charterCost(1, 1))}{' '}
+            {TOKEN.ticker} for a new plot, {n(charterCost(10, 5))} for a top city, the same bargain at
+            every level. Buying another while one runs adds the days on. It is recorded on the claim
+            row, so it follows the plot to any device and the payout route counts it.
+          </p>
+          <h3>Judged, not reported</h3>
+          <p>
+            What the vault pays is decided on the server from three things the browser cannot write.
+            The <b>level</b> a plot is paid on is the smaller of what its published world shows and
+            one level per three days its owner has actually been present, which the heartbeat
+            records. The <b>score</b> is computed from the published world with the same function
+            the settlement runs. The <b>attention</b> is the owner&rsquo;s last heartbeat on that
+            plot. The payout route pays the lesser of what the client claims and ceiling × score ×
+            attention, so a scripted client earns what a present, well-run plot earns and nothing
+            more, and a level-ten snapshot on a day-old claim is paid as level one.
           </p>
         </section>
 
@@ -823,6 +840,17 @@ export default function Wiki() {
               ))}
             </tbody>
           </table>
+          <h3>What improving does</h3>
+          <p>
+            Every improvement does something, and the building&rsquo;s card says what before you
+            pay. Workplaces make {Math.round(OUTPUT_PER_LEVEL * 100)}% more per level. A house adds
+            two beds. A school, library, lab, clinic, hospital, cafe, tavern, chapel and the rest do
+            their job a quarter more strongly per level. A market sells exports for 5% more per
+            level; a bank makes every building&rsquo;s upkeep 5% cheaper per level; a town hall lifts
+            stewardship quality 2% per level; an improved store counts half again toward readiness;
+            stables, stations, depots and pod hubs move people 10% faster per level; an improved
+            jail halves the odds again and stops a rogue sooner.
+          </p>
           <h3>One of each</h3>
           <p>
             A town hall, a jail, a tavern, a school, a harbour: every building whose whole effect

@@ -8,7 +8,7 @@
  */
 
 import { eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, upgradeEffect, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -55,6 +55,8 @@ export interface FocusBuilding {
   moveGold: number;
   /** For a house: who sleeps here against the beds, and the beds an improvement would add. */
   beds: { sleeping: number; room: number; next: number | null } | null;
+  /** What the next improvement would do, in a line. */
+  improves: string;
 }
 
 export type Focus = FocusCitizen | FocusBuilding;
@@ -157,6 +159,8 @@ export interface Snapshot {
   cover: { charterUntil: number; insuredUntil: number; insured: boolean; buildersUntil: number; builders: boolean };
   /** Today's festival: what one costs, and whether one has been held. */
   festival: { cost: number; held: boolean };
+  /** The banner the plot flies, or null. */
+  banner: string | null;
   /**
    * Everybody and every workplace at a glance: who does what and where, which
    * trades have open posts, which buildings stand short-handed. What the
@@ -337,6 +341,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       };
     })(),
     moveGold: moveCost(b.type),
+    improves: upgradeEffect(b.type),
     beds: b.type === 'House'
       ? {
         sleeping: world.families.filter((f) => f.homeId === b.id).reduce((s, f) => s + f.members.length, 0),
@@ -463,6 +468,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     city: cityGate(world),
     cover: { charterUntil: world.charterUntil ?? 0, insuredUntil: world.insuredUntil ?? 0, insured: insured(world), buildersUntil: world.buildersUntil ?? 0, builders: buildersHere(world) },
     festival: { cost: festivalCost(world), held: world.festivalDay === world.day },
+    banner: world.banner ?? null,
     roster: rosterOf(world),
     projects: world.projects.map((p) => ({
       id: p.id, name: p.name, progress: p.progress, length: p.length,

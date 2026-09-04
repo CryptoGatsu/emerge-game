@@ -80,6 +80,8 @@ export interface Claim {
   insuredUntil?: number;
   /** Master builders hired for the plot, as the time they leave. */
   buildersUntil?: number;
+  /** The banner the plot flies on the world map. */
+  banner?: string;
 }
 
 /**
@@ -300,6 +302,15 @@ export async function markEra(seed: number, owner: string, era: number): Promise
 }
 
 /** Record a charter or insurance on the plot: from now, or from the end of the one running, for `days`. */
+/** Record the banner a plot flies. */
+export async function markBanner(seed: number, owner: string, emblem: string): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const row: Claim = { ...existing, banner: emblem };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
 export type CoverKind = 'charter' | 'insurance' | 'builders';
 export const COVER_KEY: Record<CoverKind, 'charterUntil' | 'insuredUntil' | 'buildersUntil'> = { charter: 'charterUntil', insurance: 'insuredUntil', builders: 'buildersUntil' };
 export async function markCover(seed: number, owner: string, kind: CoverKind, days: number): Promise<{ claim: Claim; until: number } | null> {
@@ -815,9 +826,30 @@ export async function playersOnline(): Promise<number> {
  * know is how many people are looking at their world besides themselves, and a
  * badge that says 1 when nobody is there is worse than no badge.
  */
+/**
+ * The days somebody has been present at all, as a set of UTC days.
+ *
+ * This is the one record of attention the client cannot write: a heartbeat
+ * arrives because a browser is open on a world. The city level a wallet is
+ * paid on is bounded by these days, and its attention is read from the last
+ * of them.
+ */
+const seenDaysKey = (who: string) => serverKey(`seen-days:${who.toLowerCase()}`);
+const utcDayOf = (ms: number) => Math.floor(ms / 86_400_000);
+export async function presenceDays(who: string): Promise<number> {
+  const rows = await hgetall(seenDaysKey(who));
+  return Object.keys(rows).length;
+}
+/** When somebody last had a world open, in wall-clock ms, or 0. */
+export async function lastSeenAt(seed: number, who: string): Promise<number> {
+  const at = await hget(presenceKey(seed), who);
+  return at ? Number(at) || 0 : 0;
+}
+
 export async function heartbeat(seed: number, who: string): Promise<string[]> {
   const key = presenceKey(seed);
   await hset(key, who, String(Date.now()));
+  await hset(seenDaysKey(who), String(utcDayOf(Date.now())), '1');
   // The same beat counts them as playing at all. One write rather than a
   // second heartbeat from the client, because a player is present in the game
   // exactly when they are present in a world.

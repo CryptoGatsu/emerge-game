@@ -59,6 +59,32 @@ export interface ArenaState {
   shared: boolean;
   /** How far this browser's clock is ahead of the arena's. */
   skew: number;
+  /** This wallet's token bets on the bouts shown, with results once revealed. */
+  tokenBets: TokenBetView[];
+  /** Whether the vault pays token wins itself; otherwise the client credits its ledger. */
+  vaultPays: boolean;
+}
+
+export interface TokenBetView {
+  boutId: number;
+  bet: { side: 'red' | 'blue'; stake: number; odds: number; at: number; txHash: string | null };
+  result: { won: boolean; amount: number; txHash: string | null; paid: boolean } | null;
+}
+
+/** Put a token bet on the bout. The stake is already in the vault. */
+export async function placeTokenBet(address: string, boutId: number, side: 'red' | 'blue', stake: number, txHash: string | null): Promise<{ ok: true } | { ok: false; error: string; settling?: boolean }> {
+  try {
+    const response = await withSession(
+      address,
+      () => fetch('/api/arena', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bet: { boutId, side, stake, txHash } }) }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { ok?: boolean; error?: string; retry?: boolean };
+    if (!response.ok || !json.ok) return { ok: false, error: json.error ?? 'The arena refused the bet.', settling: !!json.retry };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'The arena could not be reached.' };
+  }
 }
 
 export async function fetchArena(): Promise<ArenaState | null> {
@@ -79,6 +105,8 @@ export async function fetchArena(): Promise<ArenaState | null> {
       // Measured at receipt, the same way the market does it, so the bell
       // rings at the same moment for everybody however wrong their clock is.
       skew: Date.now() - json.now,
+      tokenBets: json.tokenBets ?? [],
+      vaultPays: json.vaultPays === true,
     };
   } catch {
     return null;

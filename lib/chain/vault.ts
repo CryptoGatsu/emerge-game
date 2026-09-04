@@ -38,7 +38,7 @@
  * the vault, to be burned deliberately rather than sent anywhere.
  */
 
-import { ERA_YIELD_STEP, eraYield } from '../world/eras';
+import { ERA_YIELD_STEP, eraYield, advanceCost, charterCost } from '../world/eras';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, chainConfigured, tokenBalance, tokenLive, transferTokens,
   vaultLive, type ChainConfig,
@@ -49,28 +49,30 @@ import { clientKey } from '../limits';
 /** $EMERGE per unit of in-world Gold. */
 export const EMERGE_PER_GOLD = 10_000;
 /** Share of a withdrawal that is burned rather than returned. */
-export const WITHDRAW_BURN_RATE = 0.05;
+export const WITHDRAW_BURN_RATE = 0.1;
 /** Renaming a world costs tokens, so a name means something. */
-export const RENAME_COST_EMERGE = 50_000;
+export const RENAME_COST_EMERGE = 100_000;
 /** Renaming one of the beings who live there. */
-export const RENAME_CITIZEN_EMERGE = 20_000;
+export const RENAME_CITIZEN_EMERGE = 40_000;
 /** Surveying a brand-new plot into existence. */
-export const PROSPECT_COST_EMERGE = 120_000;
+export const PROSPECT_COST_EMERGE = 240_000;
 /** Changing your own name, after the first change, which is free. */
-export const RENAME_PLAYER_EMERGE = 30_000;
+export const RENAME_PLAYER_EMERGE = 60_000;
 /**
  * What it costs to expand a plot, once, opening its outer belt for building.
  * Burned like every other charge. Set high on purpose: it is the one thing a
  * player can buy that makes a plot itself bigger, and it should read as a
  * decision rather than an upgrade.
  */
-export const EXPAND_COST_EMERGE = 500_000;
+export const EXPAND_COST_EMERGE = 1_000_000;
 /**
  * What it costs to advance a plot to the next era. The same at every step,
  * burned, and only ever payable once the settlement has earned the step:
  * the gate is days lived and things built, and the charge is the last word.
  */
 export const ADVANCE_COST_EMERGE = 1_000_000;
+/** The step is dearer the further along it is: see advanceCost in world/eras. */
+export { advanceCost, charterCost };
 
 /**
  * What a player starts with while there is no token to hold.
@@ -184,8 +186,8 @@ export const chargeSplit = (cost: number) => {
 };
 
 /** Boons: paid for in $EMERGE, applied to the world at once. */
-export type BoonKind = 'settlers' | 'shipment' | 'restore';
-export const BOON_COST_EMERGE: Record<BoonKind, number> = { settlers: 50_000, shipment: 40_000, restore: 100_000 };
+export type BoonKind = 'settlers' | 'shipment' | 'restore' | 'monument' | 'banner';
+export const BOON_COST_EMERGE: Record<BoonKind, number> = { settlers: 50_000, shipment: 40_000, restore: 100_000, monument: 250_000, banner: 100_000 };
 
 /**
  * Rewards grow with the era.
@@ -199,7 +201,8 @@ export const BOON_COST_EMERGE: Record<BoonKind, number> = { settlers: 50_000, sh
  */
 export { ERA_YIELD_STEP, eraYield };
 /** A charter on a plot: burned, for CHARTER_DAYS of a fifth more on its ceiling. */
-export const CHARTER_COST_EMERGE = 300_000;
+/** Kept as the floor a charter never goes below. */
+export const CHARTER_COST_EMERGE = 160_000;
 /** Master builders on a plot: burned like the rest, for BUILDERS_DAYS of cheaper building. */
 export const BUILDERS_COST_EMERGE = 120_000;
 /** Insurance on a plot: burned, for INSURANCE_DAYS of half damage from trouble. */
@@ -220,7 +223,15 @@ export const eraCeiling = (era: number) => Math.round(DAILY_EARN_CEILING * eraYi
  * plot, so the whole scheme cannot emit more than the plots in the game times
  * a small number — and the global daily budget caps it regardless.
  */
-export const HAND_MIN_EMERGE = 1_000;
+export const HAND_MIN_EMERGE = 50_000;
+/** Opening a job for a hand costs the owner this, paid like any charge. */
+export const HIRE_FEE_EMERGE = 10_000;
+/** The registry's fee on a resale, paid by the buyer into the vault. */
+export const RESALE_FEE_RATE = 0.05;
+export const resaleFee = (price: number) => Math.ceil(price * RESALE_FEE_RATE);
+/** Prestige: a monument in the square, and a banner on the world map. */
+export const MONUMENT_COST_EMERGE = 250_000;
+export const BANNER_COST_EMERGE = 100_000;
 export const HAND_SHARE = 0.1;
 export const HAND_DAILY_CEILING = 25_000;
 

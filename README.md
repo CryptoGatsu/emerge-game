@@ -513,6 +513,21 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.3: stewardship is judged on the server (`judgedFor` in
+`lib/server/land.ts`): the level is `min(cityLevel(published), 1 + presenceDays / 3)`
+with presence days recorded by the heartbeat (`presenceDays`, `lastSeenAt` in
+`lib/server/registry.ts`), the score is `stewardshipScore` over the published
+world, the attention is `attentionFrom(lastSeen)`, and the payout route pays
+the lesser of the client's claim and ceiling × score × attention. Every
+improvement has an effect (`civicStrength`, `marketEdge`, `bankRelief`,
+`townHallOrder`, `transportBoost`, `upgradeEffect` for the card). Prices:
+`PRICE_SCALE` 2400, `PLOT_CEILING_MIN` 40,000, `charterCost` four days of the
+ceiling, `advanceCost` a million per step taken, `WITHDRAW_BURN_RATE` a tenth
+with half owed to the burn (`noteHold`), `HIRE_FEE_EMERGE`, `resaleFee`. Token
+bets: `lib/server/book.ts` holds stakes transferred into the vault against a
+bout, settles winners from the vault signer, and books the house edge as a
+charge. Prestige: the `monument` and `banner` boons; `lib/world/emblems.ts`.
+
 v2.2: `CHARGE_VAULT_SHARE` is a quarter. Master builders are a third cover
 (`buildersUntil`, `buildDiscount` applied in `constructBuilding` and
 `upgradeBuilding`). `isUnique`/`UNIQUE_BUILDINGS` (everything but houses,
