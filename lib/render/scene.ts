@@ -1589,7 +1589,12 @@ export class EmergeScene {
       }
       const height = this.map.heightAt(sprite.wx, sprite.wy);
       const face = this.castingFor(citizen, dt);
-      sprite.update(citizen, dt, height, door, face ?? undefined);
+      // The boat only where the ground drawn under them is water: the
+      // simulation's mask is coarser than the tiles, and a boat on the bank
+      // is worse than a wet footstep.
+      const ground = this.map.tileAt(sprite.wx, sprite.wy);
+      const afloat = !!citizen.afloat && (ground === Tile.Water || ground === Tile.WaterShore);
+      sprite.update(citizen, dt, height, door, face ?? undefined, afloat);
       sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
     }
   }

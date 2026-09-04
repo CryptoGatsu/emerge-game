@@ -27,7 +27,8 @@ export const UPDATES: Update[] = [
       'AI: white composite, light strips, gardens on the roofs, pale quiet roads. A Pod Hub puts everybody in autonomous pods, fastest of all; the ferry becomes a hydrofoil. Data Centre, Research Campus, Vertical Farm and Drone Port.',
       'Every building already standing is redrawn in the new era\u2019s style when you improve it, and keeps its old look until then. People change clothes and hats with the era: bonnets and tricorns, bowlers and goggles, caps and beanies, visors.',
       'Streets connect. A road reads its neighbours and runs unbroken into the next tile or the plaza; every other edge gets the era\u2019s kerb and pavement. Ruts on a dirt lane, rails on the setts, a dashed line down the tarmac, a light seam along the composite.',
-      'Each era rebuilds a building differently, not just in a new colour: the township adds quoins, shutters and dormers; the industrial era a soldier course, tall arched windows, a stack and a gas lamp; the modern era window bands, a canopy, a parapet and a plant room; the AI era slit windows, light strips, a roof garden and solar glass.',
+      'Each era rebuilds a building in its own shape, not a new colour. The township raises mansard-roofed stone homes, steep gables and tall hipped halls; the industrial era long brick terraces with a stack, sawtooth glass roofs over the works and flat-topped blocks; the modern era stepped concrete homes, wide sheds and towers; the AI era rounded white pods with garden decks and domes of light.',
+      'People ride what they ride. Every vehicle is drawn at their scale and in two layers, so a rider sits inside the car or the pod, astride the bike, on the box seat of a horse-drawn cart or in the tram, and in the boat. Boats appear only over water.',
     ],
   },
   {
@@ -93,7 +94,8 @@ export const UPDATES_ZH: Update[] = [
       '人工智能：白色复合材料、灯带、屋顶花园、安静的浅色道路。出行舱站让每个人坐上自动驾驶舱，最快；渡船变成水翼船。数据中心、研究园区、垂直农场和无人机港。',
       '已有的每栋建筑在你升级它时按新时代的样式重绘，在那之前保留旧貌。人们随时代换装换帽：软帽和三角帽、圆顶礼帽和护目镜、棒球帽和毛线帽、面罩。',
       '街道相连。道路会读取相邻格：与下一格或广场相接处路面不间断，其余每条边都有该时代的路缘和人行道。泥路上的车辙、石板路上的铁轨、柏油路中间的虚线、复合路面上的光缝。',
-      '每个时代重建建筑的方式不同，而不只是换色：城镇加上隅石、百叶窗和老虎窗；工业时代加上砖带、高拱窗、烟囱和煤气灯；现代加上带状窗、雨棚、女儿墙和设备间；人工智能时代加上条窗、灯带、屋顶花园和太阳能玻璃。',
+      '每个时代按自己的形状重建建筑，而不是换个颜色。城镇建起孟莎顶石屋、陡峭的山墙和高大的四坡顶大厅；工业时代是带烟囱的长排砖屋、作坊上的锯齿玻璃顶和平顶砖楼；现代是退台式混凝土住宅、宽大的厂棚和高楼；人工智能时代是带花园平台的圆角白色舱体和光之穹顶。',
+      '人们真的在骑乘。每种交通工具都按人物比例绘制、分两层，骑手坐在汽车或出行舱里、跨在自行车上、坐在马车的车座上或有轨车厢里，也坐在船里。船只只出现在水面上。',
     ],
   },
   {

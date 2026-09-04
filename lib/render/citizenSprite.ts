@@ -60,8 +60,9 @@ export class CitizenSprite {
   readonly container = new Container();
   readonly id: string;
   private readonly shadow: Sprite;
-  /** The cart or the boat under them, when they are on one. */
+  /** The cart or the boat under them, when they are on one, and the part of it in front of them. */
   private readonly vehicle: Sprite;
+  private readonly vehicleFront: Sprite;
   private vehicleKind: string | null = null;
   private readonly era: number;
   private readonly body: Partial<Record<LayerName, Sprite>> = {};
@@ -147,6 +148,13 @@ export class CitizenSprite {
     stack.addChild(this.torch);
 
     this.container.addChild(stack);
+
+    // The near side of whatever they ride, over the body: the door of the
+    // car, the gunwale of the boat, the front wheel of the bike.
+    this.vehicleFront = new Sprite();
+    this.vehicleFront.anchor.set(0.5, 0.7);
+    this.vehicleFront.visible = false;
+    this.container.addChild(this.vehicleFront);
     this.dressFor(citizen);
     this.applyFrame();
   }
@@ -204,7 +212,9 @@ export class CitizenSprite {
   }
 
   /** Pick the animation state from what the citizen is actually doing. */
-  private stateFor(citizen: Citizen, moving: boolean): CharState {
+  private stateFor(citizen: Citizen, moving: boolean, mounted = false): CharState {
+    // On a vehicle or a boat they sit, whatever the vehicle is doing.
+    if (mounted) return 'sit';
     if (moving) return 'walk';
     // Actually sat down: on a bench in the square, or crouched at a fire.
     if (citizen.seated) return 'sit';
@@ -246,7 +256,7 @@ export class CitizenSprite {
    * state. `doorPoint` is supplied when the citizen is inside a building, so
    * they walk to the doorway before fading out of sight indoors.
    */
-  update(citizen: Citizen, dt: number, height: number, doorPoint?: { x: number; y: number }, face?: { dir: Dir; flipped: boolean }): CitizenView {
+  update(citizen: Citizen, dt: number, height: number, doorPoint?: { x: number; y: number }, face?: { dir: Dir; flipped: boolean }, afloat = !!citizen.afloat): CitizenView {
     this.dressFor(citizen);
     this.moodFor(citizen);
     const targetX = doorPoint ? doorPoint.x : citizen.x;
@@ -280,7 +290,7 @@ export class CitizenSprite {
     }
 
     const scuffling = !!citizen.scuffle && citizen.scuffle > 0;
-    const nextState = scuffling ? 'work' : this.stateFor(citizen, moving);
+    const nextState = scuffling ? 'work' : this.stateFor(citizen, moving, afloat || !!citizen.riding);
     if (nextState !== this.state) { this.state = nextState; this.clock = 0; }
 
     // Walk cadence comes from distance travelled; everything else runs on time.
@@ -303,7 +313,7 @@ export class CitizenSprite {
     // The boat of the era while they are on the water; the ride while they
     // ride one. The boat rocks; the vehicles sit on their wheels and the
     // walker's own bob reads as the road. No shadow on the water.
-    const boat = citizen.afloat;
+    const boat = afloat;
     const vehicle: string | null = boat
       ? (this.era >= 5 ? 'fx.hydrofoil' : this.era >= 4 ? 'fx.motorboat' : this.era >= 3 ? 'fx.steamboat' : 'fx.boat')
       : citizen.riding
@@ -311,17 +321,28 @@ export class CitizenSprite {
         : null;
     if (vehicle !== this.vehicleKind) {
       this.vehicleKind = vehicle;
-      if (vehicle) this.vehicle.texture = this.assets.get(vehicle);
+      if (vehicle) { this.vehicle.texture = this.assets.get(vehicle); this.vehicleFront.texture = this.assets.get(`${vehicle}.front`); }
     }
     this.vehicle.visible = vehicle !== null;
+    this.vehicleFront.visible = vehicle !== null;
     this.shadow.visible = !boat;
+    // Seated in it: the body is lifted onto the seat and the near side of
+    // the vehicle covers the legs, so the person reads as riding.
+    const lift = vehicle === null ? 0 : vehicle === 'fx.bike' ? 9 : vehicle.startsWith('fx.car') ? 6 : vehicle === 'fx.pod' ? 6 : vehicle === 'fx.tram' ? 7 : vehicle === 'fx.cart' ? 10 : vehicle === 'fx.steamboat' ? 6 : 5;
+    this.stack.position.y = -lift;
     if (vehicle) {
       const s = this.appearance.scale;
       this.vehicle.scale.set(this.flipped ? -s : s, s);
+      this.vehicleFront.scale.set(this.flipped ? -s : s, s);
       const rock = boat ? Math.sin(this.clock * 2.4 + this.wx) * (this.era >= 5 ? 0.5 : 1.2) : 0;
       // The boat sits lower than the vehicles so its hull shows past the feet.
-      this.vehicle.position.set(0, (boat ? 4 : 1) + rock);
+      const vy = (boat ? 5 : 2) + rock;
+      // The cart's seat is over its big wheel, left of the sprite's middle, so the cart slides right under the rider.
+      const vx = vehicle === 'fx.cart' ? (this.flipped ? -18 : 18) * s : 0;
+      this.vehicle.position.set(vx, vy);
+      this.vehicleFront.position.set(vx, vy);
       this.vehicle.rotation = boat ? Math.sin(this.clock * 1.7 + this.wy) * 0.05 : 0;
+      this.vehicleFront.rotation = this.vehicle.rotation;
     }
 
     // Anyone commuting during the working day is hauling something, held in
@@ -329,7 +350,7 @@ export class CitizenSprite {
     // Held at waist height in front of them, and out of sight when their back
     // is turned. Centred on the chest it just covers the character up.
     const hauling = this.carryKind !== null && moving && citizen.phase === 'working' && this.dir !== 'n'
-      && (!CARRY_ON_ERRAND.has(citizen.job) || citizen.errand);
+      && (!CARRY_ON_ERRAND.has(citizen.job) || citizen.errand) && !citizen.riding && !afloat;
     this.carry.visible = hauling;
     // The rod is out while the fisher stands at the water; the bow is up
     // while the hunter has something in sight.

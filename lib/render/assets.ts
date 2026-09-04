@@ -181,151 +181,158 @@ function activityIcon(kind: 'work' | 'eat' | 'social' | 'sleep' | 'trade'): Pixe
   return p;
 }
 
+/** A filled disc, for wheels and hulls. */
+function disc(p: Pixels, cx: number, cy: number, r: number, color: string) {
+  for (let y = -r; y <= r; y++) {
+    const w = Math.floor(Math.sqrt(r * r - y * y));
+    rect(p, cx - w, cy + y, w * 2 + 1, 1, color);
+  }
+}
+/** A spoked wheel: iron tyre, pale rim, hub, four spokes. */
+function wheel(p: Pixels, cx: number, cy: number, r: number, tyre = '#2a2a2e', rim = '#7a828c') {
+  disc(p, cx, cy, r, tyre);
+  disc(p, cx, cy, r - 2, rim);
+  disc(p, cx, cy, r - 3, '#1e1e22');
+  rect(p, cx - r + 3, cy, r * 2 - 5, 1, rim); rect(p, cx, cy - r + 3, 1, r * 2 - 5, rim);
+  disc(p, cx, cy, 1, '#c8c8c0');
+}
+
 /**
- * The cart a Stables puts under a working adult. Side-on, drawn under the
- * body: a plank bed on two spoked wheels, the shafts reaching forward.
+ * The cart a Stables puts under a working adult, and the horse that pulls it.
+ * Side on, facing right: the rider sits on the box seat over the big wheel,
+ * the horse in harness ahead. The near wheel and the side board come in front
+ * of the rider on the split sprite.
  */
 function cart(): Pixels {
-  const p = surface(22, 12);
-  // Shafts, then the bed, then the wheels over the bed so the axle reads.
-  rect(p, 15, 5, 7, 1, BUILD.timberDark);
-  rect(p, 2, 3, 14, 4, BUILD.timber);
-  rect(p, 2, 3, 14, 1, BUILD.timberLight);
-  rect(p, 2, 6, 14, 1, BUILD.timberDark);
-  rect(p, 3, 1, 3, 2, '#c9b47a');
-  rect(p, 7, 1, 4, 2, '#8f7f4a');
-  for (const cx of [5, 13]) {
-    rect(p, cx - 2, 6, 5, 5, '#3a2a1a');
-    rect(p, cx - 1, 7, 3, 3, '#6b4a2e');
-    rect(p, cx, 8, 1, 1, '#d8b24a');
-  }
+  const p = surface(72, 28);
+  // The horse: a bay, walking.
+  rect(p, 44, 8, 22, 11, '#6b4a2e'); rect(p, 44, 8, 22, 2, '#7c5a3a');
+  rect(p, 62, 3, 8, 9, '#6b4a2e'); rect(p, 66, 1, 4, 6, '#6b4a2e'); rect(p, 67, 0, 2, 2, '#4a3220');
+  rect(p, 60, 2, 5, 8, '#3a2414');
+  rect(p, 42, 7, 3, 9, '#3a2414');
+  for (const [x, dy] of [[46, 0], [51, 2], [57, 1], [62, 0]] as [number, number][]) { rect(p, x, 19, 3, 6 - dy, '#4a3220'); rect(p, x, 24 - dy, 3, 2, '#1e1e22'); }
+  rect(p, 68, 5, 1, 1, '#1e1e22'); rect(p, 63, 12, 3, 2, '#8a6a4e');
+  rect(p, 44, 14, 22, 1, '#2a2a2e'); rect(p, 40, 12, 6, 1, '#2a2a2e');
+  // The cart: shafts, bed, side board, seat, wheels.
+  rect(p, 34, 13, 12, 2, BUILD.timberDark);
+  rect(p, 6, 10, 30, 8, BUILD.timber); rect(p, 6, 10, 30, 1, BUILD.timberLight); rect(p, 6, 17, 30, 1, BUILD.timberDark);
+  rect(p, 8, 12, 26, 1, BUILD.timberDark); rect(p, 8, 15, 26, 1, BUILD.timberDark);
+  rect(p, 24, 6, 10, 4, '#8a5a3a'); rect(p, 24, 6, 10, 1, '#a87a52');
+  rect(p, 8, 7, 12, 3, '#c9b47a'); rect(p, 10, 5, 8, 2, '#b8a469');
+  wheel(p, 14, 20, 7); wheel(p, 32, 21, 5);
   return p;
 }
 
-/**
- * The ferry's boat, drawn under anyone crossing the water: a clinker hull
- * with a pale gunwale and a dark waterline, wide enough to sit a person in.
- */
-function boat(): Pixels {
-  const p = surface(32, 14);
-  // Hull, waterline, then the pale gunwale and the thwart the passenger sits on.
-  rect(p, 4, 5, 24, 6, '#7a4e2a');
-  rect(p, 2, 6, 28, 4, '#7a4e2a');
-  rect(p, 5, 11, 22, 1, '#4a2e18');
-  rect(p, 8, 12, 16, 1, '#2f3f4a');
-  rect(p, 4, 5, 24, 1, '#c99a5e');
-  rect(p, 1, 6, 3, 2, '#c99a5e');
-  rect(p, 28, 6, 3, 2, '#c99a5e');
-  rect(p, 6, 7, 20, 1, '#5e3a20');
-  rect(p, 10, 8, 12, 1, '#5e3a20');
-  rect(p, 14, 3, 4, 2, '#a8843a');
-  return p;
-}
-
-/** The industrial era's rail trolley: a short green carriage on iron wheels, a little chimney up front. */
+/** The industrial era's rail trolley: an open-sided green tram on iron wheels, a chimney up front. */
 function tram(): Pixels {
-  const p = surface(26, 14);
-  rect(p, 2, 3, 20, 8, '#2f5a3a');
-  rect(p, 2, 3, 20, 1, '#5a8a5a');
-  rect(p, 2, 9, 20, 2, '#1e3a26');
-  for (const x of [5, 10, 15]) { rect(p, x, 5, 3, 3, '#1d2a30'); rect(p, x, 5, 3, 1, '#7ab0c0'); }
-  rect(p, 22, 1, 2, 5, '#3a3a3e');
-  rect(p, 21, 0, 4, 1, '#55555a');
-  for (const cx of [6, 18]) { rect(p, cx - 2, 10, 5, 4, '#3a3a3e'); rect(p, cx - 1, 11, 3, 2, '#7a828c'); }
-  rect(p, 0, 11, 26, 1, '#55555a');
+  const p = surface(56, 28);
+  rect(p, 4, 4, 46, 3, '#1e3a26'); rect(p, 2, 6, 50, 1, '#2f5a3a');
+  for (const x of [6, 22, 38, 46]) rect(p, x, 7, 2, 11, '#c9a552');
+  rect(p, 4, 18, 46, 5, '#2f5a3a'); rect(p, 4, 18, 46, 1, '#5a8a5a'); rect(p, 4, 22, 46, 1, '#1e3a26');
+  rect(p, 8, 20, 38, 1, '#c9a552');
+  rect(p, 50, 8, 4, 10, '#3a3a3e'); rect(p, 49, 6, 6, 2, '#55555a');
+  rect(p, 52, 0, 3, 8, '#3a3a3e'); rect(p, 51, 0, 5, 1, '#55555a');
+  rect(p, 0, 23, 56, 1, '#55555a');
+  wheel(p, 12, 24, 4); wheel(p, 26, 24, 4); wheel(p, 40, 24, 4);
+  rect(p, 2, 12, 2, 3, '#ffd07a');
   return p;
 }
 
-/** A bicycle, side on: two wheels, a frame, the handlebars up front. */
+/** A bicycle, side on: two big wheels, a frame, saddle and handlebars, pedals. */
 function bike(): Pixels {
-  const p = surface(22, 12);
-  for (const cx of [5, 17]) {
-    rect(p, cx - 4, 4, 9, 8, '#3a3a3e');
-    rect(p, cx - 3, 5, 7, 6, '#7a828c');
-    rect(p, cx - 2, 6, 5, 4, '#3a3a3e');
-    rect(p, cx - 1, 7, 3, 2, '#c8c8c0');
-  }
-  rect(p, 6, 3, 10, 1, '#c84a4a');
-  rect(p, 9, 1, 1, 6, '#c84a4a');
-  rect(p, 5, 5, 1, 4, '#c84a4a');
-  rect(p, 14, 3, 1, 5, '#c84a4a');
-  rect(p, 16, 0, 3, 1, '#3a3a3e');
-  rect(p, 17, 1, 1, 3, '#3a3a3e');
-  rect(p, 8, 0, 3, 1, '#2a2a2a');
+  const p = surface(40, 22);
+  wheel(p, 9, 14, 7, '#2a2a2e', '#a8a8a0'); wheel(p, 31, 14, 7, '#2a2a2e', '#a8a8a0');
+  // The frame: down tube, seat tube, top tube, chain stay, in red.
+  for (let i = 0; i < 12; i++) rect(p, 12 + i, 14 - i, 2, 1, '#c84a4a');
+  for (let i = 0; i < 10; i++) rect(p, 24 + i, 4 + i, 2, 1, '#c84a4a');
+  rect(p, 14, 3, 12, 2, '#c84a4a');
+  rect(p, 20, 5, 2, 9, '#c84a4a');
+  rect(p, 9, 14, 12, 1, '#c84a4a');
+  rect(p, 17, 1, 8, 2, '#2a2a2e');
+  rect(p, 30, 0, 6, 2, '#2a2a2e'); rect(p, 32, 2, 2, 5, '#3a3a3e');
+  disc(p, 20, 14, 2, '#3a3a3e'); rect(p, 17, 15, 3, 2, '#1e1e22'); rect(p, 21, 11, 3, 2, '#1e1e22');
   return p;
 }
 
-/** A small car in one of three colours, side on. */
+/** A small car in one of three colours, side on, the near door on the front layer. */
 function car(color: string, dark: string): Pixels {
-  const p = surface(28, 13);
-  rect(p, 2, 5, 24, 5, color);
-  rect(p, 7, 2, 13, 4, color);
-  rect(p, 8, 3, 4, 3, '#cfe8f0');
-  rect(p, 14, 3, 5, 3, '#cfe8f0');
-  rect(p, 2, 5, 24, 1, '#ffffff');
-  rect(p, 2, 9, 24, 1, dark);
-  rect(p, 25, 6, 2, 2, '#ffe6a0');
-  rect(p, 1, 6, 2, 2, '#d04040');
-  for (const cx of [7, 21]) { rect(p, cx - 2, 9, 5, 4, '#1e1e22'); rect(p, cx - 1, 10, 3, 2, '#9a9a9a'); }
+  const p = surface(52, 24);
+  rect(p, 2, 10, 48, 9, color);
+  rect(p, 10, 4, 30, 7, color); rect(p, 12, 3, 26, 1, color);
+  rect(p, 13, 5, 10, 5, '#cfe8f0'); rect(p, 26, 5, 12, 5, '#cfe8f0');
+  rect(p, 13, 5, 10, 1, '#f0fbff'); rect(p, 26, 5, 12, 1, '#f0fbff');
+  rect(p, 2, 10, 48, 1, '#ffffff'); rect(p, 2, 18, 48, 1, dark);
+  rect(p, 24, 11, 1, 7, dark); rect(p, 30, 13, 4, 1, dark);
+  rect(p, 47, 12, 3, 3, '#ffe6a0'); rect(p, 1, 12, 3, 3, '#d04040');
+  rect(p, 2, 19, 48, 1, '#2a2a2e');
+  wheel(p, 12, 19, 5, '#1e1e22', '#9a9a9a'); wheel(p, 39, 19, 5, '#1e1e22', '#9a9a9a');
   return p;
 }
 
-/** An autonomous pod: a rounded white capsule on a light strip, no wheels to see. */
+/** An autonomous pod: a white capsule with a wide glass canopy, riding a light strip. No wheels to see. */
 function pod(): Pixels {
-  const p = surface(26, 12);
-  rect(p, 3, 2, 20, 8, '#eef0f4');
-  rect(p, 5, 0, 16, 2, '#eef0f4');
-  rect(p, 1, 4, 24, 4, '#eef0f4');
-  rect(p, 6, 2, 14, 4, '#7fd8e8');
-  rect(p, 6, 2, 14, 1, '#d8f4fa');
-  rect(p, 3, 9, 20, 1, '#5fd6c8');
-  rect(p, 1, 10, 24, 1, '#3fa3a8');
-  rect(p, 2, 6, 22, 1, '#c8ccd8');
+  const p = surface(50, 24);
+  rect(p, 6, 4, 38, 15, '#eef0f4'); rect(p, 10, 1, 30, 3, '#eef0f4'); rect(p, 2, 8, 46, 8, '#eef0f4');
+  rect(p, 12, 3, 26, 8, '#7fd8e8'); rect(p, 14, 2, 22, 1, '#d8f4fa'); rect(p, 12, 3, 26, 1, '#bff0f8');
+  rect(p, 4, 16, 42, 2, '#c8ccd8');
+  rect(p, 6, 19, 38, 1, '#5fd6c8'); rect(p, 3, 20, 44, 1, '#3fa3a8'); rect(p, 8, 21, 34, 1, '#8fe3dc');
+  rect(p, 44, 10, 3, 2, '#ffe6a0'); rect(p, 3, 10, 3, 2, '#ff6060');
   return p;
 }
 
-/** The industrial ferry: an iron hull with a funnel and a plume. */
+/** The ferry's boat: a clinker hull with a pale gunwale, a thwart to sit on, a dark waterline. */
+function boat(): Pixels {
+  const p = surface(56, 22);
+  rect(p, 6, 6, 44, 9, '#7a4e2a'); rect(p, 3, 8, 50, 5, '#7a4e2a');
+  rect(p, 8, 15, 40, 2, '#4a2e18'); rect(p, 12, 17, 32, 1, '#2f3f4a');
+  rect(p, 6, 6, 44, 1, '#c99a5e'); rect(p, 1, 8, 4, 2, '#c99a5e'); rect(p, 51, 8, 4, 2, '#c99a5e');
+  rect(p, 10, 9, 36, 1, '#5e3a20'); rect(p, 14, 12, 28, 1, '#5e3a20');
+  rect(p, 20, 3, 16, 3, '#a8843a');
+  rect(p, 0, 18, 56, 1, '#cfe8f0');
+  return p;
+}
+
+/** The industrial ferry: an iron hull, a paddle wheel, a funnel with a plume. */
 function steamboat(): Pixels {
-  const p = surface(34, 16);
-  rect(p, 3, 8, 28, 5, '#3a3a3e');
-  rect(p, 1, 9, 32, 3, '#3a3a3e');
-  rect(p, 5, 13, 24, 1, '#22262a');
-  rect(p, 9, 14, 16, 1, '#2f3f4a');
-  rect(p, 3, 8, 28, 1, '#c84a4a');
-  rect(p, 8, 5, 18, 3, '#d8d0b8');
-  rect(p, 14, 0, 4, 5, '#2a2a2e');
-  rect(p, 13, 0, 6, 1, '#c84a4a');
-  rect(p, 10, 6, 3, 1, '#1d2a30'); rect(p, 20, 6, 3, 1, '#1d2a30');
-  rect(p, 19, 0, 3, 2, '#a8a8a8'); rect(p, 22, 0, 2, 1, '#c8c8c8');
+  const p = surface(60, 28);
+  rect(p, 6, 14, 48, 7, '#3a3a3e'); rect(p, 2, 16, 56, 4, '#3a3a3e');
+  rect(p, 10, 21, 40, 2, '#22262a'); rect(p, 16, 23, 28, 1, '#2f3f4a');
+  rect(p, 6, 14, 48, 1, '#c84a4a');
+  rect(p, 14, 9, 30, 5, '#d8d0b8'); rect(p, 14, 9, 30, 1, '#ece8dc');
+  for (const x of [17, 24, 31, 38]) rect(p, x, 10, 3, 3, '#1d2a30');
+  rect(p, 26, 0, 6, 9, '#2a2a2e'); rect(p, 25, 0, 8, 2, '#c84a4a');
+  rect(p, 33, 0, 5, 3, '#a8a8a8'); rect(p, 38, 0, 4, 2, '#c8c8c8');
+  disc(p, 50, 18, 6, '#c84a4a'); disc(p, 50, 18, 4, '#3a3a3e'); rect(p, 44, 18, 12, 1, '#c84a4a'); rect(p, 50, 12, 1, 12, '#c84a4a');
+  rect(p, 0, 24, 60, 1, '#cfe8f0');
   return p;
 }
 
-/** The modern ferry: a white motorboat with a low cabin and a wake. */
+/** The modern ferry: a white motorboat with a low cabin, a rail, and a wake. */
 function motorboat(): Pixels {
-  const p = surface(34, 14);
-  rect(p, 3, 7, 28, 5, '#f0f0ea');
-  rect(p, 1, 8, 32, 3, '#f0f0ea');
-  rect(p, 3, 7, 28, 1, '#3a5a9a');
-  rect(p, 5, 12, 24, 1, '#b8bcc0');
-  rect(p, 8, 13, 18, 1, '#cfe8f0');
-  rect(p, 9, 3, 14, 4, '#f0f0ea');
-  rect(p, 10, 4, 12, 2, '#7fd8e8');
-  rect(p, 24, 5, 3, 2, '#3a5a9a');
-  rect(p, 0, 9, 2, 1, '#cfe8f0');
+  const p = surface(56, 24);
+  rect(p, 6, 12, 44, 7, '#f0f0ea'); rect(p, 2, 14, 52, 4, '#f0f0ea');
+  rect(p, 6, 12, 44, 1, '#3a5a9a'); rect(p, 10, 19, 36, 2, '#b8bcc0'); rect(p, 14, 21, 28, 1, '#cfe8f0');
+  rect(p, 16, 5, 22, 7, '#f0f0ea'); rect(p, 18, 6, 18, 4, '#7fd8e8'); rect(p, 18, 6, 18, 1, '#d8f4fa');
+  rect(p, 40, 8, 6, 4, '#3a5a9a'); rect(p, 6, 9, 10, 1, '#b8bcc0'); for (const x of [7, 11, 15]) rect(p, x, 9, 1, 3, '#b8bcc0');
+  rect(p, 0, 16, 3, 1, '#cfe8f0'); rect(p, 0, 22, 56, 1, '#cfe8f0');
   return p;
 }
 
-/** The AI era's ferry: a hydrofoil, hull lifted clear on two struts, a light strip along it. */
+/** The AI era's ferry: a hydrofoil, hull lifted on two struts, a light strip along the side. */
 function hydrofoil(): Pixels {
-  const p = surface(36, 16);
-  rect(p, 4, 4, 28, 5, '#eef0f4');
-  rect(p, 2, 5, 32, 3, '#eef0f4');
-  rect(p, 9, 1, 16, 3, '#eef0f4');
-  rect(p, 10, 2, 14, 2, '#7fd8e8');
-  rect(p, 4, 9, 28, 1, '#5fd6c8');
-  rect(p, 8, 10, 2, 4, '#c8ccd8'); rect(p, 26, 10, 2, 4, '#c8ccd8');
-  rect(p, 4, 14, 28, 1, '#b8c4d0');
-  rect(p, 6, 15, 24, 1, '#cfe8f0');
+  const p = surface(60, 26);
+  rect(p, 6, 8, 48, 8, '#eef0f4'); rect(p, 2, 10, 56, 4, '#eef0f4'); rect(p, 14, 3, 30, 5, '#eef0f4');
+  rect(p, 16, 4, 26, 3, '#7fd8e8'); rect(p, 16, 4, 26, 1, '#d8f4fa');
+  rect(p, 6, 16, 48, 1, '#5fd6c8'); rect(p, 8, 17, 44, 1, '#c8ccd8');
+  rect(p, 14, 18, 3, 6, '#c8ccd8'); rect(p, 43, 18, 3, 6, '#c8ccd8');
+  rect(p, 6, 24, 48, 1, '#b8c4d0'); rect(p, 10, 25, 40, 1, '#cfe8f0');
+  return p;
+}
+
+/** The rows of a sprite from `cut` down, as their own sprite: the part of a vehicle in front of its rider. */
+function frontOf(pixels: Pixels, cut: number): Pixels {
+  const p = surface(pixels.w, pixels.h);
+  p.ctx.drawImage(pixels.canvas, 0, cut, pixels.w, pixels.h - cut, 0, cut, pixels.w, pixels.h - cut);
   return p;
 }
 
@@ -550,17 +557,21 @@ export function loadAssets(): AssetLibrary {
   for (let f = 0; f < 3; f++) put(`fx.splash.${f}`, splashRing(f));
   for (const kind of ['crate', 'sack', 'log', 'loaf', 'cloth', 'fish', 'game', 'basket'] as const) put(`fx.carry.${kind}`, carried(kind));
   put('fx.rod', fishingRod());
-  put('fx.cart', cart());
-  put('fx.boat', boat());
-  put('fx.tram', tram());
-  put('fx.bike', bike());
-  put('fx.car.0', car('#c84a4a', '#7a2a2a'));
-  put('fx.car.1', car('#3a5a9a', '#22365e'));
-  put('fx.car.2', car('#e0c060', '#8a7430'));
-  put('fx.pod', pod());
-  put('fx.steamboat', steamboat());
-  put('fx.motorboat', motorboat());
-  put('fx.hydrofoil', hydrofoil());
+  // Every vehicle in two layers: the whole thing behind the rider, and the
+  // part below the cut in front of them, so a person sits in a car or a
+  // boat and astride a bike rather than standing on top of it.
+  const vehicle = (name: string, pixels: Pixels, cut: number) => { put(name, pixels); put(`${name}.front`, frontOf(pixels, cut)); };
+  vehicle('fx.cart', cart(), 10);
+  vehicle('fx.boat', boat(), 8);
+  vehicle('fx.tram', tram(), 17);
+  vehicle('fx.bike', bike(), 8);
+  vehicle('fx.car.0', car('#c84a4a', '#7a2a2a'), 10);
+  vehicle('fx.car.1', car('#3a5a9a', '#22365e'), 10);
+  vehicle('fx.car.2', car('#e0c060', '#8a7430'), 10);
+  vehicle('fx.pod', pod(), 11);
+  vehicle('fx.steamboat', steamboat(), 14);
+  vehicle('fx.motorboat', motorboat(), 12);
+  vehicle('fx.hydrofoil', hydrofoil(), 8);
   for (let f = 0; f < 4; f++) put(`fx.funnel.${f}`, funnel(f));
   put('fx.torch.0', torch(0));
   put('fx.torch.1', torch(1));
