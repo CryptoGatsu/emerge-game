@@ -12,12 +12,13 @@ import 'server-only';
  * worth a transaction, after each charge and on demand.
  */
 
-import { chargeSplit, CHARGE_VAULT_SHARE } from '../chain/vault';
+import { chargeSplit, CHARGE_VAULT_SHARE, CHARGE_DIVIDEND_SHARE } from '../chain/vault';
 import { serverKey } from '../limits';
 import { counter, incrBy, push, range, releaseLock, takeLock } from './kv';
 import { burnFromVault, vaultCanSign } from './signer';
 
 const RECEIVED = serverKey('vault:received');
+export const DIVIDEND_POOL = serverKey('dividend:pool');
 const OWED = serverKey('vault:owed-burn');
 const BURNED = serverKey('vault:burned');
 const BURNS = serverKey('vault:burns');
@@ -32,6 +33,7 @@ export async function noteCharge(whole: number): Promise<void> {
   if (split.whole <= 0) return;
   await incrBy(RECEIVED, split.whole);
   await incrBy(OWED, split.burned);
+  if (split.dividend > 0) await incrBy(DIVIDEND_POOL, split.dividend);
   void sweepBurn().catch(() => {});
 }
 
@@ -40,11 +42,8 @@ export async function noteCharge(whole: number): Promise<void> {
  * half of it is owed to the burn address like a charge's share is.
  */
 export async function noteHold(whole: number): Promise<void> {
-  const held = Math.floor(whole);
-  if (held <= 0) return;
-  await incrBy(RECEIVED, held);
-  await incrBy(OWED, Math.floor(held / 2));
-  void sweepBurn().catch(() => {});
+  // Split the same way a charge is.
+  await noteCharge(whole);
 }
 
 export interface VaultBook {
@@ -56,17 +55,20 @@ export interface VaultBook {
   owed: number;
   /** Burned from the vault, ever. */
   burned: number;
+  /** The dividend pool waiting for the week's settlement, in $EMERGE. */
+  dividendPool: number;
   share: number;
+  dividendShare: number;
   /** Whether this deployment can burn from the vault at all. */
   automatic: boolean;
   burns: { txHash: string; whole: number; at: number }[];
 }
 
 export async function vaultBook(): Promise<VaultBook> {
-  const [received, owed, burned, lines] = await Promise.all([counter(RECEIVED), counter(OWED), counter(BURNED), range(BURNS)]);
+  const [received, owed, burned, lines, dividendPool] = await Promise.all([counter(RECEIVED), counter(OWED), counter(BURNED), range(BURNS), counter(DIVIDEND_POOL)]);
   const burns = lines.map((l) => { try { return JSON.parse(l) as { txHash: string; whole: number; at: number }; } catch { return null; } })
     .filter((x): x is { txHash: string; whole: number; at: number } => !!x);
-  return { received, kept: received - owed - burned, owed, burned, share: CHARGE_VAULT_SHARE, automatic: vaultCanSign(), burns };
+  return { received, kept: received - owed - burned - dividendPool, owed, burned, dividendPool, share: CHARGE_VAULT_SHARE, dividendShare: CHARGE_DIVIDEND_SHARE, automatic: vaultCanSign(), burns };
 }
 
 export type Sweep = { ok: true; burned: number; txHash: string | null } | { ok: false; reason: string };

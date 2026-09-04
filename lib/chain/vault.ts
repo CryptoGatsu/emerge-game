@@ -179,11 +179,26 @@ export const DAILY_EARN_CEILING = WALLET_DAILY_CEILING;
  * burned, a quarter kept.
  */
 export const CHARGE_VAULT_SHARE = 0.25;
+/**
+ * The dividend: a share of every charge set aside, swapped into GLD once a
+ * week and paid to the people who hold land and the people who hold the
+ * token. The burn takes what is left, so the three add up to the charge.
+ */
+export const CHARGE_DIVIDEND_SHARE = 0.15;
+export const CHARGE_BURN_SHARE = 1 - CHARGE_VAULT_SHARE - CHARGE_DIVIDEND_SHARE;
 export const chargeSplit = (cost: number) => {
   const whole = Math.max(0, Math.floor(cost));
   const kept = Math.floor(whole * CHARGE_VAULT_SHARE);
-  return { whole, kept, burned: whole - kept };
+  const dividend = Math.floor(whole * CHARGE_DIVIDEND_SHARE);
+  return { whole, kept, dividend, burned: whole - kept - dividend };
 };
+/** How the dividend pool is shared out each week. */
+export const DIVIDEND_LAND_SHARE = 0.55;
+export const DIVIDEND_STAKE_SHARE = 0.15;
+export const DIVIDEND_DEV_SHARE = 0.3;
+/** Soft stake: a registered wallet's lowest balance through the week counts, above a floor and up to a cap. */
+export const STAKE_MIN_EMERGE = 100_000;
+export const STAKE_CAP_EMERGE = 5_000_000;
 
 /** Boons: paid for in $EMERGE, applied to the world at once. */
 export type BoonKind = 'settlers' | 'shipment' | 'restore' | 'monument' | 'banner';
@@ -681,7 +696,7 @@ export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
     ...ledger,
     balance: ledger.balance - cost,
     burnedEmerge: ledger.burnedEmerge + split.burned,
-    fundedEmerge: (ledger.fundedEmerge ?? 0) + split.kept,
+    fundedEmerge: (ledger.fundedEmerge ?? 0) + split.kept + split.dividend,
   };
 }
 

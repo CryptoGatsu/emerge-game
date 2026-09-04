@@ -1,6 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
@@ -344,11 +344,11 @@ export default function Wiki() {
         <section id="costs">
           <h2>What things cost</h2>
           <p>
-            <b>Every charge goes into the vault, and three quarters of it is burned there.</b> Not sent to
+            <b>Every charge goes into the vault, and most of it is burned there.</b> Not sent to
             us, not collected by anybody: one transfer into the vault at {shortAddress(VAULT_ADDRESS)},
-            of which the vault burns {pct(1 - CHARGE_VAULT_SHARE)} itself, from its own key, so the
-            supply falls with every charge, and keeps {pct(CHARGE_VAULT_SHARE)} to pay withdrawals
-            from. What players spend is what players are paid from, and the book is public at{' '}
+            of which the vault burns {pct(CHARGE_BURN_SHARE)} itself, from its own key, so the
+            supply falls with every charge, keeps {pct(CHARGE_VAULT_SHARE)} to pay withdrawals
+            from, and sets {pct(CHARGE_DIVIDEND_SHARE)} aside for the weekly GLD dividend. What players spend is what players are paid from, and the book is public at{' '}
             <code>/api/vault</code>: paid in, kept, owed to the burn address, burned, and the burn
             transactions. There is no address the project takes a cut into, because there is no cut.
           </p>
@@ -518,6 +518,18 @@ export default function Wiki() {
             {TOKEN.ticker} for a new plot, {n(charterCost(10, 5))} for a top city, the same bargain at
             every level. Buying another while one runs adds the days on. It is recorded on the claim
             row, so it follows the plot to any device and the payout route counts it.
+          </p>
+          <h3>The GLD dividend</h3>
+          <p>
+            {pct(CHARGE_DIVIDEND_SHARE)} of every charge is set aside in a pool. Each Monday the
+            vault sends {pct(DIVIDEND_DEV_SHARE)} of it to development, swaps the rest into GLD on
+            Robinhood Chain, and books the GLD to holders: {pct(DIVIDEND_LAND_SHARE)} to land,
+            weighted by the level each plot is judged at and the days its owner was present that
+            week; {pct(DIVIDEND_STAKE_SHARE)} to <b>soft stakes</b>, which are a registration rather
+            than a lock: register once on the Bank&rsquo;s DIVIDENDS card and your lowest{' '}
+            {TOKEN.ticker} balance through the week counts, from {n(STAKE_MIN_EMERGE)} up. Sell
+            mid-week and the week is forfeited. GLD waits under your wallet until you claim it, and
+            the vault sends it. The settlements are on the public book at <code>/api/dividend</code>.
           </p>
           <h3>Judged, not reported</h3>
           <p>

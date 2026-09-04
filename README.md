@@ -513,6 +513,22 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.4: the GLD dividend. `chargeSplit` is three-way (`CHARGE_BURN_SHARE` 60%,
+`CHARGE_VAULT_SHARE` 25%, `CHARGE_DIVIDEND_SHARE` 15%); `noteCharge` books the
+dividend share into `dividend:pool`. `lib/server/dividend.ts`: soft-stake
+registration, daily balance sampling (`sampleBalances`, the week's lowest
+balance per staker), weekly `settleEpoch` (the development share to
+`EMERGE_DEV_ADDRESS` or booked as owed, the rest swapped to GLD through
+`swapForGld` in the signer, then `shareOut` by `landWeights` and
+`stakeWeights`, booked as claimable base units), and `claimGld` paid by
+`sendTokenFromVault`. `GET /api/dividend` is the book and a wallet's standing;
+`?sample=1` and `?settle=1` with `EMERGE_CRON_SECRET` (or Vercel's
+`CRON_SECRET`) are the crons in `vercel.json`. `NEXT_PUBLIC_GLD_TOKEN` and
+`NEXT_PUBLIC_SWAP_ROUTER` default to the GLD contract and the Uniswap router
+on Robinhood Chain; `EMERGE_SWAP_KIND` (`v2`, the default, or `v3`) and
+`EMERGE_SWAP_FEE` pick the router's shape. Without a live token the
+settlement is simulated in $EMERGE units so the flow can be exercised.
+
 v2.3: stewardship is judged on the server (`judgedFor` in
 `lib/server/land.ts`): the level is `min(cityLevel(published), 1 + presenceDays / 3)`
 with presence days recorded by the heartbeat (`presenceDays`, `lastSeenAt` in

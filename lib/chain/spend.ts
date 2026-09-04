@@ -146,13 +146,13 @@ export async function settleBurn(
   ledger: VaultLedger,
   cost: number,
   address: string,
-  split?: { kept: number; burned: number },
+  split?: { kept: number; burned: number; dividend: number },
 ): Promise<VaultLedger> {
   const fresh = await tokenBalance(address);
   return {
     ...ledger,
     balance: fresh ?? Math.max(0, ledger.balance - cost),
     burnedEmerge: ledger.burnedEmerge + (split ? split.burned : cost),
-    fundedEmerge: (ledger.fundedEmerge ?? 0) + (split ? split.kept : 0),
+    fundedEmerge: (ledger.fundedEmerge ?? 0) + (split ? split.kept + split.dividend : 0),
   };
 }

@@ -17,6 +17,17 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.4',
+    date: '2026-09-09',
+    title: 'The GLD dividend',
+    notes: [
+      'Every charge now splits three ways: 60% burned by the vault, 25% kept to pay withdrawals, 15% set aside in a dividend pool. Withdrawal holds split the same way.',
+      'Each Monday the vault sends 30% of the pool to development, swaps the rest into GLD on Robinhood Chain, and books the GLD to holders: 55% to land, weighted by the level each plot is judged at and the days its owner was present that week; 15% to soft stakes.',
+      'A soft stake is a registration, not a lock. Register once on the Bank’s DIVIDENDS card, and your lowest $EMERGE balance through the week counts, from 100,000 up to a cap of 5,000,000. Sell mid-week and the week is forfeited; nothing else changes.',
+      'GLD waits under your wallet until you claim it, and the vault sends it. The pool, your land weight, your stake and your GLD are all on the card, and the settlements are on the public book.',
+    ],
+  },
+  {
     version: '2.3',
     date: '2026-09-08',
     title: 'The flywheel, judged: every improvement counts, every charge feeds the vault, and the vault pays what it can see',
@@ -145,6 +156,17 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.4',
+    date: '2026-09-09',
+    title: 'GLD 分红',
+    notes: [
+      '每笔收费现在三分：60% 由金库销毁，25% 留作提现，15% 进入分红池。提现扣留部分同样分配。',
+      '每周一金库把分红池的 30% 送往开发，其余在 Robinhood Chain 上兑换成 GLD，并记到持有者名下：55% 归土地，按每块地被裁定的等级和主人当周在场天数加权；15% 归软质押。',
+      '软质押是登记，不是锁仓。在银行的"分红"卡片登记一次，你整周的最低 $EMERGE 余额即计入，100,000 起，上限 5,000,000。周中卖出即放弃本周；其他一切不变。',
+      'GLD 记在你的钱包名下，直到你领取，由金库发送。分红池、你的土地权重、你的质押和你的 GLD 都在卡片上，结算记录在公开账本上。',
+    ],
+  },
   {
     version: '2.3',
     date: '2026-09-08',

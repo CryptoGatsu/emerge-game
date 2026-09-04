@@ -26,6 +26,8 @@ import {
   advanceCost, charterCost, HIRE_FEE_EMERGE,
 } from '@/lib/chain/vault';
 import { EMBLEMS, EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
+import { claimDividend, fetchDividend, registerSoftStake, type DividendStanding } from '@/lib/net/dividend';
+import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
 import { spend as spendEmerge } from '@/lib/chain/spend';
 import { Sparkline } from './Sparkline';
 import {
@@ -1369,23 +1371,46 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
   onRaiseCity: () => string | null;
   onFestival: () => string | null;
 }) {
+  const { wallet } = useWallet();
   const [cityNote, setCityNote] = useState<string | null>(null);
   const city = view.city;
   // The vault's book, so the loop is visible: what players paid in, what the
   // vault burned, what it keeps to pay withdrawals with.
-  const [book, setBook] = useState<{ received: number; kept: number; owed: number; burned: number; automatic: boolean } | null>(null);
+  const [book, setBook] = useState<{ received: number; kept: number; owed: number; burned: number; dividendPool: number; automatic: boolean } | null>(null);
+  const [dividend, setDividend] = useState<DividendStanding | null>(null);
+  const [dividendNote, setDividendNote] = useState<string | null>(null);
+  const [dividendBusy, setDividendBusy] = useState(false);
   useEffect(() => {
     let live = true;
     fetch('/api/vault').then((r) => (r.ok ? r.json() : null)).then((b) => { if (live && b && typeof b.received === 'number') setBook(b); }).catch(() => {});
+    void fetchDividend(wallet.address).then((d) => { if (live && d) setDividend(d); });
     return () => { live = false; };
-  }, []);
+  }, [wallet.address]);
+  const gld = (units: string) => { try { const n = Number(BigInt(units) / 10n ** 14n) / 10_000; return n.toLocaleString(undefined, { maximumFractionDigits: 4 }); } catch { return units; } };
+  const stakeNow = async () => {
+    if (!wallet.address) return;
+    setDividendBusy(true); setDividendNote(null);
+    const r = await registerSoftStake(wallet.address);
+    setDividendBusy(false);
+    if (!r.ok) { setDividendNote(r.error); return; }
+    setDividend(r.standing);
+    setDividendNote(t('Registered. Your lowest balance each week counts, from the next daily sample.'));
+  };
+  const claimNow = async () => {
+    if (!wallet.address) return;
+    setDividendBusy(true); setDividendNote(null);
+    const r = await claimDividend(wallet.address);
+    setDividendBusy(false);
+    if (!r.ok) { setDividendNote(r.error); return; }
+    setDividend(r.standing);
+    setDividendNote(r.txHash ? t('Sent from the vault: {tx}…', { tx: r.txHash.slice(0, 10) }) : t('Claimed. This build has no live token, so the GLD is booked rather than sent.'));
+  };
   const [depositAmount, setDepositAmount] = useState('100000');
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | null>(null);
   const [history, setHistory] = useState<PayoutHistory | null>(null);
-  const { wallet } = useWallet();
   const ledger = player.ledger;
   const steward = view.stewardship;
   useLocale();
@@ -1553,7 +1578,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
         <span className="eyebrow">{t('THE FLYWHEEL')}</span>
         <h3>{t('What players spend is what players are paid from')}</h3>
         <p className="muted small">
-          {t('Every {ticker} charged in the game is paid into the vault. The vault burns {burn}% of it, so the supply falls with every charge, and keeps {keep}% to pay withdrawals from. Stewardship is paid out of the same vault. The book is public.', { ticker: TOKEN.ticker, burn: Math.round((1 - CHARGE_VAULT_SHARE) * 100), keep: Math.round(CHARGE_VAULT_SHARE * 100) })}
+          {t('Every {ticker} charged in the game is paid into the vault. The vault burns {burn}% of it, so the supply falls with every charge, keeps {keep}% to pay withdrawals from, and sets {div}% aside for the weekly GLD dividend. Stewardship is paid out of the same vault. The book is public.', { ticker: TOKEN.ticker, burn: Math.round(CHARGE_BURN_SHARE * 100), keep: Math.round(CHARGE_VAULT_SHARE * 100), div: Math.round(CHARGE_DIVIDEND_SHARE * 100) })}
         </p>
         {book && (
           <div className="flywheel-grid">
@@ -1561,8 +1586,35 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
             <div><span>{t('BURNED BY THE VAULT')}</span><b>{book.burned.toLocaleString()}</b></div>
             <div><span>{t('KEPT FOR WITHDRAWALS')}</span><b>{book.kept.toLocaleString()}</b></div>
             <div><span>{t('OWED TO THE BURN')}</span><b>{book.owed.toLocaleString()}</b></div>
+            <div><span>{t('DIVIDEND POOL THIS WEEK')}</span><b>{(book.dividendPool ?? 0).toLocaleString()}</b></div>
           </div>
         )}
+      </div>
+
+      <div className="connect-card dividend-card">
+        <span className="eyebrow">{t('DIVIDENDS')}</span>
+        <h3>{t('Paid in GLD, every week')}</h3>
+        <p className="muted small">
+          {t('{pct}% of every charge goes into a pool. Each Monday the vault sends {dev}% of it to development, swaps the rest into GLD, and books the GLD to holders: {land}% to land, weighted by the level each plot is judged at and the days you were present; {stake}% to soft stakes, weighted by the lowest {ticker} balance held through the week, from {min} up. Nothing is locked; selling mid-week forfeits the week. Claim it here whenever you like.', { pct: Math.round(CHARGE_DIVIDEND_SHARE * 100), dev: Math.round(DIVIDEND_DEV_SHARE * 100), land: Math.round(DIVIDEND_LAND_SHARE * 100), stake: Math.round(DIVIDEND_STAKE_SHARE * 100), ticker: TOKEN.ticker, min: STAKE_MIN_EMERGE.toLocaleString() })}
+        </p>
+        {dividend && (
+          <div className="flywheel-grid">
+            <div><span>{t('THIS WEEK’S POOL')}</span><b>{dividend.pool.toLocaleString()} {TOKEN.ticker}</b></div>
+            <div><span>{t('YOUR LAND WEIGHT')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present', { n: dividend.presentDays })}</em></div>
+            <div><span>{t('YOUR SOFT STAKE')}</span><b>{dividend.registered ? (dividend.lowBalance === null ? t('registered') : dividend.lowBalance.toLocaleString()) : t('not registered')}</b></div>
+            <div><span>{t('GLD TO CLAIM')}</span><b>{gld(dividend.claimable)}</b></div>
+          </div>
+        )}
+        <div className="dividend-actions">
+          {dividend && !dividend.registered && (
+            <button onClick={() => void stakeNow()} disabled={dividendBusy || !wallet.address}>{wallet.address ? t('Register a soft stake') : t('Connect a wallet first')}</button>
+          )}
+          <button onClick={() => void claimNow()} disabled={dividendBusy || !wallet.address || !dividend || dividend.claimable === '0'}>{t('Claim GLD')}</button>
+        </div>
+        {dividend && dividend.settlements.length > 0 && (
+          <p className="muted small">{t('Last settlement: {epoch}, {pool} {ticker} pooled, {n} land holders and {m} stakers paid.', { epoch: dividend.settlements[dividend.settlements.length - 1].epoch, pool: dividend.settlements[dividend.settlements.length - 1].pool.toLocaleString(), ticker: TOKEN.ticker, n: dividend.settlements[dividend.settlements.length - 1].landHolders, m: dividend.settlements[dividend.settlements.length - 1].stakers })}</p>
+        )}
+        {dividendNote && <p className="muted small">{dividendNote}</p>}
       </div>
 
       <div className="connect-card city-card">
@@ -2256,7 +2308,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
           <span className="eyebrow">{t('SUPPLIES')}</span>
           <h3>{t('Paid in {ticker}, delivered at once', { ticker: TOKEN.ticker })}</h3>
           <p className="muted small">
-            {t('Every charge in the game goes into the vault: {pct}% is burned by the vault and the rest stays there to pay withdrawals, so what players spend is what players are paid from.', { pct: Math.round((1 - CHARGE_VAULT_SHARE) * 100) })}
+            {t('Every charge in the game goes into the vault: {pct}% is burned by the vault, {keep}% stays to pay withdrawals and {div}% goes to the weekly GLD dividend, so what players spend is what players are paid from.', { pct: Math.round(CHARGE_BURN_SHARE * 100), keep: Math.round(CHARGE_VAULT_SHARE * 100), div: Math.round(CHARGE_DIVIDEND_SHARE * 100) })}
           </p>
           <div className="boon-rows">
             {BOONS.map((b) => (

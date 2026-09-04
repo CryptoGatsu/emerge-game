@@ -60,6 +60,15 @@ import { presenceDays, markBanner } from '@/lib/server/registry';
 import { isEmblem } from '@/lib/world/emblems';
 import { advanceCost, charterCost } from '@/lib/world/eras';
 import { HIRE_FEE_EMERGE, resaleFee } from '@/lib/chain/vault';
+import { noteCharge } from '@/lib/server/treasury';
+
+/**
+ * Without a live token nothing is verified on chain, so nothing would ever
+ * reach the vault's book; booking the price as if paid keeps the flywheel,
+ * the dividend and their panels exercisable before launch. Never runs once
+ * a token is configured: then only a verified payment is booked.
+ */
+const bookDev = async (cost: number) => { if (!tokenLive()) await noteCharge(cost).catch(() => {}); };
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
@@ -325,6 +334,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
+    await bookDev(cost);
     // A banner is recorded on the row, so the world map flies it.
     if (kind === 'banner') {
       if (!isEmblem(body.emblem)) return NextResponse.json({ error: 'Choose an emblem.' }, { status: 400 });
@@ -380,6 +390,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
     }
+    await bookDev(price);
     try {
       const result = await markCover(seed, owner, kind, span);
       if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });

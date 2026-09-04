@@ -840,6 +840,11 @@ export async function presenceDays(who: string): Promise<number> {
   const rows = await hgetall(seenDaysKey(who));
   return Object.keys(rows).length;
 }
+/** How many of the UTC days in [fromDay, toDay) somebody was present on. */
+export async function presenceDaysBetween(who: string, fromDay: number, toDay: number): Promise<number> {
+  const rows = await hgetall(seenDaysKey(who));
+  return Object.keys(rows).filter((d) => { const n = Number(d); return n >= fromDay && n < toDay; }).length;
+}
 /** When somebody last had a world open, in wall-clock ms, or 0. */
 export async function lastSeenAt(seed: number, who: string): Promise<number> {
   const at = await hget(presenceKey(seed), who);

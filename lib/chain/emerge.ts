@@ -479,6 +479,13 @@ export const BURN_ADDRESS =
 export const VAULT_ADDRESS =
   process.env.NEXT_PUBLIC_EMERGE_VAULT ?? '0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062';
 
+/**
+ * GLD on Robinhood Chain, and the router the vault swaps through for the
+ * weekly dividend. Both overridable without a code change.
+ */
+export const GLD_ADDRESS = process.env.NEXT_PUBLIC_GLD_TOKEN ?? '0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e';
+export const SWAP_ROUTER = process.env.NEXT_PUBLIC_SWAP_ROUTER ?? '0x8876789976decbfcbbbe364623c63652db8c0904';
+
 /** True once there is somewhere for deposited tokens to actually go. */
 export const vaultLive = (config: ChainConfig = ACTIVE_CHAIN) =>
   tokenLive(config) && /^0x[0-9a-fA-F]{40}$/.test(VAULT_ADDRESS);

@@ -30,7 +30,7 @@ import 'server-only';
 
 import { createPublicClient, createWalletClient, defineChain, http, parseUnits, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
+import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
 
@@ -248,6 +248,112 @@ export async function burnFromVault(whole: number): Promise<SendResult> {
     return { ok: true, txHash };
   } catch {
     return { ok: false, problem: 'The burn could not be sent.' };
+  } finally {
+    await releaseLock(NONCE_LOCK);
+  }
+}
+
+const ERC20_APPROVE = [
+  { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ type: 'uint256' }] },
+] as const;
+const ROUTER_V2 = [
+  { type: 'function', name: 'getAmountsOut', stateMutability: 'view', inputs: [{ name: 'amountIn', type: 'uint256' }, { name: 'path', type: 'address[]' }], outputs: [{ type: 'uint256[]' }] },
+  { type: 'function', name: 'swapExactTokensForTokens', stateMutability: 'nonpayable', inputs: [{ name: 'amountIn', type: 'uint256' }, { name: 'amountOutMin', type: 'uint256' }, { name: 'path', type: 'address[]' }, { name: 'to', type: 'address' }, { name: 'deadline', type: 'uint256' }], outputs: [{ type: 'uint256[]' }] },
+] as const;
+const ROUTER_V3 = [
+  {
+    type: 'function', name: 'exactInputSingle', stateMutability: 'payable',
+    inputs: [{ name: 'params', type: 'tuple', components: [
+      { name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'recipient', type: 'address' },
+      { name: 'amountIn', type: 'uint256' }, { name: 'amountOutMinimum', type: 'uint256' }, { name: 'sqrtPriceLimitX96', type: 'uint160' },
+    ] }],
+    outputs: [{ type: 'uint256' }],
+  },
+] as const;
+
+export type TokenSend = { ok: true; txHash: string } | { ok: false; problem: string };
+
+/** Send any ERC-20 the vault holds, in base units. GLD dividends go out this way. */
+export async function sendTokenFromVault(tokenAddress: string, to: string, units: bigint): Promise<TokenSend> {
+  const key = vaultKey();
+  if (!key) return { ok: false, problem: 'The vault is not configured to pay out.' };
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to) || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) return { ok: false, problem: 'That is not an address.' };
+  if (!(units > 0n)) return { ok: false, problem: 'There is nothing to send.' };
+  if (!(await takeLock(NONCE_LOCK, LOCK_SECONDS))) return { ok: false, problem: 'The vault is sending something else. Try again in a moment.' };
+  try {
+    const account = privateKeyToAccount(key);
+    const client = reader();
+    const wallet = createWalletClient({ account, chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+    const held = await client.readContract({ address: tokenAddress as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
+    if (held < units) return { ok: false, problem: 'The vault holds less than that.' };
+    const nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
+    const txHash = await wallet.writeContract({ address: tokenAddress as Hex, abi: ERC20, functionName: 'transfer', args: [to as Hex, units], nonce });
+    return { ok: true, txHash };
+  } catch {
+    return { ok: false, problem: 'The transfer could not be sent.' };
+  } finally {
+    await releaseLock(NONCE_LOCK);
+  }
+}
+
+export type Swap = { ok: true; txHash: string; received: bigint } | { ok: false; problem: string };
+
+/**
+ * Swap $EMERGE the vault holds into GLD through the router.
+ *
+ * Uniswap's V2 shape by default (`swapExactTokensForTokens`, floored at
+ * three percent under `getAmountsOut`); set `EMERGE_SWAP_KIND=v3` for the V3
+ * router's `exactInputSingle` (fee tier from `EMERGE_SWAP_FEE`, default 3000).
+ * What was received is measured from the vault's GLD balance before and
+ * after, which is the one figure that does not depend on the router's
+ * return value.
+ */
+export async function swapForGld(wholeEmerge: number): Promise<Swap> {
+  const key = vaultKey();
+  if (!key) return { ok: false, problem: 'The vault is not configured to sign.' };
+  if (!token()) return { ok: false, problem: `No ${TOKEN.ticker} contract is configured.` };
+  const amount = Math.floor(wholeEmerge);
+  if (!(amount > 0)) return { ok: false, problem: 'There is nothing to swap.' };
+  if (!/^0x[0-9a-fA-F]{40}$/.test(SWAP_ROUTER) || !/^0x[0-9a-fA-F]{40}$/.test(GLD_ADDRESS)) return { ok: false, problem: 'No router or GLD address is configured.' };
+  if (!(await takeLock(NONCE_LOCK, LOCK_SECONDS * 2))) return { ok: false, problem: 'The vault is sending something else.' };
+  try {
+    const account = privateKeyToAccount(key);
+    const client = reader();
+    const wallet = createWalletClient({ account, chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+    const decimals = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' });
+    const units = parseUnits(String(amount), Number(decimals));
+    const held = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
+    if (held < units) return { ok: false, problem: 'The vault holds less than the pool.' };
+    const before = await client.readContract({ address: GLD_ADDRESS as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
+    let nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
+    const allowance = await client.readContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'allowance', args: [account.address, SWAP_ROUTER as Hex] });
+    if (allowance < units) {
+      const approveTx = await wallet.writeContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'approve', args: [SWAP_ROUTER as Hex, units], nonce });
+      await client.waitForTransactionReceipt({ hash: approveTx });
+      nonce += 1;
+    }
+    const kind = (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase();
+    let txHash: Hex;
+    if (kind === 'v3') {
+      const fee = Number(process.env.EMERGE_SWAP_FEE) || 3000;
+      txHash = await wallet.writeContract({
+        address: SWAP_ROUTER as Hex, abi: ROUTER_V3, functionName: 'exactInputSingle',
+        args: [{ tokenIn: token() as Hex, tokenOut: GLD_ADDRESS as Hex, fee, recipient: account.address, amountIn: units, amountOutMinimum: 0n, sqrtPriceLimitX96: 0n }],
+        nonce,
+      });
+    } else {
+      const path = [token() as Hex, GLD_ADDRESS as Hex];
+      const quote = await client.readContract({ address: SWAP_ROUTER as Hex, abi: ROUTER_V2, functionName: 'getAmountsOut', args: [units, path] });
+      const floor = (quote[quote.length - 1] * 97n) / 100n;
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+      txHash = await wallet.writeContract({ address: SWAP_ROUTER as Hex, abi: ROUTER_V2, functionName: 'swapExactTokensForTokens', args: [units, floor, path, account.address, deadline], nonce });
+    }
+    await client.waitForTransactionReceipt({ hash: txHash });
+    const after = await client.readContract({ address: GLD_ADDRESS as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
+    return { ok: true, txHash, received: after > before ? after - before : 0n };
+  } catch {
+    return { ok: false, problem: 'The swap could not be sent.' };
   } finally {
     await releaseLock(NONCE_LOCK);
   }

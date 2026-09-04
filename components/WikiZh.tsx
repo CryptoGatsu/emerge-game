@@ -1,6 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
@@ -243,7 +243,7 @@ export function WikiZh() {
 
         <section id="costs">
           <h2>各项费用</h2>
-          <p><b>每一笔收费都进入金库，其中四分之三在那里被销毁。</b>不是付给我们，不是被任何人收走：一笔转账进入金库，金库用自己的密钥销毁其中 {pct(1 - CHARGE_VAULT_SHARE)}，所以供应量随每笔收费下降，另外 {pct(CHARGE_VAULT_SHARE)} 留在金库用于支付提现。玩家花掉的就是支付玩家的来源，账本公开在 <code>/api/vault</code>：收入、留存、待销毁、已销毁，以及销毁交易。项目没有抽成的地址，因为没有抽成。</p>
+          <p><b>每一笔收费都进入金库，其中大部分在那里被销毁。</b>不是付给我们，不是被任何人收走：一笔转账进入金库，金库用自己的密钥销毁其中 {pct(CHARGE_BURN_SHARE)}，所以供应量随每笔收费下降，{pct(CHARGE_VAULT_SHARE)} 留在金库用于支付提现，{pct(CHARGE_DIVIDEND_SHARE)} 拨作每周 GLD 分红。玩家花掉的就是支付玩家的来源，账本公开在 <code>/api/vault</code>：收入、留存、待销毁、已销毁，以及销毁交易。项目没有抽成的地址，因为没有抽成。</p>
           <table className="wiki-table">
             <thead><tr><th>动作</th><th>费用</th><th /></tr></thead>
             <tbody>
@@ -269,6 +269,8 @@ export function WikiZh() {
           </table>
           <p className="wiki-note">支付接口从登记处保存的世界副本读取等级，和读取时代一样，所以改存档得不到更高的上限。v2.0 到来时已经有四级规模的城市就是四级城市，已经长到的等级不用付钱。时代门槛也要求等级：城镇三级、工业五级、现代七级、人工智能九级。</p>
           <p><b>特许状</b>让上限提高 {Math.round(CHARTER_BONUS * 100)}%，为期 {CHARTER_DAYS} 天，价格是地块自身上限的四天：新地块 {n(charterCost(1, 1))} {T}，顶级城市 {n(charterCost(10, 5))}，各等级同样划算。有效期内再买会累加天数。它记录在地块记录上，跟着地块走到任何设备，支付接口也会计入。</p>
+          <h3>GLD 分红</h3>
+          <p>每笔收费的 {pct(CHARGE_DIVIDEND_SHARE)} 进入分红池。每周一金库把其中 {pct(DIVIDEND_DEV_SHARE)} 送往开发，其余在 Robinhood Chain 上兑换成 GLD，并记到持有者名下：{pct(DIVIDEND_LAND_SHARE)} 归土地，按每块地被裁定的等级和主人当周在场天数加权；{pct(DIVIDEND_STAKE_SHARE)} 归<b>软质押</b>——那是登记而不是锁仓：在银行的"分红"卡片登记一次，你整周的最低 {T} 余额即计入，{n(STAKE_MIN_EMERGE)} 起。周中卖出即放弃本周。GLD 记在你的钱包名下直到你领取，由金库发送。结算记录在公开账本 <code>/api/dividend</code>。</p>
           <h3>裁定，而非申报</h3>
           <p>金库付多少由服务器根据三样浏览器无法伪造的东西决定。地块按<b>等级</b>支付，取发布世界显示的等级与"主人实际在场每三天一级"中的较小者，在场由心跳记录。<b>评分</b>用聚落同一个函数从发布的世界算出。<b>关注度</b>取主人在该地块的最近一次心跳。支付接口按客户端申报与"上限 × 评分 × 关注度"中的较小者支付，所以脚本客户端只能赚到一块在场且经营良好的地块能赚的，一天大的地块上传十级存档也只按一级支付。</p>
         </section>

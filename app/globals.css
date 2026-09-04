@@ -3161,3 +3161,6 @@ button.fold:hover { color: var(--emerald); }
 
 .arena-bet-row.token { margin-top: 6px; padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.12); }
 .arena-bet-row.token label span { color: var(--gold, #f0d05e); }
+
+.dividend-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.flywheel-grid em { font-size: 10px; }
