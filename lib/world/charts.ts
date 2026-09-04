@@ -84,6 +84,24 @@ const ISLAND_NAMES = [
   'Oxbow Rock', 'Wintermarch',
   'Ashridge', 'Coppermere', 'Saltcove', 'Feathercairn', 'Umberholm', 'Greylag Isle',
   'Kestrel Skerry', 'Endhaven',
+  'Bramblesound', 'Cinder Rock', 'Wold Holm', 'Merrow Isle', 'Gorsehead', 'Lanternmere',
+  'Skerryvore', 'Dovecote Ness',
+  'Thistledown', 'Quern Rock', 'Halcyon Isle', 'Mossgarth', 'Ebbwater', 'Fallow Holm',
+  'Curlew Skerry', 'Widdershin',
+  'Copsehaven', 'Sorrow Ness', 'Ironmere', 'Sedgeholm', 'Plover Rock', 'Marlstone',
+  'Windlestraw', 'Greave Isle',
+  'Kelder Holm', 'Tarrow', 'Rushlight', 'Eider Skerry', 'Bracewater', 'Stonechat Isle',
+  'Hobb Rock', 'Sallowmere',
+  'Wrenhaven', 'Barleycove', 'Lamplight Ness', 'Coombe Holm', 'Osprey Rock', 'Fennelmere',
+  'Drover Isle', 'Cloudsound',
+  'Nettlebed', 'Sheerwater', 'Gullhaven', 'Kernow Rock', 'Elder Skerry', 'Wanderholm',
+  'Peatmere', 'Crowsfell',
+  'Amberness', 'Gloaming Isle', 'Tideholm', 'Rookcairn', 'Saltire Rock', 'Harebell Skerry',
+  'Marchwater', 'Yewhaven',
+  'Fogbank', 'Cinquefoil', 'Lark Rock', 'Dunlin Holm', 'Bittern Ness', 'Hazelmere',
+  'Wraithsound', 'Cobble Isle',
+  'Oriel Rock', 'Foxglove Holm', 'Weirwater', 'Pennyhaven', 'Tallowmere', 'Stag Skerry',
+  'Ambleside Ness', 'Vesper Isle',
 ];
 
 /** The first chart, kept as a name because the world map opens on it. */
@@ -113,11 +131,15 @@ export const HOME_CHART_RESERVED = 9;
  *
  * Not unlimited, because "somewhere else to look" stops meaning anything when
  * there is always somewhere else: with enough charts the world map becomes a
- * slot machine rather than a map. Twelve charts of seventeen berths is room for
- * about two hundred settlements, which is the size of world the game is
- * sized for.
+ * slot machine rather than a map. Twenty-one charts of seventeen berths is
+ * room for 357 settlements: the twelve the game opened with, and nine more
+ * opened before launch when two hundred looked like too few.
  */
-export const CHART_COUNT = 12;
+export const CHART_COUNT = 21;
+
+if (ISLAND_NAMES.length < (CHART_COUNT - 1) * 8) {
+  throw new Error(`${CHART_COUNT} charts need ${(CHART_COUNT - 1) * 8} island names; there are ${ISLAND_NAMES.length}.`);
+}
 
 /** How many plots the whole world has room for, across every chart. */
 export function worldCapacity() {

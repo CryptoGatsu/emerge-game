@@ -299,7 +299,7 @@ export default function Wiki() {
             transfer, nothing burned, nothing taken by the game — and the registry moves the plot to
             them once it has read that transfer off the chain, from their wallet, to yours, for at
             least what you asked. The settlement goes with the land. The world holds room for about
-            two hundred plots across twelve charts, and the map says how many are claimed and how
+            357 plots across twenty-one charts, and the map says how many are claimed and how
             many are left.
           </p>
           <p>

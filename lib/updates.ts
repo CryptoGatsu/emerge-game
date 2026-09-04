@@ -30,6 +30,7 @@ export const UPDATES: Update[] = [
       'A first day. A new settlement opens with a card that says what the game pays you for and gives five things to do — a person, a house, the Bank, an improvement, and coming back — each ticked off by doing it. Skip it any time.',
       'A leaderboard on the world map. Every city ranked by the level the vault judges it at, then by how well it is run, with its banner, era and GLD beside it. Tap a row to go and look.',
       'A pass over the phone: every panel by touch. The language switch no longer sits over the population pill in the world, and everything a finger has to hit is big enough to hit.',
+      'Nine more charts. The world grows from twelve charts and 204 plots to twenty-one charts and 357, seventy-two new islands with names of their own, and the map counts across all of them.',
     ],
   },
   {
@@ -186,6 +187,7 @@ export const UPDATES_ZH: Update[] = [
       '第一天。新聚落打开时会有一张卡片，说明游戏为什么付你钱，并给出五件事——一个人、一座房子、银行、一次升级、明天再来——做了就自动打勾。随时可以跳过。',
       '世界地图上的排行榜。每座城市按金库裁定的等级排名，再按经营好坏排，旁边是它的旗帜、时代和 GLD。点一行就去看看。',
       '手机上过了一遍：每个面板都用手指点过。语言切换不再压在世界里的人口标签上，手指要点的东西都够大了。',
+      '再开九张海图。世界从十二张海图、204 块地扩到二十一张海图、357 块地，七十二座新岛各有自己的名字，地图上的计数覆盖全部海图。',
     ],
   },
   {

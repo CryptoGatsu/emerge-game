@@ -577,9 +577,10 @@ rogue chance (`jailFactor`, floor a tenth) and cuts the escape chance to a
 tenth; `hazardBudget` caps an earthquake or a tornado at `HAZARD_SHARE` of
 the standing buildings (never fewer than three).
 
-## Room for two hundred settlements
+## Room for 357 settlements
 
-Twelve charts of seventeen berths — 204 plots in all — and the world map says
+Twenty-one charts of seventeen berths — 357 plots in all, up from twelve
+charts and 204 before launch — and the world map says
 how many are claimed and how many are left, across every chart rather than the
 one on screen. Plots are resold player to player: a listing shows on
 everybody's map, the buyer pays the seller's wallet directly in $EMERGE, nothing
