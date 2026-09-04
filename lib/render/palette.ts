@@ -193,6 +193,54 @@ export const PEOPLE_TOWNSHIP = {
 } as const;
 
 /**
+ * The industrial era: caps, aprons and overalls in soot grey, indigo and
+ * brown, a brass or a red kerchief at the neck.
+ */
+export const PEOPLE_INDUSTRIAL = {
+  skin: PEOPLE.skin,
+  hair: PEOPLE.hair,
+  shirt: [
+    '#3a3a3e', '#2c3450', '#4a3a30', '#33403a', '#2a2a30', '#4a4038', '#38304a',
+    '#2e3a44', '#463a2a', '#3c3c34', '#2a3648', '#40343c',
+  ],
+  accent: ['#c9a552', '#b8433a', '#d8d0b8', '#8fa0b0', '#e0b070', '#a8a8a0', '#c8c0a0', '#d0605a'],
+  pants: ['#24262c', '#2a2420', '#1e2430', '#2c2a2a', '#202428', '#302a24'],
+  shoes: ['#1c1a18', '#241c16', '#1a1a20', '#2a221a'],
+} as const;
+
+/**
+ * The modern era: jackets, tees and jeans, brighter and lighter, with a
+ * white or a neon accent and trainers.
+ */
+export const PEOPLE_MODERN = {
+  skin: PEOPLE.skin,
+  hair: PEOPLE.hair,
+  shirt: [
+    '#3a5a9a', '#c84a4a', '#3a8a6a', '#e0c060', '#6a4aa0', '#e07a3a', '#4a8ac0',
+    '#d8d8d0', '#2a2a30', '#8ab04a', '#c05a90', '#3a3a5a',
+  ],
+  accent: ['#ffffff', '#ff5a5a', '#5ad8ff', '#ffe05a', '#8fff6a', '#ff8ad8', '#2a2a2a', '#ffb05a'],
+  pants: ['#33456a', '#2a3550', '#3a3a3a', '#5a4a3a', '#24304a', '#48505a'],
+  shoes: ['#f0f0ea', '#2a2a2a', '#c8c8c0', '#3a3a50'],
+} as const;
+
+/**
+ * The AI era: light suits in white, pearl and pale grey, a soft glow at the
+ * collar in teal, violet or spring green.
+ */
+export const PEOPLE_AI = {
+  skin: PEOPLE.skin,
+  hair: PEOPLE.hair,
+  shirt: [
+    '#e8ecf0', '#d8dce4', '#c8d0d8', '#eef0e8', '#d0d8e8', '#e0e4ec', '#c8ccd8',
+    '#f0f0f4', '#b8c4d0', '#dce8e4', '#e4dce8', '#ccd4dc',
+  ],
+  accent: ['#5fd6c8', '#a986d8', '#8ff06a', '#5ad8ff', '#ffe05a', '#ff8ad8', '#ffffff', '#7ab8ff'],
+  pants: ['#d8dce4', '#c8ccd4', '#e0e4ea', '#b8bec8', '#cdd3dc', '#dfe3ea'],
+  shoes: ['#f4f4f0', '#d8d8d4', '#c0c4cc', '#e8e8e4'],
+} as const;
+
+/**
  * Ambient light by hour, applied as a full-scene tint.
  *
  * Night is teal-green rather than blue — a forest at night, lit by what the

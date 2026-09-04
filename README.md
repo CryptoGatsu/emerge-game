@@ -416,8 +416,8 @@ A plot starts in the Settlement era and can be advanced one era at a time, for
 in the era plus a checklist drawn from what the simulation already measures
 (`eraGate` in `lib/simulation.ts`; the table in `lib/world/eras.ts`). Township
 asks for sixty days, forty people, thirty buildings, a Town Hall, a Bank, a
-School and a Jail, 20,000 Gold and no ruins. Industrial, Modern and AI are named
-and gated but not yet built (`OPEN_ERA`).
+School and a Jail, 20,000 Gold and no ruins. Industrial, Modern and AI follow,
+each with its own checklist, and all five are open (`OPEN_ERA`).
 
 The era lives on the world (saved and published), on the claim row (`Claim.era`)
 and in the snapshot, so it follows the plot to any device and to a buyer. The
@@ -436,6 +436,22 @@ afloat swims for the bank. Six Township buildings arrive: Chapel, Guildhall,
 Brewery, Printer, Stables and Harbour; every building carries a category
 (`BUILDING_CATEGORY`) and a minimum era (`BUILDING_ERA`), which the Build panel
 uses for its shelves and locks and the self-builder uses as a filter.
+
+The later eras run on the same rails. Each has a dressing for every earlier
+recipe (`industrialDress`, `modernDress`, `aiDress`, keyed as `.E3`, `.E4`,
+`.E5` bodies) and a set of its own recipes. Era bodies are not built at load:
+five eras of every recipe at three levels is ten atlas pages, so the atlas holds
+only the plain bodies and `AssetLibrary.ensureBuilding` builds an era body the
+first time the scene asks for it (`buildBuildingArt`), packing it onto the live
+atlas. Each has a road tile (`tile.setts`,
+`tile.tarmac`, `tile.composite`); a people palette; a ride (`rideOf`: rail from a
+Railway Station, cars and bikes from a Bus Depot, pods from a Pod Hub, each at
+its own `RIDE_PACE`, falling back to the era before when the building is lost);
+and a boat for the ferry (steamboat, motorboat, hydrofoil). Industrial adds smog
+(`smogged`): a daily happiness drain until a Gasworks stands. Factory, Foundry,
+Power Plant and Research Campus add to `methodBonus`; a Hospital is a stronger
+Clinic (`careOf`, `survivalOf`); Telegraph, Stadium, Supermarket, Office,
+Vertical Farm and Drone Port put something back into people each day.
 
 ## Room for two hundred settlements
 

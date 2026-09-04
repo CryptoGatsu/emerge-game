@@ -12,7 +12,7 @@
 
 import { Container, Sprite } from 'pixi.js';
 import type { Citizen } from '../simulation';
-import { PEOPLE, PEOPLE_TOWNSHIP } from './palette';
+import { PEOPLE, PEOPLE_AI, PEOPLE_INDUSTRIAL, PEOPLE_MODERN, PEOPLE_TOWNSHIP } from './palette';
 import { appearanceFor, type Appearance, type AssetLibrary } from './assets';
 import { BODY_LAYERS, CHAR_GROUND, CHAR_H, STATE_FRAMES, hatForJob, type CharState, type Dir, type HatKind, type LayerName } from './character';
 import { ELEVATION, worldToScreen } from '../world/iso';
@@ -54,7 +54,8 @@ export class CitizenSprite {
   private readonly shadow: Sprite;
   /** The cart or the boat under them, when they are on one. */
   private readonly vehicle: Sprite;
-  private vehicleKind: 'cart' | 'boat' | null = null;
+  private vehicleKind: string | null = null;
+  private readonly era: number;
   private readonly body: Partial<Record<LayerName, Sprite>> = {};
   private readonly hair: Sprite;
   private readonly hat: Sprite;
@@ -89,7 +90,8 @@ export class CitizenSprite {
     this.wx = citizen.x;
     this.wy = citizen.y;
     // The same person, dressed for the era the plot is in.
-    this.appearance = appearanceFor(citizen.look, citizen.age, era >= 2 ? PEOPLE_TOWNSHIP : PEOPLE);
+    this.appearance = appearanceFor(citizen.look, citizen.age, era >= 5 ? PEOPLE_AI : era >= 4 ? PEOPLE_MODERN : era >= 3 ? PEOPLE_INDUSTRIAL : era >= 2 ? PEOPLE_TOWNSHIP : PEOPLE);
+    this.era = era;
     this.hatKind = hatForJob(citizen.job, citizen.look);
 
     this.shadow = new Sprite(assets.get('fx.shadow'));
@@ -290,20 +292,28 @@ export class CitizenSprite {
     // The ferry's boat while they are on the water, the cart while they ride
     // one. The boat rocks; the cart sits on its wheels and the walker's own
     // bob reads as the road. No shadow on the water.
-    const vehicle: 'cart' | 'boat' | null = citizen.afloat ? 'boat' : citizen.riding ? 'cart' : null;
+    // The boat of the era while they are on the water; the ride while they
+    // ride one. The boat rocks; the vehicles sit on their wheels and the
+    // walker's own bob reads as the road. No shadow on the water.
+    const boat = citizen.afloat;
+    const vehicle: string | null = boat
+      ? (this.era >= 5 ? 'fx.hydrofoil' : this.era >= 4 ? 'fx.motorboat' : this.era >= 3 ? 'fx.steamboat' : 'fx.boat')
+      : citizen.riding
+        ? (citizen.ride === 'car' ? `fx.car.${citizen.hash % 3}` : citizen.ride === 'rail' ? 'fx.tram' : citizen.ride === 'bike' ? 'fx.bike' : citizen.ride === 'pod' ? 'fx.pod' : 'fx.cart')
+        : null;
     if (vehicle !== this.vehicleKind) {
       this.vehicleKind = vehicle;
-      if (vehicle) this.vehicle.texture = this.assets.get(`fx.${vehicle}`);
+      if (vehicle) this.vehicle.texture = this.assets.get(vehicle);
     }
     this.vehicle.visible = vehicle !== null;
-    this.shadow.visible = vehicle !== 'boat';
+    this.shadow.visible = !boat;
     if (vehicle) {
       const s = this.appearance.scale;
       this.vehicle.scale.set(this.flipped ? -s : s, s);
-      const rock = vehicle === 'boat' ? Math.sin(this.clock * 2.4 + this.wx) * 1.2 : 0;
-      // The boat sits lower than the cart so its hull shows past the feet.
-      this.vehicle.position.set(0, (vehicle === 'boat' ? 4 : 1) + rock);
-      this.vehicle.rotation = vehicle === 'boat' ? Math.sin(this.clock * 1.7 + this.wy) * 0.05 : 0;
+      const rock = boat ? Math.sin(this.clock * 2.4 + this.wx) * (this.era >= 5 ? 0.5 : 1.2) : 0;
+      // The boat sits lower than the vehicles so its hull shows past the feet.
+      this.vehicle.position.set(0, (boat ? 4 : 1) + rock);
+      this.vehicle.rotation = boat ? Math.sin(this.clock * 1.7 + this.wy) * 0.05 : 0;
     }
 
     // Anyone commuting during the working day is hauling something, held in

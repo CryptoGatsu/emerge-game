@@ -1272,14 +1272,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown } }).__emerge = {
       world: () => worldRef.current,
-      construct: (type, x, y) => (worldRef.current ? constructBuilding(worldRef.current, type, BUILD_COSTS[type] ?? 0, x, y) : null),
+      construct: (type, x, y) => {
+        if (!worldRef.current) return null;
+        const built = constructBuilding(worldRef.current, type, BUILD_COSTS[type] ?? 0, x, y);
+        // What the Build panel does after a placement: give the new building its sprites.
+        if (built) sceneRef.current?.syncBuildings();
+        return built;
+      },
       map: () => sceneRef.current?.mapSize() ?? null,
       spot: () => sceneRef.current?.spot ?? null,
       music: () => music.playing,
       // Put the camera on a citizen, close, for a screenshot of what they ride.
       focus: (id: string, zoom = 2.4) => { sceneRef.current?.focus({ kind: 'citizen', id }); sceneRef.current?.zoomBy(zoom); },
+      art: (key: string) => sceneRef.current?.artInfo(key) ?? null,
+      sprites: () => sceneRef.current?.spriteInfo() ?? null,
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;

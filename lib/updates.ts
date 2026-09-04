@@ -17,6 +17,18 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '1.5',
+    date: '2026-09-04',
+    title: 'Every era, to the AI age',
+    notes: [
+      'The three remaining eras are built and open: Industrial, Modern and AI. A plot advances one step at a time, 1,000,000 $EMERGE burned per step, once it has earned it. The checklists are on the ERA card.',
+      'Industrial: brick and iron, setts with rails on the roads, chimneys. A Railway Station puts every working adult on the rails, faster than carts; the ferry becomes a steamboat. Factory, Foundry, Telegraph and Gasworks. Smog hangs over the town and drains happiness until a Gasworks stands.',
+      'Modern: concrete and glass, tarmac with markings, jackets and jeans. A Bus Depot puts people in cars, a third of them on bikes; the ferry becomes a motorboat. Hospital, Stadium, Supermarket, Office and Power Plant. The Hospital takes most of the risk out of a bad week.',
+      'AI: white composite, light strips, gardens on the roofs, pale quiet roads. A Pod Hub puts everybody in autonomous pods, fastest of all; the ferry becomes a hydrofoil. Data Centre, Research Campus, Vertical Farm and Drone Port.',
+      'Every building already standing is redrawn in the new era\u2019s style when you improve it, and keeps its old look until then. People change clothes with the era.',
+    ],
+  },
+  {
     version: '1.4',
     date: '2026-09-04',
     title: 'Eras: the Township',
@@ -68,6 +80,18 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '1.5',
+    date: '2026-09-04',
+    title: '所有时代，直到人工智能时代',
+    notes: [
+      '剩下的三个时代已经建成并开放：工业、现代和人工智能。地块一次推进一步，每步销毁 1,000,000 $EMERGE，须先达成条件。清单在"时代"卡片上。',
+      '工业：砖与铁、带铁轨的石板路、烟囱。火车站让每个上班的成年人乘铁路，比马车快；渡船变成蒸汽船。工厂、铸造厂、电报局和煤气厂。烟雾笼罩镇子、消耗幸福，直到建起煤气厂。',
+      '现代：混凝土与玻璃、带标线的柏油路、夹克和牛仔裤。公交车站让人们开上汽车，三分之一骑自行车；渡船变成摩托艇。医院、体育场、超市、写字楼和发电厂。医院拿掉糟糕一周的大部分风险。',
+      '人工智能：白色复合材料、灯带、屋顶花园、安静的浅色道路。出行舱站让每个人坐上自动驾驶舱，最快；渡船变成水翼船。数据中心、研究园区、垂直农场和无人机港。',
+      '已有的每栋建筑在你升级它时按新时代的样式重绘，在那之前保留旧貌。人们随时代换装。',
+    ],
+  },
   {
     version: '1.4',
     date: '2026-09-04',

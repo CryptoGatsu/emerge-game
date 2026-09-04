@@ -129,6 +129,25 @@ const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] =
   { type: 'Printer', cost: BUILD_COSTS['Printer'], icon: '▤', blurb: 'Something to read. Purpose for everybody, and trades learned a little faster.' },
   { type: 'Stables', cost: BUILD_COSTS['Stables'], icon: '🐎', blurb: 'Carts and horses. Everybody moves faster along the roads.' },
   { type: 'Harbour', cost: BUILD_COSTS['Harbour'], icon: '⚓', blurb: 'A ferry across the water. Every shore counts as reached, bridge or no bridge. Build it on the bank.' },
+  // The industrial era.
+  { type: 'Factory', cost: BUILD_COSTS['Factory'], icon: '🏭', blurb: 'Machines for every trade. Everything the town makes, it makes more of.' },
+  { type: 'Foundry', cost: BUILD_COSTS['Foundry'], icon: '🔥', blurb: 'Iron poured rather than hammered. More from every trade, on top of the factory.' },
+  { type: 'Railway Station', cost: BUILD_COSTS['Railway Station'], icon: '🚂', blurb: 'Rail on the roads. Everybody working rides it, faster than any cart.' },
+  { type: 'Telegraph', cost: BUILD_COSTS['Telegraph'], icon: '📡', blurb: 'News from everywhere. Company and purpose for everybody, and trades learned a little faster.' },
+  { type: 'Gasworks', cost: BUILD_COSTS['Gasworks'], icon: '🕯', blurb: 'Gas for the lamps and the stoves. Clears the smog that an industrial town lives under without it.' },
+  // The modern era.
+  { type: 'Hospital', cost: BUILD_COSTS['Hospital'], icon: '🏥', blurb: 'A clinic with wards. Takes most of the risk out of a bad week, and out of a plague.' },
+  { type: 'Stadium', cost: BUILD_COSTS['Stadium'], icon: '🏟', blurb: 'A crowd every evening. Company for everybody, more than anything else gives.' },
+  { type: 'Supermarket', cost: BUILD_COSTS['Supermarket'], icon: '🛒', blurb: 'Everything under one roof. Nobody goes to bed hungry.' },
+  { type: 'Office', cost: BUILD_COSTS['Office'], icon: '🏢', blurb: 'Work that means something. Purpose for everybody, every day.' },
+  { type: 'Bus Depot', cost: BUILD_COSTS['Bus Depot'], icon: '🚗', blurb: 'Cars and bikes on the roads. Everybody working moves faster than the rails.' },
+  { type: 'Power Plant', cost: BUILD_COSTS['Power Plant'], icon: '⚡', blurb: 'Electricity for every workshop. More from every trade.' },
+  // The AI era.
+  { type: 'Data Centre', cost: BUILD_COSTS['Data Centre'], icon: '🗄', blurb: 'The town thinks faster. Trades are learned far quicker.' },
+  { type: 'Research Campus', cost: BUILD_COSTS['Research Campus'], icon: '🔬', blurb: 'Better methods for everything, and everybody learns. The best of the lab and the school.' },
+  { type: 'Vertical Farm', cost: BUILD_COSTS['Vertical Farm'], icon: '🌱', blurb: 'Food grown in tiers, all year. Nobody is ever hungry.' },
+  { type: 'Pod Hub', cost: BUILD_COSTS['Pod Hub'], icon: '🛸', blurb: 'Autonomous pods on the roads. Everybody working rides them, fastest of all.' },
+  { type: 'Drone Port', cost: BUILD_COSTS['Drone Port'], icon: '🚁', blurb: 'Things brought to the door. Company and purpose for everybody.' },
 ];
 
 function Shell({ title, subtitle, onClose, children, wide }: {

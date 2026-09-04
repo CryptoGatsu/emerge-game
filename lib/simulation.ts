@@ -294,6 +294,8 @@ export interface Citizen {
   afloat?: boolean;
   /** On a cart from the Stables: a working adult on the move, drawn riding. */
   riding?: boolean;
+  /** What they ride, when they do: the era and the town's transport decide. */
+  ride?: Ride;
   /** True while sat on a bench or crouched at a fire, which the renderer draws. */
   seated: boolean;
   /**
@@ -1118,6 +1120,9 @@ const FOOTPRINTS: Record<string, number> = {
   Market: 4.2, 'Town Hall': 4.2, House: 2.6, School: 3.8, Library: 3.6, Lab: 3.7, Cafe: 3.5,
   Fishery: 3.0, Forager: 2.6,
   Chapel: 3.6, Guildhall: 4.0, Brewery: 3.4, Printer: 3.2, Stables: 3.8, Harbour: 3.6,
+  Factory: 4.4, Foundry: 4.0, 'Railway Station': 4.4, Telegraph: 2.8, Gasworks: 4.0,
+  Hospital: 4.2, Stadium: 4.8, Supermarket: 4.2, Office: 3.8, 'Bus Depot': 4.2, 'Power Plant': 4.4,
+  'Data Centre': 4.2, 'Research Campus': 4.6, 'Vertical Farm': 3.8, 'Pod Hub': 4.0, 'Drone Port': 4.0,
 };
 
 function buildObstacles(world: World): Obstacle[] {
@@ -1435,7 +1440,7 @@ function moveCitizens(world: World, hours: number) {
   const ferry = hasFerry(world);
   const water = ferry ? ferried(waterOf(world)) : waterOf(world);
   const nav = navOf(world, obstacles, water);
-  const cart = hasStables(world) ? CART_PACE : 1;
+  const ride = rideOf(world);
   for (const c of world.citizens) {
     // Held by the player, or swimming for the bank: both are handled elsewhere
     // and every rule below is about walking on land.
@@ -1445,6 +1450,7 @@ function moveCitizens(world: World, hours: number) {
     if (c.afloat && !ferry) {
       c.afloat = false;
       c.riding = false;
+      c.ride = undefined;
       c.swimming = true;
       c.happiness = Math.max(0, c.happiness - 6);
       continue;
@@ -1538,15 +1544,16 @@ function moveCitizens(world: World, hours: number) {
     }
 
     lookAhead(world, c, nav, obstacles, water, hours);
-    // A working adult rides the cart when there is a Stables; nobody rides
-    // it onto the ferry.
-    const rides = cart > 1 && c.age >= 16 && phase === 'working' && !c.afloat;
-    const blocked = stepCitizen(c, hours, obstacles, world.layout, water, rides ? cart : 1);
+    // A working adult rides whatever the town offers; nobody rides it onto
+    // the ferry.
+    const own = ride && c.age >= 16 && phase === 'working' && !c.afloat ? rideFor(ride, c) : null;
+    const blocked = stepCitizen(c, hours, obstacles, world.layout, water, own ? RIDE_PACE[own] : 1);
     if (ferry) {
       const wet = waterOf(world).isWater(c.x, c.y) && !onBridge(world.layout, c.x, c.y);
       c.afloat = wet;
     } else if (c.afloat) c.afloat = false;
-    c.riding = rides && c.moving && !c.afloat;
+    c.riding = !!own && c.moving && !c.afloat;
+    c.ride = c.riding ? own! : undefined;
     // Water stopped them dead. Sliding along the bank cannot solve this — the
     // way round is the road, and the road graph knows where the bridges are —
     // so re-route now rather than shuffling until the stall detector notices.
@@ -3599,12 +3606,21 @@ export const LIBRARY_LEARNING = 0.15;
 export function learningRate(world: World): number {
   useWorld(world);
   return 1 + (hasCivic(world, 'School') ? SCHOOL_LEARNING : 0) + (hasCivic(world, 'Library') ? LIBRARY_LEARNING : 0)
-    + (hasCivic(world, 'Guildhall') ? GUILDHALL_LEARNING : 0) + (hasCivic(world, 'Printer') ? PRINTER_LEARNING : 0);
+    + (hasCivic(world, 'Guildhall') ? GUILDHALL_LEARNING : 0) + (hasCivic(world, 'Printer') ? PRINTER_LEARNING : 0)
+    + (hasCivic(world, 'Telegraph') ? TELEGRAPH_LEARNING : 0) + (hasCivic(world, 'Data Centre') ? DATA_CENTRE_LEARNING : 0)
+    + (hasCivic(world, 'Research Campus') ? CAMPUS_LEARNING : 0);
 }
 
 /** Lab: better methods, applied to every trade's output. */
 export const LAB_METHODS = 0.1;
-export const methodBonus = (world: World) => 1 + (hasCivic(world, 'Lab') ? LAB_METHODS : 0);
+/** The later eras' industry: what a factory, a foundry, a power plant and a research campus add to every trade's output. */
+export const FACTORY_METHODS = 0.15;
+export const FOUNDRY_METHODS = 0.1;
+export const POWER_METHODS = 0.15;
+export const CAMPUS_METHODS = 0.2;
+export const methodBonus = (world: World) => 1 + (hasCivic(world, 'Lab') ? LAB_METHODS : 0)
+  + (hasCivic(world, 'Factory') ? FACTORY_METHODS : 0) + (hasCivic(world, 'Foundry') ? FOUNDRY_METHODS : 0)
+  + (hasCivic(world, 'Power Plant') ? POWER_METHODS : 0) + (hasCivic(world, 'Research Campus') ? CAMPUS_METHODS : 0);
 
 /** Cafe, studio, library: what they put back into people, every day. */
 export const CAFE_SOCIAL = 1.6;
@@ -3615,11 +3631,36 @@ export const PRINTER_PURPOSE = 0.5;
 /** How much faster a trade is learned with a guildhall or a printer in town. */
 export const GUILDHALL_LEARNING = 0.3;
 export const PRINTER_LEARNING = 0.1;
+export const TELEGRAPH_LEARNING = 0.1;
+export const DATA_CENTRE_LEARNING = 0.4;
+export const CAMPUS_LEARNING = 0.3;
+/** The later eras' civic buildings: what they put back into people each day. */
+export const TELEGRAPH_SOCIAL = 0.5;
+export const TELEGRAPH_PURPOSE = 0.4;
+export const STADIUM_SOCIAL = 1.8;
+export const SUPERMARKET_HUNGER = 1.5;
+export const OFFICE_PURPOSE = 0.8;
+export const VERTICAL_FARM_HUNGER = 2.5;
+export const DRONE_PORT_SOCIAL = 0.4;
+export const DRONE_PORT_PURPOSE = 0.6;
+/**
+ * Smog. An industrial town without a Gasworks burns everything in the open,
+ * and everybody feels it: a slow drain on happiness that the Gasworks
+ * clears, and that the modern era leaves behind for good.
+ */
+export const SMOG_HAPPINESS = 0.9;
+export const smogged = (world: World) => eraOf(world) === 3 && !hasCivic(world, 'Gasworks');
 export const STUDIO_PURPOSE = 1.5;
 export const LIBRARY_PURPOSE = 0.6;
 
-/** Clinic: how much of the daily risk of death it takes away. */
+/** Clinic: how much of the daily risk of death it takes away. A hospital takes more. */
 export const CLINIC_SURVIVAL = 0.45;
+export const HOSPITAL_SURVIVAL = 0.65;
+export const HOSPITAL_CARE = 0.25;
+/** Whether the town has somewhere to be treated, and how well. */
+export const hasCare = (world: World) => hasCivic(world, 'Clinic') || hasCivic(world, 'Hospital');
+export const careOf = (world: World) => hasCivic(world, 'Hospital') ? HOSPITAL_CARE : hasCivic(world, 'Clinic') ? CLINIC_CARE : 0;
+export const survivalOf = (world: World) => hasCivic(world, 'Hospital') ? HOSPITAL_SURVIVAL : hasCivic(world, 'Clinic') ? CLINIC_SURVIVAL : 0;
 
 /** Lab and clinic: what they add to readiness for the hazards they can see coming. */
 export const LAB_WARNING = 0.12;
@@ -4399,7 +4440,7 @@ export function readiness(world: World): Record<HazardKind, number> {
   // A lab sees fire, blight and wolves coming; a clinic makes a blight a
   // sickness the town gets over rather than one it does not.
   const warned = hasCivic(world, 'Lab') ? LAB_WARNING : 0;
-  const cared = hasCivic(world, 'Clinic') ? CLINIC_CARE : 0;
+  const cared = careOf(world);
   const improved = world.buildings.filter((b) => levelOf(b) > 1).length / buildings;
   return {
     fire: clamp(wells / (1 + buildings / 8) + warned, 0, 1),
@@ -4409,7 +4450,7 @@ export function readiness(world: World): Record<HazardKind, number> {
     // a burial.
     earthquake: clamp(Math.min(1, world.resources.stone / 40) * 0.6 + warned + (stores ? 0.15 : 0), 0, 1),
     tornado: clamp((stores ? 0.3 : 0) + improved * 0.45 + warned, 0, 1),
-    plague: clamp((hasCivic(world, 'Clinic') ? 0.45 : 0) + Math.min(1, world.resources.herbs / 12) * 0.35 + warned, 0, 1),
+    plague: clamp((hasCare(world) ? 0.45 : 0) + Math.min(1, world.resources.herbs / 12) * 0.35 + warned, 0, 1),
     // Hunters know the wood, and a lodge with people in it is a lodge wolves keep clear of.
     wolves: clamp(fires / (1 + mouths / 14) + warned + world.citizens.filter((c) => c.job === 'hunter').length * 0.2, 0, 1),
     flood: clamp(backFromBank, 0, 1),
@@ -4642,7 +4683,7 @@ function hazardChance(world: World, kind: HazardKind): number {
   if (kind === 'plague') {
     if (world.citizens.length < 9) return 0;
     const season = world.season === 'Autumn' || world.season === 'Winter' ? 0.018 : 0.007;
-    return season * (hasCivic(world, 'Clinic') ? 0.45 : 1);
+    return season * (hasCare(world) ? 0.45 : 1);
   }
   // Flood: a storm, on a settlement that has water in it at all.
   if (world.weather !== 'Storm') return 0;
@@ -4915,7 +4956,7 @@ function hazardStep(world: World, hours: number) {
     if (h.kind === 'plague') {
       const sick = world.citizens.filter((c) => c.sick && !c.inside);
       if (!sick.length) continue;
-      const rate = 0.05 * hours * (hasCivic(world, 'Clinic') ? 0.6 : 1) * (h.fought ? 0.25 : 1);
+      const rate = 0.05 * hours * (hasCare(world) ? 0.6 : 1) * (h.fought ? 0.25 : 1);
       const rand = mulberry32(world.seed + Math.floor(world.hour * 20) + world.day * 480);
       for (const c of world.citizens) {
         if (c.sick || c.inside || c.age < 4) continue;
@@ -4943,7 +4984,7 @@ function plagueDay(world: World, h: Hazard) {
     c.rest = Math.max(0, c.rest - 4);
     // Herbs are the physic: one a day per patient, while there are any.
     let risk = 0.05 * severity;
-    if (hasCivic(world, 'Clinic')) risk *= 0.5;
+    if (hasCare(world)) risk *= 0.5;
     if (h.fought) risk *= 0.5;
     if (world.resources.herbs >= 1) { world.resources.herbs -= 1; note(world, 'consumed', 'herbs', 1); risk *= 0.5; }
     if (c.sick > 4 && rand() < 0.35) { c.sick = undefined; recovered++; continue; }
@@ -5311,7 +5352,7 @@ function lifeAndDeath(world: World) {
     if (c.roughSleeper) risk += 0.02;
     // A clinic does not stop anybody growing old. It stops a bad week
     // being the end of them.
-    if (hasCivic(world, 'Clinic')) risk *= 1 - CLINIC_SURVIVAL;
+    if (hasCare(world)) risk *= 1 - survivalOf(world);
 
     if (rand() < risk) dead.push(c);
   }
@@ -5617,6 +5658,12 @@ const TRADE_BUILD_COST: Record<string, number> = {
   // the water, the chapel and the brewery give people somewhere to be, the
   // guildhall and the printer make them better at what they do.
   Chapel: 380, Guildhall: 460, Brewery: 340, Printer: 360, Stables: 280, Harbour: 420,
+  // The industrial era: brick and iron, and the first machines.
+  Factory: 640, Foundry: 600, 'Railway Station': 720, Telegraph: 380, Gasworks: 560,
+  // The modern era: concrete and glass, and the roads fill up.
+  Hospital: 900, Stadium: 1100, Supermarket: 700, Office: 760, 'Bus Depot': 680, 'Power Plant': 1000,
+  // The AI era: light and quiet.
+  'Data Centre': 1400, 'Research Campus': 1600, 'Vertical Farm': 1200, 'Pod Hub': 1300, 'Drone Port': 1100,
 };
 
 /** What a building costs to raise, by type. Everything the panel shows comes from here. */
@@ -5666,6 +5713,22 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Printer: { wood: 14, stone: 18 },
   Stables: { wood: 24, stone: 6 },
   Harbour: { wood: 30, stone: 12 },
+  Factory: { wood: 30, stone: 40 },
+  Foundry: { wood: 20, stone: 44 },
+  'Railway Station': { wood: 36, stone: 36 },
+  Telegraph: { wood: 24, stone: 10 },
+  Gasworks: { wood: 14, stone: 40 },
+  Hospital: { wood: 30, stone: 60 },
+  Stadium: { wood: 40, stone: 80 },
+  Supermarket: { wood: 30, stone: 40 },
+  Office: { wood: 24, stone: 56 },
+  'Bus Depot': { wood: 34, stone: 40 },
+  'Power Plant': { wood: 20, stone: 80 },
+  'Data Centre': { wood: 20, stone: 90 },
+  'Research Campus': { wood: 40, stone: 100 },
+  'Vertical Farm': { wood: 50, stone: 60 },
+  'Pod Hub': { wood: 30, stone: 70 },
+  'Drone Port': { wood: 30, stone: 60 },
 };
 
 /** What this kind of building takes to raise. Anything unlisted is a modest shed. */
@@ -6274,6 +6337,9 @@ export function maintenanceCost(type: string) {
     Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
     Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9, Jail: 3,
     Chapel: 4, Guildhall: 7, Brewery: 6, Printer: 6, Stables: 5, Harbour: 8,
+    Factory: 12, Foundry: 11, 'Railway Station': 12, Telegraph: 5, Gasworks: 10,
+    Hospital: 14, Stadium: 16, Supermarket: 10, Office: 9, 'Bus Depot': 10, 'Power Plant': 15,
+    'Data Centre': 18, 'Research Campus': 20, 'Vertical Farm': 14, 'Pod Hub': 14, 'Drone Port': 12,
   } as Record<string, number>)[type] ?? 2;
 }
 
@@ -6518,6 +6584,17 @@ function daily(world: World) {
     if (hasCivic(world, 'Chapel')) { c.social = Math.min(100, c.social + CHAPEL_SOCIAL); c.purpose = Math.min(100, c.purpose + CHAPEL_PURPOSE); }
     if (hasCivic(world, 'Brewery')) c.social = Math.min(100, c.social + BREWERY_SOCIAL);
     if (hasCivic(world, 'Printer')) c.purpose = Math.min(100, c.purpose + PRINTER_PURPOSE);
+    // The later eras'. A telegraph is news from everywhere; a stadium is a
+    // crowd; a supermarket and a vertical farm keep the larder full; an office
+    // is work that means something; a drone port brings things to the door.
+    if (hasCivic(world, 'Telegraph')) { c.social = Math.min(100, c.social + TELEGRAPH_SOCIAL); c.purpose = Math.min(100, c.purpose + TELEGRAPH_PURPOSE); }
+    if (hasCivic(world, 'Stadium')) c.social = Math.min(100, c.social + STADIUM_SOCIAL);
+    if (hasCivic(world, 'Supermarket')) c.hunger = Math.min(100, c.hunger + SUPERMARKET_HUNGER);
+    if (hasCivic(world, 'Office')) c.purpose = Math.min(100, c.purpose + OFFICE_PURPOSE);
+    if (hasCivic(world, 'Vertical Farm')) c.hunger = Math.min(100, c.hunger + VERTICAL_FARM_HUNGER);
+    if (hasCivic(world, 'Drone Port')) { c.social = Math.min(100, c.social + DRONE_PORT_SOCIAL); c.purpose = Math.min(100, c.purpose + DRONE_PORT_PURPOSE); }
+    // Smog, until the town lights its gas.
+    if (smogged(world)) c.happiness = Math.max(0, c.happiness - SMOG_HAPPINESS);
     // Unpaid work erodes a sense of purpose; paid work slowly builds it — and
     // what the work is worth is felt on top of whether it was paid at all.
     // This is the half of the wage lever that stewardship is actually scored
@@ -6932,6 +7009,9 @@ export function expandPlot(world: World): boolean {
  */
 export const BUILDING_ERA: Record<string, number> = {
   Chapel: 2, Guildhall: 2, Brewery: 2, Printer: 2, Stables: 2, Harbour: 2,
+  Factory: 3, Foundry: 3, 'Railway Station': 3, Telegraph: 3, Gasworks: 3,
+  Hospital: 4, Stadium: 4, Supermarket: 4, Office: 4, 'Bus Depot': 4, 'Power Plant': 4,
+  'Data Centre': 5, 'Research Campus': 5, 'Vertical Farm': 5, 'Pod Hub': 5, 'Drone Port': 5,
 };
 
 /** Which shelf of the Build panel a building sits on. */
@@ -6942,8 +7022,13 @@ export const BUILDING_CATEGORY: Record<string, BuildingCategory> = {
   Woodcutter: 'Materials', Quarry: 'Materials', Mine: 'Materials', Carpenter: 'Materials', Blacksmith: 'Materials', Tailor: 'Materials',
   'Town Hall': 'Civic', Jail: 'Civic', Storage: 'Civic', Market: 'Civic', Bank: 'Civic', Guildhall: 'Civic', Chapel: 'Civic',
   School: 'Care & learning', Clinic: 'Care & learning', Library: 'Care & learning', Lab: 'Care & learning', Printer: 'Care & learning',
-  Tavern: 'Leisure', Cafe: 'Leisure', Studio: 'Leisure',
-  Stables: 'Transport', Harbour: 'Transport',
+  Tavern: 'Leisure', Cafe: 'Leisure', Studio: 'Leisure', Stadium: 'Leisure',
+  Stables: 'Transport', Harbour: 'Transport', 'Railway Station': 'Transport', 'Bus Depot': 'Transport', 'Pod Hub': 'Transport', 'Drone Port': 'Transport',
+  Factory: 'Materials', Foundry: 'Materials',
+  Telegraph: 'Civic', Office: 'Civic',
+  Hospital: 'Care & learning', 'Research Campus': 'Care & learning', 'Data Centre': 'Care & learning',
+  Supermarket: 'Food', 'Vertical Farm': 'Food',
+  Gasworks: 'Utilities', 'Power Plant': 'Utilities',
 };
 export const BUILDING_CATEGORIES: BuildingCategory[] = ['Homes', 'Food', 'Materials', 'Civic', 'Care & learning', 'Leisure', 'Transport', 'Utilities'];
 
@@ -6968,6 +7053,28 @@ export const hasFerry = (world: { buildings: Building[] }) => hasWorking(world, 
 export const hasStables = (world: { buildings: Building[] }) => hasWorking(world, 'Stables');
 /** How much faster a cart is than walking. */
 export const CART_PACE = 1.4;
+
+/**
+ * What the town rides, by era. Every ride is the same mechanic as the cart:
+ * a working adult on the move goes faster and is drawn on the vehicle. The
+ * building that provides it has to stand, and the era has to allow it; a
+ * later era keeps the earlier rides as fallbacks, so a modern town whose
+ * Bus Depot burns down is back on the rails, and then the carts.
+ */
+export type Ride = 'cart' | 'rail' | 'bike' | 'car' | 'pod';
+export const RIDE_PACE: Record<Ride, number> = { cart: CART_PACE, rail: 2.2, bike: 2.0, car: 3.0, pod: 3.4 };
+export const RIDE_BUILDING: Record<Ride, string> = { cart: 'Stables', rail: 'Railway Station', bike: 'Bus Depot', car: 'Bus Depot', pod: 'Pod Hub' };
+/** The best ride the town offers right now, or null when everybody walks. */
+export function rideOf(world: { buildings: Building[]; era?: number }): Ride | null {
+  const era = eraOf(world);
+  if (era >= 5 && hasWorking(world, 'Pod Hub')) return 'pod';
+  if (era >= 4 && hasWorking(world, 'Bus Depot')) return 'car';
+  if (era >= 3 && hasWorking(world, 'Railway Station')) return 'rail';
+  if (hasStables(world)) return 'cart';
+  return null;
+}
+/** A person's own ride from the town's: a third of a modern town cycles. */
+export const rideFor = (ride: Ride | null, c: { hash: number }): Ride | null => (ride === 'car' && c.hash % 3 === 0 ? 'bike' : ride);
 
 /** Whether people may stand on this landmass without a bridge to it. */
 function reachable(world: { buildings: Building[]; connectedIslands: number[] }, water: WaterField, land: number) {

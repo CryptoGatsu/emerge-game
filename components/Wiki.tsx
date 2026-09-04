@@ -771,16 +771,16 @@ export default function Wiki() {
           <p>
             Every plot begins in the <b>Settlement</b> era: timber and thatch, hand tools, dirt
             lanes, everybody on foot. When it has earned it, the owner can advance it one era at a
-            time. Five are named; the second is built and the rest are gated and coming.
+            time. There are five, and all of them are built.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Era</th><th>Days</th><th>What it asks</th><th>What arrives</th></tr></thead>
             <tbody>
               <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts.</td></tr>
               <tr><td>Township</td><td className="num">60</td><td>40 people, 30 buildings, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Stone and tile, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
-              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 buildings, a Lab and a Library, 300 iron ore, the plot expanded</td><td className="muted">Not built yet</td></tr>
-              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 buildings, a Hospital and a Stadium, the plot expanded</td><td className="muted">Not built yet</td></tr>
-              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 buildings, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td className="muted">Not built yet</td></tr>
+              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 buildings, a Lab and a Library, 300 iron ore, the plot expanded</td><td>Brick and iron, setts with rails, rail travel, a steamboat, smog; Factory, Foundry, Railway Station, Telegraph, Gasworks</td></tr>
+              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 buildings, a Hospital and a Stadium, the plot expanded</td><td>Concrete and glass, tarmac, cars and bikes, a motorboat; Hospital, Stadium, Supermarket, Office, Bus Depot, Power Plant</td></tr>
+              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 buildings, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td>White composite and light, pale roads, pods, a hydrofoil; Data Centre, Research Campus, Vertical Farm, Pod Hub, Drone Port</td></tr>
             </tbody>
           </table>
           <p>
@@ -798,6 +798,22 @@ export default function Wiki() {
             <li><b>Carts.</b> A Stables puts every working adult on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them.</li>
             <li><b>The ferry.</b> A Harbour puts a boat on every channel. People cross open water on it where there is no bridge, and every island counts as reachable, so a settlement hemmed in by water can spread to all of its land. Bridges stay, and the roads still run over them. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
             <li><b>Six buildings.</b> Chapel (company and purpose), Guildhall (learning), Brewery (company), Printer (purpose and learning), Stables, Harbour. They cost Gold, timber and stone like everything else and appear on their shelves in the Build panel once the plot is a township.</li>
+          </ul>
+          <h3>The later eras</h3>
+          <p>
+            Each era follows the same rails as the township. The look changes: brick and iron
+            with setts and rails on the roads, then concrete and glass with tarmac, then white
+            composite with light strips, roof gardens and pale quiet roads. People change clothes
+            with it. Buildings already standing keep their look until you improve them.
+          </p>
+          <ul>
+            <li><b>Rides.</b> A Railway Station puts working adults on the rails, faster than carts. A Bus Depot puts them in cars, a third of them on bikes. A Pod Hub puts everybody in autonomous pods, fastest of all. Each ride is drawn under the person, and a town that loses its newest transport falls back to the one before.</li>
+            <li><b>Boats.</b> The Harbour&rsquo;s ferry becomes a steamboat, then a motorboat, then a hydrofoil.</li>
+            <li><b>Smog.</b> An industrial town without a Gasworks lives under smog, a slow drain on everybody&rsquo;s happiness. A Gasworks clears it, and the modern era leaves it behind.</li>
+            <li><b>Industry.</b> Factory, Foundry, Power Plant and Research Campus each add to what every trade produces, on top of the Lab.</li>
+            <li><b>Care.</b> A Hospital is a Clinic with wards: it takes more of the risk out of a bad week and a plague.</li>
+            <li><b>Company and purpose.</b> Telegraph, Stadium, Office and Drone Port put something back into people every day; a Supermarket and a Vertical Farm keep the larder full; a Data Centre and the Research Campus make trades learned much faster.</li>
+            <li><b>Gates.</b> Some of the checks name buildings from the era after the one you are in, a Hospital for Modern, a Research Campus for AI. Those can be raised as soon as the era before opens them: the Hospital is modern, so an industrial town cannot build it. The gate counts what stands when the button is pressed, so raise them the moment you arrive in the era that allows them.</li>
           </ul>
           <h3>Shelves</h3>
           <p>

@@ -29,8 +29,8 @@ const DARK = '#0c130d';
 
 type Side = 'left' | 'right';
 type RoofStyle = 'gable' | 'hip' | 'flat';
-type WallStyle = 'plaster' | 'stone' | 'timber' | 'dark' | 'log';
-type RoofColor = 'red' | 'green' | 'slate' | 'thatch';
+type WallStyle = 'plaster' | 'stone' | 'timber' | 'dark' | 'log' | 'brick' | 'concrete' | 'composite';
+type RoofColor = 'red' | 'green' | 'slate' | 'thatch' | 'iron' | 'glass' | 'white' | 'garden';
 
 interface Geometry {
   cx: number; wallTopY: number; bw: number; bh: number; wallH: number; roofH: number;
@@ -42,6 +42,11 @@ const ROOFS: Record<RoofColor, [string, string, string]> = {
   green: [BUILD.roofGreenLight, BUILD.roofGreen, BUILD.roofGreenDark],
   slate: [BUILD.roofSlateLight, BUILD.roofSlate, BUILD.roofSlateDark],
   thatch: [BUILD.roofThatchLight, BUILD.roofThatch, BUILD.roofThatchDark],
+  // The later eras: iron sheet, glass, white composite, a garden on the roof.
+  iron: ['#5a6068', '#3e444c', '#2a2f36'],
+  glass: ['#8fd0e0', '#5aa8c0', '#3a7890'],
+  white: ['#f4f6f8', '#dfe4ea', '#b8c0c8'],
+  garden: ['#6fb04a', '#4a8a3a', '#2f6028'],
 };
 const WALLS: Record<WallStyle, [string, string, string]> = {
   plaster: [BUILD.plasterLight, BUILD.plaster, BUILD.plasterDark],
@@ -49,6 +54,9 @@ const WALLS: Record<WallStyle, [string, string, string]> = {
   timber: [BUILD.timberLight, BUILD.timber, BUILD.timberDark],
   dark: ['#3e4139', '#2e302b', '#20221e'],
   log: ['#6c5138', '#4f3a27', '#35271a'],
+  brick: ['#9a5a44', '#7a4434', '#563024'],
+  concrete: ['#b8bcc0', '#969ba2', '#6e7278'],
+  composite: ['#f2f4f6', '#d8dde3', '#aeb6bf'],
 };
 
 /**
@@ -1076,21 +1084,253 @@ function townshipDress(r: Recipe): Recipe {
   return { ...r, wall, roofColor };
 }
 
+/** As the industrial era rebuilds it: brick, and iron sheet on the roof. */
+function industrialDress(r: Recipe): Recipe {
+  const roofColor: RoofColor = r.roofColor === 'red' ? 'red' : 'iron';
+  return { ...r, wall: 'brick', roofColor };
+}
+/** As the modern era rebuilds it: concrete, glass on the roof, flatter. */
+function modernDress(r: Recipe): Recipe {
+  return { ...r, wall: 'concrete', roofColor: 'glass', roof: r.roof === 'gable' ? 'hip' : r.roof };
+}
+/** As the AI era rebuilds it: white composite, a garden or a white roof, flat. */
+function aiDress(r: Recipe): Recipe {
+  const roofColor: RoofColor = r.roofColor === 'green' || r.roofColor === 'thatch' || r.roofColor === 'garden' ? 'garden' : 'white';
+  return { ...r, wall: 'composite', roofColor, roof: 'flat', roofH: Math.min(r.roofH, 14) };
+}
+const DRESS: Record<number, (r: Recipe) => Recipe> = { 2: townshipDress, 3: industrialDress, 4: modernDress, 5: aiDress };
+
+/** A lit strip along a wall face, the AI era's signature. */
+function lightStrip(p: Pixels, lit: Pixels, g: Geometry, side: Side, v: number, color = '#5fd6c8') {
+  wallBand(p, g, side, v, 1, color);
+  wallBand(lit, g, side, v, 1, '#dffcf8');
+}
+
+/** Tall chimneys in a row, for the industrial recipes. */
+function stacks(p: Pixels, g: Geometry, at: number[], height: number) {
+  for (const t of at) chimney(p, g, t * g.bw, height);
+}
+
+/** The industrial era's own buildings. Brick and iron from the day they are raised. */
+const INDUSTRIAL: Record<string, Recipe> = {
+  Factory: {
+    bw: 112, wallH: 34, roofH: 16, roof: 'flat', wall: 'brick', roofColor: 'iron', overhang: 4,
+    windows: [['left', 0.1, 0.2], ['left', 0.3, 0.2], ['left', 0.5, 0.2], ['left', 0.7, 0.2], ['right', 0.3, 0.2], ['right', 0.6, 0.2]],
+    door: ['right', 0.82], sign: 'WORKS', chimneyAt: -34, chimneyH: 30,
+    extras: (p, _lit, g) => stacks(p, g, [0.05, 0.3], 26),
+  },
+  Foundry: {
+    bw: 96, wallH: 30, roofH: 18, roof: 'gable', wall: 'brick', roofColor: 'iron', overhang: 6,
+    windows: [['left', 0.2, 0.25], ['left', 0.55, 0.25]],
+    door: ['right', 0.4], chimneyAt: 24, chimneyH: 28,
+    extras: (p, lit, g) => {
+      // The furnace mouth, glowing on the near face.
+      const [x, y] = wallPoint(g, 'right', 0.72, 0.45);
+      rect(p, x - 6, y, 12, 10, '#2a1a12');
+      rect(p, x - 4, y + 2, 8, 6, '#ff7a2a');
+      rect(p, x - 2, y + 3, 4, 3, '#ffd07a');
+      glow(lit, x, y + 5, 22, '#ff9a3a', 0.6);
+      rect(lit, x - 4, y + 2, 8, 6, '#ffb060');
+    },
+  },
+  'Railway Station': {
+    bw: 116, wallH: 26, roofH: 18, roof: 'hip', wall: 'brick', roofColor: 'iron', overhang: 10,
+    windows: [['left', 0.15, 0.3], ['left', 0.4, 0.3], ['left', 0.65, 0.3], ['right', 0.6, 0.3]],
+    door: ['right', 0.3], sign: 'STATION',
+    extras: (p, _lit, g) => {
+      // A platform canopy on iron posts along the front, and the rails below it.
+      const y = g.groundY - 4;
+      for (let i = 0; i < 6; i++) rect(p, g.cx - 56 + i * 20, y - 16, 2, 16, BUILD.metal);
+      rect(p, g.cx - 58, y - 18, 116, 3, BUILD.metalLight);
+      rect(p, g.cx - 60, y + 1, 120, 1, BUILD.metalLight);
+      rect(p, g.cx - 60, y + 3, 120, 1, BUILD.metalLight);
+      for (let x = g.cx - 58; x < g.cx + 58; x += 6) rect(p, x, y, 3, 5, BUILD.timberDark);
+    },
+  },
+  Telegraph: {
+    bw: 58, wallH: 30, roofH: 18, roof: 'gable', wall: 'brick', roofColor: 'iron', overhang: 4,
+    windows: [['left', 0.3, 0.25], ['right', 0.6, 0.25]],
+    door: ['right', 0.3], sign: 'WIRE',
+    extras: (p, _lit, g) => {
+      // The pole, its crossarms and the wires running off the edge.
+      const x = g.cx - Math.round(g.bw * 0.42), top = g.wallTopY - 34;
+      rect(p, x, top, 2, g.wallH + 40, BUILD.timberDark);
+      for (const dy of [2, 8]) { rect(p, x - 8, top + dy, 18, 1, BUILD.timber); for (const dx of [-7, -3, 3, 7]) rect(p, x + dx, top + dy - 2, 1, 2, BUILD.glassLit); }
+      for (let i = 0; i < 40; i++) rect(p, x - 8 - i, top + 3 + Math.round(i * 0.15), 1, 1, BUILD.metal);
+    },
+  },
+  Gasworks: {
+    bw: 92, wallH: 24, roofH: 12, roof: 'flat', wall: 'brick', roofColor: 'iron', overhang: 3,
+    windows: [['left', 0.2, 0.3], ['right', 0.65, 0.3]],
+    door: ['right', 0.3], chimneyAt: -12, chimneyH: 22,
+    extras: (p, _lit, g) => {
+      // The gasholder: a drum on a frame beside the works.
+      const x = g.cx + Math.round(g.bw * 0.36), y = g.wallTopY - 14;
+      rect(p, x - 14, y, 28, 40, '#3e444c');
+      rect(p, x - 14, y, 28, 2, '#7a828c');
+      for (let i = 0; i < 4; i++) rect(p, x - 14, y + 6 + i * 9, 28, 1, '#2a2f36');
+      rect(p, x - 17, y - 4, 2, 46, BUILD.metalLight);
+      rect(p, x + 15, y - 4, 2, 46, BUILD.metalLight);
+    },
+  },
+};
+
+/** The modern era's own buildings. Concrete and glass. */
+const MODERN: Record<string, Recipe> = {
+  Hospital: {
+    bw: 110, wallH: 46, roofH: 10, roof: 'flat', wall: 'concrete', roofColor: 'white', overhang: 2,
+    windows: [['left', 0.1, 0.12], ['left', 0.3, 0.12], ['left', 0.5, 0.12], ['left', 0.7, 0.12], ['left', 0.1, 0.45], ['left', 0.3, 0.45], ['left', 0.5, 0.45], ['left', 0.7, 0.45], ['right', 0.6, 0.12], ['right', 0.6, 0.45]],
+    door: ['right', 0.3], sign: 'HOSPITAL',
+    extras: (p, lit, g) => {
+      const [x, y] = wallPoint(g, 'left', 0.5, 0.78);
+      rect(p, x - 8, y - 3, 16, 6, '#ffffff');
+      rect(p, x - 3, y - 8, 6, 16, '#ffffff');
+      rect(p, x - 6, y - 2, 12, 4, '#d04040');
+      rect(p, x - 2, y - 6, 4, 12, '#d04040');
+      glow(lit, x, y, 20, '#ff8080', 0.4);
+    },
+  },
+  Stadium: {
+    bw: 124, wallH: 30, roofH: 8, roof: 'flat', wall: 'concrete', roofColor: 'glass', overhang: 6,
+    windows: [['left', 0.15, 0.35], ['left', 0.45, 0.35], ['left', 0.75, 0.35], ['right', 0.5, 0.35]],
+    door: ['right', 0.2], sign: 'ARENA',
+    extras: (p, lit, g) => {
+      // Floodlight masts at the corners.
+      for (const [dx, h] of [[-0.46, 40], [0.46, 40], [0, 48]] as [number, number][]) {
+        const x = g.cx + Math.round(g.bw * dx), top = g.wallTopY - h;
+        rect(p, x, top, 2, h, BUILD.metal);
+        rect(p, x - 5, top - 4, 12, 4, '#2a2f36');
+        rect(p, x - 4, top - 3, 10, 2, '#ffe6a0');
+        glow(lit, x + 1, top - 2, 26, '#fff0c8', 0.55);
+      }
+    },
+  },
+  Supermarket: {
+    bw: 108, wallH: 28, roofH: 8, roof: 'flat', wall: 'concrete', roofColor: 'white', overhang: 4,
+    windows: [['left', 0.08, 0.25], ['left', 0.24, 0.25], ['left', 0.4, 0.25], ['left', 0.56, 0.25], ['left', 0.72, 0.25], ['right', 0.62, 0.25]],
+    door: ['right', 0.3], sign: 'MART',
+    extras: (p, _lit, g) => {
+      // A striped awning the length of the front.
+      for (let i = 0; i < 10; i++) wallPatch(p, g, 'left', 0.02 + i * 0.09, 0.12, 5, 3, i % 2 ? '#d04040' : '#f0f0ea');
+    },
+  },
+  Office: {
+    bw: 76, wallH: 64, roofH: 8, roof: 'flat', wall: 'concrete', roofColor: 'white', overhang: 2,
+    windows: [['left', 0.12, 0.08], ['left', 0.4, 0.08], ['left', 0.68, 0.08], ['left', 0.12, 0.3], ['left', 0.4, 0.3], ['left', 0.68, 0.3], ['left', 0.12, 0.52], ['left', 0.4, 0.52], ['left', 0.68, 0.52], ['right', 0.55, 0.08], ['right', 0.55, 0.3], ['right', 0.55, 0.52]],
+    door: ['right', 0.3], sign: 'OFFICE',
+    extras: (p, _lit, g) => { wallBand(p, g, 'left', 0.22, 1, '#dfe4ea'); wallBand(p, g, 'left', 0.44, 1, '#dfe4ea'); wallBand(p, g, 'left', 0.66, 1, '#dfe4ea'); },
+  },
+  'Bus Depot': {
+    bw: 112, wallH: 26, roofH: 10, roof: 'flat', wall: 'concrete', roofColor: 'iron', overhang: 8,
+    windows: [['right', 0.6, 0.3]],
+    door: ['right', 0.3], sign: 'DEPOT',
+    extras: (p, _lit, g) => {
+      // Wide bays along the front, a bus nosing out of one.
+      for (const t of [0.05, 0.36, 0.67]) wallPatch(p, g, 'left', t, 0.25, 12, Math.round(g.wallH * 0.72), '#2a2f36');
+      const [x, y] = wallPoint(g, 'left', 0.42, 0.55);
+      rect(p, x - 4, y, 26, 11, '#e0c060');
+      rect(p, x - 4, y, 26, 1, '#fff0c8');
+      for (let i = 0; i < 4; i++) rect(p, x - 1 + i * 6, y + 2, 4, 4, '#cfe8f0');
+      rect(p, x - 2, y + 10, 5, 3, '#1e1e22'); rect(p, x + 16, y + 10, 5, 3, '#1e1e22');
+    },
+  },
+  'Power Plant': {
+    bw: 104, wallH: 30, roofH: 10, roof: 'flat', wall: 'concrete', roofColor: 'iron', overhang: 3,
+    windows: [['left', 0.3, 0.3], ['right', 0.6, 0.3]],
+    door: ['right', 0.3], chimneyAt: -20, chimneyH: 30,
+    extras: (p, lit, g) => {
+      // A cooling tower and the pylon beside it.
+      const x = g.cx + Math.round(g.bw * 0.34), top = g.wallTopY - 30;
+      for (let i = 0; i < 50; i++) { const w = 22 - Math.round(Math.sin((i / 50) * Math.PI) * 4); rect(p, x - w / 2, top + i, w, 1, i % 6 === 0 ? '#8a8f96' : '#b0b4ba'); }
+      const px = g.cx - Math.round(g.bw * 0.42), ptop = g.wallTopY - 40;
+      rect(p, px, ptop, 2, g.wallH + 46, BUILD.metal);
+      rect(p, px - 8, ptop + 4, 18, 1, BUILD.metalLight); rect(p, px - 6, ptop + 12, 14, 1, BUILD.metalLight);
+      rect(lit, px - 7, ptop + 2, 2, 2, '#ff6060');
+    },
+  },
+};
+
+/** The AI era's own buildings. White composite, light, gardens on the roofs. */
+const AIERA: Record<string, Recipe> = {
+  'Data Centre': {
+    bw: 108, wallH: 30, roofH: 8, roof: 'flat', wall: 'composite', roofColor: 'white', overhang: 2,
+    door: ['right', 0.3], sign: 'DATA',
+    extras: (p, lit, g) => {
+      lightStrip(p, lit, g, 'left', 0.3); lightStrip(p, lit, g, 'left', 0.6); lightStrip(p, lit, g, 'right', 0.3, '#a986d8'); lightStrip(p, lit, g, 'right', 0.6, '#a986d8');
+      for (let i = 0; i < 5; i++) rect(p, g.cx - 40 + i * 18, g.wallTopY - 6, 10, 6, '#c8ccd8');
+    },
+  },
+  'Research Campus': {
+    bw: 120, wallH: 36, roofH: 14, roof: 'flat', wall: 'composite', roofColor: 'garden', overhang: 6,
+    windows: [['left', 0.1, 0.2], ['left', 0.3, 0.2], ['left', 0.5, 0.2], ['left', 0.7, 0.2], ['right', 0.4, 0.2], ['right', 0.7, 0.2]],
+    door: ['right', 0.2], sign: 'CAMPUS',
+    extras: (p, lit, g) => {
+      // A glass dome over the middle.
+      const x = g.cx, top = g.wallTopY - 24;
+      for (let i = 0; i < 24; i++) { const w = Math.round(Math.sqrt(1 - ((24 - i) / 24) ** 2) * 30); rect(p, x - w, top + i, w * 2, 1, i % 4 === 0 ? '#5aa8c0' : '#8fd0e0'); }
+      glow(lit, x, top + 14, 40, '#dffcf8', 0.35);
+      lightStrip(p, lit, g, 'left', 0.85, '#8ff06a');
+    },
+  },
+  'Vertical Farm': {
+    bw: 74, wallH: 66, roofH: 8, roof: 'flat', wall: 'composite', roofColor: 'garden', overhang: 2,
+    door: ['right', 0.3], sign: 'FARM',
+    extras: (p, lit, g) => {
+      // Green tiers the full height, each behind a light strip.
+      for (let i = 0; i < 6; i++) {
+        const v = 0.08 + i * 0.15;
+        wallBand(p, g, 'left', v, 4, '#4a8a3a'); wallBand(p, g, 'left', v + 0.03, 2, '#6fb04a');
+        wallBand(p, g, 'right', v, 4, '#3f7a32'); wallBand(p, g, 'right', v + 0.03, 2, '#5fa040');
+        lightStrip(p, lit, g, 'left', v + 0.08, '#f4f0c8');
+      }
+    },
+  },
+  'Pod Hub': {
+    bw: 100, wallH: 22, roofH: 10, roof: 'flat', wall: 'composite', roofColor: 'white', overhang: 12,
+    door: ['right', 0.3], sign: 'HUB',
+    extras: (p, lit, g) => {
+      // A wide canopy on slim posts, pods waiting under it.
+      for (let i = 0; i < 5; i++) rect(p, g.cx - 50 + i * 24, g.wallTopY + g.wallH - 20, 2, 20, '#c8ccd8');
+      lightStrip(p, lit, g, 'left', 0.5); lightStrip(p, lit, g, 'right', 0.5);
+      for (const dx of [-30, 0]) { const y = g.groundY - 12; rect(p, g.cx + dx - 10, y, 20, 8, '#eef0f4'); rect(p, g.cx + dx - 7, y + 2, 14, 3, '#7fd8e8'); rect(p, g.cx + dx - 10, y + 8, 20, 1, '#5fd6c8'); }
+    },
+  },
+  'Drone Port': {
+    bw: 96, wallH: 26, roofH: 8, roof: 'flat', wall: 'composite', roofColor: 'white', overhang: 4,
+    door: ['right', 0.3], sign: 'PORT',
+    extras: (p, lit, g) => {
+      // A landing ring on the roof and a drone hovering over it.
+      const x = g.cx, y = g.wallTopY - 4;
+      for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; rect(p, Math.round(x + Math.cos(a) * 18), Math.round(y + Math.sin(a) * 9), 2, 1, '#5fd6c8'); }
+      glow(lit, x, y, 30, '#5fd6c8', 0.35);
+      rect(p, x - 6, y - 26, 12, 3, '#c8ccd8'); rect(p, x - 9, y - 27, 4, 1, '#3a3a3e'); rect(p, x + 5, y - 27, 4, 1, '#3a3a3e');
+      rect(p, x - 2, y - 23, 4, 3, '#eef0f4');
+      rect(lit, x - 1, y - 22, 2, 1, '#ff6060');
+    },
+  },
+};
+const ERA_SETS: [number, Record<string, Recipe>][] = [[2, TOWNSHIP], [3, INDUSTRIAL], [4, MODERN], [5, AIERA]];
+const ART_ERAS = [2, 3, 4, 5];
+
+/**
+ * The bodies built at load: every building as it is first raised, at its
+ * three levels. The era bodies — the same building as a later era would
+ * rebuild it — are built on demand by `buildBuildingArt`, because five eras
+ * of every recipe at three levels is ten atlas pages, and a plot only ever
+ * shows one or two eras at a time.
+ */
 export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string; pixels: Pixels }[] } {
   const art: BuildingArt[] = [];
   let seed = 6000;
   for (const [name, recipe] of Object.entries(RECIPES)) {
     seed += 137;
     for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
-    // The township body of the same building, keyed `.E2`.
-    for (const level of ART_LEVELS) art.push(buildOne(`${name}.E2`, seed + 41, townshipDress(recipe), level));
   }
-  for (const [name, recipe] of Object.entries(TOWNSHIP)) {
-    seed += 137;
-    // Township buildings are stone from the start; the plain key and the
-    // era key are the same body, so a lookup by either finds it.
-    for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
-    for (const level of ART_LEVELS) art.push(buildOne(`${name}.E2`, seed, recipe, level));
+  for (const [, set] of ERA_SETS) {
+    for (const [name, recipe] of Object.entries(set)) {
+      seed += 137;
+      for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
+    }
   }
   const overlays = [0, 1, 2, 3].map((f) => ({ name: `overlay.mill.wheel.${f}`, pixels: millWheel(f) }));
   return { art, overlays };
@@ -1099,7 +1339,37 @@ export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string
 export const HOUSE_DESIGNS = 8;
 
 /** Every building type that has art of its own. */
-export const BUILDING_TYPES = [...Object.keys(RECIPES).filter((k) => !k.startsWith('House.')), ...Object.keys(TOWNSHIP)];
+export const BUILDING_TYPES = [...Object.keys(RECIPES).filter((k) => !k.startsWith('House.')), ...ERA_SETS.flatMap(([, set]) => Object.keys(set))];
+const knownType = (type: string) => !!(RECIPES[type] || ERA_SETS.some(([, set]) => set[type]));
+
+/** The recipe behind a base art name, and the era it belongs to. */
+function recipeFor(base: string): { recipe: Recipe; own: number } | null {
+  if (RECIPES[base]) return { recipe: RECIPES[base], own: 1 };
+  for (const [own, set] of ERA_SETS) if (set[base]) return { recipe: set[base], own };
+  return null;
+}
+
+/**
+ * Build one art key on demand: `<base>[.E<era>][.L<level>]`. The three
+ * levels of a body are built together, since a lookup for one usually means
+ * the others are coming. Returns nothing for a key that names no recipe or
+ * needs no dressing, which is everything built at load.
+ */
+export function buildBuildingArt(key: string): BuildingArt[] {
+  let rest = key;
+  const lvl = /\.L([23])$/.exec(rest);
+  if (lvl) rest = rest.slice(0, -lvl[0].length);
+  const era = /\.E([2-5])$/.exec(rest);
+  if (!era) return [];
+  const base = rest.slice(0, -era[0].length);
+  const found = recipeFor(base);
+  if (!found) return [];
+  const e = Number(era[1]);
+  const body = e <= found.own ? found.recipe : DRESS[e](found.recipe);
+  let seed = 7000;
+  for (let i = 0; i < base.length; i++) seed = (seed * 31 + base.charCodeAt(i)) % 100000;
+  return ART_LEVELS.map((level) => buildOne(`${base}.E${e}`, seed + 41 * e, body, level));
+}
 
 /**
  * Map a simulation building to its art.
@@ -1110,7 +1380,7 @@ export const BUILDING_TYPES = [...Object.keys(RECIPES).filter((k) => !k.startsWi
  */
 export function buildingArtKey(type: string, id: string, level = 1, era = 1): string {
   let base: string;
-  if (type !== 'House') base = RECIPES[type] || TOWNSHIP[type] ? type : 'House.0';
+  if (type !== 'House') base = knownType(type) ? type : 'House.0';
   else {
     let h = 2166136261;
     for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -1119,7 +1389,7 @@ export function buildingArtKey(type: string, id: string, level = 1, era = 1): st
   // The era dresses the body: anything from the township on is stone and
   // tile. A building raised earlier keeps its timber until it is improved,
   // which is the caller's decision, made by passing the era it was built in.
-  if (era >= 2) base = `${base}.E2`;
+  if (era >= 2) base = `${base}.E${Math.min(5, Math.round(era))}`;
   const lvl = Math.max(1, Math.min(3, Math.round(level)));
   return lvl === 1 ? base : `${base}.L${lvl}`;
 }

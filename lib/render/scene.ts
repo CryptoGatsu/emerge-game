@@ -346,7 +346,9 @@ export class EmergeScene {
         }
 
         // A township's roads are cobbled where a settlement's were worn earth.
-        const art = kind === Tile.Path && eraOf(this.world) >= 2 ? { key: 'tile.cobble', variants: 3 } : TILE_ART[kind];
+        const era = eraOf(this.world);
+        const road = era >= 5 ? 'tile.composite' : era >= 4 ? 'tile.tarmac' : era >= 3 ? 'tile.setts' : era >= 2 ? 'tile.cobble' : null;
+        const art = kind === Tile.Path && road ? { key: road, variants: 3 } : TILE_ART[kind];
         if (kind === Tile.Water || kind === Tile.WaterShore) {
           const sprite = new Sprite(assets.get(`${art.key}.0`));
           sprite.position.set(pos.x - TILE_W / 2, pos.y);
@@ -564,6 +566,7 @@ export class EmergeScene {
    * to all follow the same two numbers.
    */
   private placeBuilding(view: BuildingView, building: Building) {
+    this.assets.ensureBuilding(view.artKey);
     const meta = this.assets.buildingMeta.get(view.artKey);
     if (!meta) return;
     const height = this.map.heightAt(building.x, building.y);
@@ -638,6 +641,7 @@ export class EmergeScene {
       // Improved since it was last drawn: the sprites are the wrong ones now,
       // so it is taken down and raised again in its new form.
       if (seen) this.dropBuilding(building.id);
+      this.assets.ensureBuilding(artKey);
       const meta = this.assets.buildingMeta.get(artKey);
       if (!meta) return;
       const height = this.map.heightAt(building.x, building.y);
@@ -1116,6 +1120,23 @@ export class EmergeScene {
     if (target) { this.taps++; this.tapEvent = native ?? null; }
     this.selected = target;
     this.callbacks.onSelect?.(target);
+  }
+
+  /** What the atlas holds for a building art key, for the trial build's diagnostics. */
+  artInfo(key: string) {
+    this.assets.ensureBuilding(key);
+    const meta = this.assets.buildingMeta.get(key);
+    const tex = this.assets.has(`building.${key}`) ? this.assets.get(`building.${key}`) : null;
+    return { has: !!tex, meta: !!meta, pages: this.assets.pages, w: tex?.width ?? 0, h: tex?.height ?? 0, frame: tex ? [tex.frame.x, tex.frame.y] : null, source: tex ? (tex.source.width ?? 0) : 0 };
+  }
+
+  /** Every building sprite the scene holds, for the trial build's diagnostics. */
+  spriteInfo() {
+    return [...this.buildings.values()].map((v) => ({
+      id: v.building.id, type: v.building.type, artKey: v.artKey,
+      x: Math.round(v.base.x), y: Math.round(v.base.y), visible: v.base.visible, renderable: v.base.renderable, alpha: v.base.alpha,
+      tex: [v.base.texture.width, v.base.texture.height], parent: !!v.base.parent, cam: [Math.round(this.camera.x), Math.round(this.camera.y), this.camera.zoom],
+    }));
   }
 
   /** Selection driven from the UI rather than a click on the map. */
@@ -2353,6 +2374,7 @@ export class EmergeScene {
   startPlacement(type: string, onPlace: (x: number, y: number) => void) {
     this.cancelPlacement();
     const artKey = buildingArtKey(type, 'ghost', 1, eraOf(this.world));
+    this.assets.ensureBuilding(artKey);
     const meta = this.assets.buildingMeta.get(artKey);
     if (!meta) return;
     const ghost = new Sprite(this.assets.get(`building.${artKey}`));

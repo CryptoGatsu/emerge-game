@@ -1,8 +1,9 @@
 # Era advancement — design and readiness audit
 
-The next major update. This is the plan, grounded in what the code does today,
-so the work can be sized and ordered before anything is built. Nothing here
-is implemented yet.
+The plan this was built from, kept as a record. Everything in the "Order of
+work" is done as of v1.5: the framework, categories and Township (v1.4), then
+Industrial, Modern and AI (v1.5). Where the shipped game differs from the
+table below, the game and the guide are right.
 
 ## The rule
 

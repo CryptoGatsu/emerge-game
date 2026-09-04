@@ -38,22 +38,22 @@ export const ERAS: EraSpec[] = [
   {
     id: 3, name: 'Industrial', days: 90,
     look: 'Brick and iron, chimneys, gaslight, rail.',
-    arrives: 'Rail between districts, steamboats, a Factory, a Foundry, a Gasworks, coal, and smog.',
+    arrives: 'Rail on the roads, a steamboat on the water, a Factory, a Foundry, a Railway Station, a Telegraph and a Gasworks. Smog, until the gas is lit.',
   },
   {
     id: 4, name: 'Modern', days: 120,
     look: 'Concrete, glass, tarmac, streetlights at night.',
-    arrives: 'Cars and bikes, motorboats, a Hospital, a Stadium, a Supermarket, a Power Plant.',
+    arrives: 'Cars and bikes on the roads, a motorboat, a Hospital, a Stadium, a Supermarket, an Office, a Bus Depot and a Power Plant.',
   },
   {
     id: 5, name: 'AI', days: 150,
     look: 'Clean lines, light, gardens on roofs, quiet.',
-    arrives: 'Autonomous pods, drones, hydrofoils, a Data Centre, a Research Campus, a Vertical Farm.',
+    arrives: 'Pods on the roads, a hydrofoil on the water, a Data Centre, a Research Campus, a Vertical Farm, a Pod Hub and a Drone Port.',
   },
 ];
 
 /** How far the game has been built. Eras past this are described, not reachable. */
-export const OPEN_ERA: EraId = 2;
+export const OPEN_ERA: EraId = 5;
 
 export const eraSpec = (id: number): EraSpec => ERAS[Math.max(1, Math.min(ERAS.length, Math.round(id))) - 1];
 export const eraName = (id: number) => eraSpec(id).name;

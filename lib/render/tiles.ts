@@ -202,6 +202,71 @@ function cobbleTile(seed: number): Pixels {
   return p;
 }
 
+/** The industrial era's road: dark setts under soot, a rail pair down the middle. */
+function settsTile(seed: number): Pixels {
+  const p = tile();
+  const base = shade(GROUND.plaza, -0.22);
+  fillDiamond(p, base);
+  speckle(p, seed, 140, [shade(base, 0.08), shade(base, -0.14)], clip);
+  const r = rng(seed + 811);
+  for (let y = 1; y < TILE_H - 1; y += 2) {
+    const [x0, width] = diamondRow(y);
+    const offset = ((y / 2) | 0) % 2 ? 2 : 0;
+    for (let x = x0 + offset; x < x0 + width - 3; x += 4) {
+      if (!insideDiamond(x, y) || !insideDiamond(x + 2, y + 1)) continue;
+      const tone = r() < 0.5 ? shade(GROUND.stoneDark, 0.05) : shade(GROUND.stone, -0.12);
+      rect(p, x, y, 3, 1, tone);
+      rect(p, x, y + 1, 3, 1, shade(tone, -0.2));
+    }
+  }
+  // Rails along the long axis of the diamond, with sleepers between.
+  for (let x = 4; x < TILE_W - 4; x++) {
+    const y = Math.round(TILE_H / 2 + (x - TILE_W / 2) * 0.5);
+    if (insideDiamond(x, y - 2)) rect(p, x, y - 2, 1, 1, '#7a828c');
+    if (insideDiamond(x, y + 1)) rect(p, x, y + 1, 1, 1, '#7a828c');
+  }
+  scuff(p, seed + 655, shade(base, -0.1));
+  ragged(p, seed + 725, 2);
+  return p;
+}
+
+/** The modern era's road: tarmac, a dashed pale line down the middle, a kerb at the edge. */
+function tarmacTile(seed: number): Pixels {
+  const p = tile();
+  const base = '#3a3f44';
+  fillDiamond(p, base);
+  speckle(p, seed, 120, ['#454a50', '#30353a'], clip);
+  for (let x = 2; x < TILE_W - 2; x++) {
+    const y = Math.round(TILE_H / 2 + (x - TILE_W / 2) * 0.5);
+    if (((x / 6) | 0) % 2 === 0 && insideDiamond(x, y)) rect(p, x, y, 1, 1, '#d8d4c0');
+  }
+  for (let y = 0; y < TILE_H; y++) {
+    const [x0, width] = diamondRow(y);
+    rect(p, x0, y, 1, 1, '#6a7078');
+    rect(p, x0 + width - 1, y, 1, 1, '#6a7078');
+  }
+  ragged(p, seed + 735, 1);
+  return p;
+}
+
+/** The AI era's road: pale composite, one faint light seam along it. */
+function compositeTile(seed: number): Pixels {
+  const p = tile();
+  const base = '#c9cfd4';
+  fillDiamond(p, base);
+  speckle(p, seed, 80, ['#d6dbe0', '#bcc3c9'], clip);
+  for (let x = 3; x < TILE_W - 3; x++) {
+    const y = Math.round(TILE_H / 2 + (x - TILE_W / 2) * 0.5);
+    if (insideDiamond(x, y)) rect(p, x, y, 1, 1, '#8fe3dc');
+  }
+  for (let y = 0; y < TILE_H; y++) {
+    const [x0, width] = diamondRow(y);
+    rect(p, x0, y, 1, 1, '#a8b0b8');
+    rect(p, x0 + width - 1, y, 1, 1, '#a8b0b8');
+  }
+  return p;
+}
+
 function plazaTile(seed: number): Pixels {
   const p = tile();
   fillDiamond(p, GROUND.plaza);
@@ -471,6 +536,9 @@ export function buildTiles(): TileArt[] {
   for (let i = 0; i < 3; i++) add(`tile.path.${i}`, pathTile(2400 + i * 43));
   for (let i = 0; i < 2; i++) add(`tile.plaza.${i}`, plazaTile(2600 + i * 31));
   for (let i = 0; i < 3; i++) add(`tile.cobble.${i}`, cobbleTile(2700 + i * 37));
+  for (let i = 0; i < 3; i++) add(`tile.setts.${i}`, settsTile(2800 + i * 31));
+  for (let i = 0; i < 3; i++) add(`tile.tarmac.${i}`, tarmacTile(2900 + i * 29));
+  for (let i = 0; i < 3; i++) add(`tile.composite.${i}`, compositeTile(3000 + i * 23));
   for (let i = 0; i < 2; i++) add(`tile.rock.${i}`, rockTile(2800 + i * 47));
   add('tile.sand.0', sandTile(3000));
   add('tile.snow.0', snowTile(3100));

@@ -23,7 +23,7 @@ import {
   BODY_LAYERS, HATS, bodyFrame, characterFrameKeys, hairFrame, hatFrame,
   type HatKind, HAIR_STYLES,
 } from './character';
-import { buildBuildings, type BuildingArt } from './buildings';
+import { buildBuildingArt, buildBuildings, type BuildingArt } from './buildings';
 import { buildProps } from './props';
 import { animalFrame, fishingRod, huntingBow } from './wildlifeArt';
 import { clash, funnel, rubble, torch } from './dangerArt';
@@ -73,6 +73,13 @@ class AtlasPacker {
   /** Push the finished pages to the GPU. Called once after generation. */
   finalise() {
     for (const page of this.pages) page.source.update();
+  }
+
+  /** Add after the atlas is live: the page it lands on is re-uploaded at once. */
+  addLive(pixels: Pixels): Texture {
+    const tex = this.add(pixels);
+    this.pages[this.pages.length - 1].source.update();
+    return tex;
   }
 
   get pageCount() { return this.pages.length; }
@@ -215,6 +222,113 @@ function boat(): Pixels {
   return p;
 }
 
+/** The industrial era's rail trolley: a short green carriage on iron wheels, a little chimney up front. */
+function tram(): Pixels {
+  const p = surface(26, 14);
+  rect(p, 2, 3, 20, 8, '#2f5a3a');
+  rect(p, 2, 3, 20, 1, '#5a8a5a');
+  rect(p, 2, 9, 20, 2, '#1e3a26');
+  for (const x of [5, 10, 15]) { rect(p, x, 5, 3, 3, '#1d2a30'); rect(p, x, 5, 3, 1, '#7ab0c0'); }
+  rect(p, 22, 1, 2, 5, '#3a3a3e');
+  rect(p, 21, 0, 4, 1, '#55555a');
+  for (const cx of [6, 18]) { rect(p, cx - 2, 10, 5, 4, '#3a3a3e'); rect(p, cx - 1, 11, 3, 2, '#7a828c'); }
+  rect(p, 0, 11, 26, 1, '#55555a');
+  return p;
+}
+
+/** A bicycle, side on: two wheels, a frame, the handlebars up front. */
+function bike(): Pixels {
+  const p = surface(22, 12);
+  for (const cx of [5, 17]) {
+    rect(p, cx - 4, 4, 9, 8, '#3a3a3e');
+    rect(p, cx - 3, 5, 7, 6, '#7a828c');
+    rect(p, cx - 2, 6, 5, 4, '#3a3a3e');
+    rect(p, cx - 1, 7, 3, 2, '#c8c8c0');
+  }
+  rect(p, 6, 3, 10, 1, '#c84a4a');
+  rect(p, 9, 1, 1, 6, '#c84a4a');
+  rect(p, 5, 5, 1, 4, '#c84a4a');
+  rect(p, 14, 3, 1, 5, '#c84a4a');
+  rect(p, 16, 0, 3, 1, '#3a3a3e');
+  rect(p, 17, 1, 1, 3, '#3a3a3e');
+  rect(p, 8, 0, 3, 1, '#2a2a2a');
+  return p;
+}
+
+/** A small car in one of three colours, side on. */
+function car(color: string, dark: string): Pixels {
+  const p = surface(28, 13);
+  rect(p, 2, 5, 24, 5, color);
+  rect(p, 7, 2, 13, 4, color);
+  rect(p, 8, 3, 4, 3, '#cfe8f0');
+  rect(p, 14, 3, 5, 3, '#cfe8f0');
+  rect(p, 2, 5, 24, 1, '#ffffff');
+  rect(p, 2, 9, 24, 1, dark);
+  rect(p, 25, 6, 2, 2, '#ffe6a0');
+  rect(p, 1, 6, 2, 2, '#d04040');
+  for (const cx of [7, 21]) { rect(p, cx - 2, 9, 5, 4, '#1e1e22'); rect(p, cx - 1, 10, 3, 2, '#9a9a9a'); }
+  return p;
+}
+
+/** An autonomous pod: a rounded white capsule on a light strip, no wheels to see. */
+function pod(): Pixels {
+  const p = surface(26, 12);
+  rect(p, 3, 2, 20, 8, '#eef0f4');
+  rect(p, 5, 0, 16, 2, '#eef0f4');
+  rect(p, 1, 4, 24, 4, '#eef0f4');
+  rect(p, 6, 2, 14, 4, '#7fd8e8');
+  rect(p, 6, 2, 14, 1, '#d8f4fa');
+  rect(p, 3, 9, 20, 1, '#5fd6c8');
+  rect(p, 1, 10, 24, 1, '#3fa3a8');
+  rect(p, 2, 6, 22, 1, '#c8ccd8');
+  return p;
+}
+
+/** The industrial ferry: an iron hull with a funnel and a plume. */
+function steamboat(): Pixels {
+  const p = surface(34, 16);
+  rect(p, 3, 8, 28, 5, '#3a3a3e');
+  rect(p, 1, 9, 32, 3, '#3a3a3e');
+  rect(p, 5, 13, 24, 1, '#22262a');
+  rect(p, 9, 14, 16, 1, '#2f3f4a');
+  rect(p, 3, 8, 28, 1, '#c84a4a');
+  rect(p, 8, 5, 18, 3, '#d8d0b8');
+  rect(p, 14, 0, 4, 5, '#2a2a2e');
+  rect(p, 13, 0, 6, 1, '#c84a4a');
+  rect(p, 10, 6, 3, 1, '#1d2a30'); rect(p, 20, 6, 3, 1, '#1d2a30');
+  rect(p, 19, 0, 3, 2, '#a8a8a8'); rect(p, 22, 0, 2, 1, '#c8c8c8');
+  return p;
+}
+
+/** The modern ferry: a white motorboat with a low cabin and a wake. */
+function motorboat(): Pixels {
+  const p = surface(34, 14);
+  rect(p, 3, 7, 28, 5, '#f0f0ea');
+  rect(p, 1, 8, 32, 3, '#f0f0ea');
+  rect(p, 3, 7, 28, 1, '#3a5a9a');
+  rect(p, 5, 12, 24, 1, '#b8bcc0');
+  rect(p, 8, 13, 18, 1, '#cfe8f0');
+  rect(p, 9, 3, 14, 4, '#f0f0ea');
+  rect(p, 10, 4, 12, 2, '#7fd8e8');
+  rect(p, 24, 5, 3, 2, '#3a5a9a');
+  rect(p, 0, 9, 2, 1, '#cfe8f0');
+  return p;
+}
+
+/** The AI era's ferry: a hydrofoil, hull lifted clear on two struts, a light strip along it. */
+function hydrofoil(): Pixels {
+  const p = surface(36, 16);
+  rect(p, 4, 4, 28, 5, '#eef0f4');
+  rect(p, 2, 5, 32, 3, '#eef0f4');
+  rect(p, 9, 1, 16, 3, '#eef0f4');
+  rect(p, 10, 2, 14, 2, '#7fd8e8');
+  rect(p, 4, 9, 28, 1, '#5fd6c8');
+  rect(p, 8, 10, 2, 4, '#c8ccd8'); rect(p, 26, 10, 2, 4, '#c8ccd8');
+  rect(p, 4, 14, 28, 1, '#b8c4d0');
+  rect(p, 6, 15, 24, 1, '#cfe8f0');
+  return p;
+}
+
 /** Something a citizen is carrying, held in front of them as they walk. */
 function carried(kind: 'crate' | 'sack' | 'log' | 'loaf' | 'cloth' | 'fish' | 'game' | 'basket'): Pixels {
   const p = surface(12, 10);
@@ -329,6 +443,28 @@ export class AssetLibrary {
 
   has(name: string) { return this.overrides.has(name) || this.textures.has(name); }
 
+  /** How many atlas pages the art took, for the trial build's diagnostics. */
+  get pages() { return this.packer?.pageCount ?? 0; }
+  private packer: AtlasPacker | null = null;
+  attachPacker(packer: AtlasPacker) { this.packer = packer; }
+
+  /**
+   * Make sure a building art key exists, building it into the atlas if it is
+   * one of the era bodies that are not built at load. Returns false for a key
+   * that names nothing.
+   */
+  ensureBuilding(key: string): boolean {
+    if (this.buildingMeta.has(key)) return true;
+    if (!this.packer) return false;
+    for (const b of buildBuildingArt(key)) {
+      if (this.buildingMeta.has(b.name)) continue;
+      this.set(`building.${b.name}`, this.packer.addLive(b.pixels));
+      this.set(`building.${b.name}.lit`, this.packer.addLive(b.lit));
+      this.buildingMeta.set(b.name, { anchorY: b.anchorY, door: b.door, chimney: b.chimney, width: b.pixels.w, height: b.pixels.h });
+    }
+    return this.buildingMeta.has(key);
+  }
+
   /** Returns the texture if present, else the fallback name's texture. */
   getOr(name: string, fallback: string): Texture {
     return this.has(name) ? this.get(name) : this.get(fallback);
@@ -416,6 +552,15 @@ export function loadAssets(): AssetLibrary {
   put('fx.rod', fishingRod());
   put('fx.cart', cart());
   put('fx.boat', boat());
+  put('fx.tram', tram());
+  put('fx.bike', bike());
+  put('fx.car.0', car('#c84a4a', '#7a2a2a'));
+  put('fx.car.1', car('#3a5a9a', '#22365e'));
+  put('fx.car.2', car('#e0c060', '#8a7430'));
+  put('fx.pod', pod());
+  put('fx.steamboat', steamboat());
+  put('fx.motorboat', motorboat());
+  put('fx.hydrofoil', hydrofoil());
   for (let f = 0; f < 4; f++) put(`fx.funnel.${f}`, funnel(f));
   put('fx.torch.0', torch(0));
   put('fx.torch.1', torch(1));
@@ -437,6 +582,7 @@ export function loadAssets(): AssetLibrary {
   }
 
   pack.finalise();
+  lib.attachPacker(pack);
   cached = lib;
   return lib;
 }
