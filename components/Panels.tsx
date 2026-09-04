@@ -141,6 +141,7 @@ const BUILDABLE: { type: string; cost: number; blurb: string; icon: string }[] =
   { type: 'Clinic', cost: BUILD_COSTS['Clinic'], icon: '✚', blurb: 'People survive what would have killed them.' },
   { type: 'Jail', cost: BUILD_COSTS['Jail'], icon: '▦', blurb: 'Somewhere to hold anyone who turns on the settlement. Fewer do, with one standing.' },
   { type: 'Bank', cost: BUILD_COSTS['Bank'], icon: '◈', blurb: 'A counting house for the treasury.' },
+  { type: 'Town Hall', cost: BUILD_COSTS['Town Hall'], icon: '🏛', blurb: 'Where the settlement meets and resolves on something. The place is run better with one standing, and the Township needs it.' },
   // The township.
   { type: 'Chapel', cost: BUILD_COSTS['Chapel'], icon: '⛪', blurb: 'Somewhere to be quiet together. Company and purpose for everybody, a little each day.' },
   { type: 'Guildhall', cost: BUILD_COSTS['Guildhall'], icon: '⚒', blurb: 'The trades organised. Everybody learns their craft faster.' },

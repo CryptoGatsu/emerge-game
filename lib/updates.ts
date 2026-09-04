@@ -24,6 +24,9 @@ export const UPDATES: Update[] = [
       'Hunting is paid like every other trade. The stalking you can watch is the visible part of the day; the snares, the lines and the ground beyond the plot’s edge bring in the rest, so a lodge full of hunters no longer shares one herd of ten and reports 0 a day. An improved lodge and a full quiver raise the take as they should.',
       'Animals now spread over the whole of an expanded plot, and the Lodge’s card says how many are on the land and in reach.',
       'Attention is yours, not the plot’s. Acting on any of your plots keeps every plot you own attended, on this device, on another, and in what the vault judges. A plot you leave running earns at the shape you left it in, against the clock, whether or not it is open.',
+      'The Town Hall can be built. It was in the Township’s conditions and in every list but the Build panel’s; it is on the Civic shelf now, for 480 Gold, 20 timber and 30 stone.',
+      'Moving a building works on a phone. A tap places it where the finger is; before, the ghost only ever followed a mouse.',
+      'A lived-in house can be pulled down. The family moves to another house with room, or sleeps rough until one is raised, and the card says so. The market, the bank and the town hall say why they cannot come down instead of hiding the button.',
     ],
   },
   {
@@ -174,6 +177,9 @@ export const UPDATES_ZH: Update[] = [
       '狩猎现在和其他行业一样计产。屏幕上能看到的追猎只是一天的可见部分；陷阱、绳套和地块边缘之外的猎场带回其余部分，所以满员的猎人小屋不再十个猎人分一群猎物、报出"每天 0"。升级的小屋和满满的箭筒会如期提高收获。',
       '动物现在会分布在整块扩展后的土地上，猎人小屋的卡片会写明地上有多少猎物、多少在可及范围内。',
       '注意力属于你，而不是地块。在任何一块地上做点什么，你名下的每块地都算被照看，本设备、其他设备和金库的裁定都一样。你留着运转的地块按你离开时的样子继续按时钟计收，开着与否都一样。',
+      '市政厅可以建了。它在城镇时代的条件里、在每张清单上，唯独不在建造面板里；现在在"公共"一栏，480 金币、20 木材、30 石料。',
+      '手机上可以搬建筑了。点一下就放在手指的位置；以前的虚影只跟着鼠标走。',
+      '有人住的房子可以拆了。这家人会搬到有空位的房子，没有的话就露宿到新房建起，卡片上会说明。市场、银行和市政厅则会说明为什么不能拆，而不是把按钮藏起来。',
     ],
   },
   {

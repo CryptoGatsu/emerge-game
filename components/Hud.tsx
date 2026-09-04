@@ -286,8 +286,12 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             </button>
             <span className="muted small">
               {t('Salvages {wood} timber and {stone} stone. The Gold does not come back.', { wood: focus.salvage.wood, stone: focus.salvage.stone })}
+              {focus.household && <> {t('The {family} family moves to another house with room, or sleeps rough until one is raised.', { family: focus.household })}</>}
             </span>
           </div>
+        )}
+        {focus.keeps && !readOnly && !focus.ruined && (
+          <p className="muted small demolish-keeps">{t(focus.keeps)}</p>
         )}
       </section>
     );

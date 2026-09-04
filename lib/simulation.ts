@@ -6010,7 +6010,7 @@ const TRADE_BUILD_COST: Record<string, number> = {
   Storage: 120, Tavern: 350, Bank: 450,
   // The civic buildings. None employs anybody; each changes how the town lives.
   Cafe: 300, School: 380, Library: 360, Studio: 340, Clinic: 420, Lab: 520,
-  Jail: 220,
+  Jail: 220, 'Town Hall': 480,
   // The township. Stone and tile, and each one changes how the town moves
   // or thinks: the stables put carts on the roads, the harbour a ferry on
   // the water, the chapel and the brewery give people somewhere to be, the
@@ -6065,6 +6065,7 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   Clinic: { wood: 12, stone: 24 },
   Lab: { wood: 14, stone: 30 },
   Jail: { wood: 8, stone: 22 },
+  'Town Hall': { wood: 20, stone: 30 },
   Chapel: { wood: 10, stone: 30 },
   Monument: { wood: 0, stone: 0 },
   Guildhall: { wood: 16, stone: 28 },
@@ -7919,10 +7920,11 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   if (UNDEMOLISHABLE.includes(building.type)) {
     return { ok: false, message: `The ${building.type.toLowerCase()} holds the settlement together. It cannot be pulled down.` };
   }
-  const home = world.families.find((f) => f.homeId === building.id);
-  if (home && home.members.length) {
-    return { ok: false, message: `The ${home.name} family lives there. Rehouse them first.` };
-  }
+  // A lived-in house comes down with its family moved out first: into
+  // another house with room if there is one, and onto the tavern benches
+  // until one is raised if there is not. "Rehouse them first" was a wall,
+  // because nothing in the game let the player do that.
+  const home = world.families.find((f) => f.homeId === building.id && f.members.length > 0);
 
   const need = buildMaterials(building.type);
   const wood = Math.floor(need.wood / 2);
@@ -7933,6 +7935,11 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   note(world, 'produced', 'stone', stone);
 
   world.buildings = world.buildings.filter((b) => b.id !== id);
+  if (home) {
+    home.homeId = '';
+    const moved = rehouse(world);
+    if (!moved) pushFeed(world, 'social', `The ${home.name} family is without a roof. They will take the next house raised.`);
+  }
   // Anyone who was heading there needs somewhere else to be, now.
   for (const c of world.citizens) {
     if (c.destId === id) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; }

@@ -2508,8 +2508,12 @@ export class EmergeScene {
   };
   private placementSpot = { x: 50, y: 50 };
 
-  private onPlacementCommit = () => {
+  private onPlacementCommit = (e: PointerEvent) => {
     if (!this.placement || this.dragMoved > 6) return;
+    // A finger does not hover: on a phone the first the ghost hears of the
+    // spot is the tap itself, so the spot is read from the tap before it is
+    // judged. A mouse has already moved here and this changes nothing.
+    this.onPlacementMove(e);
     if (!this.placementValid) return;
     const { onPlace } = this.placement;
     const { x, y } = this.placementSpot;

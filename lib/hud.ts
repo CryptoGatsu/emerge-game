@@ -46,6 +46,10 @@ export interface FocusBuilding {
     damage: number;
     rebuild: { gold: number; wood: number; stone: number; stocked: boolean };
     demolishable: boolean;
+  /** Why it cannot be pulled down, when it cannot. */
+  keeps: string | null;
+  /** The family that would have to move out, when one lives here. */
+  household: string | null;
   salvage: { wood: number; stone: number };
   /** How far it has been improved, and what the next step would take. */
   level: number;
@@ -365,7 +369,9 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       const cost = rebuildCost(b);
       return { ...cost, stocked: world.resources.wood >= cost.wood && world.resources.stone >= cost.stone };
     })(),
-    demolishable: !b.ruined && !UNDEMOLISHABLE.includes(b.type) && !(family && family.members.length > 0),
+    demolishable: !b.ruined && !UNDEMOLISHABLE.includes(b.type),
+    keeps: UNDEMOLISHABLE.includes(b.type) ? `The ${b.type.toLowerCase()} holds the settlement together. It cannot be pulled down.` : null,
+    household: family && family.members.length > 0 ? family.name : null,
     salvage: (() => {
       const need = buildMaterials(b.type);
       return { wood: Math.floor(need.wood / 2), stone: Math.floor(need.stone / 2) };
