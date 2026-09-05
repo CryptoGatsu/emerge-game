@@ -8061,14 +8061,18 @@ export function placementProblem(world: World, type: string, x: number, y: numbe
 /** Whether a footprint of radius `r` at (x, y) lies on a bridge's deck or either ramp. */
 function bridgeUnder(world: World, x: number, y: number, r: number): boolean {
   for (const b of world.layout.bridges) {
-    const reach = b.span + BRIDGE_RAMP;
+    // The deck and the little bank at each end: the span. Beyond that is
+    // open ground, and a building beside the road there is passed.
+    const reach = b.span;
     const ax = b.x - Math.cos(b.angle) * reach, ay = b.y - Math.sin(b.angle) * reach;
     const bx = b.x + Math.cos(b.angle) * reach, by = b.y + Math.sin(b.angle) * reach;
     // Distance from the point to the segment between the ramp ends.
     const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1;
     const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2));
     const d = Math.hypot(x - (ax + dx * t), y - (ay + dy * t));
-    if (d < r + 2.2) return true;
+    // Only a footprint that actually lies across the road: the starter
+    // layouts stand houses and farms half a unit off a ramp and people pass.
+    if (d < r + 0.3) return true;
   }
   return false;
 }
