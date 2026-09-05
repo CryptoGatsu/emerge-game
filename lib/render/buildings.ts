@@ -30,7 +30,7 @@ const DARK = '#2a1d13';
 type Side = 'left' | 'right';
 type RoofStyle = 'gable' | 'hip' | 'flat' | 'mansard' | 'sawtooth' | 'stepped' | 'dome' | 'curved';
 type WallStyle = 'plaster' | 'stone' | 'timber' | 'dark' | 'log' | 'brick' | 'concrete' | 'composite';
-type RoofColor = 'red' | 'green' | 'slate' | 'thatch' | 'iron' | 'glass' | 'white' | 'garden';
+type RoofColor = 'red' | 'green' | 'slate' | 'thatch' | 'shingle' | 'iron' | 'glass' | 'white' | 'garden';
 
 interface Geometry {
   cx: number; wallTopY: number; bw: number; bh: number; wallH: number; roofH: number;
@@ -42,6 +42,8 @@ const ROOFS: Record<RoofColor, [string, string, string]> = {
   green: [BUILD.roofGreenLight, BUILD.roofGreen, BUILD.roofGreenDark],
   slate: [BUILD.roofSlateLight, BUILD.roofSlate, BUILD.roofSlateDark],
   thatch: [BUILD.roofThatchLight, BUILD.roofThatch, BUILD.roofThatchDark],
+  // Split wooden shakes, weathered: the settlement's roof.
+  shingle: ['#a58c6c', '#7d684e', '#554636'],
   // The later eras: iron sheet, glass, white composite, a garden on the roof.
   iron: ['#5a6068', '#3e444c', '#2a2f36'],
   glass: ['#8fd0e0', '#5aa8c0', '#3a7890'],
@@ -53,7 +55,7 @@ const WALLS: Record<WallStyle, [string, string, string]> = {
   stone: [BUILD.stoneWallLight, BUILD.stoneWall, BUILD.stoneWallDark],
   timber: [BUILD.timberLight, BUILD.timber, BUILD.timberDark],
   dark: ['#3e4139', '#2e302b', '#20221e'],
-  log: ['#6c5138', '#4f3a27', '#35271a'],
+  log: ['#a27c54', '#7b5b3d', '#523a27'],
   brick: ['#9a5a44', '#7a4434', '#563024'],
   concrete: ['#b8bcc0', '#969ba2', '#6e7278'],
   composite: ['#f2f4f6', '#d8dde3', '#aeb6bf'],
@@ -379,11 +381,14 @@ function drawRoof(p: Pixels, g: Geometry, style: RoofStyle, color: RoofColor, ov
       } else {
         // A dark seam under the course, then tiles along it with a light lip.
         p.ctx.strokeStyle = shade(base, -0.3); p.ctx.lineWidth = 1; p.ctx.beginPath(); p.ctx.moveTo(x0, y0 + 0.5); p.ctx.lineTo(x1, y1 + 0.5); p.ctx.stroke();
-        const tileW = color === 'green' ? 6 : 4;
+        const tileW = color === 'green' ? 6 : color === 'shingle' ? 3 : 4;
         const offset = i % 2 ? tileW / 2 : 0;
         for (let d = offset; d < len; d += tileW) {
           const x = x0 + ux * d, y = y0 + uy * d;
-          const c = rr() < 0.25 ? shade(base, lit ? 0.16 : 0.06) : rr() < 0.5 ? shade(base, -0.08) : base;
+          // Shakes split unevenly, so they vary more than fired tile does.
+          const c = color === 'shingle'
+            ? (rr() < 0.3 ? shade(base, lit ? 0.2 : 0.1) : rr() < 0.55 ? shade(base, -0.16) : base)
+            : rr() < 0.25 ? shade(base, lit ? 0.16 : 0.06) : rr() < 0.5 ? shade(base, -0.08) : base;
           rect(p, x, y - 2, tileW - 1, 2, c);
           rect(p, x, y - 3, tileW - 1, 1, shade(c, lit ? 0.22 : 0.1));
           rect(p, x + tileW - 2, y - 2, 1, 2, shade(c, -0.25));
@@ -558,7 +563,7 @@ interface Recipe {
   sign?: string;
   extras?: (p: Pixels, lit: Pixels, g: Geometry, seed: number) => void;
   /** The era whose structural dressing this body wears, when it is a later era's rebuild. */
-  eraLook?: 2 | 3 | 4 | 5;
+  eraLook?: 1 | 2 | 3 | 4 | 5;
 }
 
 const BOTTOM_MARGIN = 6;
@@ -1353,13 +1358,38 @@ const classOf = (name: string): BuildingClass => name.startsWith('House') ? 'hou
  * attic in it on every home, a steep gable over the workshops, a hipped
  * roof with height to it on the civic buildings.
  */
-function townshipDress(r: Recipe, name = ''): Recipe {
-  const wall: WallStyle = 'stone';
-  const roofColor: RoofColor = r.roofColor === 'thatch' ? 'red' : r.roofColor === 'green' ? 'slate' : r.roofColor;
+/**
+ * The settlement builds with what the wood gives it. Homes and workshops
+ * are log cabins: round logs notched at the corners under a low gable of
+ * split shakes or thatch, a porch over the door, firewood against the wall.
+ * The halls are plank lodges. Nothing is dressed stone yet; that is what the
+ * township is for.
+ */
+function settlementDress(r: Recipe, name = ''): Recipe {
+  if (name === 'Monument') return r;
   const cls = classOf(name);
-  if (cls === 'house') return { ...r, wall, roofColor, roof: 'mansard', roofH: r.roofH + 8, wallH: r.wallH + 10, bw: Math.round(r.bw * 0.9), eraLook: 2 };
-  if (cls === 'civic') return { ...r, wall, roofColor, roof: r.roof === 'flat' ? 'flat' : 'hip', roofH: r.roof === 'flat' ? r.roofH : r.roofH + 10, wallH: r.wallH + 8, eraLook: 2 };
-  return { ...r, wall, roofColor, roof: r.roof === 'flat' ? 'flat' : 'gable', roofH: r.roof === 'flat' ? r.roofH : r.roofH + 6, wallH: r.wallH + 4, eraLook: 2 };
+  const flat = r.roof === 'flat';
+  const roof: RoofStyle = flat ? 'flat' : 'gable';
+  const roofH = flat ? r.roofH : Math.max(9, Math.round(r.roofH * 0.7));
+  const shakes: RoofColor = r.roofColor === 'thatch' ? 'thatch' : 'shingle';
+  if (cls === 'house') return { ...r, wall: 'log', roofColor: shakes, roof, roofH, wallH: Math.max(14, r.wallH - 2), overhang: (r.overhang ?? 4) + 2, eraLook: 1 };
+  if (cls === 'civic') return { ...r, wall: 'timber', roofColor: 'shingle', roof, roofH: flat ? r.roofH : Math.max(10, Math.round(r.roofH * 0.8)), wallH: r.wallH + 2, overhang: (r.overhang ?? 4) + 1, eraLook: 1 };
+  return { ...r, wall: name === 'Farm' ? 'timber' : 'log', roofColor: r.roofColor === 'red' ? 'red' : shakes, roof, roofH, overhang: (r.overhang ?? 4) + 2, eraLook: 1 };
+}
+
+/**
+ * The township is the first place built to last: timber-framed homes on two
+ * floors with plaster between the beams and fired tile above, a dormer in
+ * the roof; the halls in dressed stone under slate; the workshops framed
+ * the same way as the homes.
+ */
+function townshipDress(r: Recipe, name = ''): Recipe {
+  const cls = classOf(name);
+  const tile: RoofColor = r.roofColor === 'thatch' || r.roofColor === 'green' || r.roofColor === 'shingle' ? 'red' : r.roofColor;
+  const flat = r.roof === 'flat';
+  if (cls === 'house') return { ...r, wall: 'plaster', roofColor: tile, roof: 'gable', roofH: r.roofH + 6, wallH: r.wallH + 10, overhang: (r.overhang ?? 4) + 1, eraLook: 2 };
+  if (cls === 'civic') return { ...r, wall: 'stone', roofColor: tile === 'red' ? 'slate' : tile, roof: flat ? 'flat' : 'hip', roofH: flat ? r.roofH : r.roofH + 10, wallH: r.wallH + 8, eraLook: 2 };
+  return { ...r, wall: r.wall === 'stone' ? 'stone' : 'plaster', roofColor: name === 'Farm' ? 'red' : tile === 'red' ? 'slate' : tile, roof: flat ? 'flat' : 'gable', roofH: flat ? r.roofH : r.roofH + 6, wallH: r.wallH + 4, eraLook: 2 };
 }
 
 /** As the industrial era rebuilds it: brick, and iron sheet on the roof. */
@@ -1411,12 +1441,70 @@ const isoDiamond = (p: Pixels, cx: number, cy: number, w: number, h: number, col
  */
 type EraLook = (p: Pixels, lit: Pixels, g: Geometry, r: Recipe, seed: number, door: [Side, number], overhang: number) => [number, number] | null;
 const ERA_LOOK: Record<number, EraLook> = {
-  // Township: dressed stone. Quoins up the near corner, shutters at the
-  // windows, a dormer in the roof, an arch over the door, pots on the chimney.
+  // Settlement: the cabin. Log butts crossed at the near corner, plank
+  // shutters, a lean-to porch on posts over the door, a fieldstone chimney,
+  // firewood stacked against the wall away from the door.
+  1: (p, _lit, g, r, seed, [dSide, dT]) => {
+    const rr = rng(seed + 1);
+    const [logLight, logMid, logDark] = WALLS.log;
+    if (r.wall === 'log') {
+      const logH = 4;
+      for (let y = 0, i = 0; y < g.wallH; y += logH, i++) {
+        const [x, yy] = wallPoint(g, 'right', 0, y / g.wallH);
+        const left = i % 2 === 0;
+        const bx = left ? x - 6 : x + 1;
+        rect(p, bx, yy, 5, logH - 1, left ? shade(logMid, -0.14) : logLight);
+        rect(p, bx, yy + logH - 2, 5, 1, shade(logDark, -0.1));
+        rect(p, left ? bx : bx + 4, yy, 1, logH - 1, shade(logLight, 0.25));
+      }
+    }
+    for (const [side, t, v] of r.windows ?? []) {
+      wallPatch(p, g, side, t - 0.035, v + 0.005, 3, 9, BUILD.timberDark);
+      wallPatch(p, g, side, t + 0.05, v + 0.005, 3, 9, BUILD.timberDark);
+      wallPatch(p, g, side, t - 0.03, v + 0.03, 2, 1, shade(BUILD.timberDark, 0.25));
+      wallPatch(p, g, side, t + 0.055, v + 0.03, 2, 1, shade(BUILD.timberDark, 0.25));
+    }
+    // The porch: a plank roof on two posts, flat to the door's wall.
+    const [ax, ay] = wallPoint(g, dSide, dT, 0.2);
+    const [, floorY] = wallPoint(g, dSide, dT, 1);
+    rect(p, ax - 10, ay - 1, 20, 3, BUILD.timberDark);
+    rect(p, ax - 10, ay - 2, 20, 1, BUILD.timberLight);
+    rect(p, ax - 9, ay + 2, 2, floorY - ay - 2, shade(BUILD.timberDark, -0.15));
+    rect(p, ax + 7, ay + 2, 2, floorY - ay - 2, shade(BUILD.timberDark, -0.15));
+    // A fieldstone stack where the recipe put a chimney.
+    if (r.chimneyAt !== undefined) {
+      const x = Math.round(g.cx + r.chimneyAt), h = r.chimneyH ?? 20;
+      const topY = Math.round(g.wallTopY + g.bh / 2 - g.roofH - h + 6);
+      for (let y = 0; y < h - 2; y += 3) {
+        const off = (y / 3) % 2 ? 1 : 0;
+        rect(p, x - 4 + off, topY + y, 8, 2, y % 6 === 0 ? BUILD.stoneWall : BUILD.stoneWallLight);
+        rect(p, x - 4 + off + (rr() < 0.5 ? 1 : 4), topY + y, 3, 2, BUILD.stoneWallDark);
+      }
+      rect(p, x - 5, topY - 1, 10, 1, BUILD.stoneWallLight);
+    }
+    // Firewood.
+    const other: Side = dSide === 'left' ? 'right' : 'left';
+    const [wx, wy] = wallPoint(g, other, 0.72, 0.68);
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 4 - (row === 2 ? 1 : 0); col++) {
+      rect(p, wx - 6 + col * 3 + (row === 2 ? 1 : 0), wy + row * 2, 2, 2, rr() < 0.5 ? logLight : shade(logMid, 0.1));
+    }
+    return null;
+  },
+  // Township: dressed stone on the halls, framed plaster on the homes.
+  // Quoins up the near corner of stone, a stone base course under plaster,
+  // shutters at the windows, a dormer in the roof, an arch over the door,
+  // pots on the chimney.
   2: (p, _lit, g, r, seed, [dSide, dT]) => {
     const rr = rng(seed + 2);
     const cornerX = g.cx, cornerY = g.wallTopY + g.bh;
-    for (let i = 0; i < g.wallH; i += 4) rect(p, cornerX - 2 + (i % 8 === 0 ? 0 : 1), cornerY + i, 4, 3, i % 8 === 0 ? BUILD.stoneWallLight : shade(BUILD.stoneWallLight, 0.15));
+    if (r.wall === 'stone') {
+      for (let i = 0; i < g.wallH; i += 4) rect(p, cornerX - 2 + (i % 8 === 0 ? 0 : 1), cornerY + i, 4, 3, i % 8 === 0 ? BUILD.stoneWallLight : shade(BUILD.stoneWallLight, 0.15));
+    } else {
+      for (const side of ['left', 'right'] as Side[]) {
+        wallBand(p, g, side, 0.86, 3, side === 'left' ? shade(BUILD.stoneWall, -0.16) : BUILD.stoneWall);
+        wallBand(p, g, side, 0.86, 1, side === 'left' ? shade(BUILD.stoneWallLight, -0.16) : BUILD.stoneWallLight);
+      }
+    }
     for (const [side, t, v] of r.windows ?? []) {
       wallPatch(p, g, side, t - 0.035, v + 0.005, 3, 9, '#2f5a3a');
       wallPatch(p, g, side, t + 0.05, v + 0.005, 3, 9, '#2f5a3a');
@@ -1738,7 +1826,7 @@ export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string
   let seed = 6000;
   for (const [name, recipe] of Object.entries(RECIPES)) {
     seed += 137;
-    for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
+    for (const level of ART_LEVELS) art.push(buildOne(name, seed, settlementDress(recipe, name), level));
   }
   for (const [, set] of ERA_SETS) {
     for (const [name, recipe] of Object.entries(set)) {

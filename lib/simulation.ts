@@ -1506,6 +1506,12 @@ function lookAhead(world: World, c: Citizen, nav: NavGrid, obstacles: Obstacle[]
   }
 }
 
+/** Which way to face to look at a point. */
+function facingToward(x: number, y: number, tx: number, ty: number): Facing {
+  const dx = tx - x, dy = ty - y;
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'e' : 'w') : (dy > 0 ? 's' : 'n');
+}
+
 function moveCitizens(world: World, hours: number) {
   const obstacles = buildObstacles(world);
   const ferry = hasFerry(world);
@@ -1513,10 +1519,23 @@ function moveCitizens(world: World, hours: number) {
   const nav = navOf(world, obstacles, water);
   const ride = rideOf(world);
   const pace = transportBoost(world);
+  // Whoever is mid-conversation stands still for it. Nothing used to hold
+  // them: two people started talking as they passed, walked on, and the
+  // exchange was cut two paces later with one line said, which is why
+  // conversations were so rarely seen.
+  const talking = new Map<string, string>();
+  for (const talk of world.conversations) { talking.set(talk.a, talk.b); talking.set(talk.b, talk.a); }
   for (const c of world.citizens) {
     // Held by the player, or swimming for the bank: both are handled elsewhere
     // and every rule below is about walking on land.
     if (c.carried || c.swimming) continue;
+    const partner = talking.get(c.id);
+    if (partner !== undefined) {
+      const other = world.citizens.find((o) => o.id === partner);
+      if (other) c.facing = facingToward(c.x, c.y, other.x, other.y);
+      c.moving = false; c.riding = false; c.ride = undefined;
+      continue;
+    }
     // The ferry stopped running with them on it: a ruined Harbour leaves
     // anyone out on the water swimming for the bank.
     if (c.afloat && !ferry) {
@@ -1923,7 +1942,7 @@ function converse(world: World, hours: number) {
     const b = world.citizens.find((c) => c.id === talk.b);
     // Someone walked off, went inside or died: the conversation is over, which
     // is what happens to conversations.
-    if (!a || !b || a.inside || b.inside || Math.hypot(a.x - b.x, a.y - b.y) > TALKING_RANGE + 2.5) {
+    if (!a || !b || !outAndAbout(a) || !outAndAbout(b) || Math.hypot(a.x - b.x, a.y - b.y) > TALKING_RANGE + 2.5) {
       // Cut short, but if the subject was raised it is still remembered.
       if (a && b && talk.index >= 2) rememberTalk(world, a, b, talk.topic);
       world.conversations.splice(i, 1);

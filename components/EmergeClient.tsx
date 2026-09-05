@@ -854,6 +854,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    */
   const firstKey = `emerge:firstday:${wallet.address?.toLowerCase() ?? 'guest'}`;
   const [firstDay, setFirstDay] = useState<FirstDayRecord | null>(null);
+  /** Photo mode: the interface hidden for a clean screenshot. */
+  const [photo, setPhoto] = useState(false);
   useEffect(() => {
     if (visit) { setFirstDay(null); return; }
     setFirstDay(readFirstDay(firstKey));
@@ -1499,7 +1501,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; bubbles: () => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1521,6 +1523,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       dump: (names: string[]) => sceneRef.current?.dump(names) ?? null,
       probe: (x: number, y: number) => sceneRef.current?.probe(x, y) ?? null,
       sprites: () => sceneRef.current?.spriteInfo() ?? null,
+      bubbles: () => sceneRef.current?.bubbleInfo() ?? null,
       // Open a building's card, as a tap on it would.
       select: (id: string) => { setSelected({ kind: 'building', id }); },
       pick: (id: string) => { setSelected({ kind: 'citizen', id }); },
@@ -1981,14 +1984,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * Keyboard
    * -------------------------------------------------------------- */
 
+  useEffect(() => { sceneRef.current?.setPhoto(photo); }, [photo]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === 'Space') { e.preventDefault(); setPaused((p) => !p); }
       else if (e.key === '1') setSpeed(1);
       else if (e.key === '2') setSpeed(2);
       else if (e.key === 'f' || e.key === 'F') toggleFollow();
-      else if (e.key === 'Escape') { setPanel(null); cancelBuild(); setSelected(null); }
+      else if (e.key === 'p' || e.key === 'P') setPhoto((v) => !v);
+      else if (e.key === 'Escape') { setPhoto(false); setPanel(null); cancelBuild(); setSelected(null); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -2008,9 +2014,16 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         </div>
       )}
 
-      {ready && view && (
+      {ready && photo && (
+        <button className="photo-exit" onClick={() => setPhoto(false)} title={t('Back to the interface (P or Esc)')}>
+          {t('Exit photo mode')}
+        </button>
+      )}
+
+      {ready && view && !photo && (
         <>
           <Hud
+            onPhoto={() => setPhoto(true)}
             view={view}
             paused={paused}
             speed={speed}

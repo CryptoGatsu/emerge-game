@@ -567,6 +567,10 @@ export const UI: Record<string, string> = {
   'Collectable today': '今日可收取',
   'Judged by the vault today': '金库今日裁定',
   'Take a crossing down': '拆除一座桥',
+  'Exit photo mode': '退出拍照模式',
+  'Back to the interface (P or Esc)': '回到界面（P 或 Esc）',
+  'Photo mode: hide the interface for a clean screenshot (P)': '拍照模式：隐藏界面，截一张干净的图（P）',
+  'Photo mode': '拍照模式',
   'Tap a deck to take that crossing down. Some of the timber comes back. A crossing that is the only way to buildings on the far bank stays.': '点击桥面拆除那座桥。部分木料会退回。若那是通往对岸建筑的唯一通道，桥会留着。',
   'Still standing': '桥还在',
   'Crossing removed': '桥已拆除',
@@ -1298,7 +1302,7 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * that happens to end in a full stop.
  */
 const SLOT: Record<string, string> = {
-  name: "([A-Z][\\w'-]*)", town: "([A-Z][\\w' -]*)", place: '(the [a-z ]+|home)', trade: '([A-Za-z ]+)', n: '(\\d+)', season: '(\\w+)',
+  name: "([A-Z][\\w'-]*)", town: "([A-Z][\\w' -]*)", place: '([Tt]he [a-z ]+|[Hh]ome)', trade: '([A-Za-z ]+)', n: '(\\d+)', season: '(\\w+)',
 };
 /** A template with {slots} becomes a regex with a group per slot, and the Chinese keeps the slots in order. */
 function templatePair([en, zh]: [string, string]): [RegExp, string] {

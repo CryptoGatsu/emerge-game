@@ -57,6 +57,8 @@ interface HudProps {
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
   onResetView: () => void;
+  /** Hide the whole interface for a clean screenshot. */
+  onPhoto: () => void;
   onMinimapJump: (u: number, v: number) => void;
   drawMinimap: (canvas: HTMLCanvasElement) => void;
   onCancelBuild: () => void;
@@ -869,6 +871,9 @@ export function Hud(props: HudProps) {
             title={props.sound ? t('Mute the world') : t('Listen to the world')}
           >
             {props.sound ? '♪' : '♪̸'}
+          </button>
+          <button onClick={props.onPhoto} title={t('Photo mode: hide the interface for a clean screenshot (P)')} aria-label={t('Photo mode')}>
+            ◉
           </button>
         </div>
         <DangerBanner view={view} onFight={props.onFight} readOnly={!!props.visiting} />

@@ -113,7 +113,14 @@ export function tx(line: string): string {
     if (typeof replacement === 'function') return replacement(m);
     return replacement.replace(/\$(\d)/g, (_: string, i: string) => {
       const group = m[Number(i)] ?? '';
-      return group === line ? group : tx(group);
+      if (group === line) return group;
+      const done = tx(group);
+      if (done !== group) return done;
+      // A slot that opened the sentence carries its capital: 'The market'
+      // is the same place as 'the market'.
+      const lower = group.charAt(0).toLowerCase() + group.slice(1);
+      const again = lower === group ? group : tx(lower);
+      return again === lower ? group : again;
     });
   }
   return line;

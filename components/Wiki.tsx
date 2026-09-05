@@ -945,15 +945,15 @@ export default function Wiki() {
         <section id="eras">
           <h2>Eras</h2>
           <p>
-            Every plot begins in the <b>Settlement</b> era: timber and thatch, hand tools, dirt
+            Every plot begins in the <b>Settlement</b> era: log cabins under shakes and thatch, hand tools, dirt
             lanes, everybody on foot. When it has earned it, the owner can advance it one era at a
             time. There are five, and all of them are built.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Era</th><th>Days</th><th>What it asks</th><th>What arrives</th></tr></thead>
             <tbody>
-              <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts.</td></tr>
-              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 buildings, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Stone and tile, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
+              <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts: log cabins notched at the corners, shake and thatch roofs, plank lodges for the halls.</td></tr>
+              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 buildings, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Timber-framed homes on two floors under fired tile, halls in dressed stone under slate, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
               <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 buildings, a Lab and a Library, 300 iron ore, the plot expanded</td><td>Brick and iron, setts with rails, rail travel, a steamboat, smog; Factory, Foundry, Railway Station, Telegraph, Gasworks</td></tr>
               <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 buildings, a Hospital and a Stadium, the plot expanded</td><td>Concrete and glass, tarmac, cars and bikes, a motorboat; Hospital, Stadium, Supermarket, Office, Bus Depot, Power Plant</td></tr>
               <tr><td>AI</td><td className="num">150</td><td>160 people, 100 buildings, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td>White composite and light, pale roads, pods, a hydrofoil; Data Centre, Research Campus, Vertical Farm, Pod Hub, Drone Port</td></tr>
@@ -1020,6 +1020,12 @@ export default function Wiki() {
             The panel in the corner is the settlement&rsquo;s vital signs. None of these is a score
             you are given — each is measured from the people who live there, and each has something
             you can actually do about it.
+          </p>
+          <p className="wiki-note">
+            For a clean picture of the place, the <b>◉</b> button beside the clock, or <b>P</b>, is
+            photo mode: the whole interface goes, including the crew badges over the buildings, and
+            only a faint pill in the corner remains. <b>P</b>, <b>Esc</b> or the pill brings it
+            back.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Figure</th><th>What it is</th><th>How to move it</th></tr></thead>

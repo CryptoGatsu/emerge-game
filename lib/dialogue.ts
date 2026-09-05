@@ -432,5 +432,7 @@ export function compose(a: Brief, b: Brief, rel: Relation, town: TownBrief, roll
   const part = closer.evening ? PART[closer.traits[0]].going : PART[closer.traits[0]].staying;
   lines.push(fill(part[(roll >> 6) % part.length], vars(closer, closer === a ? b : a)));
 
-  return { topic: subject.topic, lines };
+  // A line that opens on a filled slot ('the square, I suppose') starts
+  // with a small letter; every line is a sentence.
+  return { topic: subject.topic, lines: lines.map((l) => l.charAt(0).toUpperCase() + l.slice(1)) };
 }

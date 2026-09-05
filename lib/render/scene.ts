@@ -17,7 +17,7 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
-import { spokenLine, waterOf, type Animal, type Hazard } from '../simulation';
+import { waterOf, type Animal, type Hazard } from '../simulation';
 import type { Dir } from './character';
 import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
@@ -243,6 +243,9 @@ export class EmergeScene {
   private maxZoom = 2.4;
   private time = 0;
   private bubbleTimer = 0;
+  /** Photo mode: no panels to keep clear of, so bubbles go anywhere on screen. */
+  private photo = false;
+  setPhoto(on: boolean) { this.photo = on; }
   private beat = 0;
   private cullTimer = 0;
   /** The view the last cull was computed for, so an unmoved camera is not re-culled. */
@@ -1176,6 +1179,11 @@ export class EmergeScene {
     });
   }
 
+  /** The speech bubbles as they stand, for the trials. */
+  bubbleInfo() {
+    return this.bubbles.map((b) => ({ id: b.citizenId, text: b.text, visible: b.root.visible, x: Math.round(b.root.x), y: Math.round(b.root.y), w: Math.round(b.root.width), h: Math.round(b.root.height), life: +b.life.toFixed(1) }));
+  }
+
   spriteInfo() {
     return [...this.buildings.values()].map((v) => ({
       id: v.building.id, type: v.building.type, artKey: v.artKey,
@@ -1438,7 +1446,7 @@ export class EmergeScene {
         view.badgeText.text = String(occupants);
         const anchor = this.sceneToScreen(view.base.x, view.base.y - view.base.height * view.base.anchor.y - 12);
         view.badge.position.set(anchor.x, anchor.y);
-        view.badge.visible = this.camera.zoom > 0.6;
+        view.badge.visible = this.camera.zoom > 0.6 && !this.photo;
       } else {
         view.badge.visible = false;
       }
@@ -1971,12 +1979,32 @@ export class EmergeScene {
     // lines of every conversation in the settlement were being spoken and never
     // drawn: the pair appeared to say one thing each and stop. Anyone
     // mid-conversation has their bubble refreshed every frame instead.
-    for (const bubble of this.bubbles) {
-      if (!bubble.citizenId) continue;
-      const spoken = spokenLine(this.world, bubble.citizenId);
-      if (spoken && spoken.text !== bubble.text) {
-        bubble.text = spoken.text;
-        bubble.label.text = spoken.text;
+    //
+    // And the bubble follows the turn, not the person. Refreshing the
+    // speaker's bubble was not enough: when the other one answered, the
+    // answer went to a citizen who held no bubble and was never drawn, while
+    // the first line sat stale over the first speaker. Each exchange now owns
+    // one bubble that hops to whoever is speaking, taking a bubble from a
+    // bystander if it has to, so a conversation reads as one.
+    const inTalk = new Set<string>();
+    for (const talk of this.world.conversations) { inTalk.add(talk.a); inTalk.add(talk.b); }
+    for (const talk of this.world.conversations) {
+      const speaker = talk.index % 2 === 0 ? talk.a : talk.b;
+      const listener = speaker === talk.a ? talk.b : talk.a;
+      const citizen = this.world.citizens.find((c) => c.id === speaker);
+      if (!citizen || !this.citizens.has(speaker)) continue;
+      const line = speechFor(this.world, citizen, this.beat);
+      if (!line) continue;
+      let bubble = this.bubbles.find((b) => b.citizenId === speaker) ?? this.bubbles.find((b) => b.citizenId === listener);
+      if (!bubble) {
+        const spare = this.bubbles.filter((b) => !b.citizenId || !inTalk.has(b.citizenId)).sort((p, q) => (p.citizenId ? p.life : -1) - (q.citizenId ? q.life : -1));
+        bubble = spare[0];
+      }
+      if (!bubble) continue;
+      if (bubble.citizenId !== speaker || bubble.text !== line) {
+        bubble.citizenId = speaker;
+        bubble.text = line;
+        bubble.label.text = line;
         bubble.life = BUBBLE_ROTATE;
         this.layoutBubble(bubble);
       }
@@ -2012,8 +2040,9 @@ export class EmergeScene {
 
       bubble.root.position.set(Math.round(x), Math.round(y));
       // Hide rather than let a bubble slide under the side panels or off screen.
-      const clearOfPanels = x > 24 && x + bw < w - 296;
-      bubble.root.visible = clearOfPanels && y > 96 && y < h - 190 && this.camera.zoom > 0.55;
+      const clearOfPanels = this.photo ? x > 4 && x + bw < w - 4 : x > 24 && x + bw < w - 296;
+      const clearOfBars = this.photo ? y > 4 && y < h - 4 : y > 96 && y < h - 190;
+      bubble.root.visible = clearOfPanels && clearOfBars && this.camera.zoom > 0.55;
       bubble.life -= dt;
     }
   }
