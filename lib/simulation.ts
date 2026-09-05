@@ -4080,13 +4080,27 @@ function jobScore(world: World, j: WorkingJob) {
 
 /** How many workers a job can usefully employ, given the buildings that exist. */
 function jobCapacity(world: World, j: WorkingJob) {
-  const base = j === 'miner' ? 3 : 2;
   // Summed per building rather than multiplied by a count, because two sheds
   // and one improved workshop are no longer the same thing.
   return world.buildings
     .filter((b) => b.type === jobs[j].building && b.active)
-    .reduce((room, b) => room + buildingCapacity(b, base), 0);
+    .reduce((room, b) => room + buildingPosts(b, world), 0);
 }
+
+/**
+ * What an age adds to every workplace on the plot.
+ *
+ * An era used to arrive as a coat of paint and a few new shelves, and players
+ * said so: advancing felt like unlocking rather than growing. So the age
+ * itself is a step up for the whole town — one more post at every workplace
+ * and more from each pair of hands, on top of the higher upkeep the age
+ * already charges and the level cap it lifts. A settlement's woodcutter takes
+ * two; an AI-era one takes six and gets half again as much out of them.
+ */
+export const POSTS_PER_ERA = 1;
+export const OUTPUT_PER_ERA = 0.12;
+export const eraPosts = (world: { era?: number }) => POSTS_PER_ERA * (eraOf(world) - 1);
+export const eraOutput = (world: { era?: number }) => 1 + OUTPUT_PER_ERA * (eraOf(world) - 1);
 
 /**
  * What improving a building does, said in one line on its card. Every type
@@ -4117,10 +4131,10 @@ export function upgradeEffect(type: string): string {
   return effects[type] ?? 'nothing yet';
 }
 
-/** Posts at one workplace, by its level. Three at a mine, two elsewhere. */
-export function buildingPosts(b: Building) {
+/** Posts at one workplace: three at a mine, two elsewhere, one more per age the plot has reached. */
+export function buildingPosts(b: Building, world: { era?: number }) {
   const base = b.type === 'Mine' ? 3 : 2;
-  return buildingCapacity(b, base);
+  return buildingCapacity(b, base) + eraPosts(world);
 }
 /** How many people a trade can employ across its standing workplaces. */
 export const tradeCapacity = (world: World, job: WorkingJob) => { useWorld(world); return jobCapacity(world, job); };
@@ -4307,7 +4321,7 @@ function produce(world: World) {
       ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
       : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const due = (n as number) * hands * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
+      const due = (n as number) * hands * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * eraOutput(world) * methodBonus(world) * gear;
       // Less what was already booked as it happened, never below nothing.
       const made = Math.max(0, due - (taken[r as Resource] ?? 0));
       if (made <= 0) continue;

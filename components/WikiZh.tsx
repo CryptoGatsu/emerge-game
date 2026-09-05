@@ -1,5 +1,5 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
@@ -21,7 +21,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA,
   ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -486,6 +486,16 @@ export function WikiZh() {
             </tbody>
           </table>
           <p>天数按地块所在的时代计算，清单取自聚落本来就在衡量的东西。两者都显示在"链上"面板的<b>时代</b>卡片上，逐行列出，达成的打勾。全部达成后，按钮以 {n(ADVANCE_COST_EMERGE)} {T} 提供推进，和其他收费一样销毁。世界会先发布，登记处按它持有的副本判断清单，所以你自己设备上的任何改动都不能把地块改进一个时代。时代记在地块上，跟着它走到任何设备和买家手里。</p>
+          <h3>每个时代改变了什么</h3>
+          <p>时代是整座城的一次升级，不只是更长的货架。地块每推进一个时代：</p>
+          <ul>
+            <li><b>每个工作场所多容纳 {POSTS_PER_ERA} 人</b>，聚落里容两人的伐木场到人工智能时代容六人。</li>
+            <li><b>每双手多产出 {Math.round(OUTPUT_PER_ERA * 100)}%</b>，叠加在技能、升级和方法之上。</li>
+            <li><b>升级上限提高一级</b>，从聚落的 {MAX_BUILDING_LEVEL} 级到人工智能时代的 {MAX_BUILDING_LEVEL_EVER} 级。</li>
+            <li><b>每日管理收益上限提高基数的 {Math.round(ERA_YIELD_STEP * 100)}%</b>。</li>
+            <li><b>本时代建的建筑维护费高 {Math.round(UPKEEP_PER_ERA * 100)}%</b>：更大的城自己付账。</li>
+            <li>本时代的建筑开放，建造面板默认打开它们；早期时代在旁边的标签里。</li>
+          </ul>
           <h3>城镇改变了什么</h3>
           <ul>
             <li><b>外观。</b>推进之后新建或升级的建筑是石墙瓦顶；原有的保留木结构直到你升级它，所以现代城镇中央有一座旧石礼拜堂是对的画面。泥路变成石板路。人们穿羊毛外套、戴帽子。</li>

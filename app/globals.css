@@ -3044,6 +3044,10 @@ button.fold:hover { color: var(--emerald); }
 .build-shelves { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
 .build-shelves button { padding: 6px 11px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--panel-edge-soft); }
 .build-shelves button.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); background: rgba(184, 231, 86, 0.08); }
+.build-ages { margin-bottom: 4px; }
+.build-ages button.later { opacity: 0.55; }
+.build-ages button.on { color: var(--gold); border-color: rgba(225, 210, 78, 0.45); background: rgba(225, 210, 78, 0.08); }
+.build-age-note { margin: 0 0 6px; }
 .build-card.later-era { opacity: 0.55; }
 .era-lock { font-style: normal; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; background: rgba(95, 214, 200, 0.18); color: #5fd6c8; vertical-align: middle; }
 .visiting-bar.at-work .eyebrow { color: var(--emerald); }

@@ -1,5 +1,5 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
 
@@ -28,7 +28,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -960,6 +960,18 @@ export default function Wiki() {
             copy it holds, so nothing on your own device can be edited into an era. The era is
             recorded against the plot and follows it to any device and to a buyer.
           </p>
+          <h3>What an age changes</h3>
+          <p>
+            An age is a step up for the whole town, not a longer shelf. With each one the plot advances:
+          </p>
+          <ul>
+            <li><b>Every workplace takes {POSTS_PER_ERA} more {POSTS_PER_ERA === 1 ? 'person' : 'people'}</b>, so a woodcutter that held two in the settlement holds six in the AI age.</li>
+            <li><b>Every pair of hands makes {Math.round(OUTPUT_PER_ERA * 100)}% more</b>, on top of skill, improvements and methods.</li>
+            <li><b>The improvement cap rises by one</b>, from {MAX_BUILDING_LEVEL} in a settlement to {MAX_BUILDING_LEVEL_EVER} in the AI age.</li>
+            <li><b>The daily stewardship ceiling rises {Math.round(ERA_YIELD_STEP * 100)}%</b> of the base, per age.</li>
+            <li><b>Upkeep rises {Math.round(UPKEEP_PER_ERA * 100)}%</b> per age on every building raised in it: the bigger town pays for itself.</li>
+            <li>The age's own buildings open, and the Build panel opens on them; earlier ages are a tab away.</li>
+          </ul>
           <h3>What a township changes</h3>
           <ul>
             <li><b>The look.</b> Buildings raised or improved after the step are stone with tiled roofs; the ones you already had keep their timber until you improve them, so an old stone chapel in the middle of a modern town is the right picture. Dirt lanes become cobbles. People wear wool coats and hats.</li>

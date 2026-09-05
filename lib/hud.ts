@@ -241,7 +241,7 @@ function rosterOf(world: World): Roster {
     const trade = byType(b.type);
     return {
       id: b.id, type: b.type, level: levelOf(b), ruined: !!b.ruined, era: b.era ?? 1,
-      crew: b.workers.length, posts: trade ? buildingPosts(b) : null, trade: trade ? JOB_LABELS[trade] : null,
+      crew: b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? JOB_LABELS[trade] : null,
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
   return {

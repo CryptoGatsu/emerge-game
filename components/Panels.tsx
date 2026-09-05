@@ -11,8 +11,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind } from '@/lib/simulation';
-import { eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, POSTS_PER_ERA, OUTPUT_PER_ERA } from '@/lib/simulation';
+import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
@@ -2028,8 +2028,14 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
   // not shown; a building from a later era is shown greyed with the era's
   // name, so the player can see what advancing would open.
   const [shelf, setShelf] = useState<BuildingCategory | 'All'>('All');
-  const shelves = BUILDING_CATEGORIES.filter((c) => BUILDABLE.some((o) => BUILDING_CATEGORY[o.type] === c));
-  const shown = BUILDABLE.filter((o) => shelf === 'All' || BUILDING_CATEGORY[o.type] === shelf);
+  // The age comes first: the panel opens on what this age brought, with the
+  // earlier ages a tab away and the later ones there to look at. A township
+  // that opened on houses and farms read as a settlement with a longer list.
+  const [age, setAge] = useState<number | 'all'>(view.era.id);
+  const ofAge = BUILDABLE.filter((o) => age === 'all' || (BUILDING_ERA[o.type] ?? 1) === age);
+  const shelves = BUILDING_CATEGORIES.filter((c) => ofAge.some((o) => BUILDING_CATEGORY[o.type] === c));
+  const onShelf = shelf !== 'All' && shelves.includes(shelf) ? shelf : 'All';
+  const shown = ofAge.filter((o) => onShelf === 'All' || BUILDING_CATEGORY[o.type] === onShelf);
   useLocale();
   return (
     <Shell
@@ -2079,10 +2085,29 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
           </button>
         </div>
       </div>
+      <div className="build-shelves build-ages">
+        {ERAS.map((e) => (
+          <button key={e.id} className={`${age === e.id ? 'on' : ''} ${e.id > view.era.id ? 'later' : ''}`} onClick={() => setAge(e.id)}>
+            {tn(e.name)}{e.id === view.era.id ? ` · ${t('now')}` : ''}
+          </button>
+        ))}
+        <button className={age === 'all' ? 'on' : ''} onClick={() => setAge('all')}>{t('All ages')}</button>
+      </div>
+      <p className="muted small build-age-note">
+        {age === view.era.id
+          ? (view.era.id > 1
+            ? t('What the {era} brought. Everything from earlier ages is still yours to raise: pick its tab. In this age every workplace holds {posts} more than a settlement’s and makes {pct}% more.', { era: tn(eraName(view.era.id)).toLowerCase(), posts: POSTS_PER_ERA * (view.era.id - 1), pct: Math.round(OUTPUT_PER_ERA * (view.era.id - 1) * 100) })
+            : t('Where every plot begins. Each age the plot advances adds a post to every workplace, {pct}% to what each pair of hands makes, and a level to the improvement cap — and its own buildings, on the tabs above.', { pct: Math.round(OUTPUT_PER_ERA * 100) }))
+          : age === 'all'
+            ? t('Every building in the game, by shelf.')
+            : typeof age === 'number' && age < view.era.id
+              ? t('An earlier age’s buildings, still yours to raise.')
+              : t('What the {era} will open. The plot advances from the On-Chain panel.', { era: tn(eraName(age as number)).toLowerCase() })}
+      </p>
       <div className="build-shelves">
-        <button className={shelf === 'All' ? 'on' : ''} onClick={() => setShelf('All')}>{t('All')}</button>
+        <button className={onShelf === 'All' ? 'on' : ''} onClick={() => setShelf('All')}>{t('All')}</button>
         {shelves.map((c) => (
-          <button key={c} className={shelf === c ? 'on' : ''} onClick={() => setShelf(c)}>{tn(c)}</button>
+          <button key={c} className={onShelf === c ? 'on' : ''} onClick={() => setShelf(c)}>{tn(c)}</button>
         ))}
       </div>
       <div className="build-grid">
