@@ -339,6 +339,8 @@ export interface BridgeWorks {
   toX: number; toY: number;
   /** Days of work done, and how many it takes. */
   progress: number;
+  /** A crossing over water people could already walk round, rather than to a new shore. */
+  shortcut?: boolean;
   length: number;
 }
 
@@ -4768,6 +4770,7 @@ function damageBuilding(world: World, b: Building, amount: number, cause: string
   // A ruined house is nobody's home: the family lodges until it is rebuilt
   // or another roof goes up.
   for (const f of world.families) if (f.homeId === b.id) f.homeId = '';
+  if (b.type === 'House') rehouse(world);
   for (const c of world.citizens) {
     if (c.destId === b.id) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; c.inside = false; }
   }
@@ -5258,6 +5261,8 @@ function plagueDay(world: World, h: Hazard) {
 function bury(world: World, c: Citizen, line: string) {
   world.citizens = world.citizens.filter((x) => x.id !== c.id);
   for (const f of world.families) f.members = f.members.filter((id) => id !== c.id);
+  // The bed they leave behind is somebody else's tonight, not tomorrow.
+  rehouse(world);
   for (const [key, bond] of Object.entries(world.bonds)) {
     if (bond.a === c.id || bond.b === c.id) delete world.bonds[key];
   }
@@ -5712,23 +5717,113 @@ export function startBridgeAt(world: World, x: number, y: number): { ok: boolean
   useWorld(world);
   const water = waterOf(world);
   if (world.bridgeWorks) return { ok: false, message: 'A bridge is already being built. One crossing at a time.' };
-  const island = water.landAt(x, y);
-  if (island < 0) return { ok: false, message: 'That is water. Point at the land you want to reach.' };
-  if (island === water.mainland || world.connectedIslands.includes(island)) return { ok: false, message: 'People can already walk there.' };
   if (world.treasury < BRIDGE_GOLD) return { ok: false, message: `A crossing costs ${BRIDGE_GOLD.toLocaleString()} Gold to start.` };
-  const crossing = narrowestCrossing(world, island);
-  if (!crossing) return { ok: false, message: 'No sound crossing to that shore could be found.' };
+  const island = water.landAt(x, y);
+  const reachable = island >= 0 && (island === water.mainland || world.connectedIslands.includes(island));
+  if (island >= 0 && !reachable) {
+    // Land nobody can walk to: the crossing goes wherever the water is
+    // narrowest between here and there, which is what the crew would pick.
+    const crossing = narrowestCrossing(world, island);
+    if (!crossing) return { ok: false, message: 'No sound crossing to that shore could be found.' };
+    spend(world, 'works', BRIDGE_GOLD);
+    world.bridgeWorks = {
+      island,
+      fromX: crossing.fromX, fromY: crossing.fromY,
+      toX: crossing.toX, toY: crossing.toY,
+      progress: 0,
+      length: Math.max(3, Math.round(crossing.gap / 2.5)),
+    };
+    noteAttention(world);
+    pushFeed(world, 'build', 'The crossing you ordered has been staked out. The bridge crew starts in the morning.');
+    return { ok: true, message: 'The bridge is staked out.' };
+  }
+  // Water, or a bank people can already reach the long way round: a bridge
+  // where the player pointed, across the narrowest stretch of water there.
+  // "People can already walk there" was the answer a player got for a lake
+  // in the middle of their town, and it was no answer at all.
+  const chord = shortcutCrossing(world, x, y);
+  if (!chord) {
+    return {
+      ok: false,
+      message: island < 0
+        ? 'No bank within reach of that water. Tap nearer the shore you want to bridge.'
+        : 'No water near there to bridge. Tap the water you want crossed, or the land across it.',
+    };
+  }
+  if (world.layout.bridges.some((b) => Math.hypot(b.x - (chord.fromX + chord.toX) / 2, b.y - (chord.fromY + chord.toY) / 2) < 6)) {
+    return { ok: false, message: 'There is a bridge there already.' };
+  }
   spend(world, 'works', BRIDGE_GOLD);
   world.bridgeWorks = {
-    island,
-    fromX: crossing.fromX, fromY: crossing.fromY,
-    toX: crossing.toX, toY: crossing.toY,
+    island: water.landAt(chord.toX, chord.toY),
+    shortcut: true,
+    fromX: chord.fromX, fromY: chord.fromY,
+    toX: chord.toX, toY: chord.toY,
     progress: 0,
-    length: Math.max(3, Math.round(crossing.gap / 2.5)),
+    length: Math.max(3, Math.round(chord.gap / 2.5)),
   };
   noteAttention(world);
-  pushFeed(world, 'build', 'The crossing you ordered has been staked out. The bridge crew starts in the morning.');
+  pushFeed(world, 'build', 'The crossing you ordered has been staked out across the water. The bridge crew starts in the morning.');
   return { ok: true, message: 'The bridge is staked out.' };
+}
+
+/**
+ * The narrowest stretch of water at the point the player tapped.
+ *
+ * From a tap on the water, a line is cast in every direction and the
+ * shortest one with a bank at both ends wins. From a tap on land, the line
+ * runs from that bank out over the water to the next one. Either way both
+ * ends are dry ground inside the plot, and the deck is never longer than a
+ * crew could build.
+ */
+function shortcutCrossing(world: World, x: number, y: number): { fromX: number; fromY: number; toX: number; toY: number; gap: number } | null {
+  const water = waterOf(world);
+  const ext = activeExtent;
+  const STEP = 0.5, REACH = 36, TO_SHORE = 10, MIN_GAP = 2;
+  const inside = (px: number, py: number) => px >= ext.x0 + 2 && px <= ext.x1 - 2 && py >= ext.y0 + 3 && py <= ext.y1 - 3;
+  const dry = (px: number, py: number) => inside(px, py) && water.landAt(px, py) >= 0;
+  // Walk from a point on the water to the first dry ground along a heading.
+  const toBank = (sx: number, sy: number, dx: number, dy: number): [number, number] | null => {
+    let px = sx, py = sy;
+    for (let over = 0; over < REACH; over += STEP) {
+      px += dx * STEP; py += dy * STEP;
+      if (!inside(px, py)) return null;
+      if (water.landAt(px, py) >= 0) return [px, py];
+    }
+    return null;
+  };
+  // Walk from a point on land to its shore along a heading: the last dry point.
+  const toShore = (sx: number, sy: number, dx: number, dy: number): [number, number] | null => {
+    let px = sx, py = sy, last: [number, number] = [sx, sy];
+    for (let walked = 0; walked < TO_SHORE; walked += STEP) {
+      px += dx * STEP; py += dy * STEP;
+      if (!inside(px, py)) return null;
+      if (water.landAt(px, py) < 0) return last;
+      last = [px, py];
+    }
+    return null;
+  };
+  const onLand = dry(x, y);
+  let best: { fromX: number; fromY: number; toX: number; toY: number; gap: number } | null = null;
+  const headings = onLand ? 48 : 24;
+  for (let k = 0; k < headings; k++) {
+    const ang = (k / headings) * (onLand ? Math.PI * 2 : Math.PI);
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    let from: [number, number] | null, to: [number, number] | null;
+    if (onLand) {
+      from = toShore(x, y, dx, dy);
+      if (!from) continue;
+      to = toBank(from[0], from[1], dx, dy);
+    } else {
+      from = toBank(x, y, -dx, -dy);
+      to = toBank(x, y, dx, dy);
+    }
+    if (!from || !to) continue;
+    const gap = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (gap < MIN_GAP) continue;
+    if (!best || gap < best.gap) best = { fromX: from[0], fromY: from[1], toX: to[0], toY: to[1], gap };
+  }
+  return best;
 }
 
 function bridgeBuilding(world: World) {
@@ -5848,8 +5943,8 @@ function narrowestCrossing(world: World, island: number) {
 
   let best: { fromX: number; fromY: number; toX: number; toY: number; gap: number } | null = null;
   let bestScore = Infinity;
-  for (let y = 5; y < 96; y += 1.5) {
-    for (let x = 5; x < 96; x += 1.5) {
+  for (let y = activeExtent.y0 + 5; y < activeExtent.y1 - 4; y += 1.5) {
+    for (let x = activeExtent.x0 + 5; x < activeExtent.x1 - 4; x += 1.5) {
       if (water.landAt(x, y) !== island) continue;
       // The far end has to be ground somebody could stand a building on. The
       // shortest gap is often a one-cell sliver at the edge of the map, and a
@@ -5952,7 +6047,7 @@ function completeBridge(world: World, works: BridgeWorks) {
   for (let probe = 5; probe <= 14; probe += 1.5) {
     const px = works.toX + Math.cos(heading) * probe;
     const py = works.toY + Math.sin(heading) * probe;
-    if (px < 6 || px > 94 || py < 8 || py > 92) break;
+    if (px < activeExtent.x0 + 6 || px > activeExtent.x1 - 6 || py < activeExtent.y0 + 8 || py > activeExtent.y1 - 8) break;
     if (water.landAt(px, py) !== works.island) break;
     reach = probe;
   }
@@ -5981,8 +6076,8 @@ function completeBridge(world: World, works: BridgeWorks) {
   const spacing = 7;
   const found: [number, number][] = [];
   for (const clearance of [4.4, 3.6]) {
-    for (let py = 9; py <= 91 && found.length < 4; py += 2) {
-      for (let px = 7; px <= 93 && found.length < 4; px += 2) {
+    for (let py = activeExtent.y0 + 9; py <= activeExtent.y1 - 9 && found.length < 4; py += 2) {
+      for (let px = activeExtent.x0 + 7; px <= activeExtent.x1 - 7 && found.length < 4; px += 2) {
         if (water.landAt(px, py) !== works.island) continue;
         if (water.distanceToWater(px, py) < clearance) continue;
         if (found.some(([qx, qy]) => (qx - px) ** 2 + (qy - py) ** 2 < spacing * spacing)) continue;
@@ -5996,10 +6091,14 @@ function completeBridge(world: World, works: BridgeWorks) {
     layout.workSites.push(plot);
   }
 
-  world.connectedIslands.push(works.island);
+  if (works.island !== water.mainland && !world.connectedIslands.includes(works.island)) world.connectedIslands.push(works.island);
   world.bridgeWorks = null;
-  world.unlockedAreas.push('The Far Shore');
-  pushFeed(world, 'build', 'The bridge is finished. The far shore is open.');
+  if (works.shortcut) {
+    pushFeed(world, 'build', 'The bridge is finished. The crossing is open.');
+  } else {
+    world.unlockedAreas.push('The Far Shore');
+    pushFeed(world, 'build', 'The bridge is finished. The far shore is open.');
+  }
 }
 
 /** What a settlement pays to raise a building for itself. Mirrors the build menu. */
@@ -6590,10 +6689,6 @@ function arriveOne(world: World, rand: () => number) {
     members: [],
     wealth: 40 + Math.floor(rand() * 40),
   };
-  // A vacant house if there is one; otherwise they lodge until one is raised.
-  const vacant = world.buildings.find((b) =>
-    b.type === 'House' && !world.families.some((f) => f.homeId === b.id));
-  family.homeId = vacant?.id ?? '';
 
   const settler: Citizen = {
     id: `c${world.counter++}`,
@@ -6619,6 +6714,10 @@ function arriveOne(world: World, rand: () => number) {
   family.members.push(settler.id);
   world.citizens.push(settler);
   pushFeed(world, 'social', `${name} arrived on the road, looking for work and a roof.`);
+  // Housed now, by the same rule as everybody else, not at dawn tomorrow: a
+  // town with arrivals most days otherwise always had somebody sleeping rough
+  // beside a house with a spare bed, and the helper said so.
+  rehouse(world);
 }
 
 /**
@@ -6644,8 +6743,7 @@ export function addSettler(world: World, name?: string): Citizen {
   const family: Family = {
     id: `f${world.counter++}`,
     name: familyNames[world.families.length % familyNames.length],
-    homeId: world.buildings.find((b) =>
-      b.type === 'House' && !world.families.some((f) => f.homeId === b.id))?.id ?? '',
+    homeId: '',
     members: [],
     wealth: 40 + Math.floor(rand() * 40),
   };
@@ -6674,6 +6772,7 @@ export function addSettler(world: World, name?: string): Citizen {
   world.citizens.push(settler);
   world.population = world.citizens.length;
   pushFeed(world, 'social', `${chosen} walked back with the prospecting party, looking for work.`);
+  rehouse(world);
   return settler;
 }
 
@@ -7081,6 +7180,11 @@ function daily(world: World) {
   world.population = world.citizens.length;
   checkUnlocks(world);
   scheduleGatherings(world);
+  // Once more at the end of the day: a bed freed by a death, a family put
+  // out by a ruin, a house the settlement raised for itself — all of it is
+  // taken up today, not tomorrow. The first pass at dawn is kept so the
+  // helper's figures are right from the morning.
+  rehouse(world);
 }
 
 /**

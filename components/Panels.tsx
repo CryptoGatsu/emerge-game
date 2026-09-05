@@ -1958,7 +1958,7 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
         <div className="build-card tool">
           <div className="build-icon">🌉</div>
           <h3>{t('Bridge')}</h3>
-          <p>{t('Tap land across the water and the crew stakes out the narrowest sound crossing to it. Timber comes from the yard by the day, and is bought in when the yard is short.')}</p>
+          <p>{t('Tap the water you want bridged, or the land across it, and the crew stakes out the narrowest sound crossing there. Timber comes from the yard by the day, and is bought in when the yard is short.')}</p>
           <div className="build-cost">
             <b>{t('{n} Gold to start', { n: BRIDGE_GOLD.toLocaleString() })}</b>
             <small>{t('+ timber and wages by the day')}</small>

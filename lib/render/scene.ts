@@ -2497,8 +2497,10 @@ export class EmergeScene {
     // whether there is one under it.
     this.placementValid = this.placement?.type === 'Clear trees'
       ? this.standingTreesNear(wx, wy) > 0
+      // A crossing can be pointed at from the water itself or from either
+      // bank; the simulation says where the deck goes and refuses out loud.
       : this.placement?.type === 'Bridge'
-        ? this.map.tileAt(wx, wy) !== Tile.Water && this.map.tileAt(wx, wy) !== Tile.WaterShore
+        ? true
         : this.canBuildAt(wx, wy);
     const height = this.map.heightAt(wx, wy);
     const pos = worldToScreen(wx, wy, height);
