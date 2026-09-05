@@ -4239,9 +4239,26 @@ function produce(world: World) {
     // the farmers, which is what makes a granary the answer to it.
     const blighted = wj === 'farmer' && hazardActive(world, 'blight') ? 0.45 : 1;
     const weather = world.weather === 'Storm' ? .65 : world.weather === 'Rain' && wj === 'farmer' ? 1.08 : world.weather === 'Snow' ? .7 : 1;
-    if (recipe.input && !Object.entries(recipe.input).every(([r, n]) => world.resources[r as Resource] >= (n as number) * workers)) continue;
+    // A trade with an input works as far as the store stretches, not all or
+    // nothing. It used to need every worker's full share before anybody
+    // lifted a finger: three bakeries and twenty bakers wanted two hundred
+    // flour and fifty timber a day, and on the day the yard held forty
+    // timber not a loaf was baked, while wheat and flour piled up.
+    let hands = workers;
+    let short: Resource | null = null;
     for (const [r, n] of Object.entries(recipe.input || {})) {
-      const used = (n as number) * workers;
+      const can = Math.floor(world.resources[r as Resource] / (n as number));
+      if (can < hands) { hands = Math.max(0, can); short = r as Resource; }
+    }
+    if (recipe.input && hands < workers && world.day % 2 === 0) {
+      const label = JOB_LABELS[wj].toLowerCase();
+      pushFeed(world, 'work', hands === 0
+        ? `The ${label}s stood idle: no ${RESOURCE_LABELS[short!].toLowerCase()} in store for them.`
+        : `${hands} of ${workers} ${label}s worked: the store was short of ${RESOURCE_LABELS[short!].toLowerCase()} for the rest.`);
+    }
+    if (hands <= 0) continue;
+    for (const [r, n] of Object.entries(recipe.input || {})) {
+      const used = (n as number) * hands;
       world.resources[r as Resource] -= used;
       note(world, 'consumed', r as Resource, used);
     }
@@ -4256,7 +4273,7 @@ function produce(world: World) {
       ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
       : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const due = (n as number) * workers * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
+      const due = (n as number) * hands * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
       // Less what was already booked as it happened, never below nothing.
       const made = Math.max(0, due - (taken[r as Resource] ?? 0));
       if (made <= 0) continue;
