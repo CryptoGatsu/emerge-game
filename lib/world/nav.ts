@@ -56,7 +56,7 @@ export interface NavGrid {
 
 /** A fingerprint of everything the grid depends on. */
 export function navKey(obstacles: NavObstacle[], layout: WorldLayout): string {
-  let key = `${layout.bridges.length}`;
+  let key = `${layout.bridges.length}:${layout.bridges.reduce((sum, b) => sum + b.span, 0).toFixed(1)}`;
   for (const o of obstacles) key += `|${o.id}:${o.x.toFixed(1)}:${o.y.toFixed(1)}:${o.r}`;
   return key;
 }

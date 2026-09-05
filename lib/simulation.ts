@@ -1439,6 +1439,7 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
 /** The walkability grid for a world, rebuilt only when what it depends on has changed. */
 const navCache = new WeakMap<World, NavGrid>();
 function navOf(world: World, obstacles: Obstacle[], water: WaterField): NavGrid {
+  ensureRamps(world, water);
   const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}${hasFerry(world) ? 'f' : ''}`;
   const held = navCache.get(world);
   if (held && held.key === key) return held;
@@ -5931,6 +5932,7 @@ function shortcutCrossing(world: World, x: number, y: number): { fromX: number; 
   };
   const onLand = dry(x, y);
   let best: { fromX: number; fromY: number; toX: number; toY: number; gap: number } | null = null;
+  let bestCost = Infinity;
   const headings = onLand ? 48 : 24;
   for (let k = 0; k < headings; k++) {
     const ang = (k / headings) * (onLand ? Math.PI * 2 : Math.PI);
@@ -5947,7 +5949,12 @@ function shortcutCrossing(world: World, x: number, y: number): { fromX: number; 
     if (!from || !to) continue;
     const gap = Math.hypot(to[0] - from[0], to[1] - from[1]);
     if (gap < MIN_GAP) continue;
-    if (!best || gap < best.gap) best = { fromX: from[0], fromY: from[1], toX: to[0], toY: to[1], gap };
+    // A bank with no way off it is not a bank. The shortest water is not the
+    // best crossing if its ramp ends on a spit nobody can leave.
+    const exits = crossingExits(water, from[0], from[1], to[0], to[1]);
+    if (exits.from > MAX_RAMP_EXTRA || exits.to > MAX_RAMP_EXTRA) continue;
+    const cost = gap + (exits.from + exits.to) * 0.5;
+    if (!best || cost < bestCost) { best = { fromX: from[0], fromY: from[1], toX: to[0], toY: to[1], gap }; bestCost = cost; }
   }
   return best;
 }
@@ -6062,6 +6069,72 @@ function strandedBuilding(world: World): number | null {
  * far out to put anything on. So the span is weighed against how close the far
  * end is to the heart of the island and how far it is from the map's edge.
  */
+/**
+ * How much further than the standard ramp a deck must reach at one end for
+ * the first step off it to land on open ground.
+ *
+ * A crossing's banks are the first dry points along its line, and the ramp
+ * runs a fixed way past them. On a straight shore that is open ground; on a
+ * spit, a cove or a diagonal bank it is still inside the water's walking
+ * margin, and the water rule refuses the step off. The deck's own rule then
+ * walks people to the end of the ramp and no further: a third of hand-built
+ * crossings, measured over twelve plots, ended like that, with a queue on
+ * the deck all night beside whatever bush happened to stand there. Zero when
+ * the ramp already ends on open ground; Infinity when nothing within reach
+ * does, which is a crossing not to build.
+ */
+const RAMP_REACH = 8;
+function rampExit(water: WaterField, ex: number, ey: number, dx: number, dy: number): number {
+  const px = -dy, py = dx;
+  // Open the way the route grid sees it: the point, and the whole cell it is
+  // in, since that is what a route is found across.
+  const open = (x: number, y: number) => {
+    if (water.blocks(x, y)) return false;
+    const cx = Math.floor(x) + 0.5, cy = Math.floor(y) + 0.5;
+    for (const [ox, oy] of [[0, 0], [-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]]) {
+      if (water.blocks(cx + ox, cy + oy)) return false;
+    }
+    return true;
+  };
+  for (let d = 0; d <= RAMP_REACH; d += 0.25) {
+    const x = ex + dx * d, y = ey + dy * d;
+    if (open(x, y) && open(x + px * 0.6, y + py * 0.6) && open(x - px * 0.6, y - py * 0.6) && open(x + dx * 0.5, y + dy * 0.5) && open(x + dx, y + dy)) return d;
+  }
+  return Infinity;
+}
+
+/** The extra ramp each end of a crossing needs, bank to bank. */
+function crossingExits(water: WaterField, fromX: number, fromY: number, toX: number, toY: number): { from: number; to: number } {
+  const len = Math.hypot(toX - fromX, toY - fromY) || 1;
+  const dx = (toX - fromX) / len, dy = (toY - fromY) / len;
+  return {
+    from: rampExit(water, fromX - dx * BRIDGE_RAMP, fromY - dy * BRIDGE_RAMP, -dx, -dy),
+    to: rampExit(water, toX + dx * BRIDGE_RAMP, toY + dy * BRIDGE_RAMP, dx, dy),
+  };
+}
+
+/** The most extra ramp a crossing is given before it is refused instead. */
+const MAX_RAMP_EXTRA = 6;
+
+/**
+ * Lengthen the ramps of bridges built before landings were checked, so a
+ * deck that ends inside the margin reaches open ground. Once per world.
+ */
+const rampsChecked = new WeakSet<World>();
+function ensureRamps(world: World, water: WaterField) {
+  if (rampsChecked.has(world)) return;
+  rampsChecked.add(world);
+  for (const b of world.layout.bridges) {
+    const cos = Math.cos(b.angle), sin = Math.sin(b.angle);
+    let extra = 0;
+    for (const sign of [1, -1]) {
+      const exit = rampExit(water, b.x + cos * b.span * sign, b.y + sin * b.span * sign, cos * sign, sin * sign);
+      if (Number.isFinite(exit)) extra = Math.max(extra, exit);
+    }
+    if (extra > 0) b.span += Math.min(RAMP_REACH, extra);
+  }
+}
+
 function narrowestCrossing(world: World, island: number) {
   const water = waterOf(world);
   const centre = water.islands.find((i) => i.id === island);
@@ -6081,16 +6154,14 @@ function narrowestCrossing(world: World, island: number) {
       if (back.d <= 1 || back.d >= 26) continue;
       const rim = Math.max(0, 12 - Math.min(x - activeExtent.x0, y - activeExtent.y0, activeExtent.x1 - x, activeExtent.y1 - y));
       const inland = Math.hypot(x - centre.x, y - centre.y);
-      const score = back.d + rim * 1.4 + inland * 0.22;
+      const fromX = edge(x + back.x * back.d, 2, 98), fromY = edge(y + back.y * back.d, 4, 96);
+      // Both ends must be somewhere people can step off.
+      const exits = crossingExits(water, fromX, fromY, x, y);
+      if (exits.from > MAX_RAMP_EXTRA || exits.to > MAX_RAMP_EXTRA) continue;
+      const score = back.d + rim * 1.4 + inland * 0.22 + (exits.from + exits.to) * 0.5;
       if (score >= bestScore) continue;
       bestScore = score;
-      best = {
-        toX: x,
-        toY: y,
-        gap: back.d,
-        fromX: edge(x + back.x * back.d, 2, 98),
-        fromY: edge(y + back.y * back.d, 4, 96),
-      };
+      best = { toX: x, toY: y, gap: back.d, fromX, fromY };
     }
   }
   return best;
@@ -6135,13 +6206,17 @@ export function clearTrees(world: World, x: number, y: number, standing: number)
 /** Lay the deck, and wire the far side into the road network. */
 function completeBridge(world: World, works: BridgeWorks) {
   const layout = world.layout;
+  const water = waterOf(world);
   const angle = Math.atan2(works.toY - works.fromY, works.toX - works.fromX);
   const span = Math.hypot(works.toX - works.fromX, works.toY - works.fromY);
+  // The ramps reach open ground at both ends, however the shore bends.
+  const exits = crossingExits(water, works.fromX, works.fromY, works.toX, works.toY);
+  const extra = Math.min(RAMP_REACH, Math.max(0, Number.isFinite(exits.from) ? exits.from : 0, Number.isFinite(exits.to) ? exits.to : 0));
   layout.bridges.push({
     x: (works.fromX + works.toX) / 2,
     y: (works.fromY + works.toY) / 2,
     angle,
-    span: span / 2 + BRIDGE_RAMP,
+    span: span / 2 + BRIDGE_RAMP + extra,
     deck: span / 2 + DECK_OVERHANG,
   });
 
@@ -6164,7 +6239,6 @@ function completeBridge(world: World, works: BridgeWorks) {
   // The road on the far side heads for the middle of the island, not straight
   // on along the line of the bridge — which, at the edge of the map, walks off
   // it. Stop as soon as the ground stops being the island's.
-  const water = waterOf(world);
   const centre = water.islands.find((i) => i.id === works.island);
   const heading = centre
     ? Math.atan2(centre.y - works.toY, centre.x - works.toX)
