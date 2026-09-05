@@ -513,6 +513,20 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.6: ages that mean something, and a Bank that tells the truth.
+`POSTS_PER_ERA`, `BEDS_PER_ERA` and `OUTPUT_PER_ERA` in `lib/simulation.ts`
+scale every workplace's posts (`buildingPosts(b, world)`), every house's beds
+(`houseRoom(b, world)`) and every trade's output (`eraOutput` in `produce`)
+by the plot's era; `maxLevelFor(world)` lifts the improvement cap a level per
+age (`UPGRADE_STEPS` runs to six) and `upgradeCost(b, world)` reads it; the
+Build panel opens on the age's own tab. `judgedFor` returns present days and
+per-plot judged and reported levels; `GET /api/payouts` measures the day's
+room against the judged yield and returns `judged`; `sendFromVault` waits for
+the receipt (`EMERGE_RECEIPT_WAIT_MS`) and refuses a revert, an unconfirmed
+transfer is settled by `confirmPayouts` on the next read and refunded
+(`Payout.failed`, `VaultLedger.refunded`). `rampExit`/`crossingExits` make a
+crossing land on open ground, `ensureRamps` lengthens old bridges on load.
+
 v2.5 also: `components/FirstDay.tsx` (a first-day card under
 `emerge:firstday:<address>`, ticked by the things themselves), the
 leaderboard (`lib/server/leaderboard.ts` from the headline index, which now

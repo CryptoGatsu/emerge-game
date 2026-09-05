@@ -2096,8 +2096,8 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
       <p className="muted small build-age-note">
         {age === view.era.id
           ? (view.era.id > 1
-            ? t('What the {era} brought. Everything from earlier ages is still yours to raise: pick its tab. In this age every workplace holds {posts} more than a settlement’s and makes {pct}% more.', { era: tn(eraName(view.era.id)).toLowerCase(), posts: POSTS_PER_ERA * (view.era.id - 1), pct: Math.round(OUTPUT_PER_ERA * (view.era.id - 1) * 100) })
-            : t('Where every plot begins. Each age the plot advances adds a post to every workplace, {pct}% to what each pair of hands makes, and a level to the improvement cap — and its own buildings, on the tabs above.', { pct: Math.round(OUTPUT_PER_ERA * 100) }))
+            ? t('What the {era} brought. Everything from earlier ages is still yours to raise: pick its tab. In this age every workplace holds {posts} more than a settlement’s, every house sleeps {posts} more, and every pair of hands makes {pct}% more.', { era: tn(eraName(view.era.id)).toLowerCase(), posts: POSTS_PER_ERA * (view.era.id - 1), pct: Math.round(OUTPUT_PER_ERA * (view.era.id - 1) * 100) })
+            : t('Where every plot begins. Each age the plot advances adds a post to every workplace, a bed to every house, {pct}% to what each pair of hands makes, and a level to the improvement cap — and its own buildings, on the tabs above.', { pct: Math.round(OUTPUT_PER_ERA * 100) }))
           : age === 'all'
             ? t('Every building in the game, by shelf.')
             : typeof age === 'number' && age < view.era.id

@@ -28,7 +28,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA, BEDS_PER_ERA,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -966,6 +966,7 @@ export default function Wiki() {
           </p>
           <ul>
             <li><b>Every workplace takes {POSTS_PER_ERA} more {POSTS_PER_ERA === 1 ? 'person' : 'people'}</b>, so a woodcutter that held two in the settlement holds six in the AI age.</li>
+            <li><b>Every house sleeps {BEDS_PER_ERA} more</b>, so a town grows up before it grows out.</li>
             <li><b>Every pair of hands makes {Math.round(OUTPUT_PER_ERA * 100)}% more</b>, on top of skill, improvements and methods.</li>
             <li><b>The improvement cap rises by one</b>, from {MAX_BUILDING_LEVEL} in a settlement to {MAX_BUILDING_LEVEL_EVER} in the AI age.</li>
             <li><b>The daily stewardship ceiling rises {Math.round(ERA_YIELD_STEP * 100)}%</b> of the base, per age.</li>

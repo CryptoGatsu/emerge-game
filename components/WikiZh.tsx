@@ -21,7 +21,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA, BEDS_PER_ERA,
   ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -490,6 +490,7 @@ export function WikiZh() {
           <p>时代是整座城的一次升级，不只是更长的货架。地块每推进一个时代：</p>
           <ul>
             <li><b>每个工作场所多容纳 {POSTS_PER_ERA} 人</b>，聚落里容两人的伐木场到人工智能时代容六人。</li>
+            <li><b>每座房子多睡 {BEDS_PER_ERA} 人</b>，城先向上长，再向外长。</li>
             <li><b>每双手多产出 {Math.round(OUTPUT_PER_ERA * 100)}%</b>，叠加在技能、升级和方法之上。</li>
             <li><b>升级上限提高一级</b>，从聚落的 {MAX_BUILDING_LEVEL} 级到人工智能时代的 {MAX_BUILDING_LEVEL_EVER} 级。</li>
             <li><b>每日管理收益上限提高基数的 {Math.round(ERA_YIELD_STEP * 100)}%</b>。</li>

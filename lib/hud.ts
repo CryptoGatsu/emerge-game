@@ -357,8 +357,8 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     beds: b.type === 'House'
       ? {
         sleeping: world.families.filter((f) => f.homeId === b.id).reduce((s, f) => s + f.members.length, 0),
-        room: houseRoom(b),
-        next: levelOf(b) < maxLevelFor(world) ? houseRoom({ ...b, level: levelOf(b) + 1 }) : null,
+        room: houseRoom(b, world),
+        next: levelOf(b) < maxLevelFor(world) ? houseRoom({ ...b, level: levelOf(b) + 1 }, world) : null,
       }
       : null,
     herd: b.type === 'Lodge' ? herdOf(world, b) : null,

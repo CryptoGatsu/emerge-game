@@ -3787,7 +3787,7 @@ export function rehouse(world: World): number {
   const sleeping = new Map<string, number>();
   for (const f of world.families) if (f.members.length && standing(f.homeId)) sleeping.set(f.homeId, (sleeping.get(f.homeId) ?? 0) + f.members.length);
   const houses = world.buildings.filter((b) => b.type === 'House' && b.active);
-  const roomIn = (b: Building) => houseRoom(b) - (sleeping.get(b.id) ?? 0);
+  const roomIn = (b: Building) => houseRoom(b, world) - (sleeping.get(b.id) ?? 0);
   // The largest family first: the most people off the street per house.
   const homeless = world.families
     .filter((f) => f.members.length && !standing(f.homeId))
@@ -4095,7 +4095,10 @@ function jobCapacity(world: World, j: WorkingJob) {
  * itself is a step up for the whole town — one more post at every workplace
  * and more from each pair of hands, on top of the higher upkeep the age
  * already charges and the level cap it lifts. A settlement's woodcutter takes
- * two; an AI-era one takes six and gets half again as much out of them.
+ * two; an AI-era one takes six and gets half again as much out of them. Houses
+ * sleep one more per age too (BEDS_PER_ERA), so a plot that was wall to wall
+ * with houses to hold its people has room again. Players showed exactly that
+ * plot.
  */
 export const POSTS_PER_ERA = 1;
 export const OUTPUT_PER_ERA = 0.12;
@@ -6791,7 +6794,9 @@ const LAST_RESORT_POPULATION = 3;
 export const HOUSE_ROOM = 3;
 export const HOUSE_ROOM_PER_LEVEL = 2;
 /** How many people this one house sleeps, whole. */
-export const houseRoom = (b: Building) => Math.round(HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL);
+/** One more bed per house per age: a town grows up before it grows out. */
+export const BEDS_PER_ERA = 1;
+export const houseRoom = (b: Building, world: { era?: number }) => Math.round(HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL + BEDS_PER_ERA * (eraOf(world) - 1));
 
 /**
  * How many people the settlement's houses can sleep between them.
