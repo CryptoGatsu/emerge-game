@@ -330,6 +330,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
           </h2>
           <div className="being-handle">{focus.handle}</div>
           <p className="muted">{tj(focus.job)} · {t('age {age}', { age: focus.age })} · {t('{family} family', { family: focus.family })}</p>
+          {focus.traits.length > 0 && <p className="muted small being-traits">{focus.traits.map((w) => tx(w)).join(', ')}</p>}
           {/* What they are worth at the work, which is the difference between
               a settlement of strangers and one that has been running a while. */}
           {focus.skill && (
@@ -386,6 +387,19 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
         </button>
       </div>
       {focus.project && <div className="being-note">{t('Working on {project}', { project: tx(focus.project) })}</div>}
+      {focus.lately.length > 0 && (
+        <div className="being-lately">
+          <span className="muted">{t('Lately')}</span>
+          <ul>{focus.lately.map((line, i) => <li key={i}>{tx(line)}</li>)}</ul>
+        </div>
+      )}
+      {focus.lastTalk && (
+        <div className="being-note being-talk">
+          {focus.lastTalk.daysAgo <= 0
+            ? t('Talked with {name} today about {topic}.', { name: focus.lastTalk.name, topic: tx(focus.lastTalk.topic) })
+            : t('Talked with {name} {n} days ago about {topic}.', { name: focus.lastTalk.name, n: focus.lastTalk.daysAgo, topic: tx(focus.lastTalk.topic) })}
+        </div>
+      )}
       {focus.friends.length > 0 && (
         <div className="being-people">
           <span className="muted">{t('Friends')}</span>

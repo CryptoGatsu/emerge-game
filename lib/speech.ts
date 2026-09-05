@@ -12,6 +12,7 @@ import {
   type Citizen, type WorkingJob, type World,
 } from './simulation';
 import { tx } from './i18n';
+import { episodeLine } from './dialogue';
 
 type Line = string;
 
@@ -151,6 +152,15 @@ function speechLine(world: World, c: Citizen, beat: number): string | null {
   if (c.job !== 'unemployed' && c.activity === 'working' && roll < 9
     && skillLevel(skillDays(c, c.job as WorkingJob)) >= 6) {
     return BY_MASTERY[(c.hash + beat) % BY_MASTERY.length];
+  }
+
+  // Something that happened to them lately is on their mind, in their own
+  // words, and it comes out before the errand does — a person who slept in
+  // the open says so before they say where they are walking.
+  const lately = (c.recent ?? []).filter((e) => world.day - e.day <= 2);
+  if (lately.length && roll < 16) {
+    const e = lately[(c.hash + beat) % lately.length];
+    return episodeLine(e, world.day);
   }
 
   // What they are actually doing, before anything generic. A line that names

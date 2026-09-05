@@ -369,6 +369,16 @@ export class EmergeScene {
         }
 
         const key = art.variants ? `${art.key}.${map.variants[i]}` : art.key;
+        // A raised tile is drawn a step up, which leaves the ground it rose
+        // from open wherever no cliff face covers it: the backdrop showed
+        // through as a dark diamond. The same tile, darker, fills the gap.
+        if (step > 0) {
+          const foot = tileToScreen(tx + map.t0, ty + map.t0, 0);
+          const base = new Sprite(assets.get(key));
+          base.position.set(foot.x - TILE_W / 2, foot.y);
+          base.tint = 0x8a8478;
+          this.groundLayer.addChild(base);
+        }
         const sprite = new Sprite(assets.get(key));
         sprite.position.set(pos.x - TILE_W / 2, pos.y);
         sprite.tint = groundTint(map.tone[i]);
@@ -879,6 +889,11 @@ export class EmergeScene {
     this.applyCamera();
   }
 
+  /** Set the zoom outright, keeping the centre of the screen where it is. */
+  zoomTo(zoom: number) {
+    this.zoomBy(zoom / (this.camera.zoom || 1));
+  }
+
   zoomBy(factor: number, anchorX?: number, anchorY?: number) {
     const w = this.app.renderer.width, h = this.app.renderer.height;
     const ax = anchorX ?? w / 2, ay = anchorY ?? h / 2;
@@ -1143,6 +1158,24 @@ export class EmergeScene {
   }
 
   /** Every building sprite the scene holds, for the trial build's diagnostics. */
+  /** What ground lies under a screen point, for the trials: tile kind, art variant, tint. */
+  probe(sx: number, sy: number) {
+    const scene = this.screenToScene(sx, sy);
+    const t = screenToTile(scene.x, scene.y);
+    const tx = Math.floor(t.x) - this.map.t0, ty = Math.floor(t.y) - this.map.t0;
+    if (tx < 0 || ty < 0 || tx >= this.map.grid || ty >= this.map.grid) return null;
+    const i = ty * this.map.grid + tx;
+    return { tx, ty, kind: this.map.tiles[i], variant: this.map.variants[i], tone: this.map.tone[i], step: this.map.steps[i], cliff: this.map.cliffs[i] };
+  }
+
+  /** Sprites by name as PNG data URLs, for the art contact sheet in the trials. */
+  dump(names: string[]): [string, string | null][] {
+    return names.map((name) => {
+      if (name.startsWith('building.')) this.assets.ensureBuilding(name.slice('building.'.length).replace(/\.lit$/, ''));
+      return [name, this.assets.dataUrl(name)];
+    });
+  }
+
   spriteInfo() {
     return [...this.buildings.values()].map((v) => ({
       id: v.building.id, type: v.building.type, artKey: v.artKey,

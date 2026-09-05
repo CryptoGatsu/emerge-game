@@ -1477,7 +1477,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1490,8 +1490,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       spot: () => sceneRef.current?.spot ?? null,
       music: () => music.playing,
       // Put the camera on a citizen, close, for a screenshot of what they ride.
-      focus: (id: string, zoom = 2.4) => { sceneRef.current?.focus({ kind: 'citizen', id }); sceneRef.current?.zoomBy(zoom); },
+      focus: (id: string, zoom = 2.4) => {
+        const kind = worldRef.current?.citizens.some((c) => c.id === id) ? 'citizen' : 'building';
+        sceneRef.current?.focus({ kind, id });
+        sceneRef.current?.zoomTo(zoom);
+      },
       art: (key: string) => sceneRef.current?.artInfo(key) ?? null,
+      dump: (names: string[]) => sceneRef.current?.dump(names) ?? null,
+      probe: (x: number, y: number) => sceneRef.current?.probe(x, y) ?? null,
       sprites: () => sceneRef.current?.spriteInfo() ?? null,
       // Open a building's card, as a tap on it would.
       select: (id: string) => { setSelected({ kind: 'building', id }); },

@@ -71,12 +71,47 @@ function blades(p: Pixels, seed: number, count: number, colors: string[]) {
   }
 }
 
+/**
+ * Soft patches of lighter and darker turf, a few per tile, so a field is
+ * mottled the way a painting's is rather than uniformly noisy.
+ */
+function mottle(p: Pixels, seed: number, base: string, count: number) {
+  const r = rng(seed + 1234);
+  p.ctx.save();
+  p.ctx.globalAlpha = 0.55;
+  for (let i = 0; i < count; i++) {
+    const cx = 8 + r() * (TILE_W - 16), cy = 4 + r() * (TILE_H - 8);
+    const rx = 5 + r() * 9, ry = rx * 0.5;
+    p.ctx.fillStyle = shade(base, r() < 0.5 ? 0.09 : -0.09);
+    for (let y = -ry; y <= ry; y++) {
+      const half = Math.sqrt(Math.max(0, 1 - (y / ry) ** 2)) * rx;
+      for (let x = Math.round(cx - half); x <= cx + half; x++) if (insideDiamond(x, Math.round(cy + y))) p.ctx.fillRect(x, Math.round(cy + y), 1, 1);
+    }
+  }
+  p.ctx.restore();
+}
+
+/** Tufts: three blades together, lit on the right, a shadow pixel under them. */
+function tufts(p: Pixels, seed: number, count: number, base: string) {
+  const r = rng(seed + 77);
+  for (let i = 0; i < count; i++) {
+    const x = Math.floor(r() * TILE_W), y = Math.floor(r() * TILE_H);
+    if (!insideDiamond(x - 1, y) || !insideDiamond(x + 2, y - 3)) continue;
+    rect(p, x - 1, y - 2, 1, 2, shade(base, 0.16));
+    rect(p, x, y - 3, 1, 3, shade(base, 0.3));
+    rect(p, x + 1, y - 2, 1, 2, shade(base, 0.42));
+    rect(p, x - 1, y, 3, 1, shade(base, -0.2));
+  }
+}
+
 function grassTile(seed: number, base: string, tone: 'plain' | 'flowers' | 'meadow' | 'forest'): Pixels {
   const p = tile();
   fillDiamond(p, base);
-  speckle(p, seed, 260, [shade(base, 0.1), shade(base, -0.12), shade(base, 0.04), shade(base, -0.05)], clip);
-  speckle(p, seed + 91, 60, [shade(base, -0.24)], clip, 2);
-  blades(p, seed + 17, 34, [shade(base, 0.22), shade(base, 0.32), GROUND.grassLight]);
+  mottle(p, seed, base, 3);
+  speckle(p, seed, 150, [shade(base, 0.08), shade(base, -0.1), shade(base, 0.04), shade(base, -0.05)], clip);
+  speckle(p, seed + 91, 30, [shade(base, -0.2)], clip, 2);
+  tufts(p, seed + 17, tone === 'forest' ? 6 : 12, base);
+  blades(p, seed + 19, 16, [shade(base, 0.22), shade(base, 0.34)]);
   if (tone === 'flowers') {
     const r = rng(seed + 401);
     const petals = [BLOOM.white, BLOOM.yellow, BLOOM.pink, BLOOM.violet];
@@ -150,7 +185,8 @@ function cropTile(seed: number, kind: 'wheat' | 'veg'): Pixels {
 function pathTile(seed: number): Pixels {
   const p = tile();
   fillDiamond(p, GROUND.path);
-  speckle(p, seed, 200, [GROUND.pathDark, GROUND.pathLight, shade(GROUND.path, -0.08)], clip);
+  mottle(p, seed, GROUND.path, 2);
+  speckle(p, seed, 140, [GROUND.pathDark, GROUND.pathLight, shade(GROUND.path, -0.08)], clip);
   // Irregular cobbles rather than a repeating grid. Every variant carries the
   // same number of stones and differs only in where they fall.
   const r = rng(seed + 313);
@@ -370,17 +406,25 @@ function streetTile(era: StreetEra, mask: number, seed: number): Pixels {
 
 function plazaTile(seed: number): Pixels {
   const p = tile();
-  fillDiamond(p, GROUND.plaza);
-  speckle(p, seed, 160, [shade(GROUND.plaza, 0.08), shade(GROUND.plaza, -0.12)], clip);
-  // Flagstones follow the isometric axes so the square reads as laid paving.
-  for (let y = 0; y < TILE_H; y++) {
-    const [x0, width] = diamondRow(y);
-    for (let x = x0; x < x0 + width; x++) {
-      const u = Math.round((x - TILE_W / 2) / 2 + (y - TILE_H / 2));
-      const v = Math.round((x - TILE_W / 2) / 2 - (y - TILE_H / 2));
-      if (u % 8 === 0 || v % 8 === 0) rect(p, x, y, 1, 1, GROUND.stoneDark);
-    }
+  // The square: big irregular flagstones, warm and sun-bleached, with a
+  // sand joint between them. No grid — a grid of any kind draws the tile
+  // diamond across the whole square.
+  fillDiamond(p, shade(GROUND.plaza, -0.08));
+  mottle(p, seed, GROUND.plaza, 2);
+  const r = rng(seed + 313);
+  for (let i = 0; i < 14; i++) {
+    const cx = 3 + Math.floor(r() * (TILE_W - 10));
+    const cy = 2 + Math.floor(r() * (TILE_H - 5));
+    const w = 6 + Math.floor(r() * 8);
+    const h = 3 + Math.floor(r() * 3);
+    if (!insideDiamond(cx, cy) || !insideDiamond(cx + w, cy + h)) continue;
+    const tone = r() < 0.4 ? GROUND.stoneLight : r() < 0.7 ? GROUND.plaza : shade(GROUND.plaza, 0.05);
+    rect(p, cx, cy, w, h, tone);
+    rect(p, cx, cy, w, 1, shade(tone, 0.12));
+    rect(p, cx + w - 1, cy, 1, h, shade(tone, -0.16));
+    rect(p, cx, cy + h, w, 1, shade(GROUND.stoneDark, -0.05));
   }
+  speckle(p, seed, 60, [shade(GROUND.plaza, 0.08), shade(GROUND.plaza, -0.1)], clip);
   scuff(p, seed + 614, GROUND.plaza);
   ragged(p, seed + 714, 3);
   return p;
@@ -388,18 +432,24 @@ function plazaTile(seed: number): Pixels {
 
 function rockTile(seed: number): Pixels {
   const p = tile();
+  // Bare rock on the uplands: warm grey with the sun on the upper faces of
+  // the slabs, a little dry grass in the cracks.
   fillDiamond(p, GROUND.rock);
-  speckle(p, seed, 240, [GROUND.rockDark, GROUND.rockLight, shade(GROUND.rock, -0.1)], clip);
+  mottle(p, seed, GROUND.rock, 3);
+  speckle(p, seed, 120, [GROUND.rockDark, GROUND.rockLight, shade(GROUND.rock, -0.08)], clip);
   const r = rng(seed + 641);
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 6; i++) {
     const cx = 8 + Math.floor(r() * (TILE_W - 16));
     const cy = 5 + Math.floor(r() * (TILE_H - 10));
     const w = 5 + Math.floor(r() * 8);
-    const h = 3 + Math.floor(r() * 4);
+    const h = 2 + Math.floor(r() * 3);
     if (!insideDiamond(cx, cy) || !insideDiamond(cx + w, cy + h)) continue;
-    rect(p, cx, cy, w, h, GROUND.rockLight);
-    rect(p, cx, cy + h - 1, w, 1, GROUND.rockDark);
+    rect(p, cx, cy, w, h, shade(GROUND.rock, 0.06));
+    rect(p, cx, cy, w, 1, GROUND.rockLight);
+    rect(p, cx + w - 1, cy, 1, h, GROUND.rockDark);
+    rect(p, cx, cy + h, w, 1, shade(GROUND.rockDark, -0.15));
   }
+  tufts(p, seed + 9, 3, GROUND.scrub);
   scuff(p, seed + 615, GROUND.rock);
   return p;
 }
@@ -489,7 +539,9 @@ function snowTile(seed: number): Pixels {
  */
 function waterTile(seed: number, frame: number, shore: boolean): Pixels {
   const p = tile();
-  const base = shore ? WATER.shallow : WATER.mid;
+  // The shallows are only a little lighter than the deep: a hard step between
+  // the two draws every shore tile as its own diamond.
+  const base = shore ? shade(WATER.mid, 0.14) : WATER.mid;
   fillDiamond(p, base);
   speckle(p, seed + frame, 150, [shade(base, 0.05), shade(base, -0.05)], clip);
   const r = rng(seed + 17);
@@ -598,9 +650,9 @@ function waterfallFrame(frame: number): Pixels {
 export function canopyPattern(): Pixels {
   const size = 128;
   const p = surface(size, size);
-  rect(p, 0, 0, size, size, '#14290f');
+  rect(p, 0, 0, size, size, '#24401c');
   const r = rng(9091);
-  const tones = ['#1b3616', '#22421b', '#182f12', '#2a4d21'];
+  const tones = ['#2c4f22', '#356028', '#274620', '#3d6c2e'];
   for (let i = 0; i < 210; i++) {
     const cx = r() * size;
     const cy = r() * size;
@@ -615,7 +667,7 @@ export function canopyPattern(): Pixels {
       }
     }
   }
-  speckle(p, 4242, 900, ['#0f2210', '#2d5626']);
+  speckle(p, 4242, 900, ['#1d3617', '#467a35']);
   return p;
 }
 

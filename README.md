@@ -513,6 +513,25 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.6 also: people talk like people. `lib/dialogue.ts` composes every
+exchange from two `Brief`s and a `TownBrief` (`compose`): an opener by
+`Relation` (spouse, kin, friends, known, strangers, rivals), a subject drawn
+from the other's or one's own recent `Episode`s, the last talk with that
+person, the town or the weather, a reply in the listener's voice
+(`REPLY[trait][cut]`), an acknowledgement and a parting that names where
+they are bound. `traitsOf(hash)` gives two traits; `noteEpisode` records
+life events on `Citizen.recent` (six, saved with the citizen);
+`rememberTalk` keeps `Citizen.lastTalk` per person; `relationOf`, `briefOf`
+and `townBrief` in the simulation feed the composer. The card shows
+`traits`, `lately` and `lastTalk`. `lib/i18n/zh.ts` carries every template
+as a `DIALOGUE` pair, turned into patterns with typed slots so a bare name
+cannot swallow a sentence. The settlement art pass lives in
+`lib/render/palette.ts` (golden-hour colour script and ambient stops),
+`buildings.ts` (coursed materials, `ambientOcclusion`, roof `texture`,
+arched doors, sun upper right), `props.ts` (`conifer`, lobed `canopy`),
+`tiles.ts` (`mottle`, `tufts`, flagstone plaza, softer shallows) and the
+scene's base tile under raised ground.
+
 v2.6: ages that mean something, and a Bank that tells the truth.
 `POSTS_PER_ERA`, `BEDS_PER_ERA` and `OUTPUT_PER_ERA` in `lib/simulation.ts`
 scale every workplace's posts (`buildingPosts(b, world)`), every house's beds

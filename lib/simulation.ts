@@ -18,6 +18,7 @@ import {
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
 import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
+import { compose, episodeNote, traitsOf, TRAIT_LABELS, type Brief, type Episode, type EpisodeKind, type Relation, type TownBrief } from './dialogue';
 import { buildWater, type WaterField } from './world/water';
 import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
@@ -322,6 +323,31 @@ export interface Citizen {
    * lying to the player.
    */
   chilled: boolean;
+  /**
+   * What has happened to them lately, newest last, six at most. This is
+   * what they talk about, and what the card says under "Lately".
+   */
+  recent?: Episode[];
+  /** The last thing they talked about with each person, by that person's id. */
+  lastTalk?: Record<string, { topic: string; day: number }>;
+}
+
+/** Remember something that happened to somebody, once per kind per day. */
+export function noteEpisode(world: World, c: Citizen, kind: EpisodeKind, about?: string) {
+  const list = c.recent ?? (c.recent = []);
+  if (list.some((e) => e.kind === kind && e.day === world.day)) return;
+  list.push(about ? { day: world.day, kind, about } : { day: world.day, kind });
+  while (list.length > 6) list.shift();
+}
+
+/** What has happened to somebody lately, newest first, for the card. */
+export function latelyOf(world: World, c: Citizen): string[] {
+  return [...(c.recent ?? [])].reverse().filter((e) => world.day - e.day <= 8).map((e) => episodeNote(e));
+}
+
+/** The two words that describe how somebody talks. */
+export function traitWords(c: Citizen): string[] {
+  return traitsOf(c.hash).map((t) => TRAIT_LABELS[t]);
 }
 
 /**
@@ -1742,10 +1768,14 @@ function socialStep(world: World, hours: number) {
       if (!bond.friends && bond.strength >= 78) {
         bond.friends = true;
         pushFeed(world, 'social', `${a.name} and ${b.name} are now good friends.`);
+        noteEpisode(world, a, 'newFriend', b.name);
+        noteEpisode(world, b, 'newFriend', a.name);
       }
       if (!bond.rivals && bond.strength <= -55) {
         bond.rivals = true;
         pushFeed(world, 'social', `${a.name} and ${b.name} have fallen out badly.`);
+        noteEpisode(world, a, 'fellOut', b.name);
+        noteEpisode(world, b, 'fellOut', a.name);
       }
     }
   }
@@ -1792,178 +1822,85 @@ function outAndAbout(c: Citizen) {
  * an answer and a closing — so a conversation is on one subject from start to
  * finish rather than four unrelated lines taking turns.
  */
-function conversationFor(world: World, a: Citizen, b: Citizen): { topic: string; lines: string[] } {
-  const shared = a.job !== 'unemployed' && a.job === b.job;
-  const friends = world.bonds[bondKey(a.id, b.id)]?.friends ?? false;
-  const art = world.artworks[0];
-
-  // People who cannot stand each other are not making small talk.
+/**
+ * How two people stand to each other, for the composer.
+ *
+ * Kin share a family; a spouse is the other grown-up in it who is near
+ * enough in age to be a partner rather than a parent. Friends and rivals
+ * are the bond's own words for it. Anyone else is known if they have stood
+ * together before, a stranger if not.
+ */
+function relationOf(world: World, a: Citizen, b: Citizen): Relation {
   const bond = bondOf(world, a.id, b.id);
-  if (bond && bond.strength <= -40) {
-    return {
-      topic: bond.fights > 0 ? 'what happened last time' : 'an old grievance',
-      lines: bond.fights > 0
-        ? [
-          'You have a nerve, showing your face.',
-          'It is a small settlement. I go where I like.',
-          'Not where I am, you do not.',
-          'Then move.',
-        ]
-        : [
-          'I heard what you said about the yard.',
-          'I said what everybody is thinking.',
-          'Say it to me next time, then.',
-          'I just did.',
-        ],
-    };
+  if (bond && bond.strength <= -40) return 'rivals';
+  if (a.familyId === b.familyId) {
+    const grown = a.age >= 18 && b.age >= 18 && Math.abs(a.age - b.age) < 25;
+    const family = world.families.find((f) => f.id === a.familyId);
+    const adults = family ? family.members.map((id) => world.citizens.find((c) => c.id === id)).filter((c): c is Citizen => !!c && c.age >= 18) : [];
+    if (grown && adults.length <= 2) return 'spouse';
+    return 'kin';
   }
+  if (bond?.friends) return 'friends';
+  if ((bond && bond.strength > 12) || a.lastTalk?.[b.id]) return 'known';
+  return 'strangers';
+}
 
-  // Urgent business first, because these are things happening to the two of
-  // them right now and nobody talks about the price of wool in a blizzard.
-  if (world.weather === 'Storm' || world.weather === 'Snow') {
-    return {
-      topic: 'the weather',
-      lines: [
-        world.weather === 'Snow' ? 'Cold enough to see your breath out here.' : 'That wind is getting up.',
-        world.weather === 'Snow' ? 'Second fall this season. Earlier than last year.' : 'It will be through here by dark.',
-        'Have you enough firewood put by?',
-        'Enough for a week. Come round if you run short.',
-      ],
-    };
+/** Where somebody is off to next, said as a place, or null when they are staying put. */
+function boundFor(world: World, c: Citizen): string | null {
+  if (world.hour >= 17 && world.hour < 22) {
+    const venue = ['Tavern', 'Cafe', 'Brewery', 'Chapel'].find((t) => hasWorking(world, t));
+    return venue ? `the ${venue.toLowerCase()}` : 'the square';
   }
+  if (c.phase === 'working' && c.job !== 'unemployed') return `the ${jobs[c.job as WorkingJob].building.toLowerCase()}`;
+  if (c.phase === 'eating') return 'the market';
+  return null;
+}
 
-  if (a.hunger < 32 || b.hunger < 32) {
-    return {
-      topic: 'the stores',
-      lines: [
-        'Have you eaten today?',
-        world.resources.bread > 4 ? 'There was bread at the market this morning.' : 'The stores were bare when I looked.',
-        world.resources.bread > 4 ? 'I will go down before it goes.' : 'Somebody ought to say something at the meeting.',
-        'I will walk with you.',
-      ],
-    };
-  }
-
-  // Everything else is small talk, and small talk is a choice among the things
-  // both of them could reasonably raise — not a fixed order. Running it as a
-  // priority chain made the last town meeting the subject of four
-  // conversations in five, for the three days a resolution stands.
-  const options: { topic: string; lines: string[] }[] = [];
-
-  if (world.resolution && world.day - world.resolution.day <= 1) {
-    options.push({
-      topic: 'the meeting',
-      lines: [
-        `They resolved ${world.resolution.text}.`,
-        `${world.resolution.voters} in the room, I heard.`,
-        'About time somebody decided it.',
-        'We will see if it comes to anything.',
-      ],
-    });
-  }
-
-  if (art && world.day - art.day <= 2) {
-    options.push({
-      topic: 'the showcase',
-      lines: [
-        `Did you see ${art.maker}'s piece? “${art.title}”.`,
-        'I stood in front of it a good while.',
-        'It is the light on it that gets me.',
-        'They should show another.',
-      ],
-    });
-  }
-
-  if (shared) {
-    options.push({
-      topic: `the ${JOB_LABELS[a.job].toLowerCase()}'s work`,
-      lines: [
-        'How did you get on today?',
-        'Slow start, then it came right after noon.',
-        'Same. My hands are finished.',
-        'Tomorrow, then.',
-      ],
-    });
-    options.push({
-      topic: `the ${JOB_LABELS[a.job].toLowerCase()}'s work`,
-      lines: [
-        'Are you on the same run as me tomorrow?',
-        'If the weather holds I will be.',
-        'Two of us would halve it.',
-        'Then two of us it is.',
-      ],
-    });
-  }
-
-  if (friends) {
-    options.push({
-      topic: 'each other',
-      lines: [
-        `Good to see you, ${b.name}.`,
-        'And you. It has been days.',
-        'Come by the house this week.',
-        'I will bring something.',
-      ],
-    });
-  }
-
-  const babies = world.citizens.filter((c) => c.age < 3).length;
-  if (babies > 0) {
-    options.push({
-      topic: 'the children',
-      lines: [
-        babies === 1 ? 'There is a new one in the settlement.' : `${babies} little ones about the place now.`,
-        'They will need somewhere to live before long.',
-        'They always do. We managed.',
-        'We did at that.',
-      ],
-    });
-  }
-
-  const site = world.projects[0];
-  if (site) {
-    options.push({
-      topic: site.name,
-      lines: [
-        `Have you seen how far along ${site.name.toLowerCase()} is?`,
-        'I walked past this morning. Further than I expected.',
-        'It will change this end of town.',
-        'For the better, I hope.',
-      ],
-    });
-  }
-
-  options.push({
-    topic: world.name,
-    lines: [
-      `${JOB_LABELS[a.job]}, is it? I do not think we have spoken.`,
-      `${b.name}. I am mostly down the other end of ${world.name}.`,
-      'Long enough here to know the shortcuts, then.',
-      'Ask me any time.',
-    ],
-  });
-
-  // The weather as a thing you can say out loud. Dropping `weather` straight
-  // into a sentence gives you "and the cloudy with it".
-  const skies: Record<Weather, string> = {
-    Clear: 'these bright mornings',
-    Cloudy: 'this flat grey light',
-    Rain: 'all this rain',
-    Storm: 'the wind that comes with it',
-    Fog: 'the fog off the water',
-    Snow: 'the snow on top of it',
+function briefOf(world: World, c: Citizen, other: Citizen): Brief {
+  return {
+    name: c.name,
+    trade: c.job === 'unemployed' ? '' : JOB_LABELS[c.job].toLowerCase(),
+    traits: traitsOf(c.hash),
+    age: Math.floor(c.age),
+    hungry: c.hunger < 32,
+    tired: c.rest < 30,
+    recent: c.recent ?? [],
+    evening: boundFor(world, c),
+    lastTalk: c.lastTalk?.[other.id] ?? null,
   };
-  options.push({
-    topic: 'the season',
-    lines: [
-      `${world.season} always comes round faster than I expect.`,
-      `It does. And ${skies[world.weather]}.`,
-      'Still, it is a good place to be in it.',
-      'It is.',
-    ],
-  });
+}
 
-  return options[(a.hash + b.hash + world.day) % options.length];
+function townBrief(world: World): TownBrief {
+  const art = world.artworks[0];
+  return {
+    name: world.name,
+    day: world.day,
+    season: world.season,
+    weather: world.weather,
+    bread: world.resources.bread > 4,
+    resolution: world.resolution && world.day - world.resolution.day <= 1 ? world.resolution.text : null,
+    showcase: art && world.day - art.day <= 2 ? { maker: art.maker, title: art.title } : null,
+    project: world.projects[0]?.name ?? null,
+    babies: world.citizens.filter((c) => c.age < 3).length,
+    festivalToday: world.festivalDay === world.day,
+    gatesClosed: !!world.gatesClosed,
+    arrivals: world.citizens.filter((c) => (c.recent ?? []).some((e) => e.kind === 'arrived' && e.day === world.day)).length,
+  };
+}
+
+function conversationFor(world: World, a: Citizen, b: Citizen): { topic: string; lines: string[] } {
+  const roll = ((a.hash * 31 + b.hash * 17 + world.day * 7919 + Math.floor(world.hour) * 97) >>> 0) % 100000;
+  return compose(briefOf(world, a, b), briefOf(world, b, a), relationOf(world, a, b), townBrief(world), roll);
+}
+
+/** Each remembers what they talked about, so next time can pick it up. */
+function rememberTalk(world: World, a: Citizen, b: Citizen, topic: string) {
+  for (const [self, other] of [[a, b], [b, a]] as [Citizen, Citizen][]) {
+    const memory = self.lastTalk ?? (self.lastTalk = {});
+    memory[other.id] = { topic, day: world.day };
+    const ids = Object.keys(memory);
+    if (ids.length > 8) delete memory[ids.sort((x, y) => memory[x].day - memory[y].day)[0]];
+  }
 }
 
 /**
@@ -1987,6 +1924,8 @@ function converse(world: World, hours: number) {
     // Someone walked off, went inside or died: the conversation is over, which
     // is what happens to conversations.
     if (!a || !b || a.inside || b.inside || Math.hypot(a.x - b.x, a.y - b.y) > TALKING_RANGE + 2.5) {
+      // Cut short, but if the subject was raised it is still remembered.
+      if (a && b && talk.index >= 2) rememberTalk(world, a, b, talk.topic);
       world.conversations.splice(i, 1);
       continue;
     }
@@ -2005,7 +1944,10 @@ function converse(world: World, hours: number) {
       if (!bond.friends && bond.strength >= 78) {
         bond.friends = true;
         pushFeed(world, 'social', `${a.name} and ${b.name} are now good friends.`);
+        noteEpisode(world, a, 'newFriend', b.name);
+        noteEpisode(world, b, 'newFriend', a.name);
       }
+      rememberTalk(world, a, b, talk.topic);
       world.conversations.splice(i, 1);
     }
   }
@@ -2069,6 +2011,7 @@ function quarrels(world: World, hours: number) {
       if (c === a || c === b || c.inside || c.age < 10) continue;
       if (Math.hypot(c.x - a.x, c.y - a.y) > 9) continue;
       c.happiness = Math.max(0, c.happiness - 5);
+      noteEpisode(world, c, 'sawFight', `${a.name} and ${b.name}`);
       witnesses++;
     }
     // The conversation, if they were having one, is over.
@@ -5031,6 +4974,7 @@ function hazards(world: World) {
       pushFeed(world, 'world', 'The sickness has run its course.');
     }
     if (h.kind === 'flood') pushFeed(world, 'world', 'The water has gone down.');
+    for (const c of world.citizens) if (c.age >= 10) noteEpisode(world, c, 'hazard', HAZARD_LABELS[h.kind].toLowerCase());
     world.hazards.splice(i, 1);
   }
   if (world.hazards.length) return;
@@ -5116,6 +5060,7 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     for (let i = 0; i < first && adults.length; i++) {
       const c = adults.splice(Math.floor(rand() * adults.length), 1)[0];
       c.sick = 1;
+      noteEpisode(world, c, 'sick');
     }
     const h = add('Sickness is spreading from person to person.');
     h.days = 6 + Math.round(severity * 6);
@@ -5294,7 +5239,7 @@ function hazardStep(world: World, hours: number) {
         if (c.sick || c.inside || c.age < 4) continue;
         for (const s of sick) {
           if (Math.hypot(c.x - s.x, c.y - s.y) > 2.6) continue;
-          if (rand() < rate) { c.sick = 1; break; }
+          if (rand() < rate) { c.sick = 1; noteEpisode(world, c, 'sick'); break; }
         }
       }
       const down = world.citizens.filter((c) => c.sick).length;
@@ -5319,7 +5264,7 @@ function plagueDay(world: World, h: Hazard) {
     if (hasCare(world)) risk *= 0.5;
     if (h.fought) risk *= 0.5;
     if (world.resources.herbs >= 1) { world.resources.herbs -= 1; note(world, 'consumed', 'herbs', 1); risk *= 0.5; }
-    if (c.sick > 4 && rand() < 0.35) { c.sick = undefined; recovered++; continue; }
+    if (c.sick > 4 && rand() < 0.35) { c.sick = undefined; recovered++; noteEpisode(world, c, 'recovered'); continue; }
     if (rand() < risk) dead.push(c);
   }
   for (const c of dead) bury(world, c, `${c.name} died of the sickness. The settlement is smaller today.`);
@@ -5329,6 +5274,12 @@ function plagueDay(world: World, h: Hazard) {
 
 /** Take somebody out of the world, and tidy everything that pointed at them. */
 function bury(world: World, c: Citizen, line: string) {
+  // The household remembers, before the lists forget.
+  const household = world.families.find((f) => f.id === c.familyId);
+  for (const id of household?.members ?? []) {
+    const kin = world.citizens.find((other) => other.id === id);
+    if (kin && kin !== c && kin.age >= 10) noteEpisode(world, kin, 'lost', c.name);
+  }
   forget(world, c);
   world.deaths += 1;
   world.population = world.citizens.length;
@@ -5448,6 +5399,7 @@ function unrest(world: World) {
     c.purpose = Math.max(c.purpose, 40);
     c.dwell = 0;
     pushFeed(world, 'social', `${c.name} was let out of the jail, quieter than they went in.`);
+    noteEpisode(world, c, 'freed');
   }
   if (world.day < 6 || world.citizens.some((c) => c.rogue)) return;
   const rand = mulberry32(world.seed + world.day * 5573);
@@ -6707,6 +6659,8 @@ function formHouseholds(world: World, rand: () => number) {
   world.families.push(family);
   if (!home) rehouse(world);
   pushFeed(world, 'social', `${a.name} and ${b.name} have set up a household together.`);
+  noteEpisode(world, a, 'household', b.name);
+  noteEpisode(world, b, 'household', a.name);
 }
 
 /**
@@ -6757,6 +6711,10 @@ function births(world: World, rand: () => number) {
     family.members.push(child.id);
     world.births += 1;
     pushFeed(world, 'social', `${parent.name}'s family welcomed ${name}.`);
+    for (const id of family.members) {
+      const kin = world.citizens.find((c) => c.id === id);
+      if (kin && kin.age >= 16) noteEpisode(world, kin, 'child', name);
+    }
     // Every household gets its own chance, rather than the settlement getting
     // one between them. Deaths scale with the population; a single birth a day
     // for the whole settlement could never keep pace with them, and every world
@@ -6955,6 +6913,7 @@ function arriveOne(world: World, rand: () => number) {
   family.members.push(settler.id);
   world.citizens.push(settler);
   pushFeed(world, 'social', `${name} arrived on the road, looking for work and a roof.`);
+  noteEpisode(world, settler, 'arrived');
   // Housed now, by the same rule as everybody else, not at dawn tomorrow: a
   // town with arrivals most days otherwise always had somebody sleeping rough
   // beside a house with a spare bed, and the helper said so.
@@ -7271,6 +7230,12 @@ export function returnYield(world: World, amount: number) {
 }
 
 function daily(world: World) {
+  // The night just gone, as each of them will remember it.
+  for (const c of world.citizens) {
+    if (c.age < 16) continue;
+    if (c.hunger < 20) noteEpisode(world, c, 'hungry');
+    if (c.roughSleeper) noteEpisode(world, c, 'roughSleep');
+  }
   rehouse(world);
   world.flowYesterday = world.flow;
   world.flow = { produced: {}, consumed: {} };
@@ -7335,6 +7300,7 @@ function daily(world: World) {
     if (c.age < 16) continue;
     c.wage = jobs[c.job as WorkingJob].wage * rate * ratio;
     c.wallet += c.wage;
+    if (ratio < 0.5 && c.job !== 'unemployed') noteEpisode(world, c, 'unpaid');
     // A day at the trade is a day's learning — less of one when the settlement
     // could not pay for it, because half a day spent wondering whether you
     // will be paid is not a day at the bench.
@@ -7348,6 +7314,7 @@ function daily(world: World) {
       const after = skillLevel(c.skills[job] ?? 0);
       if (after > before && after >= 3) {
         pushFeed(world, 'work', `${c.name} is now a ${SKILL_TITLES[after].toLowerCase()} ${JOB_LABELS[job].toLowerCase()}.`);
+        noteEpisode(world, c, 'mastered', `${SKILL_TITLES[after].toLowerCase()} ${JOB_LABELS[job].toLowerCase()}`);
       }
     }
     c.hunger = Math.max(0, c.hunger - 7); c.rest = Math.max(0, c.rest - 5);
@@ -7818,6 +7785,7 @@ export function holdFestival(world: World): { ok: boolean; message: string } {
   if (world.treasury < cost) return { ok: false, message: `A festival for ${world.citizens.length} people costs ${cost.toLocaleString()} Gold.` };
   spend(world, 'festival', cost);
   world.festivalDay = world.day;
+  for (const c of world.citizens) if (c.age >= 12) noteEpisode(world, c, 'festival');
   for (const c of world.citizens) {
     if (c.jailed || c.rogue) continue;
     c.happiness = Math.min(100, c.happiness + 18);

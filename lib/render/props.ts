@@ -10,36 +10,107 @@
 import { BLOOM, BUILD, FOLIAGE, GROUND, WATER } from './palette';
 import { groundShadow, outline, rect, rng, shade, speckle, surface, type Pixels } from './pixelCanvas';
 
-const DARK = '#141c14';
+const DARK = '#22301c';
 
-/** A blobby mass of foliage built from overlapping discs, lit from upper left. */
+/**
+ * A mass of foliage built from clustered lobes, lit from the upper right.
+ *
+ * Each lobe is painted four times: its full dark shape, the mid tone
+ * shifted toward the sun, the light tone shifted further, and a rim of
+ * highlight on the sunward edge. The whole canopy then gets a shadowed
+ * underside and leaf speckle in the mid tones only, so the highlights stay
+ * clean. That is what turns a green blob into a tree with a side the sun
+ * is on.
+ */
 function canopy(p: Pixels, cx: number, cy: number, rx: number, ry: number, seed: number, light: string, mid: string, dark: string) {
   const r = rng(seed);
-  const blobs = 7 + Math.floor(r() * 4);
+  // Many small lobes rather than a few big ones: the reference canopies are
+  // built of leaf clusters the size of a hand, not of beach balls.
+  const blobs = 12 + Math.floor(r() * 6);
   const discs: [number, number, number][] = [];
   for (let i = 0; i < blobs; i++) {
-    const a = (i / blobs) * Math.PI * 2 + r() * 0.7;
-    const d = r() * 0.62;
-    discs.push([cx + Math.cos(a) * rx * d, cy + Math.sin(a) * ry * d, (0.42 + r() * 0.34) * Math.min(rx, ry) + 3]);
+    const a = (i / blobs) * Math.PI * 2 + r() * 0.9;
+    const d = 0.3 + r() * 0.5;
+    discs.push([cx + Math.cos(a) * rx * d, cy + Math.sin(a) * ry * d * 0.9, (0.26 + r() * 0.2) * Math.min(rx, ry) + 3]);
   }
-  discs.push([cx, cy, Math.min(rx, ry) * 0.92]);
+  for (let i = 0; i < 3; i++) discs.push([cx + (r() - 0.5) * rx * 0.5, cy + (r() - 0.5) * ry * 0.5, Math.min(rx, ry) * (0.5 + r() * 0.2)]);
+  // Sorted back to front so the lobes at the bottom overlap the ones above.
+  discs.sort((a, b) => a[1] - b[1]);
 
-  const paint = (color: string, dx: number, dy: number, scale: number) => {
+  const disc = (color: string, bx: number, by: number, br: number) => {
     p.ctx.fillStyle = color;
-    for (const [bx, by, br] of discs) {
-      p.ctx.beginPath();
-      p.ctx.arc(Math.round(bx + dx), Math.round(by + dy), Math.max(2, Math.round(br * scale)), 0, Math.PI * 2);
-      p.ctx.fill();
-    }
+    p.ctx.beginPath();
+    p.ctx.arc(Math.round(bx), Math.round(by), Math.max(2, Math.round(br)), 0, Math.PI * 2);
+    p.ctx.fill();
   };
-  paint(dark, 0, 1, 1);
-  paint(mid, -1, -1, 0.95);
-  paint(light, -2, -3, 0.6);
-  // Leaf texture so the canopy is not a smooth vector shape.
-  speckle(p, seed + 71, Math.round(rx * ry * 0.5), [light, dark, mid], (x, y) => {
+  const deep = shade(dark, -0.22);
+  const rim = shade(light, 0.28);
+  for (const [bx, by, br] of discs) {
+    disc(deep, bx - 1, by + 2, br);
+    disc(dark, bx, by, br);
+    disc(mid, bx + 1, by - 1, br * 0.8);
+    disc(light, bx + 2, by - 2, br * 0.42);
+    if (br > 5) disc(rim, bx + 3, by - 3, Math.max(1, br * 0.16));
+  }
+  const inside = (x: number, y: number) => {
     for (const [bx, by, br] of discs) if ((x - bx) ** 2 + (y - by) ** 2 < br * br) return true;
     return false;
-  });
+  };
+  // Leaf texture in the body of the canopy, never on the highlights.
+  const rr = rng(seed + 71);
+  for (let i = 0; i < rx * ry * 0.4; i++) {
+    const x = Math.floor(cx - rx + rr() * rx * 2), y = Math.floor(cy - ry + rr() * ry * 2);
+    if (!inside(x, y)) continue;
+    const sun = (x - cx) / rx - (y - cy) / ry;
+    if (sun > 0.5) continue;
+    rect(p, x, y, 1, 1, rr() < 0.5 ? dark : shade(mid, -0.06));
+  }
+  // The shaded underside, where the lobes hang over the trunk.
+  for (let i = 0; i < rx * 0.8; i++) {
+    const x = Math.floor(cx - rx * 0.8 + rr() * rx * 1.6), y = Math.floor(cy + ry * 0.45 + rr() * ry * 0.5);
+    if (inside(x, y)) rect(p, x, y, 2, 1, deep);
+  }
+}
+
+/**
+ * A conifer's tiers: chevrons stacked up the trunk, each lit on its right
+ * side and dark on its left, with a ragged lower edge of needle clusters
+ * and a highlight along the sunward edge. The silhouette is what makes a
+ * pine a pine; the blob canopy could never fake it.
+ */
+function conifer(p: Pixels, cx: number, topY: number, baseY: number, halfW: number, tiers: number, seed: number, light: string, mid: string, dark: string) {
+  const r = rng(seed);
+  const deep = shade(dark, -0.2);
+  const tierH = (baseY - topY) / tiers;
+  const tri = (x0: number, y0: number, x1: number, y1: number, x2: number, y2: number, color: string) => {
+    p.ctx.fillStyle = color;
+    p.ctx.beginPath(); p.ctx.moveTo(x0, y0); p.ctx.lineTo(x1, y1); p.ctx.lineTo(x2, y2); p.ctx.closePath(); p.ctx.fill();
+  };
+  for (let i = tiers - 1; i >= 0; i--) {
+    const t = (i + 1) / tiers;
+    const apexY = topY + i * tierH * 0.78;
+    const bottom = topY + (i + 1) * tierH + tierH * 0.3;
+    const w = halfW * (0.35 + t * 0.65);
+    // Left half in shadow, right half lit, a strip of highlight on the rim.
+    tri(cx, apexY, cx - w, bottom, cx, bottom + 1, dark);
+    tri(cx, apexY, cx + w, bottom, cx, bottom + 1, mid);
+    tri(cx + w * 0.55, apexY + (bottom - apexY) * 0.55, cx + w, bottom, cx + w * 0.7, bottom, light);
+    p.ctx.strokeStyle = shade(light, 0.2); p.ctx.lineWidth = 1; p.ctx.beginPath();
+    p.ctx.moveTo(cx + 1, apexY + 2); p.ctx.lineTo(cx + w - 1, bottom - 1); p.ctx.stroke();
+    // Needle clusters hanging off the bottom edge.
+    for (let x = -w; x < w; x += 2 + Math.floor(r() * 2)) {
+      const droop = 1 + Math.floor(r() * 3);
+      rect(p, cx + x, bottom - 1, 2, droop, x < 0 ? (r() < 0.5 ? deep : dark) : (r() < 0.5 ? mid : shade(mid, -0.1)));
+    }
+    // The shadow the tier above throws on this one.
+    if (i > 0) { p.ctx.save(); p.ctx.globalAlpha = 0.35; tri(cx, apexY, cx - w * 0.5, apexY + 4, cx + w * 0.5, apexY + 4, deep); p.ctx.restore(); }
+  }
+  // Trunk showing at the foot.
+  const th = Math.round(tierH * 0.9);
+  for (let y = 0; y < th; y++) {
+    rect(p, cx - 2, baseY - y + tierH * 0.3, 4, 1, FOLIAGE.trunkDark);
+    rect(p, cx, baseY - y + tierH * 0.3, 1, 1, FOLIAGE.trunk);
+  }
 }
 
 function trunk(p: Pixels, cx: number, baseY: number, height: number, width: number, lean = 0) {
@@ -48,10 +119,13 @@ function trunk(p: Pixels, cx: number, baseY: number, height: number, width: numb
     const x = Math.round(cx - width / 2 + (lean * i) / height);
     rect(p, x, y, width, 1, FOLIAGE.trunkDark);
     rect(p, x + 1, y, Math.max(1, width - 2), 1, FOLIAGE.trunk);
-    if (i % 5 === 0) rect(p, x + 1, y, 1, 1, FOLIAGE.trunkLight);
+    // Lit down the right edge, the side the sun is on.
+    rect(p, x + width - 2, y, 1, 1, FOLIAGE.trunkLight);
+    if (i % 5 === 2) rect(p, x + 1, y, 1, 1, shade(FOLIAGE.trunkDark, -0.15));
   }
   // Root flare.
   rect(p, cx - width, baseY - 1, width * 2, 2, FOLIAGE.trunkDark);
+  rect(p, cx + 1, baseY - 1, width - 1, 1, FOLIAGE.trunk);
 }
 
 type Species = 'pine' | 'oak' | 'birch' | 'palm' | 'mangrove' | 'acacia';
@@ -82,17 +156,10 @@ function tree(seed: number, species: Species, big: boolean): Pixels {
   const p = surface(w, h);
   const cx = Math.round(w / 2);
   const baseY = h - 3;
-  groundShadow(p, cx, baseY, big ? 15 : 11, big ? 6 : 4, 0.32);
+  groundShadow(p, cx - (big ? 4 : 3), baseY, big ? 15 : 11, big ? 6 : 4, 0.3);
 
   if (species === 'pine') {
-    trunk(p, cx, baseY, Math.round(h * 0.34), big ? 6 : 4);
-    const tiers = big ? 4 : 3;
-    for (let i = 0; i < tiers; i++) {
-      const t = i / tiers;
-      const ty = Math.round(h * 0.1 + t * h * 0.5);
-      const rx = Math.round((big ? 24 : 17) * (0.5 + t * 0.62));
-      canopy(p, cx, ty, rx, Math.round(rx * 0.6), seed + i * 13, FOLIAGE.pineLight, FOLIAGE.pine, FOLIAGE.pineDark);
-    }
+    conifer(p, cx, big ? 3 : 4, baseY - (big ? 12 : 9), big ? 23 : 16, big ? 5 : 4, seed, FOLIAGE.pineLight, FOLIAGE.pine, FOLIAGE.pineDark);
   } else if (species === 'oak') {
     trunk(p, cx, baseY, Math.round(h * 0.42), big ? 7 : 5, big ? 3 : 2);
     canopy(p, cx + 1, Math.round(h * 0.3), big ? 24 : 17, big ? 20 : 14, seed, FOLIAGE.oakLight, FOLIAGE.oak, FOLIAGE.oakDark);

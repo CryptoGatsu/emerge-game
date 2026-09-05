@@ -1035,6 +1035,23 @@ export default function Wiki() {
             tapping them. A settlement whose average happiness is fine can still contain somebody
             cold, friendless and about to change trade.
           </p>
+          <h3>What people say</h3>
+          <p>
+            Everybody has a <b>temperament</b> — warm, blunt, a dreamer, a worrier, a joker, proud,
+            quiet, curious, a grumbler or steady — and it is on their card, under their trade. It
+            decides how they answer: a warm person hearing that you went hungry asks you round for
+            supper, a blunt one tells you the market shuts at dusk. A conversation between two
+            people is composed for those two: the opening knows what they are to each other (a
+            spouse, kin, a friend, someone they have met before, a stranger, a rival), the subject
+            is something one of them has a real reason to raise, the reply is in the listener&rsquo;s
+            own voice, and the parting says where they are off to. People <b>remember what happens
+            to them</b> — a night gone hungry, going unpaid, sleeping rough, a fight they saw, a new
+            friend, setting up house, a child, arriving, mastering a trade, jail, sickness, a
+            festival, a falling-out, a loss — and it is what they raise and what they ask each other
+            about; the card lists it under <b>Lately</b>. They also remember what they last talked
+            about with each person, and pick it up next time. Tap somebody and follow them for an
+            evening: the talk in the square is the settlement telling you how it is going.
+          </p>
         </section>
 
         {/* ---------------------------------------------------------- */}

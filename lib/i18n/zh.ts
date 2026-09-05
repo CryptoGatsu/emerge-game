@@ -1089,7 +1089,225 @@ const skill = (word: string) => NAMES[word] ?? NAMES[word[0].toUpperCase() + wor
  * 世界自己写出的句子。每一项是 [正则, 替换]，替换里的 $1 会再送回 tx()，
  * 所以建筑名、资源名、行当名会跟着翻译。顺序有意义：具体的在前。
  */
+/**
+ * What people say to each other, in Chinese.
+ *
+ * `lib/dialogue.ts` composes every exchange from templates with {name},
+ * {town}, {trade} and {place} in them. Each template is listed here once,
+ * in English exactly as written there, with its Chinese; the regex for it is
+ * built from the English, and the groups come through `tx` so a name stays
+ * a name and a building becomes a Chinese building.
+ */
+const DIALOGUE: [string, string][] = [
+  // Trait words on the card.
+  ['warm', '热心'], ['blunt', '直率'], ['a dreamer', '爱做梦'], ['a worrier', '爱操心'], ['a joker', '爱开玩笑'],
+  ['proud', '骄傲'], ['quiet', '寡言'], ['curious', '好奇'], ['a grumbler', '爱抱怨'], ['steady', '稳重'],
+  // Lately, on the card.
+  ['Went to bed hungry', '饿着肚子睡了'], ['Went unpaid', '没领到工钱'], ['Slept rough', '露宿了'],
+  ['Saw {a} fight', '看见{a}打了起来'], ['Made a friend in {a}', '和{a}成了朋友'], ['Set up house with {a}', '和{a}成了家'],
+  ['Welcomed {a}', '迎来了{a}'], ['Arrived on the road', '从大路上来到这里'], ['Became a {a}', '成了{a}'],
+  ['Let out of the jail', '从监狱放出来了'], ['Fell sick', '病倒了'], ['Recovered', '康复了'], ['Came through the {a}', '熬过了{a}'],
+  ['Danced at the festival', '在节庆上跳了舞'], ['Fell out with {a}', '和{a}闹翻了'], ['Lost {a}', '失去了{a}'],
+  ['Talked with {name} today about {topic}.', '今天和{name}聊了{topic}。'],
+  ['Talked with {name} {n} days ago about {topic}.', '{n} 天前和{name}聊了{topic}。'],
+  ['Lately', '近况'],
+  // Topics.
+  ["{name}'s new child", '{name}家的新生儿'], ["{name}'s news", '{name}的近况'], ["{name}'s trouble", '{name}的难处'], ["{name}'s loss", '{name}的丧事'],
+  ['the fight in the square', '广场上的那场架'], ['an old grievance', '旧怨'], ['the festival', '节庆'], ['the meeting', '集会'],
+  ['the showcase', '展示会'], ['the children', '孩子们'], ['the gates', '城门'], ['the newcomers', '新来的人'],
+  ["the {trade}'s work", '{trade}的活计'], ['the stores', '库存'], ['the long day', '漫长的一天'], ['the weather', '天气'], ['the season', '季节'],
+  // Episodes, first person.
+  ['I went to bed hungry last night.', '我昨晚饿着肚子睡的。'], ['I went to bed hungry {when}.', '我{when}饿着肚子睡的。'],
+  ['The treasury could not pay me yesterday.', '昨天金库付不出我的工钱。'], ['I went unpaid {when}.', '我{when}没领到工钱。'],
+  ['I slept under the sky again.', '我又露宿了一夜。'], ['I saw {a} come to blows in the square.', '我看见{a}在广场上打起来了。'],
+  ['{a} and I have got to be good friends.', '{a}和我成了好朋友。'], ['{a} and I have set up house together.', '{a}和我成家了。'],
+  ['We have a new one at home. {a}.', '家里添了个小的。叫{a}。'], ['I only came in on the road yesterday.', '我昨天才从大路上来。'],
+  ['I only came in on the road {when}.', '我{when}才从大路上来。'], ['They call me a {a} now.', '他们现在叫我{a}了。'],
+  ['I am out of the jail. Quieter for it.', '我从监狱出来了。安分多了。'], ['I have been poorly.', '我病了一场。'],
+  ['I am on my feet again.', '我又能站起来了。'], ['We came through the {a}.', '我们熬过了{a}。'],
+  ['That festival was a day to remember.', '那场节庆真值得记住。'], ['{a} and I are not speaking.', '{a}和我不说话了。'],
+  ['We buried {a} {when}.', '我们{when}埋葬了{a}。'],
+  ['today', '今天'], ['yesterday', '昨天'], ['{n} days back', '{n} 天前'],
+  // Openers.
+  ['You are back early.', '你回来得早。'], ['There you are, love.', '你来了，亲爱的。'], ['I saved you some.', '我给你留了些。'], ['Did you get on all right today?', '今天还顺吗？'],
+  ['{name}. Is everyone home?', '{name}。大家都在家吗？'], ['There you are. I have been looking for you.', '你在这儿。我到处找你。'], ['Have you eaten?', '吃了吗？'], ['Mother asked after you.', '母亲问起你了。'],
+  ['{name}! Come here, let me look at you.', '{name}！过来，让我看看你。'], ['It has been days, {name}.', '好些天了，{name}。'],
+  ['Look what the road dragged in.', '瞧瞧路上刮来了谁。'], ['{name}! Still alive, then.', '{name}！还活着呢。'],
+  ['About time, {name}.', '也该来了，{name}。'], ['Good to see you, {name}.', '见到你真好，{name}。'], ['{name}! It has been days.', '{name}！好些天了。'],
+  ['Morning, {name}.', '早，{name}。'], ['Good day, {name}.', '日安，{name}。'], ['{name}, how goes it?', '{name}，怎么样？'],
+  ['You have a nerve, showing your face.', '你还有脸露面。'], ['I heard what you said about the yard.', '我听说你怎么说场院的了。'], ['Not here. Not today.', '别在这儿。今天不行。'],
+  ['You will know my work. {name}, {trade}.', '你会认得我的手艺。{name}，{trade}。'], ['{name}. The {trade}. You will have heard.', '{name}。{trade}。你该听说过。'],
+  ['Hello.', '你好。'], ['I do not know you. {name}. Where are you from?', '我不认识你。我是{name}。你从哪儿来？'], ['New face. I am {name}, the {trade}.', '生面孔。我是{name}，{trade}。'],
+  ['{trade}, is it? I do not think we have spoken. {name}.', '{trade}，是吧？我们好像没说过话。我是{name}。'], ['Newcomer, is it? I do not think we have spoken. {name}.', '新来的？我们好像没说过话。我是{name}。'],
+  ['I am {name}, the {trade}. And you?', '我是{name}，{trade}。你呢？'],
+  // Spats.
+  ['It is a small settlement. I go where I like.', '这地方小。我爱去哪儿去哪儿。'], ['Not where I am, you do not.', '有我在的地方就不行。'], ['Then move.', '那你挪开。'],
+  ['I said what everybody is thinking.', '我说的是大家心里想的。'], ['Say it to me next time, then.', '那下次当着我说。'], ['I just did.', '我刚说了。'],
+  ['Keep your people off my side of the lane.', '让你的人别到我这边的巷子来。'], ['Your side. Listen to yourself.', '你那边。听听你自己说的。'], ['I mean it.', '我是认真的。'], ['So do I.', '我也是。'],
+  // Weather.
+  ['Cold enough to see your breath out here.', '外面冷得能看见哈气。'], ['That wind is getting up.', '风越来越大了。'],
+  ['Have you enough firewood put by?', '柴火备够了吗？'], ['Enough for a week. Come round if you run short.', '够一周的。短了就来我这儿。'],
+  ['A fine day for it.', '干活的好天气。'], ['Flat grey light all day.', '一整天灰蒙蒙的。'], ['All this rain.', '这雨下个没完。'],
+  ['Cannot see the far bank in this.', '这雾里看不见对岸。'], ['Cold enough to see your breath.', '冷得能看见哈气。'], ['Some weather we are having.', '这天气真够呛。'],
+  ['{season} always comes round faster than I expect.', '{season}总是比我想的来得快。'],
+  // Subjects.
+  ['I heard you went to bed hungry, {name}. Is that true?', '听说你饿着肚子睡的，{name}。真的吗？'], ['Did they pay you in the end?', '最后给你工钱了吗？'],
+  ['Are you still sleeping out, {name}?', '你还露宿着吗，{name}？'], ['You were there when it came to blows, I heard.', '听说打起来的时候你在场。'],
+  ['You and {a} are thick as thieves these days.', '你和{a}最近好得很啊。'], ['So you and {a} have set up house. Good.', '这么说你和{a}成家了。好。'],
+  ['How is the little one? {a}, is it?', '小家伙怎么样？叫{a}，是吧？'], ['How are you finding {town}?', '{town}住得惯吗？'],
+  ['A {a} now, I hear. Is it true?', '听说你成{a}了。真的？'], ['Out of the jail, then. How was it?', '出来了。里面怎么样？'],
+  ['Are you feeling any better?', '好些了吗？'], ['Good to see you on your feet.', '见你能站起来真好。'],
+  ['Did the {a} reach your end?', '{a}到你们那头了吗？'], ['I saw you dancing at the festival.', '我看见你在节庆上跳舞了。'],
+  ['You and {a} still not speaking?', '你和{a}还不说话？'], ['I was sorry to hear about {a}.', '{a}的事，我很难过。'],
+  ['You remember what we said about {topic}?', '还记得我们说的{topic}吗？'],
+  ['A festival, today of all days. Are you going down?', '偏偏今天办节庆。你去吗？'], ['They resolved {a} at the meeting.', '集会上他们决定了{a}。'],
+  ["Did you see {a}'s piece? “{b}”.", '看见{a}的作品了吗？《{b}》。'], ['Have you seen how far along {a} is?', '你看见{a}进展到哪儿了吗？'],
+  ['There is a new one in the settlement.', '聚落里添了个小的。'], ['{n} little ones about the place now.', '现在有 {n} 个小家伙满地跑了。'],
+  ['The gates are shut. Nobody new on the road.', '城门关了。路上没有新人。'], ['Somebody new came in on the road today.', '今天有个新人从大路上来了。'],
+  ['{n} came in on the road today.', '今天有 {n} 个人从大路上来了。'], ['How did you get on today?', '今天干得怎么样？'],
+  ["{trade}'s work never ends. My hands are finished.", '{trade}的活干不完。我的手都废了。'],
+  ['I have not eaten. Is there bread at the market still?', '我还没吃。市场还有面包吗？'], ['I have not eaten, and the stores were bare when I looked.', '我还没吃，我去看的时候库房是空的。'],
+  ['I have been up since before light.', '天没亮我就起了。'],
+  // Answers to a question about one's own news.
+  ['It is true. It was a bad night.', '是真的。那晚很难熬。'], ['Not the first time, either.', '也不是头一回了。'], ['I would rather not talk about it.', '我不想说这个。'],
+  ['It is true. I still cannot quite believe it.', '是真的。我还不太敢信。'], ['It is. Ask me how I feel about it.', '是啊。问问我什么心情。'], ['Yes. It has changed everything.', '是的。一切都不一样了。'],
+  ['Slow start, then it came right after noon.', '开头慢，过了晌午就顺了。'], ['Better than yesterday.', '比昨天好。'], ['The same as ever.', '老样子。'],
+  ['Well enough.', '还行。'], ['I have seen worse.', '我见过更糟的。'], ['It is what it is.', '就这样吧。'],
+  ['I was there.', '我在场。'], ['I heard.', '我听说了。'], ['So they say.', '他们是这么说。'],
+  ['I remember.', '我记得。'], ['Yes.', '是。'], ['How could I forget.', '怎么忘得了。'], ['Finding my feet.', '正在适应。'], ['It will do.', '还过得去。'],
+  // Warm.
+  ['Come to ours tonight, {name}. There is enough.', '今晚来我们家，{name}。够吃的。'], ['I am sorry. You should have said sooner.', '真抱歉。你该早点说的。'], ['Sit with me a minute. It helps.', '陪我坐一会儿。会好些。'],
+  ['That is the best thing I have heard all week.', '这是我这周听到最好的消息。'], ['I am so glad, {name}.', '我真高兴，{name}。'], ['You deserve it, every bit.', '你应得的，一点不多。'],
+  ['You work too hard, you know.', '你太拼了，知道吗。'], ['Tell me if it gets too much.', '扛不住了就跟我说。'], ['You make it look easy. It is not.', '你让它看着轻松。其实不。'],
+  ['Wrap up, then. I mean it.', '那就裹严实点。我说真的。'], ['Days like this are for being together.', '这样的日子就该在一起。'], ['Come in by the fire later.', '晚点来炉边坐坐。'],
+  ['I hope it does us all some good.', '希望对大家都有好处。'], ['People here look after each other. That is what I like.', '这里的人互相照应。我就喜欢这个。'], ['We will see it through together.', '我们一起挺过去。'],
+  ['I have been thinking about it since.', '我从那以后一直在想。'], ['You remembered. That means a lot.', '你还记得。这对我很重要。'], ['It stayed with me too.', '我也一直记着。'],
+  ['Well met, {name}. Truly.', '幸会，{name}。真心的。'], ['Any friend of {town} is a friend of mine.', '{town}的朋友就是我的朋友。'], ['You must come by the house.', '你一定要来家里坐坐。'],
+  // Blunt.
+  ['Then eat earlier. The market shuts at dusk.', '那就早点吃。市场天黑就关。'], ['That is what happens. Deal with it.', '就是这样。自己扛。'], ['Complaining will not fix it.', '抱怨没用。'],
+  ['Good. About time.', '好。也该了。'], ['Fine. Do not let it go to your head.', '行。别得意忘形。'], ['Earned, then.', '那是应得的。'],
+  ['Work is work.', '活就是活。'], ['Less talk, more done.', '少说多干。'], ['Everybody is tired. Get on with it.', '谁都累。干就是了。'],
+  ['Weather is weather.', '天气就是天气。'], ['It will do what it does.', '它爱怎样怎样。'], ['Dress for it.', '穿够衣服。'],
+  ['We will see.', '走着瞧。'], ['Talk is cheap in {town}.', '{town}的话不值钱。'], ['Somebody had to say it.', '总得有人说。'],
+  ['I said what I said.', '我说过的就是那样。'], ['Still true.', '还是那样。'], ['You did not listen the first time.', '你头一回就没听。'],
+  ['{name}. Right.', '{name}。行。'], ['I know your face.', '我认得你的脸。'], ['Keep out of my way in the yard and we will get on.', '在场院别挡我的道，我们就处得来。'],
+  // Dreamer.
+  ['One day none of us will go without. I can see it.', '总有一天谁都不用挨饿。我看得见。'], ['Bad nights make the good mornings, {name}.', '难熬的夜换来好的早晨，{name}。'], ['Think of what this place will be in ten years.', '想想十年后这地方会是什么样。'],
+  ['I knew it. I dreamed something like it.', '我就知道。我梦见过差不多的。'], ['This is how it begins.', '就是这样开始的。'], ['Imagine where that leads.', '想想这会通向哪儿。'],
+  ['I keep thinking of what we could build instead.', '我老想着我们本可以建点别的。'], ['Somewhere past the ridge there is a better way to do it.', '山脊那边一定有更好的做法。'], ['The work is only the start of it.', '干活只是开头。'],
+  ['The light on the water was worth the walk.', '水上的光，值得走这一趟。'], ['I could watch this sky all day.', '这天空我能看一整天。'], ['A day like this wants a song.', '这样的日子该有首歌。'],
+  ['{town} is going to be something. I feel it.', '{town}会有出息的。我感觉得到。'], ['Wait until the roads reach the far shore.', '等路修到对岸再看。'], ['This is the start of a story.', '这是一个故事的开头。'],
+  ['I made a song out of it, nearly.', '我差点把它编成了歌。'], ['I still think about that.', '我还在想那件事。'], ['It has been in my head ever since.', '从那以后它就在我脑子里。'],
+  ['I have wondered about you, {name}.', '我一直好奇你，{name}。'], ['Everybody here has a story. What is yours?', '这里每个人都有故事。你的呢？'], ['New faces mean new roads.', '新面孔就是新路。'],
+  // Worrier.
+  ['That is the second time this week. It worries me.', '这周第二回了。我担心。'], ['What if it happens again?', '要是再来一次呢？'], ['Should we tell somebody? We should tell somebody.', '要不要告诉谁？该告诉谁的。'],
+  ['I am pleased. I only hope it lasts.', '我高兴。只盼它长久。'], ['That is good. Do not jinx it.', '那好。别说破了。'], ['Wonderful. Now mind you keep it.', '太好了。可得守住。'],
+  ['Are we behind? I feel like we are behind.', '我们落后了吗？我觉得落后了。'], ['The stores looked low to me this morning.', '今早我看库房挺空的。'], ['Mind your hands on that.', '干那个小心手。'],
+  ['I do not like the look of it.', '我不喜欢这架势。'], ['Is the roof going to hold?', '屋顶撑得住吗？'], ['We should get the animals in.', '该把牲口赶进来。'],
+  ['I hope they know what they are doing.', '希望他们知道自己在干什么。'], ['These things always cost more than they say.', '这种事总比说的贵。'], ['And who pays for it?', '那谁来付钱？'],
+  ['I have not stopped thinking about it.', '我一直没停下想它。'], ['Did it come right in the end?', '最后好了吗？'], ['I worried about you after.', '那之后我一直担心你。'],
+  ['Are you settling in? It is not easy here.', '安顿下来了吗？这里不容易。'], ['You will want to find a roof before winter.', '入冬前你得找个屋顶。'], ['Mind the water at the north end.', '当心北头的水。'],
+  // Joker.
+  ['That is why you look so thin.', '怪不得你这么瘦。'], ['Cheer up. It could be raining. Oh.', '振作点。至少没下雨。哦。'], ['I would lend you my supper but I ate it.', '我本想借你我的晚饭，可我吃了。'],
+  ['Well look at you.', '瞧瞧你。'], ['Drinks are on you, then.', '那酒你请。'], ['Do not tell everybody or they will all want one.', '别到处说，不然人人都想要一个。'],
+  ['Working hard or hardly working?', '是在干活还是在装干活？'], ['My hands hurt just watching you.', '看你干活我手都疼。'], ['Rest is for people with nothing to carry.', '休息是没东西扛的人的事。'],
+  ['Lovely weather for ducks.', '鸭子最爱的天气。'], ['I ordered sun. This is not sun.', '我点的是太阳。这不是太阳。'], ['Snow again. Who is in charge of this?', '又下雪。这归谁管？'],
+  ['I give it a week.', '我看撑不过一周。'], ['That is the most exciting thing to happen since the last thing.', '这是上一件事以来最刺激的事。'], ['Somebody will write a song about it. Probably me.', '会有人为它写首歌。多半是我。'],
+  ['I told everyone that story. Twice.', '那故事我跟谁都讲了。讲了两遍。'], ['You are still on about that?', '你还在说那个？'], ['I have a better version now.', '我现在有个更好的版本。'],
+  ['Do not believe anything they tell you about me.', '他们说我的话一句别信。'], ['Welcome to {town}. Mind the mud.', '欢迎来{town}。当心泥。'], ['I am the handsome one. You will have heard.', '我是那个好看的。你该听说了。'],
+  // Proud.
+  ['I have never gone without in my life. Plan better.', '我这辈子从没短过。计划好点。'], ['Trouble finds those who let it.', '麻烦找的是放任它的人。'], ['You will not hear me complain.', '你不会听见我抱怨。'],
+  ['I said you had it in you.', '我说过你行的。'], ['Not bad. Not as good as mine, but not bad.', '不错。不如我的，但不错。'], ['Now you know what it takes.', '现在你知道这要付出什么了。'],
+  ['Nobody in {town} does it better than me.', '{town}没人比我干得好。'], ['You will know my work when you see it.', '你见了就认得我的手艺。'], ['Standards, {name}. Standards.', '标准，{name}。标准。'],
+  ['Weather never stopped me.', '天气从没拦住过我。'], ['A little wind. Please.', '一点风。拜托。'], ['I have worked through worse.', '更糟的我也干过。'],
+  ['They should have asked me.', '他们该来问我。'], ['I would have done it differently.', '换我不会这么做。'], ['It will be better for my part in it.', '有我一份它会更好。'],
+  ['I was right, as it turned out.', '结果证明我是对的。'], ['You will recall I said so.', '你该记得我说过。'], ['Of course I remember. I remember everything.', '我当然记得。我什么都记得。'],
+  ['You will know my name soon enough.', '你很快就会知道我的名字。'], ['{name}. I am the best {trade} this side of the water.', '{name}。我是水这边最好的{trade}。'], ['I do not need introductions.', '我不需要介绍。'],
+  // Quiet.
+  ['I am sorry.', '我很抱歉。'], ['That is hard.', '那很难。'], ['Say if you need anything.', '需要什么就说。'],
+  ['Good.', '好。'], ['That is good news.', '好消息。'], ['I am glad.', '我很高兴。'],
+  ['It goes.', '还过得去。'], ['Same here.', '我也是。'], ['It is.', '是啊。'], ['Mm.', '嗯。'],
+  ['Perhaps.', '也许。'], ['Yes. I thought about it.', '是。我想过。'], ['I have seen you about.', '我见过你。'],
+  // Curious.
+  ['How did that happen? Tell me all of it.', '怎么回事？全说给我听。'], ['Was it the stores, or the wages?', '是库存的事，还是工钱的事？'], ['And what did you do then?', '那你后来怎么办？'],
+  ['How did it come about?', '这是怎么来的？'], ['Tell me everything.', '全告诉我。'], ['What was that like?', '那是什么感觉？'],
+  ['How does the {trade} spend a day, really?', '{trade}的一天到底怎么过？'], ['What is the hardest part of it?', '最难的是哪一部分？'], ['I always wanted to see that done.', '我一直想看看那是怎么做的。'],
+  ['Where does the weather come from, do you think?', '你说天气是从哪儿来的？'], ['Have you ever seen it worse?', '你见过更糟的吗？'], ['I wonder what it is doing over the water.', '不知道水那边是什么天。'],
+  ['Who decided that? I want to know how it works.', '谁定的？我想知道这怎么运作。'], ['What happens next?', '接下来呢？'], ['I want to see it for myself.', '我想亲眼看看。'],
+  ['And did it turn out the way you thought?', '结果和你想的一样吗？'], ['I have wondered about that since.', '我从那以后一直在琢磨。'], ['Tell me the rest.', '把剩下的讲给我。'],
+  ['Where did you come from, {name}?', '你从哪儿来，{name}？'], ['What brought you to {town}?', '什么把你带到{town}来的？'], ['What do you make of the place?', '你觉得这地方怎么样？'],
+  // Grumbler.
+  ['Nothing works in this town.', '这镇上什么都不灵。'], ['And nobody does anything about it.', '也没人管。'], ['Same as ever.', '老样子。'],
+  ['Wait until it goes wrong.', '等出岔子再说。'], ['Enjoy it while it lasts.', '趁还在，享受吧。'], ['Hm. Nice for some.', '哼。有些人真好命。'],
+  ['My back has had enough of it.', '我的腰受够了。'], ['The tools are rubbish and the pay is worse.', '工具是破烂，工钱更糟。'], ['Nobody thanks you.', '没人谢你。'],
+  ['Typical.', '典型。'], ['Of course it is.', '当然了。'], ['It was better in my day.', '我那时候好多了。'],
+  ['More talk.', '又是空话。'], ['I will believe it when I see it.', '看见了我才信。'], ['Who asked for that?', '谁要那个了？'],
+  ['Still not sorted, I suppose.', '我看还没弄好。'], ['Told you.', '早说了。'], ['Nothing changes.', '什么都不会变。'],
+  ['Another one.', '又来一个。'], ['You will regret coming here.', '你会后悔来这儿的。'], ['Do not expect much.', '别指望太多。'],
+  // Steady.
+  ['One day at a time, {name}.', '一天一天来，{name}。'], ['It will come right. It usually does.', '会好的。通常都会。'], ['We have had worse and we are still here.', '更糟的我们也经过了，还不是在这儿。'],
+  ['Well done. Keep at it.', '干得好。接着干。'], ['That is how it should be.', '就该这样。'], ['Good news is good news.', '好消息就是好消息。'],
+  ['Steady does it.', '稳着来。'], ['Same tomorrow, and the day after.', '明天一样，后天也一样。'], ['The work is there. We do it.', '活在那儿。我们干就是。'],
+  ['It will pass.', '会过去的。'], ['Every season has its own.', '每个季节有每个季节的。'], ['Nothing a good coat will not fix.', '一件好外套解决不了的事不多。'],
+  ['Give it time.', '给它点时间。'], ['Things get done here, in the end.', '这里的事最后总能办成。'], ['Sensible enough.', '挺明智。'],
+  ['I remember. It worked out.', '我记得。后来成了。'], ['Yes, and here we are.', '是，你看我们不是好好的。'], ['Time sorts most things.', '时间能理顺大多数事。'],
+  ['Welcome, {name}. You will do fine.', '欢迎，{name}。你会过得好的。'], ['Good to have another pair of hands.', '多一双手真好。'], ['Ask if you need anything.', '需要什么就问。'],
+  // Acks.
+  ['You are kind.', '你真好。'], ['Thank you, {name}.', '谢谢你，{name}。'], ['I knew you would say that.', '我就知道你会这么说。'],
+  ['Fair.', '有道理。'], ['Right.', '行。'], ['We will see about that.', '那就走着瞧。'],
+  ['Maybe you are right.', '也许你说得对。'], ['I like the sound of that.', '我喜欢这话。'], ['Yes. Maybe.', '是。也许吧。'],
+  ['I hope so.', '但愿。'], ['If you say so.', '你说是就是吧。'], ['I suppose.', '大概吧。'],
+  ['Ha.', '哈。'], ['You would say that.', '你就会这么说。'], ['Very good.', '很好。'],
+  ['Naturally.', '自然。'], ['As I thought.', '正如我想。'], ['Quite.', '正是。'],
+  ['Thank you.', '谢谢。'], ['Is that so?', '是吗？'], ['Interesting.', '有意思。'], ['I will remember that.', '我会记住的。'],
+  ['Hm.', '哼。'], ['Aye.', '嗯。'], ['Fair enough.', '也好。'], ['That is true.', '这倒是。'],
+  // Partings.
+  ['I am for {place}. Walk with me?', '我去{place}。一起走？'], ['Come and find me at {place} later.', '晚点到{place}来找我。'],
+  ['Mind how you go, {name}.', '路上当心，{name}。'], ['Come by the house this week.', '这周来家里坐坐。'],
+  ['{place}. Coming or not?', '{place}。来不来？'], ['I am off to {place}.', '我去{place}了。'], ['Right. Go on, then.', '行。去吧。'], ['That is enough talk.', '说够了。'],
+  ['I might wander to {place}. Or past it.', '我也许晃到{place}。或者晃过头。'], ['Off to {place}, unless the road has other ideas.', '去{place}，除非路另有打算。'],
+  ['Watch the sky tonight.', '今晚看看天。'], ['Until next time, then.', '那下次见。'],
+  ['I should get to {place} before it is dark.', '我得在天黑前到{place}。'], ['I had better go. {place}, then home.', '我该走了。先去{place}，再回家。'],
+  ['Get home safe.', '平安到家。'], ['Do not stay out too late.', '别在外头待太晚。'],
+  ['{place} calls. It knows my name.', '{place}在叫我。它认得我的名字。'], ['Off to {place}. Do not miss me too much.', '去{place}了。别太想我。'],
+  ['Try not to fall in the river.', '别掉河里。'], ['Same time tomorrow, same nonsense.', '明天同一时间，同样的胡闹。'],
+  ['I am expected at {place}.', '{place}那边等着我呢。'], ['They will be waiting for me at {place}.', '他们会在{place}等我。'],
+  ['You will hear of me.', '你会听到我的名声的。'], ['Good day.', '日安。'],
+  ['{place}, then.', '那就{place}。'], ['I am going to {place}.', '我去{place}。'], ['Good night.', '晚安。'], ['Take care.', '保重。'],
+  ['I want to see what is happening at {place}.', '我想看看{place}在发生什么。'], ['Off to {place}. There is always something to learn there.', '去{place}。那儿总有东西可学。'],
+  ['Tell me how it goes.', '告诉我后来怎么样。'], ['I want to hear the rest tomorrow.', '明天我要听剩下的。'],
+  ['{place}, I suppose. Not that it will be any good.', '{place}吧，我想。反正也不会有什么好。'], ['Off to {place}. Somebody has to.', '去{place}。总得有人去。'],
+  ['Go on.', '去吧。'], ['Whatever.', '随便。'],
+  ['I am for {place}. Same as always.', '我去{place}。和往常一样。'], ['Off to {place}. See you there, maybe.', '去{place}。也许那儿见。'],
+  ['Take it steady.', '稳着点。'], ['See you tomorrow.', '明天见。'],
+  ['the square', '广场'], ['home', '家'],
+  // Last, because a bare name with a full stop would otherwise match any one-word line.
+  ['{name}.', '{name}。'],
+];
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * What each slot may hold. A name is one capitalised word and a place is
+ * "the something" or "home", so "{name}." cannot swallow a whole sentence
+ * that happens to end in a full stop.
+ */
+const SLOT: Record<string, string> = {
+  name: "([A-Z][\\w'-]*)", town: "([A-Z][\\w' -]*)", place: '(the [a-z ]+|home)', trade: '([A-Za-z ]+)', n: '(\\d+)', season: '(\\w+)',
+};
+/** A template with {slots} becomes a regex with a group per slot, and the Chinese keeps the slots in order. */
+function templatePair([en, zh]: [string, string]): [RegExp, string] {
+  const slots: string[] = [];
+  const source = escapeRe(en).replace(/\\\{(\w+)\\\}/g, (_, name: string) => { slots.push(name); return SLOT[name] ?? '(.+?)'; });
+  const replacement = zh.replace(/\{(\w+)\}/g, (_, name: string) => `$${slots.indexOf(name) + 1}`);
+  return [new RegExp(`^${source}$`), replacement];
+}
+const DIALOGUE_PATTERNS: [RegExp, string][] = DIALOGUE.map(templatePair);
+
 export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
+  // Conversation first: these are whole sentences, and the generic patterns
+  // below (a trailing full stop, "the" in front of a noun) must not eat them.
+  ...DIALOGUE_PATTERNS,
+  [/^([A-Z][a-z]+) and ([A-Z][a-z]+)$/, '$1和$2'],
   // ---- 地块助手 ----
   [/^Raise a house$/, '盖一栋房子'],
   [/^Break more ground$/, '开垦更多土地'],

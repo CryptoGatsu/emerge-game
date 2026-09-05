@@ -17,7 +17,7 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type Job, type World, adviseBuild, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD } from './simulation';
+  type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD } from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -32,6 +32,12 @@ export interface FocusCitizen {
   mood: number; energy: number; purpose: number; hunger: number; social: number;
   wallet: number; wage: number;
   friends: { id: string; name: string }[];
+  /** How they talk, in two words: "warm, a worrier". */
+  traits: string[];
+  /** What has happened to them lately, newest first. */
+  lately: string[];
+  /** The last conversation they had, if they remember one: who and what about. */
+  lastTalk: { name: string; topic: string; daysAgo: number } | null;
   trouble: string | null;
     project: string | null;
 }
@@ -318,6 +324,16 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       mood: c.happiness, energy: c.rest, purpose: c.purpose, hunger: c.hunger, social: c.social,
       wallet: c.wallet, wage: c.wage,
       friends: friendsOf(world, c.id).slice(0, 4).map((f) => ({ id: f.citizen.id, name: f.citizen.name })),
+      traits: traitWords(c),
+      lately: latelyOf(world, c).slice(0, 4),
+      lastTalk: (() => {
+        const talks = Object.entries(c.lastTalk ?? {}).sort((x, y) => y[1].day - x[1].day);
+        for (const [id, talk] of talks) {
+          const other = world.citizens.find((o) => o.id === id);
+          if (other) return { name: other.name, topic: talk.topic, daysAgo: world.day - talk.day };
+        }
+        return null;
+      })(),
       project: project?.name ?? null,
       trouble: c.jailed ? `In the jail, ${c.jailed} ${c.jailed === 1 ? 'day' : 'days'} to go`
         : c.rogue ? `Turned on the settlement${c.rogue.damage ? `, ${c.rogue.damage} ${c.rogue.damage === 1 ? 'building' : 'buildings'} wrecked` : ''}`

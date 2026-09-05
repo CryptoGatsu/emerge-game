@@ -473,6 +473,21 @@ export class AssetLibrary {
   }
 
   /** Returns the texture if present, else the fallback name's texture. */
+  /**
+   * A sprite as a PNG data URL at its native size, for the trial hooks: what
+   * the painter drew, cut out of its atlas page.
+   */
+  dataUrl(name: string): string | null {
+    if (!this.has(name)) return null;
+    const tex = this.get(name);
+    const src = tex.source.resource as HTMLCanvasElement;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(tex.frame.width));
+    c.height = Math.max(1, Math.round(tex.frame.height));
+    c.getContext('2d')!.drawImage(src, tex.frame.x, tex.frame.y, tex.frame.width, tex.frame.height, 0, 0, c.width, c.height);
+    return c.toDataURL();
+  }
+
   getOr(name: string, fallback: string): Texture {
     return this.has(name) ? this.get(name) : this.get(fallback);
   }

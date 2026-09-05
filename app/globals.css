@@ -1423,6 +1423,11 @@ button.fold:hover { color: var(--emerald); }
 .judged-card > .vault-line:first-child b { color: var(--gold); }
 .judged-card .judged-plot span { font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
 .judged-card p { margin: 6px 0 0; }
+.being-traits { margin: -2px 0 4px; font-style: italic; letter-spacing: 0.02em; }
+.being-lately { margin: 6px 0 2px; font-size: 12px; }
+.being-lately ul { margin: 2px 0 0; padding-left: 14px; color: var(--cream); }
+.being-lately li { margin: 1px 0; }
+.being-talk { font-size: 12px; }
 .vault-line.burn b { color: #e0785f; }
 .vault-card button {
   width: 100%;
