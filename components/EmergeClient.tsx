@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -1326,12 +1326,38 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         setSelected({ kind: 'building', id: building.id });
         markFirst('house');
       } else {
-        // Refused — the feed says why. Too close to a neighbour, or on the water.
+        // Refused: say why, here, not only in the feed.
         soundRef.current?.tick('deny');
+        const why = placementProblem(world, type, x, y) ?? t('The yard is short of materials for it.');
+        announce({ id: `build-${Date.now()}`, kind: 'sync', title: t('Not built'), body: tx(why), lifetime: 8_000 });
       }
       setView(snapshot(world, selectedRef.current));
     });
   }, [markFirst]);
+
+  /** Send somebody away for a few days' pay. */
+  const dismissFor = useCallback((id: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = dismissCitizen(world, id);
+    if (!result.ok) {
+      soundRef.current?.tick('deny');
+      announce({ id: `dismiss-${Date.now()}`, kind: 'sync', title: t('They stay'), body: tx(result.message), lifetime: 8_000 });
+      return;
+    }
+    setSelected(null);
+    sceneRef.current?.syncBuildings();
+    soundRef.current?.tick('select');
+    setView(snapshot(world, null));
+  }, []);
+
+  /** Open or close the gates to newcomers. */
+  const gatesFor = useCallback((closed: boolean) => {
+    const world = worldRef.current;
+    if (!world) return;
+    setGates(world, closed);
+    setView(snapshot(world, selectedRef.current));
+  }, []);
 
   /** Retrain one person into a trade, for Gold. */
   const trainFor = useCallback((id: string, job: string): string | null => {
@@ -1443,7 +1469,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown; select: (id: string) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1461,6 +1487,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       sprites: () => sceneRef.current?.spriteInfo() ?? null,
       // Open a building's card, as a tap on it would.
       select: (id: string) => { setSelected({ kind: 'building', id }); },
+      pick: (id: string) => { setSelected({ kind: 'citizen', id }); },
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
@@ -1541,11 +1568,15 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     scene.startPlacement(building.type, (x, y) => {
       setMovingBuilding(null);
       const result = moveBuilding(world, id, x, y);
-      if (!result.ok) { soundRef.current?.tick('deny'); return; }
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `move-${Date.now()}`, kind: 'sync', title: t('Not moved'), body: tx(result.message), lifetime: 8_000 });
+        return;
+      }
       scene.syncBuildings();
       soundRef.current?.cue('hammer');
       setView(snapshot(world, selectedRef.current));
-    });
+    }, id);
   }, []);
 
   /** Spend Gold and materials to make a building better at its job. */
@@ -1955,6 +1986,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             player={player}
             onRenameCitizen={renameCitizenFor}
             onDemolish={demolish}
+            onDismiss={dismissFor}
             onRebuild={rebuild}
             onFight={fight}
             hover={hoverInfo}
@@ -1990,7 +2022,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             } : null}
             onFirstDayGo={(go) => {
               if (go === 'person') {
-                const someone = worldRef.current?.citizens.find((c) => !c.inside) ?? worldRef.current?.citizens[0];
+                // Somebody with a trade, out where they can be seen: the step
+                // says everyone here has a trade, so show one who does.
+                const people = worldRef.current?.citizens ?? [];
+                const someone = people.find((c) => !c.inside && c.age >= 16 && c.job !== 'unemployed')
+                  ?? people.find((c) => c.age >= 16) ?? people[0];
                 if (someone) focusOn({ kind: 'citizen', id: someone.id });
               } else setPanel(go);
             }}
@@ -2021,6 +2057,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onBuild={beginBuild}
             onTrain={trainFor}
             onTrainTrade={trainTradeFor}
+            onGates={gatesFor}
             onClearTrees={beginClear}
             onBridge={beginBridge}
             onRaiseCity={raiseCityFor}

@@ -454,6 +454,8 @@ export interface World {
   banner?: string;
   /** The last day the settlement held a festival, so there is one a day at most. */
   festivalDay?: number;
+  /** The player has closed the gates: nobody new is taken in until they open them. */
+  gatesClosed?: boolean;
   /**
    * What the settlement pays, as a multiple of each trade's standing wage.
    *
@@ -5259,6 +5261,14 @@ function plagueDay(world: World, h: Hazard) {
 
 /** Take somebody out of the world, and tidy everything that pointed at them. */
 function bury(world: World, c: Citizen, line: string) {
+  forget(world, c);
+  world.deaths += 1;
+  world.population = world.citizens.length;
+  pushFeed(world, 'social', line);
+}
+
+/** Everything that pointed at somebody, cleared: the lists, the bonds, the bed, the post. */
+function forget(world: World, c: Citizen) {
   world.citizens = world.citizens.filter((x) => x.id !== c.id);
   for (const f of world.families) f.members = f.members.filter((id) => id !== c.id);
   // The bed they leave behind is somebody else's tonight, not tomorrow.
@@ -5270,9 +5280,54 @@ function bury(world: World, c: Citizen, line: string) {
   for (const a of world.amenities) a.users = a.users.filter((id) => id !== c.id);
   for (const o of world.citizens) if (o.chasing === c.id) o.chasing = undefined;
   for (const a of world.wildlife) if (a.stalkedBy === c.id) a.stalkedBy = undefined;
-  world.deaths += 1;
+  for (const b of world.buildings) b.workers = b.workers.filter((id) => id !== c.id);
   world.population = world.citizens.length;
-  pushFeed(world, 'social', line);
+}
+
+/** What it costs to send somebody away: a few days' pay to see them down the road. */
+export const DISMISS_GOLD = 40;
+
+/**
+ * Send somebody away.
+ *
+ * "There needs to be a way to dismiss NPCs": a town whose posts are all
+ * filled still feeds everybody, and a player who has more people than work
+ * had no way to say so. An adult, never a child, never the last adult; they
+ * leave on the road with a few days' pay, and their bed and their post are
+ * free the same day.
+ */
+export function dismissCitizen(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
+  const c = world.citizens.find((x) => x.id === id);
+  if (!c) return { ok: false, message: 'They are not here.' };
+  if (c.age < 16) return { ok: false, message: `${c.name} is a child. Children stay with their family.` };
+  if (world.citizens.filter((x) => x.age >= 16).length <= 1) return { ok: false, message: 'Somebody has to stay to keep the place.' };
+  if (world.treasury < DISMISS_GOLD) return { ok: false, message: `Seeing somebody down the road costs ${DISMISS_GOLD} Gold.` };
+  spend(world, 'wages', DISMISS_GOLD);
+  forget(world, c);
+  staffNow(world);
+  noteAttention(world);
+  pushFeed(world, 'social', `${c.name} was sent on their way with ${DISMISS_GOLD} Gold. The road took them.`);
+  return { ok: true, message: `${c.name} has left.` };
+}
+
+/** Open or close the gates to newcomers. */
+export function setGates(world: World, closed: boolean) {
+  useWorld(world);
+  if (!!world.gatesClosed === closed) return;
+  world.gatesClosed = closed || undefined;
+  noteAttention(world);
+  pushFeed(world, 'social', closed ? 'The gates are closed. Nobody new will be taken in until they open again.' : 'The gates are open again. Newcomers may come.');
+}
+
+/** Posts standing empty across every trade: the work there is for somebody new. */
+export function openPostsOf(world: World): number {
+  useWorld(world);
+  const counts: Partial<Record<Job, number>> = {};
+  for (const c of world.citizens) if (c.age >= 16) counts[c.job] = (counts[c.job] ?? 0) + 1;
+  let open = 0;
+  for (const job of Object.keys(jobs) as WorkingJob[]) open += Math.max(0, jobCapacity(world, job) - (counts[job] ?? 0));
+  return open;
 }
 
 /* ------------------------------------------------------------------ *
@@ -6597,6 +6652,11 @@ function migration(world: World, rand: () => number) {
   // A spare roof and a full store. Nobody moves to a place they would have
   // to sleep outside in, or go hungry in.
   if (!roomFor() || !fedFor()) return;
+  // The player's say. A closed gate is absolute.
+  if (world.gatesClosed) {
+    if (world.day % 6 === 0) pushFeed(world, 'social', 'The gates are closed: nobody new is taken in.');
+    return;
+  }
 
   /*
    * Below a handful of people, a roof and a meal are the whole test.
@@ -6617,6 +6677,15 @@ function migration(world: World, rand: () => number) {
    * whatever the books look like.
    */
   const desperate = world.citizens.length <= LAST_RESORT_POPULATION;
+  // And work to come to. A big plot with a spare bed in every house drew
+  // people by the dozen with every post already filled, and the newcomers
+  // sat idle, eating imported bread the treasury paid for. Past the last
+  // few people, the road brings at most as many as there are posts open.
+  const posts = openPostsOf(world);
+  if (!desperate && posts <= 0) {
+    if (world.day % 4 === 0) pushFeed(world, 'social', `Nobody new is moving to ${world.name}: every post is filled.`);
+    return;
+  }
 
   /*
    * The prosperity tests slow arrivals rather than stop them.
@@ -6660,6 +6729,7 @@ function migration(world: World, rand: () => number) {
     ? 0.22
     : (0.16 + Math.min(0.3, world.buildings.length * 0.02) + renown * 0.5 + civic * 0.06 + Math.min(0.24, improved * 0.04)) * welcome;
   let coming = Math.min(MAX_ARRIVALS_PER_DAY, Math.floor(draw) + (rand() < draw - Math.floor(draw) ? 1 : 0));
+  if (!desperate) coming = Math.min(coming, posts);
   let arrived = 0;
   while (coming-- > 0 && roomFor() && fedFor()) {
     arriveOne(world, rand);

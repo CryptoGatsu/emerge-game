@@ -58,6 +58,8 @@ interface PanelsProps {
   onTrain: (id: string, job: string) => string | null;
   /** Fill open posts in a trade by retraining the people who can best be spared. Returns a refusal, or null. */
   onTrainTrade: (job: string, count: number) => string | null;
+  /** Open or close the gates to newcomers. */
+  onGates: (closed: boolean) => void;
   /** Arm the clearing cursor. */
   onClearTrees: () => void;
   /** Arm the bridge cursor. */
@@ -1813,8 +1815,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
  * button to fill the open ones with the people who can best be spared.
  * Buildings: every workplace with its crew and its posts, ruins flagged.
  */
-function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
+function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates }: {
   view: Snapshot; onClose: () => void; onTrain: (id: string, job: string) => string | null; onTrainTrade: (job: string, count: number) => string | null;
+  onGates: (closed: boolean) => void;
 }) {
   useLocale();
   const { roster } = view;
@@ -1828,6 +1831,18 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
   const act = (fn: () => string | null) => { const why = fn(); setNote(why); if (!why) setRetraining(null); };
   return (
     <Shell title={t('PEOPLE')} subtitle={t('{n} adults · {u} without work · {o} open posts', { n: roster.people.length, u: roster.unemployed, o: roster.openPosts })} onClose={onClose} wide>
+      <div className={`gates-card ${view.gates.closed ? 'closed' : ''}`}>
+        <div>
+          <span className="eyebrow">{t('ARRIVALS')}</span>
+          <b>{view.gates.closed ? t('The gates are closed') : t('The gates are open')}</b>
+          <small>
+            {view.gates.closed
+              ? t('Nobody new is taken in. Open them when there is work to come to.')
+              : t('Newcomers come while there is a spare bed, food in store and a post to fill. {n} open now.', { n: view.gates.openPosts })}
+          </small>
+        </div>
+        <button onClick={() => onGates(!view.gates.closed)}>{view.gates.closed ? t('Open the gates') : t('Close the gates')}</button>
+      </div>
       <div className="build-shelves">
         <button className={tab === 'people' ? 'on' : ''} onClick={() => setTab('people')}>{t('People')}</button>
         <button className={tab === 'trades' ? 'on' : ''} onClick={() => setTab('trades')}>{t('Trades')}</button>
@@ -2469,7 +2484,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2514,7 +2529,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
   if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} />;
-  if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} />;
+  if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} onGates={onGates} />;
   if (panel === 'connect') {
     return (
       <ConnectPanel

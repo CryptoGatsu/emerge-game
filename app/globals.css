@@ -3224,3 +3224,14 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
   .wiki-nav a { min-height: 36px; display: inline-flex; align-items: center; }
   .overlay-panel button:not(.panel-close) { min-height: 34px; }
 }
+
+/* ---- the gates ---- */
+.gates-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid rgba(184, 231, 86, 0.22); border-radius: 12px; background: rgba(1, 10, 6, 0.4); }
+.gates-card.closed { border-color: rgba(217, 122, 90, 0.45); }
+.gates-card .eyebrow { display: block; font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
+.gates-card b { display: block; font-size: 14px; color: var(--cream); margin: 2px 0; }
+.gates-card small { display: block; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.gates-card > button { flex: none; font: inherit; font-size: 12px; padding: 8px 14px; border-radius: 9px; border: 1px solid rgba(184, 231, 86, 0.45); background: rgba(184, 231, 86, 0.12); color: #e6f5c8; cursor: pointer; min-height: 36px; }
+.gates-card > button:hover { background: rgba(184, 231, 86, 0.2); }
+.demolish.dismiss { margin-top: 10px; }
+@media (max-width: 780px) { .gates-card { flex-direction: column; align-items: stretch; } }

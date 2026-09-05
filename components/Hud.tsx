@@ -1,4 +1,5 @@
 'use client';
+import { DISMISS_GOLD } from '@/lib/simulation';
 import { FirstDay, type FirstGo, type FirstStep } from './FirstDay';
 import { EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
 
@@ -43,6 +44,8 @@ interface HudProps {
   onRenameCitizen: (id: string, name: string) => void;
   /** Pull a building down for half its materials. */
   onDemolish: (id: string) => void;
+  /** Send somebody away for a few days' pay. */
+  onDismiss: (id: string) => void;
   /** Raise a ruin again, for Gold and materials. */
   onRebuild: (id: string) => void;
   /** Spend Gold against a hazard. */
@@ -170,12 +173,13 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onRebuild, onUpgrade, onMove }: {
+function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onDismiss, onRebuild, onUpgrade, onMove }: {
   focus: Focus; following: string | null; player: PlayerRecord;
   /** True on somebody else's world: you can look and follow, not change. */
   readOnly: boolean;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
+  onDismiss: (id: string) => void;
   onDemolish: (id: string) => void;
   onRebuild: (id: string) => void;
   /** What the settlement has to spend, so the buttons can refuse honestly. */
@@ -384,6 +388,20 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
           {focus.friends.map((f) => (
             <button key={f.id} className="person-chip" onClick={() => onFocus({ kind: 'citizen', id: f.id })}>{f.name}</button>
           ))}
+        </div>
+      )}
+      {!readOnly && focus.age >= 16 && (
+        <div className="demolish dismiss">
+          <button
+            className={confirming === focus.id ? 'danger armed' : 'danger'}
+            onClick={() => {
+              if (confirming === focus.id) { onDismiss(focus.id); setConfirming(null); }
+              else setConfirming(focus.id);
+            }}
+          >
+            {confirming === focus.id ? t('Send them away — tap again') : t('Send away · {gold} Gold', { gold: DISMISS_GOLD })}
+          </button>
+          <span className="muted small">{t('They leave on the road with a few days’ pay. Their bed and their post are free the same day.')}</span>
         </div>
       )}
     </section>
@@ -915,6 +933,7 @@ export function Hud(props: HudProps) {
               onToggleFollow={props.onToggleFollow}
               onRenameCitizen={props.onRenameCitizen}
               onDemolish={props.onDemolish}
+              onDismiss={props.onDismiss}
               onRebuild={props.onRebuild}
               treasury={view.treasury}
               moving={props.movingBuilding}

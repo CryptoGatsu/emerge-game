@@ -23,7 +23,7 @@ import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
-import { CLEARING_DAYS, CLEAR_RADIUS } from '../simulation';
+import { CLEARING_DAYS, CLEAR_RADIUS, placementProblem } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
 import { extentOf } from '../world/extent';
@@ -2388,8 +2388,9 @@ export class EmergeScene {
    * cursor, snapped to the tile grid and tinted by whether the ground will take
    * it, and clicking commits. Escape or `cancelPlacement()` backs out.
    */
-  startPlacement(type: string, onPlace: (x: number, y: number) => void) {
+  startPlacement(type: string, onPlace: (x: number, y: number) => void, ignoreId?: string) {
     this.cancelPlacement();
+    this.placementIgnore = ignoreId;
     const artKey = buildingArtKey(type, 'ghost', 1, eraOf(this.world));
     this.assets.ensureBuilding(artKey);
     const meta = this.assets.buildingMeta.get(artKey);
@@ -2527,13 +2528,20 @@ export class EmergeScene {
     if (e.key === 'Escape') this.cancelPlacement();
   };
 
-  /** Ground has to be dry, clear of other buildings and off the roads. */
+  /**
+   * Whether the building would be accepted here: the simulation's own rule,
+   * footprint and walking gap and all, so the cursor never says yes to a
+   * spot the placement then refuses. It used to keep a rule of its own
+   * (eight units between centres) that was looser than the real one for
+   * anything bigger than a house, and a player who demolished a building
+   * and pointed at the same ground saw green and got nothing.
+   */
   canBuildAt(wx: number, wy: number) {
-    const tile = this.map.tileAt(wx, wy);
-    if (tile === Tile.Water || tile === Tile.WaterShore) return false;
-    if (tile === Tile.Path || tile === Tile.Plaza) return false;
-    return !this.world.buildings.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < 64);
+    const type = this.placement?.type ?? 'House';
+    return placementProblem(this.world, type, wx, wy, this.placementIgnore) === null;
   }
+  /** A building being moved is not in its own way. */
+  private placementIgnore: string | undefined;
 
   /** Tooltip text for the currently hovered thing. */
   describe(target: PickTarget): { title: string; lines: string[] } | null {
