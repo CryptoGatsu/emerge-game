@@ -323,6 +323,8 @@ export interface Citizen {
    * lying to the player.
    */
   chilled: boolean;
+  /** The site of their trade they report to, when the trade has more than one. */
+  workplaceId?: string;
   /**
    * What has happened to them lately, newest last, six at most. This is
    * what they talk about, and what the card says under "Lately".
@@ -437,6 +439,8 @@ export interface World {
   feed: FeedEntry[]; gatherings: Gathering[]; bonds: Record<string, Bond>; projects: Project[];
   /** Conversations happening right now. */
   conversations: Conversation[];
+  /** Trades that could not work in full yesterday, and what they ran short of. */
+  shortages?: Partial<Record<WorkingJob, { short: Resource; hands: number; workers: number }>>;
   /** Whatever is currently going wrong. */
   hazards: Hazard[];
   /** The animals on the land, which the hunters go after. */
@@ -884,7 +888,32 @@ function homeOf(world: World, c: Citizen) {
   const family = world.families.find((f) => f.id === c.familyId);
   return family ? world.buildings.find((b) => b.id === family.homeId) : undefined;
 }
-function jobBuilding(world: World, c: Citizen) { return c.job === 'unemployed' ? undefined : findBuilding(world, jobs[c.job].building); }
+/**
+ * Where this person goes to work.
+ *
+ * It used to be the first building of the trade's type, so every baker on
+ * the plot walked to the same bakery and the second one stood empty for
+ * good: its card said quiet, its crew read nought, and the player who built
+ * it thought it broken. Each worker now reports to a site of their own,
+ * chosen for the free posts it has, and keeps it until it is gone or so
+ * over-manned that another has room.
+ */
+function jobBuilding(world: World, c: Citizen): Building | undefined {
+  if (c.job === 'unemployed') return undefined;
+  const type = jobs[c.job].building;
+  const sites = world.buildings.filter((b) => b.type === type && b.active && !b.ruined);
+  if (sites.length === 0) return findBuilding(world, type);
+  if (sites.length === 1) { c.workplaceId = sites[0].id; return sites[0]; }
+  const posted = new Map<string, number>();
+  for (const o of world.citizens) if (o.job === c.job && o.workplaceId && o.id !== c.id) posted.set(o.workplaceId, (posted.get(o.workplaceId) ?? 0) + 1);
+  const room = (b: Building) => buildingPosts(b, world) - (posted.get(b.id) ?? 0);
+  const held = sites.find((b) => b.id === c.workplaceId);
+  if (held && (room(held) >= 1 || !sites.some((b) => b !== held && room(b) >= 1))) return held;
+  let best = sites[0];
+  for (const b of sites) if (room(b) > room(best)) best = b;
+  c.workplaceId = best.id;
+  return best;
+}
 
 /** The gathering currently running, if any. Socialising citizens are drawn to it. */
 export function activeGathering(world: World): Gathering | undefined {
@@ -4223,6 +4252,7 @@ function note(world: World, side: 'produced' | 'consumed', key: Resource, amount
 }
 
 function produce(world: World) {
+  world.shortages = {};
   const counts: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) counts[c.job] = (counts[c.job] || 0) + 1;
   for (const [job, count] of Object.entries(counts)) {
@@ -4263,6 +4293,7 @@ function produce(world: World) {
       const can = Math.floor(world.resources[r as Resource] / (n as number));
       if (can < hands) { hands = Math.max(0, can); short = r as Resource; }
     }
+    if (recipe.input && hands < workers) world.shortages[wj] = { short: short!, hands, workers };
     if (recipe.input && hands < workers && world.day % 2 === 0) {
       const label = JOB_LABELS[wj].toLowerCase();
       pushFeed(world, 'work', hands === 0

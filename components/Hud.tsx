@@ -208,6 +208,14 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             {focus.ruined && <p className="ruined-line">{t('Wrecked. Nobody can use it until it is rebuilt.')}</p>}
             {!focus.ruined && focus.damage > 0 && <p className="muted small">{t('{n}% damaged. The carpenters are patching it.', { n: focus.damage })}</p>}
             <p>{focus.production ? t('Producing · {what}', { what: tx(focus.production) }) : focus.occupants ? t('{n} inside', { n: focus.occupants }) : t('Quiet right now')}</p>
+            {focus.crew && (
+              <p className="muted small">
+                {focus.crew.posted === 0
+                  ? t('Nobody is posted here. Train somebody to the trade on the People panel.')
+                  : t('{n} of {posts} posts filled', { n: focus.crew.posted, posts: focus.crew.posts })}
+              </p>
+            )}
+            {focus.idle && <p className="muted small idle-line">{tx(focus.idle)}</p>}
             {/* What it has been improved to, and what that is costing every
                 day — the second half matters, because upkeep is what makes
                 improving everything a decision rather than a free win. */}

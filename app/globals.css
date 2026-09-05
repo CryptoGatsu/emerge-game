@@ -1250,6 +1250,10 @@ button.fold:hover { color: var(--emerald); }
   font-size: 11.5px;
   letter-spacing: 1px;
 }
+/* Two actions on one card stack; on a phone the pair takes the button's cell
+   together, since two buttons each claiming the cell sat on top of each other. */
+.build-actions { display: flex; flex-direction: column; gap: 6px; }
+.build-actions button { width: 100%; }
 .build-card button:hover:not(:disabled) { background: rgba(184, 231, 86, 0.2); }
 .build-card button:disabled { color: var(--muted); border-color: var(--panel-edge-soft); background: none; cursor: not-allowed; }
 
@@ -2255,6 +2259,8 @@ button.fold:hover { color: var(--emerald); }
   .build-cost small { font-size: 9.5px; }
   .build-materials { grid-area: mats; margin-top: 4px; }
   .build-card button { grid-area: place; margin-top: 4px; padding: 7px 16px; font-size: 12px; }
+  .build-actions { grid-area: place; }
+  .build-actions button { grid-area: auto; margin-top: 0; }
   /* The two tools carry a long blurb and a wide price; side by side on a
      phone the blurb was squeezed into a column four words wide. The price
      goes under the blurb instead, next to its button. */

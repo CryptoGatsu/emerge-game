@@ -42,9 +42,16 @@ export interface FocusCitizen {
     project: string | null;
 }
 
+/** The trade a workplace employs, or null for a building that employs nobody. */
+const tradeOf = (type: string): WorkingJob | null => (Object.keys(JOBS) as WorkingJob[]).find((j) => JOBS[j].building === type) ?? null;
+
 export interface FocusBuilding {
   kind: 'building';
   id: string; type: string; occupants: number; production: string | null;
+  /** Why the trade did not work in full yesterday, when it did not. */
+  idle: string | null;
+  /** The people posted here against its posts, for a workplace. */
+  crew: { posted: number; posts: number } | null;
   x: number; y: number; upkeep: number; active: boolean;
   people: { id: string; name: string; doing: string }[];
   /** Whether it can be pulled down, and what comes back if it is. */
@@ -353,6 +360,20 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     type: family ? `${family.name} House` : b.type,
     occupants: b.workers.length,
     production: b.production ? JOB_LABELS[b.production as keyof typeof JOB_LABELS] ?? b.production : null,
+    idle: (() => {
+      const trade = tradeOf(b.type);
+      const s = trade ? world.shortages?.[trade] : undefined;
+      if (!trade || !s) return null;
+      const what = RESOURCE_LABELS[s.short].toLowerCase();
+      return s.hands === 0
+        ? `Stood idle yesterday: no ${what} in store.`
+        : `${s.hands} of ${s.workers} worked yesterday: the store ran short of ${what}.`;
+    })(),
+    crew: (() => {
+      const trade = tradeOf(b.type);
+      if (!trade) return null;
+      return { posted: world.citizens.filter((c) => c.job === trade && (c.workplaceId === b.id || (!c.workplaceId && world.buildings.find((x) => x.type === b.type && x.active && !x.ruined)?.id === b.id))).length, posts: buildingPosts(b, world) };
+    })(),
     x: b.x, y: b.y,
     upkeep: Math.round(upkeepOf(b)),
     level: levelOf(b),

@@ -2082,14 +2082,16 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
             <b>{t('{n} Gold to start', { n: BRIDGE_GOLD.toLocaleString() })}</b>
             <small>{t('+ timber and wages by the day')}</small>
           </div>
-          <button disabled={view.treasury < BRIDGE_GOLD} onClick={onBridge}>
-            {view.treasury < BRIDGE_GOLD ? t('Not enough Gold') : t('Stake out a crossing')}
-          </button>
-          {view.bridges > 0 && (
-            <button className="ghost" onClick={onUnbridge} title={t('Tap a deck to take that crossing down. Some of the timber comes back. A crossing that is the only way to buildings on the far bank stays.')}>
-              {t('Take a crossing down')}
+          <div className="build-actions">
+            <button disabled={view.treasury < BRIDGE_GOLD} onClick={onBridge}>
+              {view.treasury < BRIDGE_GOLD ? t('Not enough Gold') : t('Stake out a crossing')}
             </button>
-          )}
+            {view.bridges > 0 && (
+              <button className="ghost" onClick={onUnbridge} title={t('Tap a deck to take that crossing down. Some of the timber comes back. A crossing that is the only way to buildings on the far bank stays.')}>
+                {t('Take a crossing down')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
       <div className="build-shelves build-ages">

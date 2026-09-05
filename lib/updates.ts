@@ -21,6 +21,7 @@ export const UPDATES: Update[] = [
     date: '2026-09-11',
     title: 'Ages that mean something, and a Bank that tells the truth',
     notes: [
+      'A second bakery works. Everybody in a trade used to walk to the first building of its type, so a second bakery or carpenter’s shop never had a soul inside: its card said quiet, its crew read nought, and players wrote in that it was broken while the trade as a whole was producing. Each worker now reports to a site of their own, chosen for the free posts it has, and a workplace’s card says how many of its posts are filled. When a trade cannot work in full for want of an input, the card says so: which input, and how many of them worked.',
       'Conversations you can watch. Two people who start talking now stop and face each other for it, and the bubble follows the exchange, hopping to whoever is speaking, so an exchange reads as one: before, people talked as they walked past each other, the talk was cut two paces later with one line said, and the answer went to somebody with no bubble to say it in. Every conversation now runs its course, and every line of it is drawn.',
       'Photo mode. The ◉ button beside the clock, or P, hides the whole interface for a clean screenshot; P, Esc or the pill in the corner brings it back.',
       'Every age builds its own way. The settlement is log cabins: round logs notched at the corners under a low roof of split shakes or thatch, a porch on posts over the door, a fieldstone chimney, firewood against the wall, plank lodges for its halls. The township is the first place built to last: timber-framed homes on two floors with plaster between the beams and fired tile above, a dormer in the roof and a stone course at the foot; halls in dressed stone under slate. A building keeps the look of the age it was raised in until it is improved.',
@@ -206,6 +207,7 @@ export const UPDATES_ZH: Update[] = [
     date: '2026-09-11',
     title: '有分量的时代，和说实话的银行',
     notes: [
+      '第二家面包房开工了。以前同一行当的每个人都走去该类型的第一栋建筑，所以第二家面包房或木匠铺里永远没人：卡片写着「安静」，人手是零，玩家来信说它坏了，而整个行当其实在产出。现在每个工人都有自己报到的工作场所，按空岗位分配；工作场所的卡片会写明填了几个岗位。行当因缺原料不能全员开工时，卡片会说明缺什么、几个人开了工。',
       '看得见的对话。两个人开始交谈时会停下来面对面，气泡跟着这段对话走，跳到正在说话的那个人头上，所以一段对话读起来是完整的：以前人们边擦肩而过边说话，两步之后对话就被打断、只说了一句，而回答落在了一个没有气泡的人身上。现在每段对话都会说完，每一句都画出来。',
       '拍照模式。时钟旁的 ◉ 按钮或 P 键隐藏整个界面，截一张干净的图；P、Esc 或角落的小按钮把界面叫回来。',
       '每个时代有自己的建法。聚落是木屋：圆木在转角处交错咬合，低矮的屋顶铺木瓦或茅草，门前有柱子撑起的门廊，毛石烟囱，柴火靠墙码着，公共建筑是木板搭的大屋。城镇是第一个为长久而建的地方：两层的木架房，梁间抹灰、上盖烧制的瓦，屋顶有老虎窗、墙脚有石砌基座；公共建筑是切石砌成、覆着石板瓦。建筑在升级之前保留它建成时那个时代的样子。',
