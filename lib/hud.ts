@@ -8,7 +8,7 @@
  */
 
 import { eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, openPostsOf, upgradeEffect, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -150,7 +150,7 @@ export interface Snapshot {
   feed: FeedEntry[];
   events: EventCard[];
   resources: { key: Resource; label: string; amount: number }[];
-  market: { key: Resource; label: string; quote: MarketQuote }[];
+  market: { key: Resource; label: string; quote: MarketQuote; keep: number; floor: number }[];
   /** Yesterday's real throughput, per resource. */
   production: Partial<Record<Resource, number>>;
   consumption: Partial<Record<Resource, number>>;
@@ -470,7 +470,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     feed: world.feed.slice(0, 14),
     events: eventCards(world),
     resources: (Object.keys(RESOURCE_LABELS) as Resource[]).map((key) => ({ key, label: RESOURCE_LABELS[key], amount: world.resources[key] })),
-    market: MARKET_ORDER.map((key) => ({ key, label: RESOURCE_LABELS[key], quote: world.market[key] })),
+    market: MARKET_ORDER.map((key) => ({ key, label: RESOURCE_LABELS[key], quote: world.market[key], keep: world.keep?.[key] ?? 0, floor: keepOf(world, key) })),
     production: { ...world.flow.produced },
     consumption: { ...world.flow.consumed },
     unlockedAreas: [...world.unlockedAreas],

@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -1351,6 +1351,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     setView(snapshot(world, null));
   }, []);
 
+  /** Set the stock the market keeps of a good. */
+  const keepFor = useCallback((resource: string, amount: number) => {
+    const world = worldRef.current;
+    if (!world) return;
+    setKeep(world, resource as Resource, amount);
+    setView(snapshot(world, selectedRef.current));
+  }, []);
+
   /** Open or close the gates to newcomers. */
   const gatesFor = useCallback((closed: boolean) => {
     const world = worldRef.current;
@@ -2058,6 +2066,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onTrain={trainFor}
             onTrainTrade={trainTradeFor}
             onGates={gatesFor}
+            onKeep={keepFor}
             onClearTrees={beginClear}
             onBridge={beginBridge}
             onRaiseCity={raiseCityFor}

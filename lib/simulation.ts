@@ -456,6 +456,8 @@ export interface World {
   festivalDay?: number;
   /** The player has closed the gates: nobody new is taken in until they open them. */
   gatesClosed?: boolean;
+  /** Stock the market must never sell below, per good, set by the player. */
+  keep?: Partial<Record<Resource, number>>;
   /**
    * What the settlement pays, as a multiple of each trade's standing wage.
    *
@@ -3404,6 +3406,10 @@ function marketStep(world: World, hours: number) {
 
   for (const r of RESOURCES) {
     const q = world.market[r], stock = world.resources[r], buffer = marketBuffers[r];
+    // What the player has asked to keep: the market never sells below it.
+    // Buying is still judged against the ordinary buffer, so a high keep on
+    // iron ore is a promise not to sell the ore, not an order to import it.
+    const held = Math.max(buffer, world.keep?.[r] ?? 0);
     const old = q.price;
 
     const abroad = worldPriceOf(r);
@@ -3451,8 +3457,8 @@ function marketStep(world: World, hours: number) {
         world.resources[r] += qty; spend(world, 'imports', cost); q.volume += qty;
         if (qty >= 6 && !reported) { reported = true; pushFeed(world, 'market', `The market bought ${qty} ${RESOURCE_LABELS[r].toLowerCase()} for ${cost.toFixed(0)} Gold.`); }
       }
-    } else if (stock > buffer * 1.2) {
-      const qty = Math.min(Math.max(1, Math.round((stock - buffer) * .25 * pace * hours)), Math.floor(stock - buffer));
+    } else if (stock > held * 1.2) {
+      const qty = Math.min(Math.max(1, Math.round((stock - held) * .25 * pace * hours)), Math.floor(stock - held));
       if (qty > 0) {
         const revenue = qty * q.price * marketEdge(world); world.resources[r] -= qty; earn(world, 'exports', revenue); q.volume += qty;
         // Tallied rather than announced one at a time: the market trades every
@@ -3858,11 +3864,38 @@ function adviseBuildAll(world: World): Advice[] {
       gain: 'Room for the next family to arrive. An improved house sleeps more, too.' });
   }
 
+  const blocker = bridgeBlockers(world)[0];
+  if (blocker) {
+    out.unshift({ kind: 'wages', title: 'Clear the bridge',
+      why: `The ${blocker.type.toLowerCase()} stands on a bridge ramp. People bound for the far bank walk to it and stop.`,
+      gain: 'Tap it and move it off the ramp. Nothing can be placed on a deck or its ramps any more.' });
+  }
   const food = foodInStore(world);
   if (food < people * 2.5) {
-    out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
-      why: `${Math.round(food)} food in store is about ${(food / Math.max(1, people)).toFixed(1)} days for ${people} people.`,
-      gain: 'Fed people are a quarter of stewardship, and the market stops buying bread at a premium.' });
+    const farms = world.buildings.filter((b) => b.type === 'Farm' && b.active);
+    const farmHands = world.citizens.filter((c) => c.age >= 16 && c.job === 'farmer').length;
+    const farmPosts = Math.max(0, jobCapacity(world, 'farmer') - farmHands);
+    const days = (food / Math.max(1, people)).toFixed(1);
+    const improvable = farms.find((b) => levelOf(b) < MAX_BUILDING_LEVEL);
+    if (farms.length < 3) {
+      out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
+        why: `${Math.round(food)} food in store is about ${days} days for ${people} people.`,
+        gain: 'Fed people are a quarter of stewardship, and the market stops buying bread at a premium.' });
+    } else if (farmPosts > 0) {
+      // Six farms and still short: the fields are there, the hands are not.
+      // Telling the player to build a seventh was the wrong advice.
+      out.push({ kind: 'wages', title: 'Staff the fields',
+        why: `${farms.length} farms already, and ${farmPosts} farm ${farmPosts === 1 ? 'post stands' : 'posts stand'} empty. ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
+        gain: 'Retrain people into farming on the People panel, or raise wages so the empty posts fill. More farms will not help until these are worked.' });
+    } else if (improvable) {
+      out.push({ kind: 'improve', type: 'Farm', title: 'Improve the farms',
+        why: `${farms.length} farms, all worked, and ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
+        gain: 'Each level is 22% more from the same fields. The keep on the Market panel stops the surplus being sold before winter, too.' });
+    } else {
+      out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
+        why: `${farms.length} farms, all worked and improved, and ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
+        gain: 'Fed people are a quarter of stewardship. Fish, game and foraging feed a town as well as grain does.' });
+    }
   }
   if (food < people * 4 && supported.has('Fishery') && !has('Fishery')) {
     out.push({ kind: 'build', type: 'Fishery', title: 'Cast from the shore',
@@ -5337,6 +5370,27 @@ export function setGates(world: World, closed: boolean) {
   pushFeed(world, 'social', closed ? 'The gates are closed. Nobody new will be taken in until they open again.' : 'The gates are open again. Newcomers may come.');
 }
 
+/**
+ * Set how much of a good the market must keep in store.
+ *
+ * "Any excess is automatically sold": a player saving iron ore for the next
+ * era watched the market sell it. The keep is a floor under the selling,
+ * nothing more — the market does not buy up to it.
+ */
+export const KEEP_MAX = 5000;
+export function setKeep(world: World, resource: Resource, amount: number) {
+  useWorld(world);
+  const n = Math.max(0, Math.min(KEEP_MAX, Math.round(Number(amount) || 0)));
+  const keep = { ...(world.keep ?? {}) };
+  if (n > 0) keep[resource] = n; else delete keep[resource];
+  world.keep = Object.keys(keep).length ? keep : undefined;
+  noteAttention(world);
+}
+/** The floor under the market's selling of a good: the player's keep, or the ordinary buffer. */
+export function keepOf(world: World, resource: Resource): number {
+  return Math.max(marketBuffers[resource], world.keep?.[resource] ?? 0);
+}
+
 /** Posts standing empty across every trade: the work there is for somebody new. */
 export function openPostsOf(world: World): number {
   useWorld(world);
@@ -6513,14 +6567,20 @@ function formHouseholds(world: World, rand: () => number) {
     const owner = world.families.find((f) => f.homeId === b.id);
     return !owner || livingIn(owner.id).length === 0;
   });
-  if (!vacant.length) return;
+  // A couple needs a bed, not a whole empty house: with houses shared, an
+  // empty one is rare in a full town, and waiting for one meant nobody ever
+  // paired off and nobody was ever born. Room anywhere will do.
+  if (!vacant.length && world.citizens.length >= housingRoom(world)) return;
 
   // Someone free to move: an adult of an age to start a household whose leaving
-  // does not strip their old home of its own pair.
+  // does not strip their old home of its own pair. Somebody who arrived on
+  // their own is exactly that — a household of one strips nobody — and it was
+  // the newcomers, each a family of one, who never paired off and left a
+  // grown town with no children at all.
   const eligible = world.citizens.filter((c) => {
     if (c.age < 18 || c.age > 40) return false;
     const kin = livingIn(c.familyId).filter((k) => k.age >= 18 && k.age <= 44);
-    return kin.length >= 3;
+    return kin.length >= 3 || kin.length === 1;
   });
   if (eligible.length < 2) return;
 
@@ -6544,7 +6604,7 @@ function formHouseholds(world: World, rand: () => number) {
   const family: Family = {
     id: `f${world.counter++}`,
     name: surname,
-    homeId: home.id,
+    homeId: home?.id ?? '',
     members: [a.id, b.id],
     wealth: a.wallet + b.wallet,
   };
@@ -6554,6 +6614,7 @@ function formHouseholds(world: World, rand: () => number) {
     person.familyId = family.id;
   }
   world.families.push(family);
+  if (!home) rehouse(world);
   pushFeed(world, 'social', `${a.name} and ${b.name} have set up a household together.`);
 }
 
@@ -7990,7 +8051,32 @@ export function placementProblem(world: World, type: string, x: number, y: numbe
     const gap = Math.hypot(b.x - px, b.y - py) - r - footprintRadius(b);
     if (gap < WALK_GAP) return `Too close to the ${b.type.toLowerCase()}. Leave room to walk between.`;
   }
+  // A bridge is a road: nothing stands on its deck or on the ramps at either
+  // end. A house on a ramp left everybody who needed the crossing walking
+  // in circles at the bank, which a player traced for us.
+  if (bridgeUnder(world, px, py, r)) return 'That would block the bridge. Leave the deck and both ramps clear.';
   return null;
+}
+
+/** Whether a footprint of radius `r` at (x, y) lies on a bridge's deck or either ramp. */
+function bridgeUnder(world: World, x: number, y: number, r: number): boolean {
+  for (const b of world.layout.bridges) {
+    const reach = b.span + BRIDGE_RAMP;
+    const ax = b.x - Math.cos(b.angle) * reach, ay = b.y - Math.sin(b.angle) * reach;
+    const bx = b.x + Math.cos(b.angle) * reach, by = b.y + Math.sin(b.angle) * reach;
+    // Distance from the point to the segment between the ramp ends.
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2));
+    const d = Math.hypot(x - (ax + dx * t), y - (ay + dy * t));
+    if (d < r + 2.2) return true;
+  }
+  return false;
+}
+
+/** Buildings standing on a bridge or its ramps, for the helper: they were placed before the rule. */
+export function bridgeBlockers(world: World): Building[] {
+  useWorld(world);
+  return world.buildings.filter((b) => bridgeUnder(world, b.x, b.y, footprintRadius(b)));
 }
 
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {

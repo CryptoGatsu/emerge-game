@@ -60,6 +60,8 @@ interface PanelsProps {
   onTrainTrade: (job: string, count: number) => string | null;
   /** Open or close the gates to newcomers. */
   onGates: (closed: boolean) => void;
+  /** Set the stock the market must keep of a good. */
+  onKeep: (resource: string, amount: number) => void;
   /** Arm the clearing cursor. */
   onClearTrees: () => void;
   /** Arm the bridge cursor. */
@@ -191,10 +193,11 @@ function Shell({ title, subtitle, onClose, children, wide }: {
   );
 }
 
-function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
+function MarketPanel({ view, onClose, onKeep }: { view: Snapshot; onClose: () => void; onKeep: (resource: string, amount: number) => void }) {
   useLocale();
   const [focus, setFocus] = useState(view.market[0]?.key ?? 'wheat');
   const row = view.market.find((m) => m.key === focus) ?? view.market[0];
+  const [keepDraft, setKeepDraft] = useState<string | null>(null);
   const store = (key: string) => Math.floor(view.resources.find((r) => r.key === key)?.amount ?? 0);
   // Where the prices come from. The panel has always been called the world
   // market; now it is one, and it should say so rather than leaving a player to
@@ -257,6 +260,17 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
                 {row.quote.trend >= 0 ? '+' : ''}{row.quote.trend.toFixed(3)}
               </b>
             </div>
+          </div>
+          <div className="market-keep">
+            <div>
+              <span className="eyebrow">{t('KEEP IN STORE')}</span>
+              <small>{t('The market never sells below this. It does not buy up to it. Sells above {n} now.', { n: row.floor })}</small>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); onKeep(row.key, Number(keepDraft ?? row.keep)); setKeepDraft(null); }}>
+              <input type="number" min={0} max={5000} step={10} value={keepDraft ?? String(row.keep)} onChange={(e) => setKeepDraft(e.target.value)} aria-label={t('KEEP IN STORE')} />
+              <button type="submit">{t('Set')}</button>
+              {row.keep > 0 && <button type="button" className="ghost" onClick={() => { onKeep(row.key, 0); setKeepDraft(null); }}>{t('Clear')}</button>}
+            </form>
           </div>
         </div>
       )}
@@ -2484,8 +2498,8 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
-  if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+  if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
   }

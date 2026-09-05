@@ -3235,3 +3235,11 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 .gates-card > button:hover { background: rgba(184, 231, 86, 0.2); }
 .demolish.dismiss { margin-top: 10px; }
 @media (max-width: 780px) { .gates-card { flex-direction: column; align-items: stretch; } }
+
+/* ---- keep in store ---- */
+.market-keep { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--panel-edge-soft); }
+.market-keep small { display: block; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.market-keep form { display: flex; gap: 6px; align-items: center; flex: none; }
+.market-keep input { width: 84px; font: inherit; font-size: 13px; padding: 7px 8px; border-radius: 8px; border: 1px solid rgba(184, 231, 86, 0.3); background: rgba(1, 10, 6, 0.55); color: var(--cream); min-height: 36px; }
+.market-keep button { font: inherit; font-size: 12px; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(184, 231, 86, 0.45); background: rgba(184, 231, 86, 0.12); color: #e6f5c8; cursor: pointer; min-height: 36px; }
+@media (max-width: 780px) { .market-keep { flex-direction: column; align-items: stretch; } }
