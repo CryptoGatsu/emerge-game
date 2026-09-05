@@ -1419,6 +1419,10 @@ button.fold:hover { color: var(--emerald); }
 .vault-line { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; padding: 3px 0; }
 .vault-line span { color: var(--muted); }
 .vault-line b { color: var(--cream); }
+.judged-card { margin: 8px 0 4px; padding: 8px 10px; border: 1px solid rgba(225, 210, 78, 0.28); border-radius: 8px; background: rgba(28, 24, 4, 0.35); }
+.judged-card > .vault-line:first-child b { color: var(--gold); }
+.judged-card .judged-plot span { font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
+.judged-card p { margin: 6px 0 0; }
 .vault-line.burn b { color: #e0785f; }
 .vault-card button {
   width: 100%;

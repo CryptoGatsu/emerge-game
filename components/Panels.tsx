@@ -27,7 +27,7 @@ import {
 } from '@/lib/chain/vault';
 import { EMBLEMS, EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
 import { claimDividend, fetchDividend, registerSoftStake, type DividendStanding } from '@/lib/net/dividend';
-import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
+import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, LEVEL_PRESENCE_DAYS, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
 import { spend as spendEmerge } from '@/lib/chain/spend';
 import { Sparkline } from './Sparkline';
 import {
@@ -85,6 +85,8 @@ interface PanelsProps {
   onRelease: () => void;
   /** Move Gold in or out of the treasury and record it against the player. */
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  /** Say something on screen, where a line at the foot of a panel would be missed. */
+  onNotice?: (title: string, body: string, kind?: 'sync' | 'danger') => void;
   /** What the settlement pays its people, as a multiple of the going rate. */
   onWages: (rate: number) => void;
   /** List this plot for resale at a price, or pass null to withdraw it. */
@@ -1380,10 +1382,11 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
   );
 }
 
-function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, onRaiseCity, onFestival }: {
+function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice, onWages, onRaiseCity, onFestival }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
   onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  onNotice?: (title: string, body: string, kind?: 'sync' | 'danger') => void;
   onWages: (rate: number) => void;
   onRaiseCity: () => string | null;
   onFestival: () => string | null;
@@ -1426,6 +1429,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [claimNote, setClaimNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | null>(null);
   const [history, setHistory] = useState<PayoutHistory | null>(null);
   const ledger = player.ledger;
@@ -1469,6 +1473,49 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
     ? Math.floor(history.principal / EMERGE_PER_GOLD)
     : Math.floor(ledger.principalGold);
 
+  /** What the vault will still pay today, or null before the server has said. */
+  const collectable = history?.room ? Math.min(history.room.left, history.room.globalLeft) : null;
+  /**
+   * What Collect asks for when the field is blank: what is earned, up to
+   * what the vault says is left today. With nothing left it asks for the lot
+   * so the vault's refusal says why, rather than "enter an amount".
+   */
+  const defaultClaim = collectable && collectable > 0
+    ? Math.min(Math.floor(ledger.earnedEmerge), collectable)
+    : Math.floor(ledger.earnedEmerge);
+
+  /*
+   * A transfer the chain rejected after it was booked.
+   *
+   * The server has already given the day's room or the principal back; this
+   * gives the in-game balance back, once per row, and says so out loud — a
+   * player who watched their balance drop and nothing arrive is owed both.
+   */
+  const ledgerRef = useRef(ledger);
+  ledgerRef.current = ledger;
+  useEffect(() => {
+    if (!history) return;
+    const current = ledgerRef.current;
+    const done = new Set(current.refunded ?? []);
+    const failed = history.payouts.filter((p) => p.failed && !done.has(p.id));
+    if (!failed.length) return;
+    let next: VaultLedger = { ...current, refunded: [...(current.refunded ?? []), ...failed.map((p) => p.id)] };
+    let gold = 0, emerge = 0;
+    for (const p of failed) {
+      next = {
+        ...next,
+        withdrawnEmerge: Math.max(0, next.withdrawnEmerge - p.net),
+        vaultBurn: Math.max(0, next.vaultBurn - p.burned),
+      };
+      if (p.kind === 'earnings') { next = { ...next, earnedEmerge: next.earnedEmerge + p.gross }; emerge += p.gross; }
+      else { next = { ...next, principalGold: next.principalGold + p.gold }; gold += p.gold; }
+    }
+    const said = t('The chain rejected a transfer of {n} {ticker} after it was booked. Nothing arrived, so it has been put back: {e} {ticker} to your earnings and {g} Gold of principal.', { n: failed.reduce((s, p) => s + p.net, 0).toLocaleString(), ticker: TOKEN.ticker, e: emerge.toLocaleString(), g: gold.toLocaleString() });
+    onVault(next, gold, said);
+    onNotice?.(t('Returned to your balance'), said, 'danger');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history]);
+
   const depositGold = Math.floor((Number(depositAmount) || 0) / EMERGE_PER_GOLD * 100) / 100;
   const quote = quoteWithdraw(Math.floor(Number(withdrawAmount) || 0));
 
@@ -1489,17 +1536,21 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
     const result = await withdraw(ledger, Math.floor(Number(withdrawAmount) || 0), view.treasury, who);
     setBusy(null);
     setMessage(result.message);
+    onNotice?.(result.ok ? t('Withdrawn') : t('Not withdrawn'), tx(result.message), result.ok ? 'sync' : 'danger');
     if (!result.ok) return;
     onVault(result.ledger, -quote.gold, t('{gold} Gold of principal was withdrawn to {ticker}.', { gold: quote.gold, ticker: TOKEN.ticker }));
     void refreshHistory();
   };
 
   const doClaim = async () => {
-    const amount = Math.floor(Number(claimAmount) || 0) || Math.floor(ledger.earnedEmerge);
+    // Left blank, the amount is what can actually be collected: what is
+    // earned, up to what the vault says is left today.
+    const amount = Math.floor(Number(claimAmount) || 0) || defaultClaim;
     setBusy('collect');
     const result = await claimEarnings(ledger, amount, who);
     setBusy(null);
-    setMessage(result.message);
+    setClaimNote(result.message);
+    onNotice?.(result.ok ? t('Collected') : t('Not collected'), tx(result.message), result.ok ? 'sync' : 'danger');
     if (!result.ok) return;
     // Collecting earnings does not touch the treasury: the settlement's Gold is
     // the settlement's, and what the player earned is for their work.
@@ -1581,7 +1632,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
           <b>{earning ? steward.dailyYield.toLocaleString() : t('nothing')}</b>
           <em>
             {earning
-              ? t('{ticker} a real day, of {cap} possible', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })
+              ? history?.judged
+                ? t('{ticker} a real day on this plot, as it sees itself. The vault’s own judgement is under Collect.', { ticker: TOKEN.ticker })
+                : t('{ticker} a real day, of {cap} possible', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })
               : t('beyond your first {n} plots', { n: EARNING_PLOT_LIMIT })}
           </em>
         </div>
@@ -1705,8 +1758,8 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
                   href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/tx/${row.txHash}`}
                   target="_blank"
                   rel="noreferrer noopener"
-                >{t('sent')}</a>
-              ) : <em>{t('sent')}</em>}
+                >{row.failed ? t('rejected by the chain') : row.confirmed === false ? t('sending') : t('sent')}</a>
+              ) : <em>{row.failed ? t('rejected by the chain') : row.confirmed === false ? t('sending') : t('sent')}</em>}
             </div>
           ))}
         </div>
@@ -1719,16 +1772,44 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
           <input
             value={claimAmount}
             inputMode="numeric"
-            placeholder={String(Math.floor(ledger.earnedEmerge))}
+            placeholder={String(defaultClaim)}
             onChange={(e) => setClaimAmount(e.target.value.replace(/[^0-9]/g, ''))}
           />
         </label>
         <div className="vault-line"><span>{t('Available')}</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
         <div className="vault-line burn"><span>{t('Burn')}</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
-        {history?.room && (
+        {history?.room && collectable !== null && (
           <div className="vault-line">
             <span>{t('Collectable today')}</span>
-            <b>{Math.min(history.room.left, history.room.globalLeft).toLocaleString()} {TOKEN.ticker}</b>
+            <b>{collectable.toLocaleString()} {TOKEN.ticker}</b>
+          </div>
+        )}
+        {history?.judged && (
+          <div className="judged-card">
+            <div className="vault-line">
+              <span>{t('Judged by the vault today')}</span>
+              <b>{history.judged.yield.toLocaleString()} {TOKEN.ticker}</b>
+            </div>
+            <p className="muted small">
+              {t('This is what the vault pays for the day, across all your earning plots together — not each. It judges every plot itself: its ceiling from the level it is paid at, times how well it is run, times your attention. A plot is paid at its city level or one level per {d} days you have been present, whichever is lower; you have been present {n} days. Your own screen counts its plot at full city level, which is why it can show more.', { d: LEVEL_PRESENCE_DAYS, n: history.judged.days })}
+            </p>
+            {history.judged.plots.map((p) => (
+              <div className="vault-line judged-plot" key={p.seed}>
+                <span>
+                  {p.name || `#${p.seed}`}
+                  {' · '}{t('level {n}', { n: p.level })}
+                  {p.reported > p.level ? ` (${t('city level {n}', { n: p.reported })})` : ''}
+                  {' · '}{t('{pct}% run', { pct: Math.round(p.score * 100) })}
+                  {' · '}{t('{pct}% attended', { pct: Math.round(p.attention * 100) })}
+                </span>
+                <b>{p.yield.toLocaleString()}</b>
+              </div>
+            ))}
+            {history.judged.plots.some((p) => p.reported > p.level) && (
+              <p className="muted small">
+                {t('The next paid level comes after {n} more days present. Open any of your plots each day to count it.', { n: Math.max(1, LEVEL_PRESENCE_DAYS - (history.judged.days % LEVEL_PRESENCE_DAYS)) })}
+              </p>
+            )}
           </div>
         )}
         {history?.hand && (
@@ -1748,6 +1829,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
         <button onClick={doClaim} disabled={busy !== null || ledger.earnedEmerge < 1}>
           {busy === 'collect' ? t('Sending…') : liveToken() ? t('Collect to wallet') : t('Collect')}
         </button>
+        {claimNote && <p className="warn">{tx(claimNote)}</p>}
       </div>
 
       <h4>{t('{ticker} vault', { ticker: TOKEN.ticker })}</h4>
@@ -2498,7 +2580,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2524,7 +2606,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     return (
       <BankPanel
         view={view} claimed={claimed} player={player} earning={earning}
-        onClose={onClose} onVault={onVault} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival}
+        onClose={onClose} onVault={onVault} onNotice={onNotice} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival}
       />
     );
   }

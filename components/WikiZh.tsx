@@ -21,7 +21,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER,
   ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -467,7 +467,7 @@ export function WikiZh() {
           <p>建造面板里有一件针对林地的工具：用它点一下地面，触及范围内每棵立着的树都会被伐倒，<b>每棵 {CLEAR_TREE_GOLD} 金币</b>，<b>每棵 {CLEAR_TREE_WOOD} 木料</b>进堆场。清理过的地面在重新加载后仍然是清理过的，并像伐木工的工作一样在接下来的几天里长回来，所以请在打算建造的地方清理，而不是为了风景。</p>
           <h3>搬迁与升级</h3>
           <p>建筑卡上除了它的行当还有两个按钮。<b>搬迁</b>把它拎起来并激活放置光标：点地面它就过去，费用是<b>建造价的 {Math.round(MOVE_SHARE * 100)}%</b>。路会修到新地点，正走向旧地点的人会被安排去别处。搬迁除了金币什么都不损失。放置任何东西——不管是搬的还是新的——只有一条规则：它必须<b>与邻居之间留出可以走人的空隙</b>。两栋挨在一起的建筑会形成谁也过不去的缝，光标会拒绝这个位置并说明原因。</p>
-          <p><b>升级</b>花金币和材料让建筑升一级，最高 <b>{MAX_BUILDING_LEVEL}</b> 级。第一步花原价的 {Math.round(UPGRADE_STEPS[0] * 100)}%，第二步 {Math.round(UPGRADE_STEPS[1] * 100)}%，金币和木料石头都要——所以顶级是一个决定，不是走过场。每一级<b>约多产 {Math.round(OUTPUT_PER_LEVEL * 100)}%</b>，<b>维护费多 {Math.round(UPKEEP_PER_LEVEL * 100)}%</b>。它不会容纳更多工人——但看得出来：二级有灯笼和旗帜，三级有玻璃附楼、更高的框架和沿檐的金饰。升级过的作坊有人有料就值回票价；闲置的升级建筑只是每天更大的一张账单。</p>
+          <p><b>升级</b>花金币和材料让建筑升一级，聚落阶段最高 <b>{MAX_BUILDING_LEVEL}</b> 级。<b>每进一个时代多开一级</b>：城镇可升到 {MAX_BUILDING_LEVEL + 1} 级，AI 时代的城市可到 {MAX_BUILDING_LEVEL_EVER} 级，地块进入新时代时建筑保留已达到的等级。升级早期时代建的建筑，也会把它换成地块当前时代的样式——木厅就是这样变成石厅的。第一步花原价的 {Math.round(UPGRADE_STEPS[0] * 100)}%，第二步 {Math.round(UPGRADE_STEPS[1] * 100)}%，之后每步更多，金币和木料石头都要——所以顶级是一个决定，不是走过场。每一级<b>约多产 {Math.round(OUTPUT_PER_LEVEL * 100)}%</b>，<b>维护费多 {Math.round(UPKEEP_PER_LEVEL * 100)}%</b>。它不会容纳更多工人——但看得出来：二级有灯笼和旗帜，三级有玻璃附楼、更高的框架和沿檐的金饰。升级过的作坊有人有料就值回票价；闲置的升级建筑只是每天更大的一张账单。</p>
           <p className="wiki-note">除了市场、银行和镇公所——它们撑着整个聚落——以及还有人住的房子，任何建筑都可以从卡片上拆除。拆除回收<b>一半的木料和石头</b>进堆场。金币没了；你得到的是停掉的维护费，而那通常就是拆它的目的。</p>
         </section>
 

@@ -111,6 +111,11 @@ export interface VaultLedger {
   principalGold: number;
   /** $EMERGE earned from stewardship and not yet withdrawn. */
   earnedEmerge: number;
+  /**
+   * Payout ids whose failure has been given back to this ledger, so a
+   * transfer the chain rejected is restored once and not on every look.
+   */
+  refunded: string[];
   /** $EMERGE earned from stewardship over all time. */
   lifetimeEarned: number;
   withdrawnEmerge: number;
@@ -249,6 +254,11 @@ export const MONUMENT_COST_EMERGE = 250_000;
 export const BANNER_COST_EMERGE = 100_000;
 export const HAND_SHARE = 0.1;
 export const HAND_DAILY_CEILING = 25_000;
+/**
+ * Present days per paid level. The vault pays a plot at the lower of its
+ * city level and one level per this many UTC days its owner has been seen.
+ */
+export const LEVEL_PRESENCE_DAYS = 3;
 
 /** Today, as a plain date key in the player's own timezone. */
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -258,6 +268,7 @@ export const NEW_LEDGER: VaultLedger = {
   depositedGold: 0,
   principalGold: 0,
   earnedEmerge: 0,
+  refunded: [],
   lifetimeEarned: 0,
   withdrawnEmerge: 0,
   burnedEmerge: 0,
@@ -279,6 +290,7 @@ export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null)
     // errs toward letting a player take back money they really did put in.
     principalGold: Number.isFinite(ledger?.principalGold) ? Number(ledger!.principalGold) : deposited,
     earnedEmerge: Number(ledger?.earnedEmerge) || 0,
+    refunded: Array.isArray(ledger?.refunded) ? ledger!.refunded.filter((id) => typeof id === 'string').slice(-50) : [],
     lifetimeEarned: Number(ledger?.lifetimeEarned) || 0,
     withdrawnEmerge: Number(ledger?.withdrawnEmerge) || 0,
     burnedEmerge: Number(ledger?.burnedEmerge) || 0,
@@ -601,7 +613,7 @@ export async function withdraw(
   const fresh = await tokenBalance(who.address, config);
   return {
     ok: true, settled: true, txHash: paid.txHash,
-    message: `Sent ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} to your wallet. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned.`,
+    message: `${paid.payout.confirmed === false ? 'Sending' : 'Sent'} ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} to your wallet${paid.payout.confirmed === false ? ' — the chain has it and it lands within a minute' : ''}. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned. The transfer is listed under Paid out.`,
     ledger: {
       ...ledger,
       balance: fresh ?? ledger.balance + paid.payout.net,
@@ -661,7 +673,7 @@ export async function claimEarnings(
   const fresh = await tokenBalance(who.address, config);
   return {
     ok: true, settled: true, txHash: paid.txHash,
-    message: `Sent ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned.`,
+    message: `${paid.payout.confirmed === false ? 'Sending' : 'Sent'} ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet${paid.payout.confirmed === false ? ' — the chain has it and it lands within a minute' : ''}. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned. The transfer is listed under Paid out.`,
     ledger: {
       ...ledger,
       balance: fresh ?? ledger.balance + paid.payout.net,

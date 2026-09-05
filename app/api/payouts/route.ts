@@ -37,23 +37,54 @@
  */
 
 import { NextResponse } from 'next/server';
-import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor } from '@/lib/server/payouts';
+import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
   MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
-  settlementFor, takePayoutSlot,
+  settlementFor, takePayoutSlot, utcDay,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
-import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
+import { receiptOf, sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { handCheck, landCheck, judgedFor, handCeilingFor } from '@/lib/server/land';
+import { handCheck, landCheck, judgedFor, handCeilingFor, type Judged } from '@/lib/server/land';
 import { noteHold } from '@/lib/server/treasury';
 import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
+// A payout waits for its receipt before answering, so the request needs
+// longer than the default.
+export const maxDuration = 60;
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const MAX_NAME = 32;
+
+/**
+ * Settle transfers that were sent and not seen mined at the time.
+ *
+ * The chain has had a while by now. A receipt that succeeded marks the row
+ * confirmed; one that reverted marks it failed and gives back what was
+ * debited — the day's emission, or the principal — so the player can take it
+ * out again, and the Bank puts it back in the in-game balance when it reads
+ * the row. A hash the chain has never seen, an hour on, was dropped.
+ */
+async function confirmPayouts(address: string, rows: Payout[]): Promise<Payout[]> {
+  const out: Payout[] = [];
+  for (const row of rows) {
+    if (row.confirmed !== false || row.failed) { out.push(row); continue; }
+    const status = await receiptOf(row.txHash);
+    // Still in flight, or the chain could not be asked: leave it be. A hash
+    // the chain has never seen an hour on was dropped before it was mined.
+    if (status === 'pending' || (status === 'missing' && Date.now() - row.at < 3_600_000)) { out.push(row); continue; }
+    const next: Payout = status === 'success' ? { ...row, confirmed: true } : { ...row, confirmed: true, failed: true };
+    if (next.failed) {
+      if (row.kind === 'principal') await debitPrincipal(address, -row.gross).catch(() => {});
+      else if (new Date(row.at).toISOString().slice(0, 10) === utcDay()) await releaseEmission(address, row.gross).catch(() => {});
+    }
+    await updatePayout(next).catch(() => {});
+    out.push(next);
+  }
+  return out;
+}
 
 const clean = (value: string, limit: number) =>
   value
@@ -70,14 +101,26 @@ export async function GET(request: Request) {
     return NextResponse.json({ payouts: [], automatic: vaultCanSign(), shared: registryShared() });
   }
   try {
-    const [payouts, principal, land] = await Promise.all([
-      payoutsFor(address), principalOf(address), landCheck(address),
-    ]);
+    const [booked, land] = await Promise.all([payoutsFor(address), landCheck(address)]);
+    const payouts = await confirmPayouts(address, booked);
+    const principal = await principalOf(address);
     // A wallet with no land may still be a hired hand, with a hand's ceiling.
     const hand = land === 'none' ? await handCheck(address) : 'none';
-    const room = await emissionRoom(address, hand === 'hand' ? HAND_DAILY_CEILING : DAILY_EARN_CEILING);
+    /*
+     * The room is measured against the same ceiling the withdrawal will be:
+     * what the vault judges the plots earn today, for land; a hand's ceiling
+     * for a hand. Measured against the game's flat maximum it told a player
+     * they could collect what the vault was about to refuse.
+     */
+    let judged: Judged | null = null;
+    let ceiling = hand === 'hand' ? HAND_DAILY_CEILING : DAILY_EARN_CEILING;
+    if (land === 'holds') {
+      judged = await judgedFor(address);
+      ceiling = judged.yield;
+    }
+    const room = await emissionRoom(address, ceiling);
     return NextResponse.json({
-      payouts, principal, room,
+      payouts, principal, room, judged,
       // Whether stewardship can be collected at all, and if not, why — so the
       // Bank can say so before somebody presses the button.
       land,
@@ -274,6 +317,7 @@ export async function POST(request: Request) {
     burned: money.burned,
     net: money.net,
     txHash: sent.txHash,
+    confirmed: sent.confirmed,
   });
 
   return NextResponse.json({ payout, txHash: sent.txHash });

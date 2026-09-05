@@ -1,4 +1,4 @@
-import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
+import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, LEVEL_PRESENCE_DAYS, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
 import { charterMultiplier, plotCeiling } from '../world/eras';
 import { cityLevel, stewardshipScore, type World } from '../simulation';
 import { worldFromSave, type SavedWorld } from '../world/save';
@@ -84,7 +84,7 @@ export async function eraHeldBy(address: string): Promise<number> {
  * level-ten snapshot is paid as level one; a city somebody has looked in on
  * for a month is paid as what it is.
  */
-export const LEVEL_PRESENCE_DAYS = 3;
+export { LEVEL_PRESENCE_DAYS };
 export function judgedLevel(world: World | null, presentDays: number): number {
   const fromWorld = world ? cityLevel(world) : 1;
   const fromPresence = 1 + Math.floor(Math.max(0, presentDays) / LEVEL_PRESENCE_DAYS);
@@ -108,7 +108,14 @@ export interface Judged {
   ceiling: number;
   /** What those plots earn in a real day as the server sees them: ceiling times score times attention. */
   yield: number;
-  plots: { seed: number; level: number; era: number; score: number; attention: number; ceiling: number }[];
+  /** UTC days the owner has been present, which bound the judged level. */
+  days: number;
+  /**
+   * One row per earning plot: `level` is what it is paid at, `reported` what
+   * the published city says it is (the two differ until enough days have been
+   * present), and `yield` is that plot's share of the day.
+   */
+  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
 }
 
 /**
@@ -123,9 +130,9 @@ export interface Judged {
 export async function judgedFor(address: string): Promise<Judged> {
   const me = address.toLowerCase();
   let rows: Claim[];
-  try { rows = await allClaims(); } catch { return { ceiling: DAILY_EARN_CEILING, yield: 0, plots: [] }; }
+  try { rows = await allClaims(); } catch { return { ceiling: DAILY_EARN_CEILING, yield: 0, days: 0, plots: [] }; }
   const mine = rows.filter((c) => c.owner.toLowerCase() === me).sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT);
-  if (!mine.length) return { ceiling: DAILY_EARN_CEILING, yield: 0, plots: [] };
+  if (!mine.length) return { ceiling: DAILY_EARN_CEILING, yield: 0, days: 0, plots: [] };
   const now = Date.now();
   let days = 0;
   try { days = await presenceDays(me); } catch { days = 0; }
@@ -141,6 +148,8 @@ export async function judgedFor(address: string): Promise<Judged> {
       world = published ? worldFromSave(published.snapshot as SavedWorld, row.seed, row.worldName) : null;
     } catch { world = null; }
     const level = judgedLevel(world, days);
+    let reported = 1;
+    try { reported = world ? cityLevel(world) : 1; } catch { reported = level; }
     const era = row.era ?? 1;
     const cap = Math.round(plotCeiling(level, era) * charterMultiplier(row.charterUntil, now));
     let score = 0;
@@ -149,10 +158,10 @@ export async function judgedFor(address: string): Promise<Judged> {
     try { attention = attentionFrom(Math.max(anywhere, await lastSeenAt(row.seed, me)), now); } catch { attention = attentionFrom(anywhere, now); }
     ceiling += cap;
     yieldSum += cap * score * attention;
-    plots.push({ seed: row.seed, level, era, score, attention, ceiling: cap });
+    plots.push({ seed: row.seed, name: row.worldName ?? '', level, reported, era, score, attention, ceiling: cap, yield: Math.round(cap * score * attention) });
   }
   // Five plots at the top would come to more than a wallet may take in a day.
-  return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), plots };
+  return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), days, plots };
 }
 
 /** Kept for callers that only want the ceiling. */

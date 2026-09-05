@@ -41,6 +41,9 @@ export const UPDATES: Update[] = [
       'Bridges anywhere. Tap the water you want bridged, or the land across it, and the crew stakes out the narrowest crossing there, including across a lake in the middle of town that people could already walk round. On an expanded plot the crossing search now covers the outer belt.',
       'Newcomers are housed the moment they arrive, by the same shared-house rule as everybody else, instead of sleeping rough until the next morning while a house had a spare bed.',
       'The GLD swap goes through Uniswap’s Universal Router, routed: $EMERGE is sold into its own pool and GLD bought with the proceeds in one trade, paid through Permit2 and floored under the quoter, because that is the router Robinhood Chain has and GLD’s pool is against USDG.',
+      'The Bank shows what the vault will pay. Under Collect, “Judged by the vault today” is the figure a withdrawal is measured against, across all your earning plots together, with each plot’s paid level, how it is run and how attended it is. A plot is paid at its city level or one level per three days you have been present, whichever is lower, and the card says how many days you have — the “earning per day” on your own screen counts the plot at full city level, which is why it could show more than arrived. Collectable today is measured against the same figure, the collect field fills with it, and a refusal is now a notice on screen rather than a line at the foot of the panel.',
+      'A withdrawal is paid when the chain says so. The vault now waits for the transfer’s receipt before telling you it was sent; a transfer the chain rejects is refused outright and nothing leaves your balance. One that takes longer than the wait is listed as “sending” under Paid out with its explorer link, checked again on your next look at the Bank, and if it turns out to have been rejected the amount goes back into your in-game balance with a notice saying so.',
+      'The level cap follows the age. A settlement improves a building to level 3; each age opens one more, to 7 in the AI age. A building keeps the level it reached when the plot advanced, and improving one raised in an earlier age re-dresses it in the plot’s current one. Each step past the third costs more again.',
     ],
   },
   {
@@ -208,6 +211,9 @@ export const UPDATES_ZH: Update[] = [
       '哪里都能架桥。点击你想架桥的水面，或对岸的陆地，工队会在那里勘定最窄的渡口，包括镇中央那片大家本来能绕过去的湖。扩展后的地块，勘定范围也覆盖外圈。',
       '新来的人一到就安排住处，和其他人一样按合住规则分配，而不是在有空床的房子旁露宿到第二天早上。',
       'GLD 兑换改走 Uniswap 的 Universal Router，按路径交易：一笔交易里先把 $EMERGE 卖进它自己的池子，再用所得买入 GLD，经 Permit2 支付并以报价器设下限——因为 Robinhood Chain 上就是这个路由器，而 GLD 的池子对的是 USDG。',
+      '银行显示金库会付多少。「收取」下方的「金库今日裁定」就是提取时实际衡量的数字，是你所有产出地块加在一起的，并列出每块地的支付等级、经营和关注度。一块地按城市等级或每在场三天一级中较低者支付，卡片会写明你已在场多少天——你屏幕上的「每日收益」按完整城市等级计算，所以可能比到账的多。「今日可收取」按同一数字衡量，收取栏默认填入它，拒绝时会弹出屏幕通知，而不再只是面板底部的一行字。',
+      '提取以链上确认为准。金库现在会等转账收据再告诉你已发出；被链拒绝的转账直接拒绝，余额分文不动。超过等待时间的转账在「已支付」下显示为「发送中」并附浏览器链接，你下次打开银行时再核对；若查明被拒绝，金额会退回游戏内余额，并弹出通知说明。',
+      '等级上限跟随时代。聚落可把建筑升到 3 级；每进一个时代多开一级，AI 时代最高 7 级。地块进入新时代时建筑保留已达到的等级，升级早期时代建的建筑会换成地块当前时代的样式。第三级之后每步更贵。',
     ],
   },
   {

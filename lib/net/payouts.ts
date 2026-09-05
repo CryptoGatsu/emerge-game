@@ -24,6 +24,23 @@ export interface Payout {
   net: number;
   at: number;
   txHash: string;
+  /** False while the transfer was sent and not yet seen mined; absent on older rows. */
+  confirmed?: boolean;
+  /** The chain rejected the transfer after it was booked: nothing arrived, and the balance is restored. */
+  failed?: boolean;
+}
+
+/**
+ * What the vault judges this wallet's plots earn today — the figure a
+ * withdrawal is actually measured against. `level` is the level each plot is
+ * paid at, `reported` what its published city says; `days` the present days
+ * that bound the one to the other.
+ */
+export interface JudgedYield {
+  ceiling: number;
+  yield: number;
+  days: number;
+  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
 }
 
 /** How much of today's ceiling a wallet has left. */
@@ -49,6 +66,8 @@ export interface PayoutHistory {
   land: 'holds' | 'none' | 'no-registry' | 'unreachable' | null;
   /** No land, but a job: this wallet is paid as a hired hand. */
   hand: boolean;
+  /** The vault's own reckoning of today's yield, for a land holder. */
+  judged: JudgedYield | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -146,7 +165,7 @@ export async function withdrawFromVault(request: WithdrawRequest): Promise<Payou
 /** What a wallet has been paid, and what it may still be paid today. */
 export async function fetchPayouts(address: string): Promise<PayoutHistory> {
   const empty: PayoutHistory = {
-    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null, hand: false,
+    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null, hand: false, judged: null,
   };
   try {
     const response = await fetch(`/api/payouts?address=${encodeURIComponent(address)}`, { cache: 'no-store' });
@@ -160,6 +179,7 @@ export async function fetchPayouts(address: string): Promise<PayoutHistory> {
       shared: json.shared === true,
       land: json.land ?? null,
       hand: json.hand === true,
+      judged: json.judged ?? null,
     };
   } catch {
     return empty;

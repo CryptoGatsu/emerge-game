@@ -2080,6 +2080,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onLeave={onLeave}
             onRelease={onRelease}
             onVault={vault}
+            onNotice={(title, body, kind) => announce({ id: `bank-${Date.now()}`, kind: kind ?? 'sync', title, body, lifetime: 12_000 })}
             onWages={setWages}
             onList={listPlot}
             onPlayer={onPlayer}

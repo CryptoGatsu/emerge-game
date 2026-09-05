@@ -3876,7 +3876,7 @@ function adviseBuildAll(world: World): Advice[] {
     const farmHands = world.citizens.filter((c) => c.age >= 16 && c.job === 'farmer').length;
     const farmPosts = Math.max(0, jobCapacity(world, 'farmer') - farmHands);
     const days = (food / Math.max(1, people)).toFixed(1);
-    const improvable = farms.find((b) => levelOf(b) < MAX_BUILDING_LEVEL);
+    const improvable = farms.find((b) => levelOf(b) < maxLevelFor(world));
     if (farms.length < 3) {
       out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
         why: `${Math.round(food)} food in store is about ${days} days for ${people} people.`,
@@ -3977,10 +3977,10 @@ function adviseBuildAll(world: World): Advice[] {
   // Improve the busiest workshop once there is Gold to spare.
   if (world.treasury > 2500) {
     const busiest = world.buildings
-      .filter((b) => JOB_BUILDINGS.has(b.type) && b.active && levelOf(b) < MAX_BUILDING_LEVEL)
+      .filter((b) => JOB_BUILDINGS.has(b.type) && b.active && levelOf(b) < maxLevelFor(world))
       .sort((a, b) => b.workers.length - a.workers.length)[0];
     if (busiest) {
-      const cost = upgradeCost(busiest);
+      const cost = upgradeCost(busiest, world);
       out.push({ kind: 'improve', type: busiest.type, buildingId: busiest.id, title: `Improve the ${busiest.type.toLowerCase()}`,
         why: `It is the busiest workshop in town and still at level ${levelOf(busiest)}.`,
         gain: `${Math.round(OUTPUT_PER_LEVEL * 100)}% more from it for ${cost?.gold ?? 0} Gold, against ${Math.round(UPKEEP_PER_LEVEL * 100)}% more upkeep.` });
@@ -8239,9 +8239,17 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
 
 /** The most a building can be improved. */
 export const MAX_BUILDING_LEVEL = 3;
+/**
+ * The cap rises with the age. A settlement improves a building to level 3;
+ * each era after opens one level more, so an AI-era city can take one to 7.
+ * A building keeps whatever level it reached when the plot advanced.
+ */
+export const LEVELS_PER_ERA = 1;
+export const MAX_BUILDING_LEVEL_EVER = MAX_BUILDING_LEVEL + LEVELS_PER_ERA * (ERAS.length - 1);
+export const maxLevelFor = (world: { era?: number }) => MAX_BUILDING_LEVEL + LEVELS_PER_ERA * (eraOf(world) - 1);
 
 /** What level a building is, whatever version of the game raised it. */
-export const levelOf = (b: Building) => Math.max(1, Math.min(MAX_BUILDING_LEVEL, Math.round(b.level ?? 1)));
+export const levelOf = (b: Building) => Math.max(1, Math.min(MAX_BUILDING_LEVEL_EVER, Math.round(b.level ?? 1)));
 
 /**
  * What an improved building is worth, as a multiple.
@@ -8285,16 +8293,16 @@ export function moveCost(type: string): number {
  * in materials alike. The second step is nearly twice the first, so the top
  * level is something a settlement grows into rather than buys on day one.
  */
-export const UPGRADE_STEPS = [0.8, 1.4];
+export const UPGRADE_STEPS = [0.8, 1.4, 2.0, 2.6, 3.2, 3.8];
 
-/** What the next improvement costs, in Gold and in the yard. */
-export function upgradeCost(b: Building): { gold: number; wood: number; stone: number } | null {
+/** What the next improvement costs, in Gold and in the yard, or null at the plot's cap. */
+export function upgradeCost(b: Building, world: { era?: number }): { gold: number; wood: number; stone: number } | null {
   const level = levelOf(b);
-  if (level >= MAX_BUILDING_LEVEL) return null;
+  if (level >= maxLevelFor(world)) return null;
   const base = SELF_BUILD_COST[b.type] ?? TRADE_BUILD_COST[b.type] ?? 250;
   const need = buildMaterials(b.type);
   // Each step costs more than the last, so the third level is a decision.
-  const step = UPGRADE_STEPS[level - 1];
+  const step = UPGRADE_STEPS[Math.min(UPGRADE_STEPS.length, level) - 1];
   return {
     gold: Math.round(base * step),
     wood: Math.round(need.wood * step),
@@ -8358,8 +8366,12 @@ export function upgradeBuilding(world: World, id: string): { ok: boolean; messag
   useWorld(world);
   const building = world.buildings.find((b) => b.id === id);
   if (!building) return { ok: false, message: 'That building is not there.' };
-  const cost = upgradeCost(building);
-  if (!cost) return { ok: false, message: 'That is as good as it gets.' };
+  const cost = upgradeCost(building, world);
+  if (!cost) {
+    return { ok: false, message: eraOf(world) < ERAS.length
+      ? `Level ${levelOf(building)} is the most a ${eraSpec(eraOf(world)).name.toLowerCase()} can raise. The ${eraSpec(eraOf(world) + 1).name.toLowerCase()} opens the next.`
+      : 'That is as good as it gets.' };
+  }
   cost.gold = Math.round(cost.gold * buildDiscount(world));
   if (world.treasury < cost.gold) {
     return { ok: false, message: `That costs ${cost.gold} Gold and the treasury cannot cover it.` };

@@ -266,7 +266,11 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 </em>
               </button>
             ) : (
-              <span className="muted small">{t('As good as it gets.')}</span>
+              <span className="muted small">
+                {focus.cap.next
+                  ? t('Level {n} is the most a {era} can raise. The {next} opens one more.', { n: focus.maxLevel, era: tx(focus.cap.era).toLowerCase(), next: tx(focus.cap.next).toLowerCase() })
+                  : t('As good as it gets.')}
+              </span>
             )}
             <button
               className={moving === focus.id ? 'shift armed' : 'shift'}

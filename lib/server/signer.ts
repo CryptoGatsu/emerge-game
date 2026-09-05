@@ -28,7 +28,7 @@ import 'server-only';
  * where that matters.
  */
 
-import { createPublicClient, createWalletClient, defineChain, http, parseUnits, type Hex } from 'viem';
+import { TransactionNotFoundError, TransactionReceiptNotFoundError, createPublicClient, createWalletClient, defineChain, http, parseUnits, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
@@ -155,8 +155,46 @@ export async function vaultHealth(): Promise<VaultHealth> {
 }
 
 export type SendResult =
-  | { ok: true; txHash: string }
+  /**
+   * `confirmed` is whether the chain has mined the transfer and it succeeded.
+   * False means it was sent and not seen within the wait: the caller records
+   * it as sent and `receiptOf` settles it later.
+   */
+  | { ok: true; txHash: string; confirmed: boolean }
   | { ok: false; problem: string };
+
+/**
+ * How long a payout waits for its receipt before answering the player.
+ *
+ * A transfer that reverts must not be booked as paid, and the only way to know
+ * is to wait for the block. Bounded, because the request has a time limit of
+ * its own; past it the transfer is sent and unconfirmed, and checked on the
+ * player's next look at the Bank.
+ */
+const RECEIPT_WAIT_MS = Math.max(3_000, Number(process.env.EMERGE_RECEIPT_WAIT_MS) || 20_000);
+
+/**
+ * What the chain says about a transaction the vault sent.
+ *
+ * `missing` is the chain saying it has never seen the hash, which is
+ * different from not being able to ask: an RPC that is down answers
+ * `pending`, so a transfer is never written off on the strength of an outage.
+ */
+export async function receiptOf(txHash: string): Promise<'success' | 'reverted' | 'pending' | 'missing'> {
+  const client = reader();
+  try {
+    const receipt = await client.getTransactionReceipt({ hash: txHash as Hex });
+    return receipt.status === 'success' ? 'success' : 'reverted';
+  } catch (error) {
+    if (!(error instanceof TransactionReceiptNotFoundError)) return 'pending';
+  }
+  try {
+    await client.getTransaction({ hash: txHash as Hex });
+    return 'pending';
+  } catch (error) {
+    return error instanceof TransactionNotFoundError ? 'missing' : 'pending';
+  }
+}
 
 /**
  * Send $EMERGE out of the vault.
@@ -208,7 +246,22 @@ export async function sendFromVault(to: string, whole: number): Promise<SendResu
       args: [to as Hex, units],
       nonce,
     });
-    return { ok: true, txHash };
+    /*
+     * Sent is not paid. A transfer the chain rejects is a hash with nothing
+     * behind it, and a player told "sent" on the strength of one watches a
+     * balance that never arrives. So: wait for the block, and refuse on a
+     * revert the same as on any other failure.
+     */
+    try {
+      const receipt = await client.waitForTransactionReceipt({ hash: txHash, timeout: RECEIPT_WAIT_MS, pollingInterval: 1_000 });
+      if (receipt.status !== 'success') {
+        return { ok: false, problem: 'The chain rejected the transfer. Nothing has been taken from your balance.' };
+      }
+      return { ok: true, txHash, confirmed: true };
+    } catch {
+      // Not mined within the wait. The chain has it; the Bank checks later.
+      return { ok: true, txHash, confirmed: false };
+    }
   } catch {
     return { ok: false, problem: 'The transfer could not be sent. Nothing has been taken from your balance.' };
   } finally {
@@ -246,7 +299,7 @@ export async function burnFromVault(whole: number): Promise<SendResult> {
     const txHash = tokenBurnable()
       ? await wallet.writeContract({ address: token() as Hex, abi: ERC20, functionName: 'burn', args: [units], nonce })
       : await wallet.writeContract({ address: token() as Hex, abi: ERC20, functionName: 'transfer', args: [BURN_ADDRESS as Hex, units], nonce });
-    return { ok: true, txHash };
+    return { ok: true, txHash, confirmed: false };
   } catch {
     return { ok: false, problem: 'The burn could not be sent.' };
   } finally {

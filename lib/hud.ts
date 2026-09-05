@@ -7,11 +7,11 @@
  * never holds a reference into mutable simulation state.
  */
 
-import { eraSpec } from './world/eras';
+import { ERAS, eraSpec } from './world/eras';
 import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
-  MAX_BUILDING_LEVEL, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
+  maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
   skillLevel, skillOutput, upgradeCost, upkeepOf,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
@@ -54,6 +54,8 @@ export interface FocusBuilding {
   /** How far it has been improved, and what the next step would take. */
   level: number;
   maxLevel: number;
+  /** The age the cap belongs to, and the next one that lifts it, or null at the last. */
+  cap: { era: string; next: string | null };
   upgrade: { gold: number; wood: number; stone: number; stocked: boolean } | null;
   /** What moving it costs, in Gold. */
   moveGold: number;
@@ -336,12 +338,14 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     x: b.x, y: b.y,
     upkeep: Math.round(upkeepOf(b)),
     level: levelOf(b),
-    maxLevel: MAX_BUILDING_LEVEL,
+    maxLevel: maxLevelFor(world),
+    // Why the cap is where it is, for the card to say when it is reached.
+    cap: { era: eraSpec(eraOf(world)).name, next: eraOf(world) < ERAS.length ? eraSpec(eraOf(world) + 1).name : null },
     // `stocked` is what lets the button refuse out loud: Gold alone is not
     // enough to improve a building, and a button that looks live and then does
     // nothing is worse than one that says it cannot yet.
     upgrade: (() => {
-      const next = upgradeCost(b);
+      const next = upgradeCost(b, world);
       if (!next) return null;
       return {
         ...next,
@@ -354,7 +358,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       ? {
         sleeping: world.families.filter((f) => f.homeId === b.id).reduce((s, f) => s + f.members.length, 0),
         room: houseRoom(b),
-        next: levelOf(b) < MAX_BUILDING_LEVEL ? houseRoom({ ...b, level: levelOf(b) + 1 }) : null,
+        next: levelOf(b) < maxLevelFor(world) ? houseRoom({ ...b, level: levelOf(b) + 1 }) : null,
       }
       : null,
     herd: b.type === 'Lodge' ? herdOf(world, b) : null,

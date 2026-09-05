@@ -28,7 +28,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -911,8 +911,12 @@ export default function Wiki() {
           </p>
           <p>
             <b>Improve</b> spends Gold and materials to take a building up a level, to a maximum of{' '}
-            <b>{MAX_BUILDING_LEVEL}</b>. The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
-            of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, in Gold and in
+            <b>{MAX_BUILDING_LEVEL}</b> in a settlement. <b>Each age opens one level more</b>: a township
+            can take a building to {MAX_BUILDING_LEVEL + 1}, an AI-era city to {MAX_BUILDING_LEVEL_EVER}, and a building keeps whatever level it reached
+            when the plot advanced. Improving a building raised in an earlier age also re-dresses it in the
+            plot's current one, which is how a timber hall becomes a stone one. The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
+            of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, and each step after
+            more again, in Gold and in
             timber and stone both — so the top level is a decision, not a formality. Each level adds
             about <b>{Math.round(OUTPUT_PER_LEVEL * 100)}% to what the building produces</b> and{' '}
             <b>{Math.round(UPKEEP_PER_LEVEL * 100)}% to its upkeep</b>. It does not hold more workers — and

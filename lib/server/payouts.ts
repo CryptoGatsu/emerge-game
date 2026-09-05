@@ -37,6 +37,19 @@ export interface Payout {
   at: number;
   /** The transfer that paid it. Always set: a row is only written after one. */
   txHash: string;
+  /**
+   * Whether the chain has confirmed the transfer. Absent on rows written
+   * before this was checked, which were confirmed by hand or not at all; true
+   * once a receipt with a success status has been read; false while the
+   * transfer was sent but not yet seen mined.
+   */
+  confirmed?: boolean;
+  /**
+   * True when the chain rejected the transfer after it was booked. Nothing
+   * reached the player, so what was debited is given back, and the Bank
+   * restores the in-game balance when it reads the row.
+   */
+  failed?: boolean;
 }
 
 const PAYOUTS = serverKey('payouts');
@@ -63,6 +76,11 @@ export async function recordPayout(
   };
   await hset(PAYOUTS, payout.id, JSON.stringify(payout));
   return payout;
+}
+
+/** Rewrite a row, keeping its id. */
+export async function updatePayout(payout: Payout): Promise<void> {
+  await hset(PAYOUTS, payout.id, JSON.stringify(payout));
 }
 
 /** Every request on record, newest first. */
