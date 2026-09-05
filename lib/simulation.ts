@@ -16,7 +16,7 @@ import {
   type Resource,
 } from './world/goods';
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
-import { BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type WorldLayout } from './world/layout';
+import { BRIDGE_HALF_WIDTH, BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type Bridge, type WorldLayout } from './world/layout';
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
 import { compose, episodeNote, traitsOf, TRAIT_LABELS, type Brief, type Episode, type EpisodeKind, type Relation, type TownBrief } from './dialogue';
 import { buildWater, type WaterField } from './world/water';
@@ -5809,6 +5809,93 @@ export const BRIDGE_GOLD = 600;
  * the narrowest sound one to that island, so the deck lands somewhere useful.
  * Gold up front, timber from the yard by the day, bought in when short.
  */
+/** The bridge under a point, or the nearest within a couple of paces of its deck, or null. */
+export function bridgeAt(world: World, x: number, y: number): Bridge | null {
+  useWorld(world);
+  const here = deckAt(world.layout.bridges, x, y);
+  if (here) return here.bridge;
+  let best: Bridge | null = null, bestD = 2.5;
+  for (const b of world.layout.bridges) {
+    const cos = Math.cos(b.angle), sin = Math.sin(b.angle);
+    const dx = x - b.x, dy = y - b.y;
+    const along = Math.max(-b.span, Math.min(b.span, dx * cos + dy * sin));
+    const across = -dx * sin + dy * cos;
+    const d = Math.hypot(dx - along * cos, dy - along * sin) - BRIDGE_HALF_WIDTH;
+    if (Math.abs(along) <= b.span && d < bestD) { bestD = d; best = b; }
+    void across;
+  }
+  return best;
+}
+
+/** What a removed bridge gives back to the yard: some of its planks. */
+export const UNBRIDGE_WOOD_PER_UNIT = 1.5;
+
+/**
+ * Take a bridge down.
+ *
+ * The deck goes, the road across the water goes with it, and an island that
+ * only this crossing reached is no longer connected. That last is refused
+ * when people would be cut off from their buildings: a settlement does not
+ * strand its own bakery. Anybody standing on the deck steps off at the
+ * nearer bank rather than into the river.
+ */
+export function removeBridge(world: World, x: number, y: number): { ok: boolean; message: string } {
+  useWorld(world);
+  const bridge = bridgeAt(world, x, y);
+  if (!bridge) return { ok: false, message: 'There is no bridge there. Tap the deck of the one you want taken down.' };
+  const water = waterOf(world);
+  const cos = Math.cos(bridge.angle), sin = Math.sin(bridge.angle);
+  const ends: [number, number][] = [[bridge.x - cos * bridge.span, bridge.y - sin * bridge.span], [bridge.x + cos * bridge.span, bridge.y + sin * bridge.span]];
+  const rest = world.layout.bridges.filter((b) => b !== bridge);
+
+  // Which islands this deck alone was holding on: none of the other decks
+  // land on them, and there is no ferry.
+  const stranded: number[] = [];
+  for (const [ex, ey] of ends) {
+    const island = water.landAt(ex, ey);
+    if (island < 0 || island === water.mainland) continue;
+    const otherWay = hasFerry(world) || rest.some((b) => {
+      const c = Math.cos(b.angle), s = Math.sin(b.angle);
+      return water.landAt(b.x - c * b.span, b.y - s * b.span) === island || water.landAt(b.x + c * b.span, b.y + s * b.span) === island;
+    });
+    if (!otherWay) stranded.push(island);
+  }
+  const cutOff = world.buildings.filter((b) => stranded.includes(water.landAt(b.x, b.y)));
+  if (cutOff.length) {
+    return { ok: false, message: `That is the only way to ${cutOff.length === 1 ? `the ${cutOff[0].type.toLowerCase()}` : `${cutOff.length} buildings`} on the far bank. Pull ${cutOff.length === 1 ? 'it' : 'them'} down first, or build another crossing.` };
+  }
+
+  // Anybody on the deck steps off at the nearer end.
+  for (const c of world.citizens) {
+    const here = deckAt([bridge], c.x, c.y);
+    if (!here || !water.isWater(c.x, c.y)) continue;
+    const [ex, ey] = here.along < 0 ? ends[0] : ends[1];
+    const out = water.blocks(ex, ey) ? water.toClear(ex, ey) : { x: 0, y: 0, d: 0 };
+    c.x = edge(ex + out.x * (out.d + 0.3), 2, 98);
+    c.y = edge(ey + out.y * (out.d + 0.3), 4, 96);
+    c.path = []; c.detour = undefined;
+  }
+  world.conversations = world.conversations.filter((t) => {
+    const a = world.citizens.find((c) => c.id === t.a), b = world.citizens.find((c) => c.id === t.b);
+    return a && b && Math.hypot(a.x - b.x, a.y - b.y) <= TALKING_RANGE + 2.5;
+  });
+
+  world.layout.bridges = rest;
+  world.connectedIslands = world.connectedIslands.filter((i) => !stranded.includes(i));
+  // The road across the water goes with the deck: any edge that now runs
+  // through open water is cut, and only those.
+  const layout = world.layout;
+  for (let i = 0; i < layout.nodes.length; i++) {
+    layout.edges[i] = layout.edges[i].filter((j) => dryLine(water, layout, layout.nodes[i][0], layout.nodes[i][1], layout.nodes[j][0], layout.nodes[j][1]));
+  }
+  const wood = Math.round(bridge.deck * 2 * UNBRIDGE_WOOD_PER_UNIT);
+  world.resources.wood += wood;
+  note(world, 'produced', 'wood', wood);
+  noteAttention(world);
+  pushFeed(world, 'build', `The crossing was taken down. ${wood} timber went back to the yard.${stranded.length ? ' The far bank is cut off again.' : ''}`);
+  return { ok: true, message: `The crossing is down. ${wood} timber went back to the yard.` };
+}
+
 export function startBridgeAt(world: World, x: number, y: number): { ok: boolean; message: string } {
   useWorld(world);
   const water = waterOf(world);

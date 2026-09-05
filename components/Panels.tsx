@@ -66,6 +66,8 @@ interface PanelsProps {
   onClearTrees: () => void;
   /** Arm the bridge cursor. */
   onBridge: () => void;
+  /** Arm the cursor for taking a crossing down. */
+  onUnbridge: () => void;
   /** Pay the public works for the next city level; the refusal, or null. */
   onRaiseCity: () => string | null;
   /** Hold a festival; the refusal, or null. */
@@ -2018,8 +2020,8 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates }: {
   );
 }
 
-function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
-  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void;
+function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge }: {
+  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void; onUnbridge: () => void;
 }) {
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
@@ -2083,6 +2085,11 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
           <button disabled={view.treasury < BRIDGE_GOLD} onClick={onBridge}>
             {view.treasury < BRIDGE_GOLD ? t('Not enough Gold') : t('Stake out a crossing')}
           </button>
+          {view.bridges > 0 && (
+            <button className="ghost" onClick={onUnbridge} title={t('Tap a deck to take that crossing down. Some of the timber comes back. A crossing that is the only way to buildings on the far bank stays.')}>
+              {t('Take a crossing down')}
+            </button>
+          )}
         </div>
       </div>
       <div className="build-shelves build-ages">
@@ -2605,7 +2612,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2649,7 +2656,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     );
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
-  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} />;
+  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} onUnbridge={onUnbridge} />;
   if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} onGates={onGates} />;
   if (panel === 'connect') {
     return (

@@ -1,7 +1,7 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
+import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -890,6 +890,14 @@ export default function Wiki() {
             is short of timber the crew buys it in with Gold at the market&rsquo;s price and a half,
             rather than standing idle, so a town that has run its woodcutters down still gets its
             crossing. One crossing at a time.
+          </p>
+          <p>
+            A crossing can come down too. Once the plot has a bridge, the same card carries{' '}
+            <b>Take a crossing down</b>: tap the deck and it is gone, with{' '}
+            <b>{UNBRIDGE_WOOD_PER_UNIT * 2} timber a unit</b> of its length back in the yard, the road
+            across the water cut, and anybody on it stepped off at the nearer bank. The only crossing
+            to an island with buildings on it is refused until they are pulled down or another
+            crossing stands, so nothing is ever stranded.
           </p>
           <h3>Clearing trees</h3>
           <p>

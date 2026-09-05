@@ -1,7 +1,7 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
+import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
 
@@ -463,6 +463,7 @@ export function WikiZh() {
           <p>市政厅、监狱、酒馆、学校、港口：所有"有一座就起作用"的建筑都是<b>每块地唯一的</b>。建造面板把已有的标为"已建"，光标拒绝第二座，聚落自建也不会再盖；它的废墟会被重建而不是被替换。房屋、仓库和所有有岗位的工作场所仍然多多益善。升级已有的那座：升级后的监狱更能镇住镇子，升级后的房子住得下更多人。</p>
           <h3>手动架桥</h3>
           <p>聚落足够富裕、对岸值得去时会自己架桥；建造面板里的<b>桥梁</b>工具则是你自己选对岸。点击水对岸的陆地，工队就会勘定通往那里最窄的可靠渡口，先付 <b>{n(BRIDGE_GOLD)} 金币</b>，木材和工钱按天计。料场木材不够时，工队会按市价的一倍半用金币买进而不是停工，所以伐木工不够的镇子也能修成渡口。一次只能修一处。</p>
+          <p>桥也能拆。地块上有桥之后，同一张卡片上会多出<b>拆除一座桥</b>：点一下桥面它就没了，桥长<b>每单位 {UNBRIDGE_WOOD_PER_UNIT * 2} 木料</b>回到堆场，跨水的路被切断，桥上的人在较近的一岸下桥。通往有建筑的岛的唯一渡口会被拒绝拆除，直到那些建筑拆掉或另有渡口，所以不会有人被困住。</p>
           <h3>清理树木</h3>
           <p>建造面板里有一件针对林地的工具：用它点一下地面，触及范围内每棵立着的树都会被伐倒，<b>每棵 {CLEAR_TREE_GOLD} 金币</b>，<b>每棵 {CLEAR_TREE_WOOD} 木料</b>进堆场。清理过的地面在重新加载后仍然是清理过的，并像伐木工的工作一样在接下来的几天里长回来，所以请在打算建造的地方清理，而不是为了风景。</p>
           <h3>搬迁与升级</h3>

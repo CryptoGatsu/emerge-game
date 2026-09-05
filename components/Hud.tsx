@@ -1027,6 +1027,8 @@ export function Hud(props: HudProps) {
               ? <>{t('Clearing trees')} — {compact ? t('tap the wood to fell everything within reach.') : t('click the wood to fell everything within reach, Esc to cancel.')}</>
               : placing === 'Bridge'
                 ? <>{t('Bridge')} — {compact ? t('tap the water you want bridged, or the land across it.') : t('click the water you want bridged, or the land across it; Esc to cancel.')}</>
+              : placing === 'Unbridge'
+                ? <>{t('Take a crossing down')} — {compact ? t('tap the deck you want taken down.') : t('click the deck you want taken down; Esc to cancel.')}</>
                 : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
           </span>
           <button onClick={props.onCancelBuild}>{t('Cancel')}</button>

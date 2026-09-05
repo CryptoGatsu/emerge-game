@@ -23,7 +23,7 @@ import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
-import { CLEARING_DAYS, CLEAR_RADIUS, placementProblem } from '../simulation';
+import { CLEARING_DAYS, CLEAR_RADIUS, bridgeAt, placementProblem } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
 import { extentOf } from '../world/extent';
@@ -2498,6 +2498,23 @@ export class EmergeScene {
     window.addEventListener('keydown', this.onPlacementKey);
   }
 
+  /** Arm the cursor for taking a bridge down: the next tap on a deck removes it. */
+  startUnbridging(onPick: (x: number, y: number) => void) {
+    this.cancelPlacement();
+    const ring = new Sprite(this.assets.get('fx.select'));
+    ring.anchor.set(0.5, 0.5);
+    ring.alpha = 0.8;
+    ring.scale.set(1.6);
+    ring.zIndex = 1e6;
+    this.objectLayer.addChild(ring);
+    this.ghost = ring;
+    this.placement = { type: 'Unbridge', onPlace: (x, y) => onPick(x, y) };
+    this.app.canvas.style.cursor = 'crosshair';
+    this.app.canvas.addEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.addEventListener('pointerup', this.onPlacementCommit);
+    window.addEventListener('keydown', this.onPlacementKey);
+  }
+
   /** How many standing trees a clearing at this spot would take. */
   standingTreesNear(x: number, y: number) {
     return this.trees.filter((t) => t.state === 'standing' && (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS).length;
@@ -2535,7 +2552,10 @@ export class EmergeScene {
       // bank; the simulation says where the deck goes and refuses out loud.
       : this.placement?.type === 'Bridge'
         ? true
-        : this.canBuildAt(wx, wy);
+        // Taking one down: the ring is green over a deck and red elsewhere.
+        : this.placement?.type === 'Unbridge'
+          ? bridgeAt(this.world, wx, wy) !== null
+          : this.canBuildAt(wx, wy);
     const height = this.map.heightAt(wx, wy);
     const pos = worldToScreen(wx, wy, height);
     this.ghost.position.set(pos.x, pos.y);

@@ -165,6 +165,8 @@ export interface Snapshot {
   unlockedAreas: string[];
   /** The outer belt is open for building. */
   expanded: boolean;
+  /** How many crossings stand, so the Build panel can offer to take one down. */
+  bridges: number;
   /** Which era the plot is in, and what stands between it and the next. */
   era: { id: number; name: string; days: number; gate: EraGate };
   /** The city level and what the next one asks. */
@@ -495,6 +497,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     consumption: { ...world.flow.consumed },
     unlockedAreas: [...world.unlockedAreas],
     expanded: !!world.expanded,
+    bridges: world.layout.bridges.length,
     era: { id: eraOf(world), name: eraSpec(eraOf(world)).name, days: Math.max(0, world.day - (world.eraSince ?? 1)), gate: eraGate(world) },
     city: cityGate(world),
     cover: { charterUntil: world.charterUntil ?? 0, insuredUntil: world.insuredUntil ?? 0, insured: insured(world), buildersUntil: world.buildersUntil ?? 0, builders: buildersHere(world) },

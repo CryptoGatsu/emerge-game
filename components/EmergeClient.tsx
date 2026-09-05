@@ -24,7 +24,7 @@ import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
-  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, removeBridge,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -1435,6 +1435,28 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Arm the cursor for taking a crossing down: the next tap on a deck removes it. */
+  const beginUnbridge = useCallback(() => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    setPanel(null);
+    setPlacing('Unbridge');
+    scene.startUnbridging((x, y) => {
+      setPlacing(null);
+      const result = removeBridge(world, x, y);
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `unbridge-${Date.now()}`, kind: 'sync', title: t('Still standing'), body: tx(result.message), lifetime: 8_000 });
+      } else {
+        soundRef.current?.cue('hammer');
+        announce({ id: `unbridge-${Date.now()}`, kind: 'sync', title: t('Crossing removed'), body: tx(result.message), lifetime: 6_000 });
+      }
+      setView(snapshot(world, selectedRef.current));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Pull a building down. Half the materials come back; the Gold does not. */
   const demolish = useCallback((id: string) => {
     const world = worldRef.current;
@@ -2075,6 +2097,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onKeep={keepFor}
             onClearTrees={beginClear}
             onBridge={beginBridge}
+            onUnbridge={beginUnbridge}
             onRaiseCity={raiseCityFor}
             onFestival={festivalFor}
             onCover={coverFor}
