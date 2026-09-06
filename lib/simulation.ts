@@ -183,6 +183,24 @@ export interface Conversation {
 }
 export interface Project { id: string; ownerId: string; name: string; buildingId: string; progress: number; length: number }
 
+/**
+ * Wealth classes.
+ *
+ * A settlement is not a town of equals. Each morning everybody over sixteen
+ * is ranked by their purse: the top slice is well off, then comfortable, then
+ * getting by, then poor. It shows on the card, it colours what people say,
+ * and it decides who rides: a cart, a car, a pod, a place on the ferry, are
+ * things the well-off have and everybody else walks past. Before this, a
+ * Stables put every working adult on wheels and a Harbour put every crosser
+ * in a boat of their own, and the roads and channels were a traffic jam.
+ */
+export type WealthClass = 'poor' | 'modest' | 'comfortable' | 'wealthy';
+export const WEALTH_WORDS: Record<WealthClass, string> = { poor: 'poor', modest: 'getting by', comfortable: 'comfortable', wealthy: 'well off' };
+/** The share of adults who count as well off, and the purse it takes at least. */
+export const WEALTHY_SHARE = 0.12;
+export const WEALTHY_FLOOR = 60;
+export const wealthOf = (c: { wealth?: WealthClass }): WealthClass => c.wealth ?? 'modest';
+
 export interface Citizen {
   id: string; name: string; handle: string; familyId: string;
   /**
@@ -326,6 +344,8 @@ export interface Citizen {
   chilled: boolean;
   /** The site of their trade they report to, when the trade has more than one. */
   workplaceId?: string;
+  /** Where they stand among their neighbours by what is in their purse, ranked each morning. */
+  wealth?: WealthClass;
   /**
    * What has happened to them lately, newest last, six at most. This is
    * what they talk about, and what the card says under "Lately".
@@ -1496,14 +1516,18 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
 }
 
 /** The walkability grid for a world, rebuilt only when what it depends on has changed. */
-const navCache = new WeakMap<World, NavGrid>();
-function navOf(world: World, obstacles: Obstacle[], water: WaterField): NavGrid {
+const navCache = new WeakMap<World, Map<string, NavGrid>>();
+function navOf(world: World, obstacles: Obstacle[], water: WaterField, ferried = false): NavGrid {
   ensureRamps(world, water);
-  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}${hasFerry(world) ? 'f' : ''}|${dugKey(world.dug)}`;
-  const held = navCache.get(world);
-  if (held && held.key === key) return held;
+  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}${ferried ? 'f' : ''}|${dugKey(world.dug)}`;
+  let grids = navCache.get(world);
+  if (!grids) { grids = new Map(); navCache.set(world, grids); }
+  const held = grids.get(key);
+  if (held) return held;
   const built = buildNavGrid(water, world.layout, obstacles, key, extentOf(world));
-  navCache.set(world, built);
+  // Two grids at most: the ground as it is, and the ground as the ferry sees it.
+  for (const k of [...grids.keys()]) if (!k.endsWith(`|${dugKey(world.dug)}`) || grids.size >= 2) grids.delete(k);
+  grids.set(key, built);
   return built;
 }
 
@@ -1548,8 +1572,13 @@ function facingToward(x: number, y: number, tx: number, ty: number): Facing {
 function moveCitizens(world: World, hours: number) {
   const obstacles = buildObstacles(world);
   const ferry = hasFerry(world);
-  const water = ferry ? ferried(waterOf(world)) : waterOf(world);
-  const nav = navOf(world, obstacles, water);
+  if (world.citizens.some((c) => c.age >= 16 && !c.wealth)) rankWealth(world);
+  // The ground as it is, and the ground as the ferry sees it: the well-off
+  // take the boat, everybody else takes the bridge.
+  const dryWater = waterOf(world);
+  const dryNav = navOf(world, obstacles, dryWater);
+  const wetWater = ferry ? ferried(dryWater) : dryWater;
+  const wetNav = ferry ? navOf(world, obstacles, wetWater, true) : dryNav;
   const ride = rideOf(world);
   const pace = transportBoost(world);
   // Whoever is mid-conversation stands still for it. Nothing used to hold
@@ -1562,6 +1591,9 @@ function moveCitizens(world: World, hours: number) {
     // Held by the player, or swimming for the bank: both are handled elsewhere
     // and every rule below is about walking on land.
     if (c.carried || c.swimming) continue;
+    const boats = ferry && wealthOf(c) === 'wealthy';
+    const water = boats ? wetWater : dryWater;
+    const nav = boats ? wetNav : dryNav;
     const partner = talking.get(c.id);
     if (partner !== undefined) {
       const other = world.citizens.find((o) => o.id === partner);
@@ -1571,7 +1603,7 @@ function moveCitizens(world: World, hours: number) {
     }
     // The ferry stopped running with them on it: a ruined Harbour leaves
     // anyone out on the water swimming for the bank.
-    if (c.afloat && !ferry) {
+    if (c.afloat && !boats) {
       c.afloat = false;
       c.riding = false;
       c.ride = undefined;
@@ -1670,10 +1702,10 @@ function moveCitizens(world: World, hours: number) {
     lookAhead(world, c, nav, obstacles, water, hours);
     // A working adult rides whatever the town offers; nobody rides it onto
     // the ferry.
-    const own = ride && c.age >= 16 && phase === 'working' && !c.afloat ? rideFor(ride, c) : null;
+    const own = ride && c.age >= 16 && phase === 'working' && !c.afloat && wealthOf(c) === 'wealthy' ? rideFor(ride, c) : null;
     const blocked = stepCitizen(c, hours, obstacles, world.layout, water, own ? RIDE_PACE[own] * pace : 1);
-    if (ferry) {
-      const wet = waterOf(world).isWater(c.x, c.y) && !onBridge(world.layout, c.x, c.y);
+    if (boats) {
+      const wet = dryWater.isWater(c.x, c.y) && !onBridge(world.layout, c.x, c.y);
       c.afloat = wet;
     } else if (c.afloat) c.afloat = false;
     c.riding = !!own && c.moving && !c.afloat;
@@ -2798,6 +2830,7 @@ export function createWorld(seed = 481516, name?: string): World {
   scheduleGatherings(world);
   // Give everyone a real first destination so the world is in motion on frame one.
   for (const c of world.citizens) assignDestination(world, c, phaseFor(c, world.hour));
+  rankWealth(world);
   return world;
 }
 
@@ -4144,7 +4177,7 @@ export function upgradeEffect(type: string): string {
     'Vertical Farm': `its daily lift ${quarter}`, 'Drone Port': `its daily lift ${quarter}`, Monument: `its daily pride ${quarter}`,
     Stables: `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`, 'Railway Station': `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`,
     'Bus Depot': `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`, 'Pod Hub': `people travel ${Math.round(TRANSPORT_PACE * 100)}% faster`,
-    Harbour: 'nothing yet: the ferry does its one job', Gasworks: 'nothing yet: it keeps the smog off and that is all',
+    Harbour: 'nothing yet: the ferry carries the well-off across the water', Gasworks: 'nothing yet: it keeps the smog off and that is all',
   };
   return effects[type] ?? 'nothing yet';
 }
@@ -5928,7 +5961,7 @@ export function removeBridge(world: World, x: number, y: number): { ok: boolean;
   for (const [ex, ey] of ends) {
     const island = water.landAt(ex, ey);
     if (island < 0 || island === water.mainland) continue;
-    const otherWay = hasFerry(world) || rest.some((b) => {
+    const otherWay = rest.some((b) => {
       const c = Math.cos(b.angle), s = Math.sin(b.angle);
       return water.landAt(b.x - c * b.span, b.y - s * b.span) === island || water.landAt(b.x + c * b.span, b.y + s * b.span) === island;
     });
@@ -7488,7 +7521,20 @@ export function returnYield(world: World, amount: number) {
   world.stewardship.pending += Math.round(amount);
 }
 
+/** Rank everybody by their purse and mark their class. */
+export function rankWealth(world: World) {
+  const adults = world.citizens.filter((c) => c.age >= 16).sort((x, y) => y.wallet - x.wallet);
+  const n = adults.length;
+  const richSeats = n >= 4 ? Math.max(1, Math.round(n * WEALTHY_SHARE)) : n >= 2 ? 1 : 0;
+  adults.forEach((c, i) => {
+    const pct = i / Math.max(1, n);
+    c.wealth = i < richSeats && c.wallet >= WEALTHY_FLOOR ? 'wealthy' : pct < 0.4 ? 'comfortable' : pct < 0.75 ? 'modest' : 'poor';
+  });
+  for (const c of world.citizens) if (c.age < 16) c.wealth = undefined;
+}
+
 function daily(world: World) {
+  rankWealth(world);
   // The night just gone, as each of them will remember it.
   for (const c of world.citizens) {
     if (c.age < 16) continue;
@@ -8334,7 +8380,9 @@ export const rideFor = (ride: Ride | null, c: { hash: number }): Ride | null => 
 
 /** Whether people may stand on this landmass without a bridge to it. */
 function reachable(world: { buildings: Building[]; connectedIslands: number[] }, water: WaterField, land: number) {
-  return land === water.mainland || world.connectedIslands.includes(land) || hasFerry(world);
+  // The ferry is not counted: it carries the well-off, and a workplace on an
+  // island has to be reachable by everybody who works there.
+  return land === water.mainland || world.connectedIslands.includes(land);
 }
 
 /**

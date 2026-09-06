@@ -3346,3 +3346,12 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 .casino-buy button:disabled { opacity: 0.5; }
 .casino-fine { margin: 0; }
 @media (max-width: 640px) { .casino-top, .casino-games { grid-template-columns: 1fr; } .casino-cups { gap: 12px; } }
+
+/* A transaction hash is one unbreakable word: shortened, linked, and never allowed past the card. */
+.tx-line { overflow-wrap: anywhere; word-break: break-all; min-width: 0; }
+.tx-line a { color: var(--emerald); text-decoration: none; border-bottom: 1px dotted rgba(184, 231, 86, 0.5); }
+
+.casino-buy-block { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.casino-passes { display: flex; gap: 4px; }
+.casino-passes button { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.04); color: var(--muted); font-size: 10.5px; }
+.casino-passes button.sel { border-color: var(--gold); color: var(--gold); background: rgba(240, 208, 94, 0.1); }

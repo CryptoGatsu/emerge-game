@@ -993,8 +993,8 @@ export default function Wiki() {
           <h3>What a township changes</h3>
           <ul>
             <li><b>The look.</b> Buildings raised or improved after the step are stone with tiled roofs; the ones you already had keep their timber until you improve them, so an old stone chapel in the middle of a modern town is the right picture. Dirt lanes become cobbles. People wear wool coats and hats.</li>
-            <li><b>Carts.</b> A Stables puts every working adult on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them.</li>
-            <li><b>The ferry.</b> A Harbour puts a boat on every channel. People cross open water on it where there is no bridge, and every island counts as reachable, so a settlement hemmed in by water can spread to all of its land. Bridges stay, and the roads still run over them. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
+            <li><b>Carts.</b> A Stables puts the well-off on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them. Transport is a luxury in every age: each morning everybody is ranked by their purse, the top slice are well off, and only they ride. The class shows on the person&rsquo;s card.</li>
+            <li><b>The ferry.</b> A Harbour puts boats on the water for the well-off, who cross anywhere in a boat of their own. Everybody else needs a bridge, and a workplace on an island still has to be bridged to count as reachable, so the settlement builds crossings as it did before. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
             <li><b>Six buildings.</b> Chapel (company and purpose), Guildhall (learning), Brewery (company), Printer (purpose and learning), Stables, Harbour. They cost Gold, timber and stone like everything else and appear on their shelves in the Build panel once the plot is a township.</li>
           </ul>
           <h3>The later eras</h3>
@@ -1005,7 +1005,7 @@ export default function Wiki() {
             with it. Buildings already standing keep their look until you improve them.
           </p>
           <ul>
-            <li><b>Rides.</b> A Railway Station puts working adults on the rails, faster than carts. A Bus Depot puts them in cars, a third of them on bikes. A Pod Hub puts everybody in autonomous pods, fastest of all. Each ride is drawn under the person, and a town that loses its newest transport falls back to the one before.</li>
+            <li><b>Rides.</b> A Railway Station puts the well-off on the rails, faster than carts. A Bus Depot puts them in cars, a third of them on bikes. A Pod Hub puts them in autonomous pods, fastest of all. Everybody else walks, in every age. Each ride is drawn under the person, and a town that loses its newest transport falls back to the one before.</li>
             <li><b>Boats.</b> The Harbour&rsquo;s ferry becomes a steamboat, then a motorboat, then a hydrofoil.</li>
             <li><b>Smog.</b> An industrial town without a Gasworks lives under smog, a slow drain on everybody&rsquo;s happiness. A Gasworks clears it, and the modern era leaves it behind.</li>
             <li><b>Industry.</b> Factory, Foundry, Power Plant and Research Campus each add to what every trade produces, on top of the Lab.</li>

@@ -33,7 +33,7 @@ export const ERAS: EraSpec[] = [
   {
     id: 2, name: 'Township', days: 60,
     look: 'Stone and brick, tiled roofs, cobbled streets.',
-    arrives: 'Carts on the roads, a ferry across the water, a Chapel, a Guildhall, a Brewery, a Printer, Stables and a Harbour.',
+    arrives: 'Carts for the well-off, a ferry for those who can pay, a Chapel, a Guildhall, a Brewery, a Printer, Stables and a Harbour.',
   },
   {
     id: 3, name: 'Industrial', days: 90,

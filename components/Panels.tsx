@@ -2338,9 +2338,20 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
           <p className="muted">
             {t('Claimed for {price} {ticker} · seed {seed} · day {day}', { price: claimed.price.toLocaleString(), ticker: TOKEN.ticker, seed: view.seed, day: view.day })}
           </p>
-          <p className="muted small">
+          <p className="muted small tx-line">
             {claimed.txHash
-              ? t('Settled on chain: {tx}', { tx: claimed.txHash })
+              ? (
+                <>
+                  {t('Settled on chain:')}{' '}
+                  {ACTIVE_CHAIN.explorerUrl
+                    ? (
+                      <a href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/tx/${claimed.txHash}`} target="_blank" rel="noreferrer noopener" title={claimed.txHash}>
+                        {claimed.txHash.slice(0, 10)}…{claimed.txHash.slice(-6)}
+                      </a>
+                    )
+                    : <span title={claimed.txHash}>{claimed.txHash.slice(0, 10)}…{claimed.txHash.slice(-6)}</span>}
+                </>
+              )
               : t('Recorded in this browser. Not settled on chain yet.')}
           </p>
           <label className="name-field">

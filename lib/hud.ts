@@ -15,7 +15,7 @@ import {
   skillLevel, skillOutput, upgradeCost, upkeepOf,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
-  readiness, talkingWith,
+  readiness, talkingWith, WEALTH_WORDS, wealthOf,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
   type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD } from './simulation';
 import { statusLine } from './speech';
@@ -335,7 +335,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       mood: c.happiness, energy: c.rest, purpose: c.purpose, hunger: c.hunger, social: c.social,
       wallet: c.wallet, wage: c.wage,
       friends: friendsOf(world, c.id).slice(0, 4).map((f) => ({ id: f.citizen.id, name: f.citizen.name })),
-      traits: traitWords(c),
+      traits: [WEALTH_WORDS[wealthOf(c)], ...traitWords(c)],
       lately: latelyOf(world, c).slice(0, 4),
       lastTalk: (() => {
         const talks = Object.entries(c.lastTalk ?? {}).sort((x, y) => y[1].day - x[1].day);

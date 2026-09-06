@@ -46,6 +46,7 @@ export default function Casino({ address, treasury, ledger, onLedger, onGold, on
   const [result, setResult] = useState<PlayResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [buying, setBuying] = useState<'emerge' | 'eth' | null>(null);
+  const [passes, setPasses] = useState(1);
   const live = useRef(true);
 
   useEffect(() => {
@@ -99,25 +100,25 @@ export default function Casino({ address, treasury, ledger, onLedger, onGold, on
     setBuying(method); setMessage(null);
     let txHash: string | null = null;
     if (method === 'emerge') {
-      const paid = await pay(ledger, info.prices.emerge, address, VAULT_ADDRESS);
+      const paid = await pay(ledger, info.prices.emerge * passes, address, VAULT_ADDRESS);
       if (!paid.ok) { setMessage(paid.refused ? tx(paid.refused) : t('The payment did not go through.')); setBuying(null); return; }
       txHash = paid.txHash;
       onLedger(paid.ledger);
     } else {
-      const sent = await sendEth(address, VAULT_ADDRESS, BigInt(info.prices.ethWei));
+      const sent = await sendEth(address, VAULT_ADDRESS, BigInt(info.prices.ethWei) * BigInt(passes));
       if (!sent.ok) { setMessage(tx(sent.message)); setBuying(null); return; }
       txHash = sent.txHash;
     }
     // The chain takes a few seconds to confirm; ask again until it has.
     for (let attempt = 0; attempt < 12; attempt++) {
-      const r = await buyPass(address, method, txHash);
-      if (r.ok) { setInfo((i) => (i ? { ...i, plays: r.plays } : i)); setMessage(t('A pass of {n} plays is yours.', { n: info.rules.passPlays })); onCue('tick'); setBuying(null); return; }
+      const r = await buyPass(address, method, txHash, passes);
+      if (r.ok) { setInfo((i) => (i ? { ...i, plays: r.plays } : i)); setMessage(t('{n} more plays are yours.', { n: info.rules.passPlays * passes })); onCue('tick'); setBuying(null); return; }
       if (!r.settling) { setMessage(tx(r.error)); setBuying(null); return; }
       await new Promise((res) => setTimeout(res, 3000));
     }
     setMessage(t('The chain is slow to confirm the pass. It will be credited when it does; open the casino again in a minute.'));
     setBuying(null);
-  }, [address, info, buying, ledger, onLedger, onCue]);
+  }, [address, info, buying, ledger, onLedger, onCue, passes]);
 
   const picks = game === 'coin' ? [t('Heads'), t('Tails')] : [t('Left'), t('Middle'), t('Right')];
 
@@ -217,17 +218,26 @@ export default function Casino({ address, treasury, ledger, onLedger, onGold, on
               <div className="casino-pass">
                 <div>
                   <h4>{t('Out of plays?')}</h4>
-                  <p className="muted small">{t('A pass of {n} more plays is about ${usd}. {ticker} passes go into the vault and are burned and kept like every charge; ETH passes go to the vault too, with a share to development.', { n: info.rules.passPlays, usd: info.rules.passUsd, ticker: TOKEN.ticker })}</p>
+                  <p className="muted small">{t('Every {n} plays are about ${usd}; buy as many as you like. {ticker} passes go into the vault and are burned and kept like every charge; ETH passes go to the vault too, with a share to development.', { n: info.rules.passPlays, usd: info.rules.passUsd, ticker: TOKEN.ticker })}</p>
                 </div>
-                <div className="casino-buy">
-                  <button disabled={!address || buying !== null} onClick={() => buy('emerge')}>
-                    {buying === 'emerge' ? t('Paying…') : `${info.prices.emerge.toLocaleString()} ${TOKEN.ticker}`}
-                  </button>
-                  {tokenLive() && (
-                    <button disabled={!address || buying !== null} onClick={() => buy('eth')}>
-                      {buying === 'eth' ? t('Paying…') : `${ethText(info.prices.ethWei)} ETH`}
+                <div className="casino-buy-block">
+                  <div className="casino-passes">
+                    {[1, 2, 5, 10].map((n) => (
+                      <button key={n} className={passes === n ? 'sel' : ''} disabled={buying !== null} onClick={() => setPasses(n)}>
+                        {t('{n} plays', { n: n * info.rules.passPlays })}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="casino-buy">
+                    <button disabled={!address || buying !== null} onClick={() => buy('emerge')}>
+                      {buying === 'emerge' ? t('Paying…') : `${(info.prices.emerge * passes).toLocaleString()} ${TOKEN.ticker}`}
                     </button>
-                  )}
+                    {tokenLive() && (
+                      <button disabled={!address || buying !== null} onClick={() => buy('eth')}>
+                        {buying === 'eth' ? t('Paying…') : `${ethText((BigInt(info.prices.ethWei) * BigInt(passes)).toString())} ETH`}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 

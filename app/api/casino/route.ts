@@ -24,6 +24,8 @@ export const dynamic = 'force-dynamic';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** Below this the development share is left to accumulate rather than paid as dust. */
 const DEV_SWEEP_GWEI = 1_000_000; // 0.001 ETH
+/** Passes in one payment; enough for an evening, few enough to price sanely. */
+const MAX_PASSES_AT_ONCE = 20;
 
 const rules = () => ({
   freePlays: FREE_PLAYS_PER_DAY, passPlays: PASS_PLAYS, passUsd: PASS_USD,
@@ -57,7 +59,7 @@ async function sweepDev(): Promise<void> {
 }
 
 export async function POST(request: Request) {
-  let body: { address?: string; play?: { game?: string; pick?: number; bet?: number; prize?: string }; buy?: { method?: string; txHash?: string | null } };
+  let body: { address?: string; play?: { game?: string; pick?: number; bet?: number; prize?: string }; buy?: { method?: string; txHash?: string | null; passes?: number } };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 }); }
   const address = String(body.address ?? '');
   if (!ADDRESS.test(address)) return NextResponse.json({ error: 'Connect a wallet to play.' }, { status: 400 });
@@ -102,15 +104,17 @@ export async function POST(request: Request) {
   if (body.buy) {
     const method = body.buy.method === 'eth' ? 'eth' : 'emerge';
     const txHash = body.buy.txHash ? String(body.buy.txHash) : null;
+    // As many passes as they like in one payment, within reason.
+    const passes = Math.max(1, Math.min(MAX_PASSES_AT_ONCE, Math.floor(Number(body.buy.passes) || 1)));
     const prices = await passPrices();
     if (tokenLive()) {
       if (!txHash) return NextResponse.json({ error: 'The pass has not been paid for.' }, { status: 402 });
       if (method === 'emerge') {
-        const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, Math.floor(prices.emerge * 0.97));
+        const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, Math.floor(prices.emerge * passes * 0.97));
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
         if (!(await spendBurn(txHash, 'casino-pass', paid.whole))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       } else {
-        const wei = BigInt(prices.ethWei);
+        const wei = BigInt(prices.ethWei) * BigInt(passes);
         const paid = await verifyNative(txHash, address, VAULT_ADDRESS, (wei * 97n) / 100n);
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
         if (!(await spendBurn(txHash, 'casino-pass-eth'))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
@@ -120,8 +124,8 @@ export async function POST(request: Request) {
         void sweepDev().catch(() => {});
       }
     }
-    await grantPlays(address, PASS_PLAYS);
-    await incrBy(PASSES_SOLD, 1);
+    await grantPlays(address, PASS_PLAYS * passes);
+    await incrBy(PASSES_SOLD, passes);
     return NextResponse.json({ plays: await playsOf(address) });
   }
 

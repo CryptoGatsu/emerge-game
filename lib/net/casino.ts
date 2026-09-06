@@ -42,11 +42,11 @@ export async function playCasino(address: string, play: { game: CasinoGame; pick
   } catch { return { ok: false, error: 'Could not reach the casino.' }; }
 }
 
-export async function buyPass(address: string, method: 'emerge' | 'eth', txHash: string | null): Promise<{ ok: true; plays: { free: number; extra: number } } | { ok: false; error: string; settling?: boolean }> {
+export async function buyPass(address: string, method: 'emerge' | 'eth', txHash: string | null, passes = 1): Promise<{ ok: true; plays: { free: number; extra: number } } | { ok: false; error: string; settling?: boolean }> {
   try {
     const response = await withSession(
       address,
-      () => fetch('/api/casino', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address, buy: { method, txHash } }) }),
+      () => fetch('/api/casino', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address, buy: { method, txHash, passes } }) }),
       async (r) => r,
     );
     const json = (await response.json()) as { plays?: { free: number; extra: number }; error?: string; retry?: boolean };
