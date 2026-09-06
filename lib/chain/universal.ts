@@ -12,13 +12,91 @@
  * Pure encoding, no chain access, so the harness can check every byte.
  */
 
-import { encodeAbiParameters, encodePacked, type Hex } from 'viem';
+import { BaseError, ContractFunctionRevertedError, decodeErrorResult, encodeAbiParameters, encodePacked, type Abi, type Hex } from 'viem';
 
 /** Permit2, deployed at the same address on every chain Uniswap ships to. */
 export const PERMIT2_ADDRESS: Hex = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 
 /** The Universal Router's command byte for a V3 exact-input swap. */
 export const V3_SWAP_EXACT_IN = 0x00;
+/** And for a V4 swap, whose input is a list of actions of its own. */
+export const V4_SWAP = 0x10;
+/** The v4 router actions a plain exact-input swap needs, from v4-periphery's Actions. */
+export const V4_ACTIONS = { SWAP_EXACT_IN: 0x07, SETTLE_ALL: 0x0c, TAKE_ALL: 0x0f } as const;
+
+/**
+ * What the router and Permit2 can throw. Without these the client only
+ * says `"execute" reverted`, which is what the casino showed a winner
+ * whose GLD could not be bought; with them the reason has a name.
+ */
+export const ROUTER_ERRORS = [
+  { type: 'error', name: 'ExecutionFailed', inputs: [{ name: 'commandIndex', type: 'uint256' }, { name: 'message', type: 'bytes' }] },
+  { type: 'error', name: 'TransactionDeadlinePassed', inputs: [] },
+  { type: 'error', name: 'ETHNotAccepted', inputs: [] },
+  { type: 'error', name: 'LengthMismatch', inputs: [] },
+  { type: 'error', name: 'InvalidCommandType', inputs: [{ name: 'commandType', type: 'uint256' }] },
+  { type: 'error', name: 'BalanceTooLow', inputs: [] },
+  { type: 'error', name: 'InvalidBips', inputs: [] },
+  { type: 'error', name: 'InvalidReserves', inputs: [] },
+  { type: 'error', name: 'InvalidPath', inputs: [] },
+  { type: 'error', name: 'V2TooLittleReceived', inputs: [] },
+  { type: 'error', name: 'V2TooMuchRequested', inputs: [] },
+  { type: 'error', name: 'V3TooLittleReceived', inputs: [] },
+  { type: 'error', name: 'V3TooMuchRequested', inputs: [] },
+  { type: 'error', name: 'V3InvalidSwap', inputs: [] },
+  { type: 'error', name: 'V3InvalidCaller', inputs: [] },
+  { type: 'error', name: 'V3InvalidAmountOut', inputs: [] },
+  { type: 'error', name: 'V4TooLittleReceived', inputs: [{ name: 'minAmountOutReceived', type: 'uint256' }, { name: 'amountReceived', type: 'uint256' }] },
+  { type: 'error', name: 'V4TooMuchRequested', inputs: [{ name: 'maxAmountInRequested', type: 'uint256' }, { name: 'amountRequested', type: 'uint256' }] },
+  { type: 'error', name: 'InsufficientToken', inputs: [] },
+  { type: 'error', name: 'InsufficientETH', inputs: [] },
+  { type: 'error', name: 'FromAddressIsNotOwner', inputs: [] },
+  { type: 'error', name: 'ContractLocked', inputs: [] },
+  { type: 'error', name: 'InputLengthMismatch', inputs: [] },
+  { type: 'error', name: 'UnsupportedAction', inputs: [{ name: 'action', type: 'uint256' }] },
+  { type: 'error', name: 'NotPoolManager', inputs: [] },
+  { type: 'error', name: 'CurrencyNotSettled', inputs: [] },
+  { type: 'error', name: 'PoolNotInitialized', inputs: [] },
+  { type: 'error', name: 'DeltaNotPositive', inputs: [{ name: 'currency', type: 'address' }] },
+  { type: 'error', name: 'DeltaNotNegative', inputs: [{ name: 'currency', type: 'address' }] },
+  { type: 'error', name: 'ManagerLocked', inputs: [] },
+  { type: 'error', name: 'UnsafeCast', inputs: [] },
+  // Permit2
+  { type: 'error', name: 'AllowanceExpired', inputs: [{ name: 'deadline', type: 'uint256' }] },
+  { type: 'error', name: 'InsufficientAllowance', inputs: [{ name: 'amount', type: 'uint256' }] },
+  { type: 'error', name: 'InvalidNonce', inputs: [] },
+  { type: 'error', name: 'SignatureExpired', inputs: [{ name: 'signatureDeadline', type: 'uint256' }] },
+  // ERC-20s that use custom errors
+  { type: 'error', name: 'ERC20InsufficientBalance', inputs: [{ name: 'sender', type: 'address' }, { name: 'balance', type: 'uint256' }, { name: 'needed', type: 'uint256' }] },
+  { type: 'error', name: 'ERC20InsufficientAllowance', inputs: [{ name: 'spender', type: 'address' }, { name: 'allowance', type: 'uint256' }, { name: 'needed', type: 'uint256' }] },
+] as const;
+
+/** Revert bytes, in words: the error's name and arguments, nested through the router's wrapper. */
+export function explainRevertData(raw: Hex | undefined): string {
+  if (!raw || raw === '0x') return 'reverted without a reason (no pool on that route at that fee, or the router is not what its address says)';
+  try {
+    // Widened: viem also decodes Solidity's own Error(string) and Panic, which
+    // the typed ABI does not name.
+    const decoded = decodeErrorResult({ abi: ROUTER_ERRORS as unknown as Abi, data: raw }) as { errorName: string; args?: readonly unknown[] };
+    if (decoded.errorName === 'ExecutionFailed') {
+      const [index, inner] = decoded.args as readonly [bigint, Hex];
+      return `ExecutionFailed at command ${index}: ${explainRevertData(inner)}`;
+    }
+    if (decoded.errorName === 'Error') return `"${String(decoded.args?.[0] ?? '')}"`;
+    const args = (decoded.args ?? []).map((a) => String(a)).join(', ');
+    return args ? `${decoded.errorName}(${args})` : decoded.errorName;
+  } catch {
+    return `revert data ${raw.slice(0, 10)}… (${(raw.length - 2) / 2} bytes)`;
+  }
+}
+
+/** What a viem call error means, for a log line or a player's screen. */
+export function explainRevert(error: unknown): string {
+  if (!(error instanceof BaseError)) return error instanceof Error ? error.message.split('\n')[0].slice(0, 160) : String(error).slice(0, 160);
+  const reverted = error.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
+  if (!reverted) return error.shortMessage.split('\n')[0].slice(0, 160);
+  return explainRevertData(reverted.raw ?? (reverted.data ? undefined : '0x'));
+}
 
 export const UNIVERSAL_ROUTER = [
   {
@@ -60,12 +138,16 @@ export const QUOTER_V2 = [
 export interface Route {
   /** One fee tier per hop, in hundredths of a basis point: 500, 3000, 10000. */
   fees: number[];
+  /** One tick spacing per hop, for v4 pools; the usual spacing for the fee unless the route says. */
+  ticks: number[];
   /** The tokens passed through between the ends, one fewer than the fees. */
   via: Hex[];
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const FEE_TIERS = new Set([100, 500, 3000, 10000]);
+/** The tick spacing each standard fee tier was created with. */
+const TICK_FOR_FEE: Record<number, number> = { 100: 1, 500: 10, 3000: 60, 10000: 200 };
 
 /**
  * Read a route out of `EMERGE_SWAP_PATH`: fees and the tokens between them,
@@ -75,21 +157,27 @@ const FEE_TIERS = new Set([100, 500, 3000, 10000]);
  */
 export function parseRoute(spec: string | undefined, fallbackFee = 3000): Route {
   const parts = (spec ?? '').split(',').map((p) => p.trim()).filter(Boolean);
-  if (!parts.length) return { fees: [FEE_TIERS.has(fallbackFee) ? fallbackFee : 3000], via: [] };
+  if (!parts.length) { const fee = FEE_TIERS.has(fallbackFee) ? fallbackFee : 3000; return { fees: [fee], ticks: [TICK_FOR_FEE[fee]], via: [] }; }
   const fees: number[] = [];
+  const ticks: number[] = [];
   const via: Hex[] = [];
   parts.forEach((part, i) => {
     if (i % 2 === 0) {
-      const fee = Number(part);
-      if (!FEE_TIERS.has(fee)) throw new Error(`Not a fee tier: ${part}`);
-      fees.push(fee);
+      // `3000` is a standard tier; `3000/60` names the tick spacing too,
+      // which a v4 pool made with an unusual fee needs.
+      const [feeText, tickText] = part.split('/');
+      const fee = Number(feeText);
+      if (!Number.isInteger(fee) || fee < 0 || fee >= 1_000_000) throw new Error(`Not a fee: ${part}`);
+      const tick = tickText !== undefined ? Number(tickText) : TICK_FOR_FEE[fee];
+      if (!Number.isInteger(tick) || tick <= 0) throw new Error(`No tick spacing for fee ${fee}: write it as ${fee}/<spacing>`);
+      fees.push(fee); ticks.push(tick);
     } else {
       if (!ADDRESS.test(part)) throw new Error(`Not a token address: ${part}`);
       via.push(part as Hex);
     }
   });
   if (parts.length % 2 === 0) throw new Error('A route starts and ends with a fee.');
-  return { fees, via };
+  return { fees, ticks, via };
 }
 
 /** The packed V3 path: token, fee, token, fee, … token. */
@@ -117,3 +205,46 @@ export function universalSwap(recipient: Hex, amountIn: bigint, minOut: bigint, 
   );
   return { commands: `0x${V3_SWAP_EXACT_IN.toString(16).padStart(2, '0')}` as Hex, inputs: [inputs] };
 }
+
+/** A v4 path key per hop: the currency arrived at, and the pool it is reached through. */
+export interface PathKey { intermediateCurrency: Hex; fee: number; tickSpacing: number; hooks: Hex; hookData: Hex }
+const NO_HOOKS: Hex = '0x0000000000000000000000000000000000000000';
+
+export function v4PathKeys(route: Route, tokenOut: Hex): PathKey[] {
+  const arrivals = [...route.via, tokenOut];
+  if (arrivals.length !== route.fees.length) throw new Error('The route does not fit its tokens.');
+  return arrivals.map((currency, i) => ({ intermediateCurrency: currency, fee: route.fees[i], tickSpacing: route.ticks[i], hooks: NO_HOOKS, hookData: '0x' }));
+}
+
+const PATH_KEY = { type: 'tuple', components: [
+  { name: 'intermediateCurrency', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }, { name: 'hookData', type: 'bytes' },
+] } as const;
+
+/**
+ * One `execute` call that swaps `amountIn` of `tokenIn` along v4 pools: swap
+ * exact-in along the path, settle the whole input from the caller through
+ * Permit2, take every unit of the output to the caller.
+ */
+export function universalSwapV4(tokenIn: Hex, amountIn: bigint, minOut: bigint, path: PathKey[]): { commands: Hex; inputs: Hex[] } {
+  const tokenOut = path[path.length - 1].intermediateCurrency;
+  const actions = `0x${[V4_ACTIONS.SWAP_EXACT_IN, V4_ACTIONS.SETTLE_ALL, V4_ACTIONS.TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex;
+  const swap = encodeAbiParameters(
+    [{ type: 'tuple', components: [{ name: 'currencyIn', type: 'address' }, { ...PATH_KEY, name: 'path', type: 'tuple[]' }, { name: 'amountIn', type: 'uint128' }, { name: 'amountOutMinimum', type: 'uint128' }] }],
+    [{ currencyIn: tokenIn, path, amountIn, amountOutMinimum: minOut }],
+  );
+  const settle = encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [tokenIn, amountIn]);
+  const take = encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [tokenOut, minOut]);
+  const input = encodeAbiParameters([{ type: 'bytes' }, { type: 'bytes[]' }], [actions, [swap, settle, take]]);
+  return { commands: `0x${V4_SWAP.toString(16).padStart(2, '0')}` as Hex, inputs: [input] };
+}
+
+/** The v4 quoter's exact-input quote, simulated rather than sent. */
+export const V4_QUOTER = [
+  {
+    type: 'function', name: 'quoteExactInput', stateMutability: 'nonpayable',
+    inputs: [{ name: 'params', type: 'tuple', components: [
+      { name: 'exactCurrency', type: 'address' }, { ...PATH_KEY, name: 'path', type: 'tuple[]' }, { name: 'exactAmount', type: 'uint128' },
+    ] }],
+    outputs: [{ name: 'amountOut', type: 'uint256' }, { name: 'gasEstimate', type: 'uint256' }],
+  },
+] as const;

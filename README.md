@@ -583,7 +583,12 @@ GLD, e.g. `3000,<USDG>,3000`), paid through Permit2 (`EMERGE_PERMIT2`,
 default the canonical address) and floored under QuoterV2 when
 `EMERGE_SWAP_QUOTER` is set (`lib/chain/universal.ts` does the encoding).
 `v2` (`swapExactTokensForTokens`) and `v3` (`exactInputSingle`, fee from
-`EMERGE_SWAP_FEE`) remain for plain routers. Without a live token the
+`EMERGE_SWAP_FEE`) remain for plain routers. Pools the Uniswap app makes on a
+new chain are v4: for those set `EMERGE_SWAP_KIND=v4` with the same path
+syntax (a hop may carry its tick spacing as `fee/spacing`) and the V4Quoter
+in `EMERGE_SWAP_QUOTER`. `GET /api/vault?probe=1` with the cron secret
+simulates the swap as configured and reports allowances, the quote and the
+decoded revert reason, sending nothing. Without a live token the
 settlement is simulated in $EMERGE units so the flow can be exercised.
 
 v2.3: stewardship is judged on the server (`judgedFor` in
@@ -1027,9 +1032,9 @@ EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, v
 EMERGE_DEPOSIT_CONFIRMATIONS=              # default: 3
 EMERGE_DEV_ADDRESS=                        # the 30% development share of the dividend pool
 EMERGE_CRON_SECRET=                        # or Vercel's CRON_SECRET: the crons' bearer token
-EMERGE_SWAP_KIND=                          # universal (Robinhood Chain), v3 or v2 (default)
-EMERGE_SWAP_PATH=                          # universal: fee,token,fee… e.g. 3000,<USDG>,3000
-EMERGE_SWAP_QUOTER=                        # universal: QuoterV2, for the 3% floor
+EMERGE_SWAP_KIND=                          # universal (v3 pools through the Universal Router), v4 (v4 pools through it), v3 or v2 (default)
+EMERGE_SWAP_PATH=                          # universal/v4: fee,token,fee… e.g. 3000,<USDG>,500; a v4 hop may name its tick spacing as fee/spacing
+EMERGE_SWAP_QUOTER=                        # universal: QuoterV2; v4: the V4Quoter — for the 3% floor
 EMERGE_PERMIT2=                            # universal: default 0x000000000022D473030F116dDEE9F6B43aC78BA3
 EMERGE_SWAP_FEE=                           # v3: the pool's fee tier, default 3000
 KV_REST_API_URL=                           # required in production: the settlement ledger

@@ -7,16 +7,34 @@
  * `POST /api/vault` with `{ sweep: true }` asks the vault to burn what it
  * owes now rather than after the next charge. Anybody may ask; it only ever
  * burns the vault's own owed share, once, under a lock.
+ *
+ * `GET /api/vault?probe=1`, with the cron secret, simulates the GLD swap as
+ * configured and says what it would do, allowances and revert reason
+ * included. Nothing is sent.
  */
 
 import { NextResponse } from 'next/server';
 import { sweepBurn, vaultBook } from '@/lib/server/treasury';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
+import { probeSwap } from '@/lib/server/signer';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+const cronAllowed = (request: Request) => {
+  const secret = process.env.EMERGE_CRON_SECRET ?? process.env.CRON_SECRET ?? '';
+  if (!secret) return false;
+  const auth = request.headers.get('authorization') ?? '';
+  return auth === `Bearer ${secret}` || request.headers.get('x-cron-secret') === secret;
+};
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('probe')) {
+    if (!cronAllowed(request)) return NextResponse.json({ error: 'Not for you.' }, { status: 401 });
+    const amount = Number(url.searchParams.get('amount')) || 100;
+    return NextResponse.json(await probeSwap(amount), { headers: { 'cache-control': 'no-store, max-age=0' } });
+  }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });
   } catch {

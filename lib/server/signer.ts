@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { PERMIT2, PERMIT2_ADDRESS, QUOTER_V2, UNIVERSAL_ROUTER, parseRoute, universalSwap, v3Path } from '../chain/universal';
+import { PERMIT2, PERMIT2_ADDRESS, QUOTER_V2, UNIVERSAL_ROUTER, V4_QUOTER, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -422,7 +422,7 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     const kind = (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase();
     let txHash: Hex;
     let unquoted = false;
-    if (kind === 'universal') {
+    if (kind === 'universal' || kind === 'v4') {
       // Permit2 pays the router out of the vault: the token approves Permit2
       // once, and Permit2 approves the router for this amount and the hour.
       const permit2 = ((process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex);
@@ -440,16 +440,28 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
         nonce += 1;
       }
       const route = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
-      const path = v3Path(token() as Hex, route, GLD_ADDRESS as Hex);
-      let minOut = 0n;
       const quoter = process.env.EMERGE_SWAP_QUOTER ?? '';
-      if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
-        const [quoted] = await client.readContract({ address: quoter as Hex, abi: QUOTER_V2, functionName: 'quoteExactInput', args: [path, units] });
-        minOut = (quoted * 97n) / 100n;
-      } else unquoted = true;
-      const { commands, inputs } = universalSwap(account.address, units, minOut, path);
+      let minOut = 0n;
+      let call: { commands: Hex; inputs: Hex[] };
+      if (kind === 'v4') {
+        // Uniswap v4 pools, the kind the Uniswap app makes on a new chain:
+        // the same router, a different command, and a quoter of its own.
+        const path = v4PathKeys(route, GLD_ADDRESS as Hex);
+        if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
+          const { result } = await client.simulateContract({ address: quoter as Hex, abi: V4_QUOTER, functionName: 'quoteExactInput', args: [{ exactCurrency: token() as Hex, path, exactAmount: units }] });
+          minOut = (result[0] * 97n) / 100n;
+        } else unquoted = true;
+        call = universalSwapV4(token() as Hex, units, minOut, path);
+      } else {
+        const path = v3Path(token() as Hex, route, GLD_ADDRESS as Hex);
+        if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
+          const [quoted] = await client.readContract({ address: quoter as Hex, abi: QUOTER_V2, functionName: 'quoteExactInput', args: [path, units] });
+          minOut = (quoted * 97n) / 100n;
+        } else unquoted = true;
+        call = universalSwap(account.address, units, minOut, path);
+      }
       const deadline = BigInt(now + 600);
-      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [commands, inputs, deadline], nonce });
+      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline], nonce });
       txHash = await wallet.writeContract(request);
     } else if (kind === 'v3') {
       const fee = Number(process.env.EMERGE_SWAP_FEE) || 3000;
@@ -469,9 +481,73 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     const after = await client.readContract({ address: GLD_ADDRESS as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
     return { ok: true, txHash, received: after > before ? after - before : 0n, unquoted };
   } catch (error) {
-    const why = error instanceof Error ? error.message.split('\n')[0].slice(0, 160) : 'unknown';
-    return { ok: false, problem: `The swap could not be sent: ${why}` };
+    return { ok: false, problem: `The swap could not be sent: ${explainRevert(error)}` };
   } finally {
     await releaseLock(NONCE_LOCK);
   }
+}
+
+/**
+ * What the swap would do, without sending it: every setting the vault reads,
+ * every allowance, the quote, and the simulated `execute` with its revert
+ * decoded. For the operator, behind the cron secret, when a GLD payout
+ * says the swap failed and the message alone does not say why.
+ */
+export async function probeSwap(wholeEmerge = 100): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {
+    kind: (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase(),
+    router: SWAP_ROUTER, token: token(), gld: GLD_ADDRESS, permit2: process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS,
+    path: process.env.EMERGE_SWAP_PATH ?? '(unset: one hop at the default fee)', quoter: process.env.EMERGE_SWAP_QUOTER ?? '(unset)',
+    signer: vaultCanSign(), amount: wholeEmerge,
+  };
+  const key = vaultKey();
+  if (!key || !token()) { out.verdict = 'The vault cannot sign, or no token is configured.'; return out; }
+  try {
+    const account = privateKeyToAccount(key);
+    const client = reader();
+    out.vault = account.address;
+    const decimals = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' });
+    const units = parseUnits(String(Math.floor(wholeEmerge)), Number(decimals));
+    out.held = String(await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] }));
+    out.routerCode = (await client.getCode({ address: SWAP_ROUTER as Hex }))?.length ?? 0;
+    const permit2 = (process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex;
+    out.permit2Code = (await client.getCode({ address: permit2 }))?.length ?? 0;
+    out.tokenToPermit2 = String(await client.readContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'allowance', args: [account.address, permit2] }));
+    const [granted, expires] = await client.readContract({ address: permit2, abi: PERMIT2, functionName: 'allowance', args: [account.address, token() as Hex, SWAP_ROUTER as Hex] });
+    out.permit2ToRouter = { amount: String(granted), expires: Number(expires), expired: Number(expires) <= Math.floor(Date.now() / 1000) };
+    const route = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
+    out.route = route;
+    const quoter = process.env.EMERGE_SWAP_QUOTER ?? '';
+    const kind = out.kind as string;
+    let call: { commands: Hex; inputs: Hex[] };
+    if (kind === 'v4') {
+      const path = v4PathKeys(route, GLD_ADDRESS as Hex);
+      if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
+        try {
+          const { result } = await client.simulateContract({ address: quoter as Hex, abi: V4_QUOTER, functionName: 'quoteExactInput', args: [{ exactCurrency: token() as Hex, path, exactAmount: units }] });
+          out.quote = String(result[0]);
+        } catch (error) { out.quote = `failed: ${explainRevert(error)}`; }
+      }
+      call = universalSwapV4(token() as Hex, units, 0n, path);
+    } else {
+      const path = v3Path(token() as Hex, route, GLD_ADDRESS as Hex);
+      out.v3Path = path;
+      if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
+        try {
+          const [quoted] = await client.readContract({ address: quoter as Hex, abi: QUOTER_V2, functionName: 'quoteExactInput', args: [path, units] });
+          out.quote = String(quoted);
+        } catch (error) { out.quote = `failed: ${explainRevert(error)}`; }
+      }
+      call = universalSwap(account.address, units, 0n, path);
+    }
+    try {
+      await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, BigInt(Math.floor(Date.now() / 1000) + 600)] });
+      out.simulation = 'ok: the swap would go through as configured';
+    } catch (error) {
+      out.simulation = `reverted: ${explainRevert(error)}`;
+    }
+  } catch (error) {
+    out.probe = `failed: ${explainRevert(error)}`;
+  }
+  return out;
 }
