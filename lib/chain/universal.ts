@@ -21,6 +21,7 @@ import { BaseError, ContractFunctionRevertedError, decodeErrorResult, encodeAbiP
  */
 export const UNISWAP_ON_ROBINHOOD = {
   universalRouter: '0x8876789976decbfcbbbe364623c63652db8c0904',
+  weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',
   v3Factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa',
   quoterV2: '0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7',
   swapRouter02: '0xcaf681a66d020601342297493863e78c959e5cb2',
@@ -33,6 +34,12 @@ export const UNISWAP_ON_ROBINHOOD = {
 export const V3_FACTORY = [
   { type: 'function', name: 'getPool', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }], outputs: [{ type: 'address' }] },
 ] as const;
+/** A v3 pool's standing liquidity: a pool the factory knows can still be empty. */
+export const V3_POOL = [
+  { type: 'function', name: 'liquidity', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint128' }] },
+] as const;
+/** Native ETH, as v4 names it: a currency of no address. */
+export const NATIVE: Hex = '0x0000000000000000000000000000000000000000';
 export const V4_STATE_VIEW = [
   { type: 'function', name: 'getSlot0', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' }, { name: 'protocolFee', type: 'uint24' }, { name: 'lpFee', type: 'uint24' }] },
   { type: 'function', name: 'getLiquidity', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'liquidity', type: 'uint128' }] },
@@ -173,6 +180,8 @@ export interface Route {
   fees: number[];
   /** One tick spacing per hop, for v4 pools; the usual spacing for the fee unless the route says. */
   ticks: number[];
+  /** One hook per hop, for v4 pools a launchpad made; none unless the route says. */
+  hooks: Hex[];
   /** The tokens passed through between the ends, one fewer than the fees. */
   via: Hex[];
 }
@@ -190,27 +199,31 @@ const TICK_FOR_FEE: Record<number, number> = { 100: 1, 500: 10, 3000: 60, 10000:
  */
 export function parseRoute(spec: string | undefined, fallbackFee = 3000): Route {
   const parts = (spec ?? '').split(',').map((p) => p.trim()).filter(Boolean);
-  if (!parts.length) { const fee = FEE_TIERS.has(fallbackFee) ? fallbackFee : 3000; return { fees: [fee], ticks: [TICK_FOR_FEE[fee]], via: [] }; }
+  if (!parts.length) { const fee = FEE_TIERS.has(fallbackFee) ? fallbackFee : 3000; return { fees: [fee], ticks: [TICK_FOR_FEE[fee]], hooks: [NATIVE], via: [] }; }
   const fees: number[] = [];
   const ticks: number[] = [];
+  const hooks: Hex[] = [];
   const via: Hex[] = [];
   parts.forEach((part, i) => {
     if (i % 2 === 0) {
       // `3000` is a standard tier; `3000/60` names the tick spacing too,
-      // which a v4 pool made with an unusual fee needs.
-      const [feeText, tickText] = part.split('/');
+      // which a v4 pool made with an unusual fee needs; `3000/60/0xHook`
+      // names the hook a launchpad attached. A dynamic-fee pool is written
+      // with its flag, 8388608, as the fee.
+      const [feeText, tickText, hookText] = part.split('/');
       const fee = Number(feeText);
-      if (!Number.isInteger(fee) || fee < 0 || fee >= 1_000_000) throw new Error(`Not a fee: ${part}`);
+      if (!Number.isInteger(fee) || fee < 0 || fee > 0x800000) throw new Error(`Not a fee: ${part}`);
       const tick = tickText !== undefined ? Number(tickText) : TICK_FOR_FEE[fee];
       if (!Number.isInteger(tick) || tick <= 0) throw new Error(`No tick spacing for fee ${fee}: write it as ${fee}/<spacing>`);
-      fees.push(fee); ticks.push(tick);
+      if (hookText !== undefined && !ADDRESS.test(hookText)) throw new Error(`Not a hook address: ${hookText}`);
+      fees.push(fee); ticks.push(tick); hooks.push((hookText ?? NATIVE) as Hex);
     } else {
       if (!ADDRESS.test(part)) throw new Error(`Not a token address: ${part}`);
       via.push(part as Hex);
     }
   });
   if (parts.length % 2 === 0) throw new Error('A route starts and ends with a fee.');
-  return { fees, ticks, via };
+  return { fees, ticks, hooks, via };
 }
 
 /** The packed V3 path: token, fee, token, fee, … token. */
@@ -246,7 +259,7 @@ const NO_HOOKS: Hex = '0x0000000000000000000000000000000000000000';
 export function v4PathKeys(route: Route, tokenOut: Hex): PathKey[] {
   const arrivals = [...route.via, tokenOut];
   if (arrivals.length !== route.fees.length) throw new Error('The route does not fit its tokens.');
-  return arrivals.map((currency, i) => ({ intermediateCurrency: currency, fee: route.fees[i], tickSpacing: route.ticks[i], hooks: NO_HOOKS, hookData: '0x' }));
+  return arrivals.map((currency, i) => ({ intermediateCurrency: currency, fee: route.fees[i], tickSpacing: route.ticks[i], hooks: route.hooks?.[i] ?? NO_HOOKS, hookData: '0x' }));
 }
 
 const PATH_KEY = { type: 'tuple', components: [
