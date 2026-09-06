@@ -186,15 +186,18 @@ export class CitizenSprite {
    * torch; somebody sick has gone a bad colour.
    */
   private moodFor(citizen: Citizen) {
-    const mood = citizen.rogue ? 'rogue' : citizen.sick ? 'sick' : '';
+    // A soldier wears their side: the garrison in the plot's own green and
+    // gold, an invader in red and black, so a fight reads from across the map.
+    const side = (citizen as { soldier?: 'home' | 'invader' }).soldier;
+    const mood = side === 'invader' ? 'invader' : side === 'home' ? 'garrison' : citizen.rogue ? 'rogue' : citizen.sick ? 'sick' : '';
     if (mood === this.moodShown) return;
     this.moodShown = mood;
     const trim = this.body.trim, head = this.body.head, hands = this.body.hands, body = this.body.body;
-    if (trim) trim.tint = mood === 'rogue' ? 0xe0402a : this.appearance.accent;
+    if (trim) trim.tint = mood === 'rogue' || mood === 'invader' ? 0xe0402a : mood === 'garrison' ? 0xffd27a : this.appearance.accent;
     const skin = mood === 'sick' ? 0xb8d8a8 : this.appearance.skin;
     if (head) head.tint = skin;
     if (hands) hands.tint = skin;
-    if (body) body.tint = mood === 'rogue' ? 0x4a2a28 : this.appearance.shirt;
+    if (body) body.tint = mood === 'rogue' ? 0x4a2a28 : mood === 'invader' ? 0x3a1e1e : mood === 'garrison' ? 0x2f5a3a : this.appearance.shirt;
   }
 
   private tintFor(layer: LayerName): number {

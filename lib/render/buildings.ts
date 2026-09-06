@@ -1016,6 +1016,29 @@ const RECIPES: Record<string, Recipe> = {
       wallPatch(p, g, 'right', 0.31, 0.5, 2, 2, '#aeb5ba');
     },
   },
+  // The base: a low stone hall with a drill yard's flagpole and a rack of
+  // spears against the wall. The age's dressing makes it a garrison, an
+  // armoury, a base and a drone bay in turn.
+  Barracks: {
+    bw: 72, wallH: 26, roofH: 10, roof: 'flat', wall: 'stone', roofColor: 'slate',
+    windows: [['left', 0.3, 0.3], ['left', 0.62, 0.3], ['right', 0.68, 0.3]],
+    door: ['right', 0.28], sign: 'BARRACKS',
+    extras: (p, lit, g) => {
+      // The flagpole on the roof, with a pennant.
+      const px = g.cx + Math.round(g.bw * 0.22), top = g.wallTopY - 30;
+      rect(p, px, top, 2, 34, '#9aa0a6');
+      rect(p, px + 2, top + 2, 12, 7, '#c8402a'); rect(p, px + 2, top + 2, 12, 1, '#ffd27a'); rect(p, px + 11, top + 4, 3, 3, '#ffd27a');
+      rect(p, px - 1, top - 2, 4, 2, '#e0c060');
+      // A rack of spears against the lit wall.
+      for (let i = 0; i < 5; i++) {
+        wallPatch(p, g, 'right', 0.55 + i * 0.05, 0.22, 1, Math.round(g.wallH * 0.7), '#5a4a30');
+        wallPatch(p, g, 'right', 0.55 + i * 0.05 - 0.004, 0.2, 2, 3, '#aeb5ba');
+      }
+      wallPatch(p, g, 'right', 0.53, 0.86, 14, 2, '#3a2e22');
+      // A lantern by the door for the night watch.
+      wallPatch(lit, g, 'right', 0.2, 0.34, 3, 3, '#ffd27a');
+    },
+  },
   Mine: {
     bw: 76, wallH: 24, roofH: 16, roof: 'flat', wall: 'stone', roofColor: 'slate',
     windows: [],
@@ -1349,7 +1372,7 @@ const TOWNSHIP: Record<string, Recipe> = {
  * they are.
  */
 /** What kind of building a recipe is, which decides the shape each era gives it. */
-const CIVIC = new Set(['Town Hall', 'Bank', 'Market', 'School', 'Library', 'Lab', 'Clinic', 'Jail', 'Cafe', 'Studio', 'Tavern', 'Storage']);
+const CIVIC = new Set(['Town Hall', 'Bank', 'Market', 'School', 'Library', 'Lab', 'Clinic', 'Jail', 'Cafe', 'Studio', 'Tavern', 'Storage', 'Barracks']);
 type BuildingClass = 'house' | 'civic' | 'works';
 const classOf = (name: string): BuildingClass => name.startsWith('House') ? 'house' : CIVIC.has(name) ? 'civic' : 'works';
 

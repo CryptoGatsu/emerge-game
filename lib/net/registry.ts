@@ -8,6 +8,7 @@
  */
 
 import { withSession } from './session';
+import type { Army, Battle, Occupation } from '@/lib/world/war';
 
 export interface Claim {
   seed: number;
@@ -35,6 +36,16 @@ export interface Claim {
   insuredUntil?: number;
   buildersUntil?: number;
   banner?: string;
+  /** The plot's army, once a base has been bought on it. */
+  army?: Army;
+  /** Somebody else's army holding the plot. */
+  occupation?: Occupation;
+  /** Until when the plot cannot be invaded. */
+  shieldUntil?: number;
+  /** The last battle fought on the plot, for the settlement to play back. */
+  battle?: Battle;
+  /** The plot this plot's army is away holding, if any. */
+  occupying?: number;
 }
 
 export interface Offer {

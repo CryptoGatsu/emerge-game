@@ -1,6 +1,7 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling, eraName } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
+import { BASE_COST_EMERGE, MAX_TRAIN_PER_DAY, MIN_ATTACK, OCCUPIER_SHARE, SHIELD_HOURS, UNITS, armyCap, occupyUpkeepGold } from '@/lib/world/war';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
@@ -29,7 +30,7 @@ import {
 } from '@/lib/simulation';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
-import { tj, tn } from '@/lib/i18n';
+import { tj, tn, tx } from '@/lib/i18n';
 import { BrandLine } from './Brand';
 import { LanguageSwitch } from './LanguageSwitch';
 
@@ -163,6 +164,7 @@ const SECTIONS = [
   ['vault', '存款与取款'],
   ['buildings', '建筑'],
   ['eras', '时代'],
+  ['war', '战争'],
   ['status', '读懂你的聚落'],
   ['danger', '可能出的岔子'],
   ['world', '世界本身'],
@@ -530,6 +532,29 @@ export function WikiZh() {
           </ul>
           <h3>货架</h3>
           <p>建造面板把每种建筑放到一个货架上：住房、食物、材料、市政、照护与学习、休闲、交通和公用。后一个时代的建筑灰显并标出所属时代的名字，让你看到将要到来的东西。聚落自建只会建当前时代允许的东西。</p>
+        </section>
+
+        <section id="war">
+          <h2>战争</h2>
+          <p>自 v3.0 起，一块地可以组建军队，进军别人的土地。每一场战斗都由登记处在服务器上裁决，依据人人可见的数字和一个开战前承诺、战后公开的秘密；双方的聚落在地面上回放同一场战斗，一兵一卒。</p>
+          <h3>基地和军队</h3>
+          <p>在"链上"面板的<b>战争</b>卡片花 <b>{n(BASE_COST_EMERGE)} {T}</b> 开设<b>基地</b>，和其他收费一样销毁，每块地一次。兵营会建在广场附近的空地上，随时代变成驻防所、军械库、军事基地和无人机库。之后<b>用金库的金币训练士兵</b>——从工业时代起还要用仓库里的钢材——<b>每天最多 {MAX_TRAIN_PER_DAY} 名</b>；基地在聚落时代容纳 {armyCap(1)} 名，工业时代 {armyCap(3)} 名，人工智能时代 {armyCap(5)} 名。登记处记账：没有基地、没付钱，就没有军队。</p>
+          <table className="wiki-table">
+            <thead><tr><th>时代</th><th>兵种</th><th>攻击</th><th>防御</th><th>主场</th><th>金币</th><th>钢材</th><th>特点</th></tr></thead>
+            <tbody>
+              {([1, 2, 3, 4, 5] as const).map((e) => (
+                <tr key={e}><td>{tn(eraName(e))}</td><td>{tn(UNITS[e].plural)}</td><td className="num">{UNITS[e].attack}</td><td className="num">{UNITS[e].defence}</td><td className="num">×{UNITS[e].home}</td><td className="num">{n(UNITS[e].gold)}</td><td className="num">{UNITS[e].steel || '—'}</td><td>{tx(UNITS[e].blurb)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <h3>入侵</h3>
+          <p>在世界地图上选任何别人占有的地块：卡片显示你最强的军队对他们的驻军，以及胜算。<b>入侵</b>至少派出 {MIN_ATTACK} 名士兵；登记处立即裁决。攻方战力是士兵数乘以其时代的攻击力；守方战力是士兵数乘以其时代的防御力，在自己的地上再乘主场加成，地块每高一个时代再加 5%。强的一方出手更多，但从不全部命中——最悬殊的对阵约十次命中七次——每方有一百点战斗力。胜方按剩余战斗力的比例保留士兵；败方溃退，五人里有一人走回家。</p>
+          <h3>占领</h3>
+          <p>获胜后你的军队<b>占领该地</b>：士兵在你的旗帜下巡逻各建筑，<b>该地每日收益的 {Math.round(OCCUPIER_SHARE * 100)}% 归你</b>而不是地主，按银行判定一切的方式判定。占领每天从你自己的金库花 <b>{n(occupyUpkeepGold(1))} 金币</b>（聚落时代），人工智能时代最多 {n(occupyUpkeepGold(5))}，在每天到期前几小时自动支付，只要金库付得起；没人付钱的那天军队回家。<b>一支军队一次只能占领一块地</b>；要进军别处，先在"链上"面板召回。地主用自己的军队<b>夺回</b>地块，享有主场优势；获胜后地块受 {SHIELD_HOURS} 小时保护。<b>任何其他人都可以伏击</b>驻军，把地块夺为己有。</p>
+          <h3>保护和消息</h3>
+          <p>地块在<b>被认领后 {SHIELD_HOURS} 小时内</b>不能被入侵，地主夺回后 {SHIELD_HOURS} 小时内也不能。世界地图标出每一块被围攻的地；每一次入侵、防守、伏击和夺回都会在游戏里的每个屏幕上公告。</p>
+          <h3>观战</h3>
+          <p>打开那块地——自己的，或去拜访别人的——登记处最近记录的那场战斗就会上演：攻方从大门进来，驻军在广场列阵，每一回合都有人倒下，顺序和登记处掷出的一样。之后胜方的幸存者各就各位，败方撤离。</p>
         </section>
 
         {/* ---------------------------------------------------------- */}

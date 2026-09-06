@@ -1,6 +1,7 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling, eraName } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
+import { BASE_COST_EMERGE, MAX_TRAIN_PER_DAY, MIN_ATTACK, OCCUPIER_SHARE, SHIELD_HOURS, UNITS, armyCap, occupyUpkeepGold } from '@/lib/world/war';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
@@ -199,6 +200,7 @@ const SECTIONS = [
   ['vault', 'Deposits and withdrawals'],
   ['buildings', 'Buildings'],
   ['eras', 'Eras'],
+  ['war', 'War'],
   ['status', 'Reading your settlement'],
   ['danger', 'What can go wrong'],
   ['world', 'The world itself'],
@@ -1034,6 +1036,70 @@ export default function Wiki() {
             and learning, Leisure, Transport and Utilities. A building from a later era is shown
             greyed with the name of the era it belongs to, so you can see what is coming. The
             settlement&rsquo;s own builder raises only what the plot&rsquo;s era allows.
+          </p>
+        </section>
+
+        <section id="war">
+          <h2>War</h2>
+          <p>
+            Since v3.0 a plot can raise an army and march it onto somebody else&rsquo;s land. The
+            registry decides every battle on the server, on numbers everybody can see and a secret
+            it commits to before the fight and reveals after, and both settlements play the same
+            result back on the ground, soldier by soldier.
+          </p>
+          <h3>The base and the army</h3>
+          <p>
+            A <b>base</b> is opened from the <b>WAR</b> card in the On-Chain panel for{' '}
+            <b>{n(BASE_COST_EMERGE)} {TOKEN.ticker}</b>, burned like every charge, once per plot. A barracks is
+            raised on open ground near the square and becomes a garrison, an armoury, a base and a drone bay
+            with the ages. Troops are then <b>trained in Gold</b> from the treasury &mdash; and, from the
+            industrial age, in steel from the yard &mdash; <b>{MAX_TRAIN_PER_DAY} a day at most</b>, and the base
+            holds {armyCap(1)} in a settlement, {armyCap(3)} in the industrial age, {armyCap(5)} in the AI age. The
+            registry counts them; a settlement cannot claim an army it did not pay for at a base it does not have.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Age</th><th>Troop</th><th>Attack</th><th>Defence</th><th>At home</th><th>Gold</th><th>Steel</th><th>What they are like</th></tr></thead>
+            <tbody>
+              {([1, 2, 3, 4, 5] as const).map((e) => (
+                <tr key={e}><td>{eraName(e)}</td><td>{UNITS[e].plural}</td><td className="num">{UNITS[e].attack}</td><td className="num">{UNITS[e].defence}</td><td className="num">&times;{UNITS[e].home}</td><td className="num">{n(UNITS[e].gold)}</td><td className="num">{UNITS[e].steel || '—'}</td><td>{UNITS[e].blurb}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <h3>Invasion</h3>
+          <p>
+            From the world map, pick any plot somebody else holds: the card shows your strongest army
+            against their garrison and the odds. <b>Invade</b> sends at least {MIN_ATTACK} troops; the
+            registry fights it at once. The attacker&rsquo;s strength is troops times their age&rsquo;s attack;
+            the defender&rsquo;s is troops times their age&rsquo;s defence, times their home bonus on their own
+            plot, plus 5% a step for the plot&rsquo;s age. The stronger side lands more blows, never all of them
+            &mdash; the most lopsided pairing lands about seven in ten &mdash; and each side has a hundred points
+            of fight. The winner keeps its troops in proportion to the fight it had left; the loser routs, and
+            one in five walk home.
+          </p>
+          <h3>Occupation</h3>
+          <p>
+            Win, and your army <b>holds the plot</b>: its soldiers patrol the buildings under your banner, and
+            <b> {Math.round(OCCUPIER_SHARE * 100)}% of the plot&rsquo;s daily yield comes to you</b> instead of its
+            owner, judged the same way the Bank judges everything. Holding it costs your own treasury{' '}
+            <b>{n(occupyUpkeepGold(1))} Gold a day</b> in a settlement, up to {n(occupyUpkeepGold(5))} in the AI
+            age, paid a few hours before each day runs out while the treasury can cover it; a day nobody pays for
+            sends the army home. <b>An army holds one plot at a time</b>; bring it home from the On-Chain panel to
+            march anywhere else. The owner <b>retakes</b> the plot with their own army, fighting with the home
+            advantage; a win shields the plot for {SHIELD_HOURS} hours. <b>Anybody else can ambush</b> the garrison
+            and take the plot over for themselves.
+          </p>
+          <h3>Shields and news</h3>
+          <p>
+            A plot cannot be invaded for <b>{SHIELD_HOURS} hours after it is claimed</b>, nor for {SHIELD_HOURS} hours
+            after its owner retakes it. The world map marks every plot under siege, and every invasion, defence,
+            ambush and retake is announced on every screen in the game.
+          </p>
+          <h3>Watching a fight</h3>
+          <p>
+            Open the plot &mdash; your own, or a visit to somebody else&rsquo;s &mdash; and the last battle the
+            registry recorded there plays out: the attackers march in from the gate, the garrison forms up in
+            the square, and each round somebody goes down, in the order the registry rolled it. Afterwards the
+            winner&rsquo;s survivors take up their places and the losers march off.
           </p>
         </section>
 

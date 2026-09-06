@@ -34,6 +34,7 @@
  */
 
 import { MAX_GIFT_GOLD, serverKey } from '../limits';
+import type { Army, Battle, Occupation } from '../world/war';
 import { HOME_CHART_INDEX, HOME_CHART_RESERVED, chartCapacity } from '../world/charts';
 import {
   clear, getValue, hdel, hget, hgetall, hset, hsetnx, push, range, releaseLock, setValue, shared,
@@ -82,6 +83,16 @@ export interface Claim {
   buildersUntil?: number;
   /** The banner the plot flies on the world map. */
   banner?: string;
+  /** The plot's army, once a base has been bought on it. */
+  army?: Army;
+  /** Somebody else's army holding the plot. */
+  occupation?: Occupation;
+  /** Until when the plot cannot be invaded: a day after it was claimed, and a day after it was retaken. */
+  shieldUntil?: number;
+  /** The last battle fought on the plot, whoever won, for the settlement to play back. */
+  battle?: Battle;
+  /** The plot whose land this plot's army is away holding, if any. */
+  occupying?: number;
 }
 
 /**
@@ -133,6 +144,11 @@ export async function allClaims(): Promise<Claim[]> {
     }
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** Write a plot's row back as it is. For the war module, which edits rows under its own lock. */
+export async function writeClaim(row: Claim): Promise<void> {
+  await hset(CLAIMS, String(row.seed), JSON.stringify(row));
 }
 
 /** Who holds one plot, or null. */

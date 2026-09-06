@@ -12,6 +12,7 @@ import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
   wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
+import { BASE_COST_EMERGE, MAX_TRAIN_PER_DAY, OCCUPIER_SHARE, SHIELD_HOURS, attackOdds, occupyUpkeepGold, unitOf } from '@/lib/world/war';
 /** The kinds that employ somebody, for the room line on a build card. */
 const WORKPLACE_TYPES = new Set(Object.values(JOBS).map((j) => j.building));
 import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
@@ -84,6 +85,11 @@ interface PanelsProps {
   onRenameWorld: (name: string) => void;
   /** Open the plot's outer belt, once, for $EMERGE. Resolves to a refusal, or null. */
   onExpand: () => Promise<string | null>;
+  /** War: open a base ($EMERGE), train troops (Gold), retake the plot, bring the army home. */
+  onBase: () => Promise<string | null>;
+  onTroops: (count: number) => Promise<string | null>;
+  onRetake: (troops: number) => Promise<string | null>;
+  onWithdraw: () => Promise<string | null>;
   /** Advance the plot to the next era, for $EMERGE. Resolves to a refusal, or null. */
   onAdvance: () => Promise<string | null>;
   onRenameCitizen: (id: string, name: string) => void;
@@ -1808,6 +1814,8 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
                   {p.reported > p.level ? ` (${t('city level {n}', { n: p.reported })})` : ''}
                   {' · '}{t('{pct}% run', { pct: Math.round(p.score * 100) })}
                   {' · '}{t('{pct}% attended', { pct: Math.round(p.attention * 100) })}
+                  {p.occupiedBy ? ` · ${t('held by {who}: you keep {pct}%', { who: shortAddress(p.occupiedBy), pct: Math.round((1 - OCCUPIER_SHARE) * 100) })}` : ''}
+                  {p.occupying ? ` · ${t('held by your army: {pct}% of its yield', { pct: Math.round(OCCUPIER_SHARE * 100) })}` : ''}
                 </span>
                 <b>{p.yield.toLocaleString()}</b>
               </div>
@@ -2196,9 +2204,10 @@ function sinceWhen(at: number): string {
   return t('{n} days ago', { n: Math.round(hours / 24) });
 }
 
-function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld, onExpand, onAdvance, onCover, onBoon, onLeave, onRelease, onList }: {
+function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld, onExpand, onAdvance, onCover, onBoon, onLeave, onRelease, onList, onBase, onTroops, onRetake, onWithdraw }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; onPlayer: (p: PlayerRecord) => void; onClose: () => void;
   onRenameWorld: (name: string) => void; onExpand: () => Promise<string | null>; onAdvance: () => Promise<string | null>;
+  onBase: () => Promise<string | null>; onTroops: (count: number) => Promise<string | null>; onRetake: (troops: number) => Promise<string | null>; onWithdraw: () => Promise<string | null>;
   onCover: (kind: CoverKind) => Promise<string | null>;
   onBoon: (kind: BoonKind, emblem?: string) => Promise<string | null>;
   onLeave: () => void; onRelease: () => void;
@@ -2215,6 +2224,17 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
     setAdvanceNote(refused);
   };
   const gate = view.era.gate;
+  // War: one busy flag and one note for the whole card.
+  const [warBusy, setWarBusy] = useState(false);
+  const [warNote, setWarNote] = useState<string | null>(null);
+  const [trainCount, setTrainCount] = useState(1);
+  const [retakeCount, setRetakeCount] = useState(0);
+  const war = view.war;
+  const doWar = async (run: () => Promise<string | null>) => {
+    setWarBusy(true); setWarNote(null);
+    const refused = await run();
+    setWarBusy(false); setWarNote(refused);
+  };
   const [expanding, setExpanding] = useState(false);
   const [expandNote, setExpandNote] = useState<string | null>(null);
   const expand = async () => {
@@ -2413,6 +2433,76 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
             <p className="muted small">{t('This is as far as the eras go.')}</p>
           )}
           {advanceNote && <p className="muted small">{advanceNote}</p>}
+        </div>
+
+        <div className="connect-card war-card">
+          <span className="eyebrow">{t('WAR')}</span>
+          {war.occupation && (
+            <div className="war-status occupied">
+              <b>{t('Held by {who}', { who: war.occupation.byName || shortAddress(war.occupation.by) })}</b>
+              <span className="muted small">
+                {t('{n} {unit} from {from} hold the plot, since {when}. They take {pct}% of its yield until they are thrown out.', { n: war.occupation.troops, unit: tn(unitOf(war.occupation.era).plural), from: war.occupation.fromName, when: new Date(war.occupation.since).toLocaleString(), pct: Math.round(OCCUPIER_SHARE * 100) })}
+              </span>
+            </div>
+          )}
+          {war.occupying && (
+            <div className="war-status away">
+              <b>{t('Your army is away, holding plot #{seed}', { seed: war.occupying })}</b>
+              <span className="muted small">{t('It costs {gold} Gold a day from this treasury to keep them there; a day nobody pays for sends them home. Bring them back to march anywhere else.', { gold: occupyUpkeepGold(view.era.id).toLocaleString() })}</span>
+              <button className="ghost" disabled={warBusy} onClick={() => doWar(onWithdraw)}>{warBusy ? t('Working…') : t('Bring the army home')}</button>
+            </div>
+          )}
+          {!war.base ? (
+            <>
+              <h3>{t('No base')}</h3>
+              <p className="muted small">{t('A base is where an army is trained and kept. Open one for {cost} {ticker}, burned like every charge; the {name} is raised on open ground near the square. Troops are then trained in Gold, {n} a day at most, and every age fights differently.', { cost: BASE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker, name: tn(formName('Barracks', view.era.id)).toLowerCase(), n: MAX_TRAIN_PER_DAY })}</p>
+              <button onClick={() => doWar(onBase)} disabled={warBusy || !wallet.address || player.ledger.balance < BASE_COST_EMERGE}>
+                {warBusy ? t('Opening…') : !wallet.address ? t('Connect a wallet to open a base') : player.ledger.balance < BASE_COST_EMERGE ? t('Not enough {ticker}', { ticker: TOKEN.ticker }) : t('Open a base · {cost} {ticker}', { cost: BASE_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+              </button>
+            </>
+          ) : (
+            <>
+              <h3>{t('{n} of {cap} {unit}', { n: war.army, cap: war.cap, unit: tn(war.cost.plural) })}</h3>
+              <p className="muted small">{tx(war.unit)}</p>
+              <div className="war-train">
+                <div className="casino-quick">
+                  {[1, 5, MAX_TRAIN_PER_DAY].map((n) => <button key={n} className={trainCount === n ? 'sel' : ''} disabled={warBusy} onClick={() => setTrainCount(n)}>{n}</button>)}
+                </div>
+                <button disabled={warBusy || war.affordable < trainCount || war.army >= war.cap} onClick={() => doWar(() => onTroops(trainCount))}>
+                  {warBusy ? t('Training…')
+                    : war.army >= war.cap ? t('The base is full')
+                      : war.affordable < trainCount
+                        ? (war.cost.steel > 0 ? t('Not enough Gold or steel') : t('Not enough Gold'))
+                        : t('Train {n} · {gold} Gold{steel}', { n: trainCount, gold: (war.cost.gold * trainCount).toLocaleString(), steel: war.cost.steel > 0 ? ` · ${war.cost.steel * trainCount} ${t('steel')}` : '' })}
+                </button>
+              </div>
+              <p className="muted small">{t('One {unit} costs {gold} Gold{steel}. The base trains {n} a day and holds {cap} in this age. The registry counts them; a fight is decided there, on numbers everybody can see and a secret it commits to first, and played back here on the ground.', { unit: tn(war.cost.unit), gold: war.cost.gold.toLocaleString(), steel: war.cost.steel > 0 ? ` ${t('and {n} steel', { n: war.cost.steel })}` : '', n: MAX_TRAIN_PER_DAY, cap: war.cap })}</p>
+              {war.occupation && (
+                <div className="war-retake">
+                  <b>{t('Throw them out')}</b>
+                  <p className="muted small">
+                    {t('Your {n} {unit} against their {m} {theirs}, on your own ground: about {pct}% to win. A win shields the plot for {h} hours.', {
+                      n: retakeCount || war.army, unit: tn(war.cost.plural), m: war.occupation.troops, theirs: tn(unitOf(war.occupation.era).plural),
+                      pct: Math.round(attackOdds({ troops: retakeCount || war.army, era: view.era.id, home: true }, { troops: war.occupation.troops, era: war.occupation.era, home: false, plotEra: view.era.id }) * 100), h: SHIELD_HOURS,
+                    })}
+                  </p>
+                  <div className="casino-quick">
+                    {[Math.max(1, Math.floor(war.army / 2)), war.army].filter((n, i, a) => n > 0 && a.indexOf(n) === i).map((n) => <button key={n} className={(retakeCount || war.army) === n ? 'sel' : ''} disabled={warBusy} onClick={() => setRetakeCount(n)}>{n}</button>)}
+                  </div>
+                  <button disabled={warBusy || war.army < 1 || war.fighting} onClick={() => doWar(() => onRetake(retakeCount || war.army))}>
+                    {warBusy ? t('Marching…') : war.fighting ? t('A fight is on') : war.army < 1 ? t('No troops at the base') : t('Retake with {n}', { n: retakeCount || war.army })}
+                  </button>
+                </div>
+              )}
+              {!war.occupation && war.shieldUntil > Date.now() && (
+                <p className="muted small">{t('Shielded: nobody can invade this plot for another {h} hours.', { h: Math.ceil((war.shieldUntil - Date.now()) / 3_600_000) })}</p>
+              )}
+              {!war.occupation && war.shieldUntil <= Date.now() && (
+                <p className="muted small">{t('Open to invasion. Anyone with an army can march on it from the world map; your garrison fights with a home advantage.')}</p>
+              )}
+            </>
+          )}
+          {warNote && <p className="muted small">{warNote}</p>}
         </div>
 
         <div className="connect-card">
@@ -2657,7 +2747,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond, onBase, onTroops, onRetake, onWithdraw }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2708,6 +2798,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
       <ConnectPanel
         view={view} claimed={claimed} player={player} onPlayer={onPlayer} onClose={onClose}
         onRenameWorld={onRenameWorld} onExpand={onExpand} onAdvance={onAdvance} onCover={onCover} onBoon={onBoon} onLeave={onLeave} onRelease={onRelease} onList={onList}
+        onBase={onBase} onTroops={onTroops} onRetake={onRetake} onWithdraw={onWithdraw}
       />
     );
   }

@@ -3064,6 +3064,23 @@ button.fold:hover { color: var(--emerald); }
 .job-box { margin-top: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(184, 231, 86, 0.22); background: rgba(184, 231, 86, 0.05); display: flex; flex-direction: column; gap: 6px; }
 .job-box .offer-row { display: flex; gap: 8px; }
 .visiting-bar.at-work { border-color: rgba(184, 231, 86, 0.45); }
+.region-pin.besieged .pin-dot { background: #e0402a; box-shadow: 0 0 0 3px rgba(224, 64, 42, 0.28); animation: siege-pulse 1.6s ease-in-out infinite; }
+@keyframes siege-pulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(224, 64, 42, 0.28); } 50% { box-shadow: 0 0 0 7px rgba(224, 64, 42, 0.08); } }
+.region-pin .siege-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; background: rgba(224, 64, 42, 0.22); color: #ff7a66; }
+/* War on the plot card and the On-Chain panel. */
+.war-plot { margin: 10px 0 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(224, 64, 42, 0.35); background: rgba(224, 64, 42, 0.06); }
+.war-plot .eyebrow { color: #ff7a66; }
+.war-plot p { margin: 4px 0; font-size: 12px; line-height: 1.5; }
+.war-plot .war-held b { color: #ff7a66; }
+.war-plot .claim-button.war-march { margin-top: 6px; border-color: rgba(224, 64, 42, 0.5); }
+.war-card .war-status { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; padding: 8px 10px; border-radius: 8px; background: rgba(224, 64, 42, 0.08); border: 1px solid rgba(224, 64, 42, 0.3); }
+.war-card .war-status b { color: #ff7a66; font-size: 13px; }
+.war-card .war-status.away { background: rgba(240, 208, 94, 0.08); border-color: rgba(240, 208, 94, 0.3); }
+.war-card .war-status.away b { color: var(--gold); }
+.war-card .war-train { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.war-card .war-retake { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--panel-edge-soft); }
+.war-card .war-retake b { color: #ff7a66; }
+.notice.danger b { color: #ff7a66; }
 .region-pin .era-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; background: rgba(95, 214, 200, 0.18); color: #5fd6c8; }
 .era-card .era-next { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 8px; }
 .era-card .era-next b { color: var(--cream); font-size: 13px; }

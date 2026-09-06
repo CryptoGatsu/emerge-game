@@ -1,5 +1,7 @@
 'use client';
 import { EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
+import { MIN_ATTACK, OCCUPIER_SHARE, SHIELD_MS, attackOdds, occupyUpkeepGold, unitOf } from '@/lib/world/war';
+import { invadePlot } from '@/lib/net/war';
 import { resaleFee } from '@/lib/chain/vault';
 
 /**
@@ -223,9 +225,11 @@ const MAX_MARKER_NUDGE = 0.09;
 /** Below this map width, in pixels, there is no room to lay names out at all. */
 const LABELS_NEED_WIDTH = 560;
 
-function RegionMap({ plots, selected, chart, owned, taken, banners, names, claimedEverywhere, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, taken, banners, names, claimedEverywhere, onSelect, sieges }: {
   /** Which emblem each plot flies, by seed, mine and theirs alike. */
   banners: Map<number, string>;
+  /** Plots under occupation right now, so the whole map can see where the fighting is. */
+  sieges: Set<number>;
   /** What each claimed world is called, by seed, from the claim rows — the name its owner gave it. */
   names: Map<number, string>;
   plots: Plot[];
@@ -505,7 +509,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
             key={plot.id}
             // A marker on the right-hand side of the map hangs its label to the
             // left, or it runs off the edge.
-            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''} ${mine ? 'owned' : ''} ${theirs ? 'settled' : ''}`}
+            className={`region-pin ${plot.biome} ${plot.mapX > 0.66 ? 'flip' : ''} ${plot.seed === selected?.seed ? 'selected' : ''} ${mine ? 'owned' : ''} ${theirs ? 'settled' : ''} ${sieges.has(plot.seed) ? 'besieged' : ''}`}
             style={{ left: `${plot.mapX * 100}%`, top: `${plot.mapY * 100}%` }}
             onClick={() => onSelect(plot)}
             aria-pressed={plot.seed === selected?.seed}
@@ -520,6 +524,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
                 {theirs && !!theirs.forSale && <i className="sale-tag">{t('for sale')}</i>}
                 {theirs && !theirs.forSale && theirs.hiring && !theirs.hand && <i className="hiring-tag">{t('hiring')}</i>}
                 {theirs && (theirs.era ?? 1) > 1 && <i className="era-tag">{tn(eraName(theirs.era ?? 1))}</i>}
+                {sieges.has(plot.seed) && <i className="siege-tag">{t('under siege')}</i>}
               </b>
               {/* The biome only on the one being looked at. Nine markers each
                   carrying two lines of text is more label than map. */}
@@ -670,6 +675,43 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   }, [allClaims, wallet.address]);
 
   const heldByOther = selected ? takenByOthers.get(selected.seed) ?? null : null;
+
+  /*
+   * War on the map. Every plot under occupation is marked for everybody;
+   * a plot somebody else holds can be marched on from any of this
+   * wallet's plots that has a base and an army at home.
+   */
+  const sieges = useMemo(() => new Set(allClaims.filter((c) => c.occupation && c.occupation.paidUntil > Date.now()).map((c) => c.seed)), [allClaims]);
+  const myBases = useMemo(() => {
+    const me = wallet.address?.toLowerCase();
+    if (!me) return [] as Claim[];
+    return allClaims.filter((c) => c.owner.toLowerCase() === me && c.army && c.army.troops >= MIN_ATTACK && !c.occupying).sort((a, b) => (b.army?.troops ?? 0) - (a.army?.troops ?? 0));
+  }, [allClaims, wallet.address]);
+  const awayAt = useMemo(() => {
+    const me = wallet.address?.toLowerCase();
+    return me ? allClaims.find((c) => c.owner.toLowerCase() === me && c.occupying)?.occupying ?? null : null;
+  }, [allClaims, wallet.address]);
+  const [marching, setMarching] = useState(false);
+  const [warNote, setWarNote] = useState<string | null>(null);
+  const [sendCount, setSendCount] = useState(0);
+  const selectedRow = selected ? allClaims.find((c) => c.seed === selected.seed) ?? null : null;
+  const shieldUntil = selectedRow ? Math.max(selectedRow.at + SHIELD_MS, selectedRow.shieldUntil ?? 0) : 0;
+  const march = useCallback(async () => {
+    if (!selected || !heldByOther || !wallet.address || !myBases.length) return;
+    const from = myBases[0];
+    const troops = Math.max(MIN_ATTACK, Math.min(from.army?.troops ?? 0, sendCount || (from.army?.troops ?? 0)));
+    setMarching(true); setWarNote(null);
+    const result = await invadePlot(selected.seed, wallet.address, from.seed, troops);
+    setMarching(false);
+    if (!result.ok) { setWarNote(result.reason); return; }
+    const won = result.battle?.winner === 'attacker';
+    setWarNote(won
+      ? t('Your army took {where}. {n} of {sent} stand; they hold the plot and take {pct}% of its yield while you pay their keep. Visit the plot to watch the fight.', { where: heldByOther.worldName, n: result.battle?.survivors.attacker ?? 0, sent: troops, pct: Math.round(OCCUPIER_SHARE * 100) })
+      : t('Your army was thrown back from {where}. {n} of {sent} walked home. Visit the plot to watch the fight.', { where: heldByOther.worldName, n: result.battle?.survivors.attacker ?? 0, sent: troops }));
+    // The rows changed on both ends; read them back rather than guessing.
+    const fresh = await fetchClaims();
+    setClaims(fresh.claims);
+  }, [selected, heldByOther, wallet.address, myBases, sendCount, setClaims]);
 
   /*
    * A plot sold from under this browser's record.
@@ -1128,6 +1170,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
           <RegionMap
             plots={plots} selected={selected} chart={chart} owned={ownedSeeds}
             taken={takenByOthers} banners={new Map(allClaims.filter((c) => c.banner).map((c) => [c.seed, c.banner as string]))} names={new Map(allClaims.filter((c) => c.worldName).map((c) => [c.seed, c.worldName]))} claimedEverywhere={allClaims.length} onSelect={choose}
+            sieges={sieges}
           />
 
           {!selected ? (
@@ -1296,6 +1339,51 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
               </p>
             )}
 
+            {(selectedRow?.occupation || heldByOther || (mine && selectedRow)) && (
+              <div className="war-plot">
+                <span className="eyebrow">{t('WAR')}</span>
+                {selectedRow?.occupation && selectedRow.occupation.paidUntil > Date.now() && (
+                  <p className="war-held">
+                    <b>{t('Held by {who}', { who: selectedRow.occupation.byName || shortAddress(selectedRow.occupation.by) })}</b>{' '}
+                    {t('{n} {unit} from {from} hold it, since {when}; they take {pct}% of its yield.', { n: selectedRow.occupation.troops, unit: tn(unitOf(selectedRow.occupation.era).plural), from: selectedRow.occupation.fromName, when: new Date(selectedRow.occupation.since).toLocaleDateString(), pct: Math.round(OCCUPIER_SHARE * 100) })}
+                  </p>
+                )}
+                {heldByOther && shieldUntil > Date.now() && (
+                  <p className="muted small">{t('Shielded: it cannot be invaded for another {h} hours.', { h: Math.ceil((shieldUntil - Date.now()) / 3_600_000) })}</p>
+                )}
+                {heldByOther && shieldUntil <= Date.now() && wallet.address && !myBases.length && (
+                  <p className="muted small">{awayAt ? t('Your army is away holding plot #{seed}. Bring it home from the On-Chain panel to march anywhere else.', { seed: awayAt }) : t('Open a base on one of your plots and train at least {n} troops to march on it.', { n: MIN_ATTACK })}</p>
+                )}
+                {heldByOther && shieldUntil <= Date.now() && myBases.length > 0 && (() => {
+                  const from = myBases[0];
+                  const troops = Math.max(MIN_ATTACK, Math.min(from.army?.troops ?? 0, sendCount || (from.army?.troops ?? 0)));
+                  const occ = heldByOther.occupation && heldByOther.occupation.paidUntil > Date.now() ? heldByOther.occupation : null;
+                  const defender = occ
+                    ? { troops: occ.troops, era: occ.era, home: false, plotEra: heldByOther.era ?? 1 }
+                    : { troops: heldByOther.army?.troops ?? 0, era: heldByOther.era ?? 1, home: true, plotEra: heldByOther.era ?? 1 };
+                  const odds = attackOdds({ troops, era: from.era ?? 1 }, defender);
+                  return (
+                    <>
+                      <p className="muted small">
+                        {t('{n} {unit} from {from} against {m} {theirs}{home}: about {pct}% to win. Win, and your army holds the plot and takes {share}% of its yield for {gold} Gold a day from your treasury; lose, and one in five walk home.', {
+                          n: troops, unit: tn(unitOf(from.era ?? 1).plural), from: from.worldName, m: defender.troops, theirs: tn(unitOf(defender.era).plural), home: occ ? '' : ` ${t('on their own ground')}`,
+                          pct: Math.round(odds * 100), share: Math.round(OCCUPIER_SHARE * 100), gold: occupyUpkeepGold(from.era ?? 1).toLocaleString(),
+                        })}
+                      </p>
+                      <div className="casino-quick">
+                        {[Math.max(MIN_ATTACK, Math.floor((from.army?.troops ?? 0) / 2)), from.army?.troops ?? 0].filter((n, i, a) => n >= MIN_ATTACK && a.indexOf(n) === i).map((n) => (
+                          <button key={n} className={troops === n ? 'sel' : ''} disabled={marching} onClick={() => setSendCount(n)}>{n}</button>
+                        ))}
+                      </div>
+                      <button className="claim-button war-march" disabled={marching} onClick={march}>
+                        {marching ? t('Marching…') : occ ? t('Ambush with {n} · ~{pct}%', { n: troops, pct: Math.round(odds * 100) }) : t('Invade with {n} · ~{pct}%', { n: troops, pct: Math.round(odds * 100) })}
+                      </button>
+                    </>
+                  );
+                })()}
+                {warNote && <p className="muted small">{warNote}</p>}
+              </div>
+            )}
             <PlotPreview seed={selected.seed} />
             <p className="muted">{t(selected.blurb)}</p>
 

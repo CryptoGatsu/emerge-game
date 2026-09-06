@@ -1,5 +1,6 @@
 import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, LEVEL_PRESENCE_DAYS, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
 import { charterMultiplier, plotCeiling } from '../world/eras';
+import { OCCUPIER_SHARE } from '../world/war';
 import { cityLevel, stewardshipScore, type World } from '../simulation';
 import { worldFromSave, type SavedWorld } from '../world/save';
 import 'server-only';
@@ -115,7 +116,7 @@ export interface Judged {
    * the published city says it is (the two differ until enough days have been
    * present), and `yield` is that plot's share of the day.
    */
-  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
+  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number; occupiedBy?: string; occupying?: boolean }[];
 }
 
 /**
@@ -141,13 +142,13 @@ export async function judgedFor(address: string): Promise<Judged> {
   try { anywhere = await lastSeenAnywhere(me); } catch { anywhere = 0; }
   const plots: Judged['plots'] = [];
   let ceiling = 0, yieldSum = 0;
-  for (const row of mine) {
+  const judge = async (row: Claim, presence: number) => {
     let world: World | null = null;
     try {
       const published = await readWorld(row.seed);
       world = published ? worldFromSave(published.snapshot as SavedWorld, row.seed, row.worldName) : null;
     } catch { world = null; }
-    const level = judgedLevel(world, days);
+    const level = judgedLevel(world, presence);
     let reported = 1;
     try { reported = world ? cityLevel(world) : 1; } catch { reported = level; }
     const era = row.era ?? 1;
@@ -156,9 +157,26 @@ export async function judgedFor(address: string): Promise<Judged> {
     try { score = world ? stewardshipScore(world) : 0; } catch { score = 0; }
     let attention = ATTENTION_FLOOR;
     try { attention = attentionFrom(Math.max(anywhere, await lastSeenAt(row.seed, me)), now); } catch { attention = attentionFrom(anywhere, now); }
-    ceiling += cap;
-    yieldSum += cap * score * attention;
-    plots.push({ seed: row.seed, name: row.worldName ?? '', level, reported, era, score, attention, ceiling: cap, yield: Math.round(cap * score * attention) });
+    return { level, reported, era, cap, score, attention, full: cap * score * attention };
+  };
+  for (const row of mine) {
+    const j = await judge(row, days);
+    // Under occupation, the larger share of the day goes to whoever holds the plot.
+    const occupied = row.occupation && row.occupation.paidUntil > now && row.occupation.by.toLowerCase() !== me ? row.occupation.by : undefined;
+    const share = occupied ? 1 - OCCUPIER_SHARE : 1;
+    ceiling += j.cap;
+    yieldSum += j.full * share;
+    plots.push({ seed: row.seed, name: row.worldName ?? '', level: j.level, reported: j.reported, era: j.era, score: j.score, attention: j.attention, ceiling: j.cap, yield: Math.round(j.full * share), occupiedBy: occupied });
+  }
+  // And the plots this wallet's army is holding: their owners' cities, judged
+  // as they stand, with the occupier's share of what they make.
+  const held = rows.filter((c) => c.occupation && c.occupation.paidUntil > now && c.occupation.by.toLowerCase() === me && c.owner.toLowerCase() !== me);
+  for (const row of held) {
+    let theirDays = 0;
+    try { theirDays = await presenceDays(row.owner.toLowerCase()); } catch { theirDays = 0; }
+    const j = await judge(row, theirDays);
+    yieldSum += j.full * OCCUPIER_SHARE;
+    plots.push({ seed: row.seed, name: row.worldName ?? '', level: j.level, reported: j.reported, era: j.era, score: j.score, attention: j.attention, ceiling: j.cap, yield: Math.round(j.full * OCCUPIER_SHARE), occupying: true });
   }
   // Five plots at the top would come to more than a wallet may take in a day.
   return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), days, plots };

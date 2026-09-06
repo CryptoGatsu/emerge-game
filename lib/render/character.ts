@@ -463,6 +463,8 @@ export type HatKind = (typeof HATS)[number];
  * and halos.
  */
 export function hatFor(job: string, look: number, era: number): HatKind {
+  // A soldier wears the age's helmet: iron, then a cap under the rifle, then a visor with the drones.
+  if (job === 'soldier') return era >= 5 ? 'visor' : era >= 3 ? 'cap' : 'helmet';
   if (job === 'miner' || job === 'quarry') return 'helmet';
   if (job === 'farmer' && era <= 3) return 'straw';
   if (era <= 1) return hatForJob(job, look);

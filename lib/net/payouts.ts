@@ -40,7 +40,7 @@ export interface JudgedYield {
   ceiling: number;
   yield: number;
   days: number;
-  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
+  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number; occupiedBy?: string; occupying?: boolean }[];
 }
 
 /** How much of today's ceiling a wallet has left. */

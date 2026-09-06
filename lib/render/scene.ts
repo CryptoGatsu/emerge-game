@@ -18,7 +18,7 @@ import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, Til
 import { GradeFilter } from './grade';
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
-import { waterOf, type Animal, type Hazard } from '../simulation';
+import { waterOf, type Animal, type Hazard, type Soldier } from '../simulation';
 import type { Dir } from './character';
 import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
@@ -236,6 +236,10 @@ export class EmergeScene {
   private seasonWash = new Sprite(Texture.WHITE);
 
   private citizens = new Map<string, CitizenSprite>();
+  /** Soldiers on the ground, drawn as people in their side's colours. */
+  private soldiers = new Map<string, CitizenSprite>();
+  /** The occupier's banner on each building their patrol holds. */
+  private banners = new Map<string, Graphics>();
   private buildings = new Map<string, BuildingView>();
   private propSprites: { sprite: Sprite; prop: PropInstance; phase: number; cleared?: boolean }[] = [];
   /**
@@ -1350,6 +1354,8 @@ export class EmergeScene {
     }
 
     this.citizens.clear();
+    this.soldiers.clear();
+    this.banners.clear();
     this.wildlife.clear();
     this.casting.clear();
     this.funnel = null;
@@ -1467,6 +1473,8 @@ export class EmergeScene {
     this.updateProps(clamped);
     this.updateBuildings(clamped);
     this.updateCitizens(clamped);
+    this.updateSoldiers(clamped);
+    this.updateBanners();
     this.updateWildlife(clamped);
     this.updateDanger(clamped);
     this.updateRings();
@@ -1734,6 +1742,86 @@ export class EmergeScene {
       const afloat = !!citizen.afloat && (ground === Tile.Water || ground === Tile.WaterShore);
       sprite.update(citizen, dt, height, door, face ?? undefined, afloat);
       sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
+    }
+  }
+
+  /** A soldier as the sprite wants to see one: a person of no trade, in their side's colours. */
+  private soldierAsCitizen(so: Soldier): Citizen {
+    return {
+      id: so.id, name: '', handle: '', familyId: '', age: 26, job: 'soldier' as Citizen['job'], hash: so.look, look: so.look,
+      x: so.x, y: so.y, destX: so.destX, destY: so.destY, facing: so.facing, moving: so.moving,
+      activity: so.moving ? 'walking' : 'idle', phase: 'wandering', inside: false, errand: false, path: [], dwell: 0, wanderIdx: 0,
+      soldier: so.side,
+    } as unknown as Citizen;
+  }
+
+  /**
+   * Soldiers: the garrison drilling by the base, an occupier's patrols
+   * walking the buildings, and two sides in a fight. One sprite each, in
+   * the side's colours; a soldier who falls goes down where they stood,
+   * the way a rogue does.
+   */
+  private updateSoldiers(dt: number) {
+    const soldiers = this.world.soldiers ?? [];
+    const seen = new Set<string>();
+    for (const so of soldiers) {
+      if (so.fallen !== undefined) {
+        const gone = this.soldiers.get(so.id);
+        if (gone) {
+          this.dying.push({ container: gone.container, timer: 0, facing: so.facing === 'w' ? -1 : 1 });
+          gone.container.eventMode = 'none';
+          this.soldiers.delete(so.id);
+        }
+        continue;
+      }
+      seen.add(so.id);
+      let sprite = this.soldiers.get(so.id);
+      if (!sprite) {
+        sprite = new CitizenSprite(this.assets, this.soldierAsCitizen(so), so.era);
+        sprite.container.eventMode = 'none';
+        this.objectLayer.addChild(sprite.container);
+        this.soldiers.set(so.id, sprite);
+      }
+      const height = this.map.heightAt(sprite.wx, sprite.wy);
+      sprite.update(this.soldierAsCitizen(so), dt, height, undefined, undefined, false);
+      sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
+    }
+    for (const [id, sprite] of this.soldiers) {
+      if (seen.has(id)) continue;
+      sprite.container.destroy({ children: true });
+      this.soldiers.delete(id);
+    }
+  }
+
+  /** The occupier's banner over every building their patrol holds; taken down when they go. */
+  private updateBanners() {
+    const occupied = !!this.world.war?.occupation;
+    const wanted = new Set<string>();
+    if (occupied) {
+      for (const b of this.world.buildings) {
+        if (b.type === 'House' || b.ruined) continue;
+        wanted.add(b.id);
+        const view = this.buildings.get(b.id);
+        if (!view) continue;
+        let flag = this.banners.get(b.id);
+        if (!flag) {
+          flag = new Graphics();
+          flag.rect(0, -30, 2, 30).fill(0x9aa0a6);
+          flag.rect(2, -30, 12, 8).fill(0xc8402a);
+          flag.rect(2, -30, 12, 1).fill(0x1a0a0a);
+          flag.rect(10, -27, 3, 3).fill(0xffd27a);
+          this.objectLayer.addChild(flag);
+          this.banners.set(b.id, flag);
+        }
+        const meta = this.assets.buildingMeta.get(view.artKey);
+        flag.position.set(view.base.x + (meta ? meta.width * 0.3 : 20), view.base.y - (meta ? meta.height * 0.55 : 30));
+        flag.zIndex = depthOf(b.x, b.y, -0.2);
+      }
+    }
+    for (const [id, flag] of this.banners) {
+      if (wanted.has(id)) continue;
+      flag.destroy();
+      this.banners.delete(id);
     }
   }
 

@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
+  applyWar, payForOccupation, payForTroops, raiseBase, advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
@@ -45,7 +45,7 @@ import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
 import Casino from './Casino';
 import { disconnectWallet, useWallet } from './WalletPicker';
-import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
+import { Notices, chatNoticesOn, setChatNotices, useNotices, type Notice } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
@@ -53,6 +53,8 @@ import {
 import { tokenBalance } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
+import { buyBase, fetchWarRow, payOccupation, retakePlot, trainTroops, withdrawFrom } from '@/lib/net/war';
+import { BASE_COST_EMERGE, SHIELD_MS } from '@/lib/world/war';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
 import { moodFor, music } from '@/lib/audio/music';
@@ -439,11 +441,20 @@ export default function EmergeClient() {
       return 'That world could not be read. Its owner may be running an older version.';
     }
     // Whether this is a visit or a shift: the registry says who works here.
+    // And the war on the plot, which a visitor sees played on the ground too.
     let hand = false;
-    if (addressRef.current) {
+    try {
       const { claims } = await fetchClaims();
-      hand = claims.find((c) => c.seed === seed)?.hand?.address === addressRef.current.toLowerCase();
-    }
+      const row = claims.find((c) => c.seed === seed);
+      if (addressRef.current) hand = row?.hand?.address === addressRef.current.toLowerCase();
+      if (row) {
+        const w = save.world as World;
+        if (w) {
+          w.war = undefined;
+          applyWar(w, { army: row.army ?? null, occupation: row.occupation ?? null, shieldUntil: Math.max(row.at + SHIELD_MS, row.shieldUntil ?? 0), battle: row.battle ?? null, occupying: row.occupying ?? null });
+        }
+      }
+    } catch { hand = false; }
     setVisit({
       seed,
       worldName: world.worldName,
@@ -942,6 +953,36 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * they next look in, not a yield that ticks while nobody plays.
    */
   const handRef = useRef<string | null>(null);
+  /**
+   * The war row, read on its own every twenty seconds: a battle is news the
+   * moment it is fought, and the claims poll is far slower than that.
+   */
+  useEffect(() => {
+    if (spectating) return;
+    const seed = claimed.seed;
+    let live = true;
+    const poll = async () => {
+      const row = await fetchWarRow(seed);
+      const world = worldRef.current;
+      if (!live || !row || !world || world.seed !== seed) return;
+      const fighting = !!world.war?.playing;
+      const hadBase = world.buildings.some((b) => b.type === 'Barracks');
+      applyWar(world, row);
+      if (!hadBase && world.buildings.some((b) => b.type === 'Barracks')) sceneRef.current?.syncBuildings();
+      if (!fighting && world.war?.playing) {
+        soundRef.current?.cue('bell');
+        announceRef.current?.({ id: `battle-${world.war.playing.id}`, kind: 'danger', title: t('A fight for {name}', { name: world.name }), body: t('{who} is at the gate. Watch the square.', { who: world.war.playing.attackerName }), lifetime: 16_000 });
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 20_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [claimed.seed, spectating]);
+  /** When the occupation was last paid for from here, so a slow registry is not paid twice. */
+  const payingRef = useRef<number | null>(null);
+  /** The notice hook is set up further down; the poll reaches it through this. */
+  const announceRef = useRef<((notice: Notice) => void) | null>(null);
+  const pushNotice = (body: string) => announceRef.current?.({ id: `war-${Date.now()}`, kind: 'danger', title: t('The army'), body, lifetime: 14_000 });
   useEffect(() => {
     if (spectating || !wallet.address) return;
     const seed = claimed.seed;
@@ -966,6 +1007,30 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         saveWorld(world);
         sceneRef.current?.reset(world);
         setView(snapshot(world, null));
+      }
+      // The war as the registry has it: the base, the army, whoever holds
+      // the plot, and a battle not yet played, which starts on the ground here.
+      if (row && world) {
+        const fighting = !!world.war?.playing;
+        const hadBase = world.buildings.some((b) => b.type === 'Barracks');
+        applyWar(world, { army: row.army ?? null, occupation: row.occupation ?? null, shieldUntil: Math.max(row.at + SHIELD_MS, row.shieldUntil ?? 0), battle: row.battle ?? null, occupying: row.occupying ?? null });
+        if (!hadBase && world.buildings.some((b) => b.type === 'Barracks')) sceneRef.current?.syncBuildings();
+        if (!fighting && world.war?.playing) {
+          soundRef.current?.cue('bell');
+          announceRef.current?.({ id: `battle-${world.war.playing.id}`, kind: 'danger', title: t('A fight for {name}', { name: world.name }), body: t('{who} is at the gate. Watch the square.', { who: world.war.playing.attackerName }), lifetime: 16_000 });
+        }
+        // Holding somebody else's plot costs Gold a day: paid from here while the treasury can, a few hours before it runs out.
+        const held = row.occupying ? claims.find((c) => c.seed === row.occupying) : null;
+        const occ = held?.occupation;
+        if (held && occ && wallet.address && occ.by.toLowerCase() === wallet.address.toLowerCase() && occ.paidUntil - Date.now() < 8 * 3_600_000 && Date.now() - (payingRef.current ?? 0) > 60_000) {
+          payingRef.current = Date.now();
+          const paid = payForOccupation(world, occ.era, held.worldName);
+          if (paid.ok) {
+            void payOccupation(held.seed, wallet.address).then((r) => {
+              if (!r.ok) { world.treasury += paid.gold; pushNotice(t('The stay could not be paid: {why}', { why: r.reason })); }
+            });
+          } else pushNotice(paid.message);
+        }
       }
       // A charter or insurance bought on another device.
       if (world && row?.charterUntil && (world.charterUntil ?? 0) < row.charterUntil) { setCover(world, 'charter', row.charterUntil); saveWorld(world); }
@@ -1211,6 +1276,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     mine: { address: wallet.address, name: player.name },
     onOpenChat: () => setPanel('chat'),
   });
+  announceRef.current = announce;
 
   /*
    * "Your people sold something."
@@ -1836,6 +1902,81 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return null;
   }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
 
+  /** Open a base on the plot: $EMERGE burned, the registry told, the building raised. */
+  const baseFor = useCallback(async (): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    if (!wallet.address) return t('Connect a wallet first.');
+    if (world.war?.base || world.buildings.some((b) => b.type === 'Barracks')) return t('The plot has a base already.');
+    const paid = await spend(player.ledger, BASE_COST_EMERGE, wallet.address);
+    if (!paid.ok) return paid.refused;
+    onPlayer({ ...player, ledger: paid.ledger });
+    let result = await buyBase(claimed.seed, wallet.address, paid.txHash ?? undefined);
+    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      result = await buyBase(claimed.seed, wallet.address, paid.txHash ?? undefined);
+    }
+    if (!result.ok) {
+      return paid.txHash
+        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the base never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+        : result.reason;
+    }
+    applyWar(world, result.war);
+    if (!world.buildings.some((b) => b.type === 'Barracks')) raiseBase(world);
+    saveWorld(world);
+    sceneRef.current?.syncBuildings();
+    soundRef.current?.cue('hammer');
+    refresh();
+    return null;
+  }, [claimed.seed, onPlayer, player, refresh, spectating, wallet.address]);
+
+  /** Train troops: the settlement pays in Gold and steel, then the registry counts them. A refusal refunds. */
+  const troopsFor = useCallback(async (count: number): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    if (!wallet.address) return t('Connect a wallet first.');
+    const paid = payForTroops(world, count);
+    if (!paid.ok) return paid.message;
+    const result = await trainTroops(claimed.seed, wallet.address, count);
+    if (!result.ok) {
+      world.treasury += paid.gold;
+      refresh();
+      return result.reason;
+    }
+    applyWar(world, result.war);
+    if ((result.trained ?? count) < count) world.treasury += Math.round(paid.gold * (1 - (result.trained ?? 0) / count));
+    saveWorld(world);
+    refresh();
+    return null;
+  }, [claimed.seed, refresh, spectating, wallet.address]);
+
+  /** March the garrison against whoever holds the plot. The registry fights it; the ground plays it. */
+  const retakeFor = useCallback(async (troops: number): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    if (!wallet.address) return t('Connect a wallet first.');
+    const result = await retakePlot(claimed.seed, wallet.address, troops);
+    if (!result.ok) return result.reason;
+    applyWar(world, result.war);
+    saveWorld(world);
+    soundRef.current?.cue('bell');
+    refresh();
+    return null;
+  }, [claimed.seed, refresh, spectating, wallet.address]);
+
+  /** Bring the army home from the plot it is holding. */
+  const withdrawFor = useCallback(async (): Promise<string | null> => {
+    const world = worldRef.current;
+    if (!world || spectating) return null;
+    if (!wallet.address || !world.war?.occupying) return t('Your army is not away.');
+    const result = await withdrawFrom(world.war.occupying, wallet.address);
+    if (!result.ok) return result.reason;
+    world.war.occupying = null;
+    world.war.army += result.war.occupation ? 0 : 0;
+    refresh();
+    return null;
+  }, [refresh, spectating, wallet.address]);
+
   /**
    * Advance the plot to the next era.
    *
@@ -2188,6 +2329,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onFestival={festivalFor}
             onCover={coverFor}
             onBoon={boonFor}
+            onBase={baseFor}
+            onTroops={troopsFor}
+            onRetake={retakeFor}
+            onWithdraw={withdrawFor}
             onRenameWorld={renameWorldFor}
             onExpand={expandFor}
             onAdvance={advanceFor}

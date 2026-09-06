@@ -17,7 +17,8 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith, WEALTH_WORDS, wealthOf,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD, formName } from './simulation';
+  type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD, formName, troopCost, troopsAffordable } from './simulation';
+import { armyCap, unitOf } from './world/war';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -184,6 +185,19 @@ export interface Snapshot {
   dug: number;
   /** Which era the plot is in, and what stands between it and the next. */
   era: { id: number; name: string; days: number; gate: EraGate };
+  /** The plot at war: base, army, whoever holds it, and what a troop costs here. */
+  war: {
+    base: boolean; army: number; away: number; occupying: number | null;
+    occupation: { by: string; byName: string; fromName: string; troops: number; era: number; since: number; paidUntil: number } | null;
+    shieldUntil: number;
+    /** A battle is being played on the ground right now. */
+    fighting: boolean;
+    cost: { gold: number; steel: number; unit: string; plural: string };
+    affordable: number;
+    cap: number;
+    /** What the age's troop is like, in a line. */
+    unit: string;
+  };
   /** The city level and what the next one asks. */
   city: CityGate;
   /** Charter and insurance bought for the plot: when each runs out, in wall-clock ms, or 0. */
@@ -534,6 +548,12 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     bridges: world.layout.bridges.length,
     dug: (world.dug ?? []).length,
     era: { id: eraOf(world), name: eraSpec(eraOf(world)).name, days: Math.max(0, world.day - (world.eraSince ?? 1)), gate: eraGate(world) },
+    war: {
+      base: !!world.war?.base || world.buildings.some((b) => b.type === 'Barracks'),
+      army: world.war?.army ?? 0, away: world.war?.away ?? 0, occupying: world.war?.occupying ?? null,
+      occupation: world.war?.occupation ?? null, shieldUntil: world.war?.shieldUntil ?? 0, fighting: !!world.war?.playing,
+      cost: troopCost(world), affordable: troopsAffordable(world), cap: armyCap(eraOf(world)), unit: unitOf(eraOf(world)).blurb,
+    },
     city: cityGate(world),
     cover: { charterUntil: world.charterUntil ?? 0, insuredUntil: world.insuredUntil ?? 0, insured: insured(world), buildersUntil: world.buildersUntil ?? 0, builders: buildersHere(world) },
     festival: { cost: festivalCost(world), held: world.festivalDay === world.day },
