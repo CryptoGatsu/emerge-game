@@ -26,6 +26,7 @@ export const UNISWAP_ON_ROBINHOOD = {
   quoterV2: '0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7',
   swapRouter02: '0xcaf681a66d020601342297493863e78c959e5cb2',
   v4PoolManager: '0x8366a39cc670b4001a1121b8f6a443a643e40951',
+  v4PositionManager: '0x58daec3116aae6d93017baaea7749052e8a04fa7',
   v4Quoter: '0x8dc178efb8111bb0973dd9d722ebeff267c98f94',
   v4StateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b',
 } as const;
@@ -43,6 +44,18 @@ export const NATIVE: Hex = '0x0000000000000000000000000000000000000000';
 export const V4_STATE_VIEW = [
   { type: 'function', name: 'getSlot0', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' }, { name: 'protocolFee', type: 'uint24' }, { name: 'lpFee', type: 'uint24' }] },
   { type: 'function', name: 'getLiquidity', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'liquidity', type: 'uint128' }] },
+] as const;
+
+/**
+ * The v4 PositionManager remembers the key of every pool anybody has added
+ * liquidity to through it, by the first 25 bytes of the pool's id: one call
+ * where the PoolManager's events would take a scan of the chain.
+ */
+export const V4_POSITION_MANAGER = [
+  {
+    type: 'function', name: 'poolKeys', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes25' }],
+    outputs: [{ name: 'currency0', type: 'address' }, { name: 'currency1', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }],
+  },
 ] as const;
 
 /** The PoolManager's record of every pool it has made: the one place a pool's key is written down. */

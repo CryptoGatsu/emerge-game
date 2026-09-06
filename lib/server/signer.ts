@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { NATIVE, PERMIT2, PERMIT2_ADDRESS, POOL_INITIALIZE, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
+import { NATIVE, PERMIT2, PERMIT2_ADDRESS, POOL_INITIALIZE, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -565,8 +565,25 @@ async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex, sta
   return poolsMade(client, [{ currency0: tokenIn }, { currency1: tokenIn }], startAt);
 }
 
-/** One pool, by the id a chart or a pair page shows, which is the hash of its key. */
+/**
+ * One pool, by the id a chart or a pair page shows, which is the hash of
+ * its key: the PositionManager's lookup first, the PoolManager's events
+ * only when nobody ever added liquidity through the app.
+ */
 async function poolById(client: ReturnType<typeof reader>, id: Hex, startAt = 0n): Promise<MadePool | null> {
+  const positions = (process.env.EMERGE_V4_POSITION_MANAGER ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4PositionManager : '')) as Hex;
+  const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
+  if (/^0x[0-9a-fA-F]{40}$/.test(positions)) {
+    try {
+      const [currency0, currency1, fee, tickSpacing, hooks] = await client.readContract({ address: positions, abi: V4_POSITION_MANAGER, functionName: 'poolKeys', args: [id.slice(0, 52) as Hex] });
+      if (tickSpacing !== 0 && v4PoolId(currency0, currency1, fee, tickSpacing, hooks).toLowerCase() === id.toLowerCase()) {
+        let liquidity = '0';
+        try { liquidity = String(await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [id] })); } catch { /* unread */ }
+        lastScan = null;
+        return { id, currency0, currency1, fee, tickSpacing, hooks, liquidity };
+      }
+    } catch { /* not there: scan */ }
+  }
   return (await poolsMade(client, [{ id }], startAt))[0] ?? null;
 }
 
@@ -584,31 +601,36 @@ async function poolsMade(client: ReturnType<typeof reader>, filters: Record<stri
   // the start in slices, halving a slice the node refuses, within a budget
   // of requests. What was covered is reported, so a pool older than the
   // scan is never mistaken for a pool that does not exist.
-  const start = startAt > 0n && startAt < head ? startAt : 0n;
-  lastScan = { from: start, to: head, head, requests: 0, complete: true };
+  // Newest first, since the pools that matter are recent, within a time
+  // budget the function can afford; a slice the node refuses is halved,
+  // one it accepts lets the next grow. What was covered is reported.
+  const floor = startAt > 0n && startAt < head ? startAt : 0n;
+  const began = Date.now();
+  const BUDGET_MS = 30_000;
+  lastScan = { from: floor, to: head, head, requests: 0, complete: true };
   for (const filter of filters) {
     lastScan.requests += 1;
     try {
-      await pull(start, head, filter);
+      await pull(floor, head, filter);
       continue;
     } catch { /* capped: slice it */ }
-    let from = start;
-    let step = 200_000n;
-    let covered = 0n;
-    while (from <= head && lastScan.requests < 160) {
-      const to = from + step - 1n > head ? head : from + step - 1n;
+    let to = head;
+    let step = 1_000_000n;
+    let reached = head + 1n;
+    while (to >= floor && Date.now() - began < BUDGET_MS && lastScan.requests < 120) {
+      const from = to - step + 1n > floor ? to - step + 1n : floor;
       lastScan.requests += 1;
       try {
         await pull(from, to, filter);
-        covered = to;
-        from = to + 1n;
-        if (step < 200_000n) step *= 2n;
+        reached = from;
+        to = from - 1n;
+        if (step < 4_000_000n) step *= 2n;
       } catch {
-        if (step <= 2_000n) { from = to + 1n; continue; }
+        if (step <= 2_000n) { to = from - 1n; continue; }
         step /= 2n;
       }
     }
-    if (from <= head) { lastScan.complete = false; lastScan.to = covered; }
+    if (to >= floor) { lastScan.complete = false; lastScan.from = reached > head ? head : reached; }
   }
   const out: MadePool[] = [];
   for (const log of logs) {
@@ -706,7 +728,7 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
       out.scan = lastScan ? { fromBlock: String(lastScan.from), toBlock: String(lastScan.to), head: String(lastScan.head), requests: lastScan.requests, complete: lastScan.complete } : null;
       if (!pool) {
         out.poolById = null;
-        out.poolAdvice = `No Initialize event carries the id ${poolId} in the blocks scanned${lastScan && !lastScan.complete ? ` (${lastScan.from}–${lastScan.to} of ${lastScan.head}; pass &from= to go on)` : ''}. Either it is not a Uniswap v4 pool on this PoolManager, or the id is something else.`;
+        out.poolAdvice = `No Initialize event carries the id ${poolId} in the blocks scanned${lastScan && !lastScan.complete ? ` (blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head} were covered; older blocks were not)` : ''}. Either it is not a Uniswap v4 pool on this PoolManager, or the id is something else.`;
       } else {
         out.poolById = pool;
         const mine = [pool.currency0, pool.currency1].some((c) => c.toLowerCase() === (token() as string).toLowerCase());
@@ -747,7 +769,7 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
         const pricey = made.filter((p) => BigInt(p.liquidity) > 0n && p.fee > FEE_TOO_HIGH);
         const best = usable[0];
         if (!best && pricey.length) {
-          out.poolAdvice = `The only pools of the token's with liquidity charge ${pricey.map((p) => `${(p.fee / 10_000).toFixed(2)}%`).join(', ')} — more than the ${FEE_TOO_HIGH / 10_000}% the vault will trade through.${lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}; an older pool may lie beyond it: pass &from=<block> or set EMERGE_V4_SCAN_FROM.` : ' If the token trades against ETH somewhere, that pool is not on this PoolManager.'}`;
+          out.poolAdvice = `The only pools of the token's with liquidity charge ${pricey.map((p) => `${(p.fee / 10_000).toFixed(2)}%`).join(', ')} — more than the ${FEE_TOO_HIGH / 10_000}% the vault will trade through.${lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}; an older pool may lie before it.` : ' If the token trades against ETH somewhere, that pool is not on this PoolManager.'}`;
         } else if (best) {
           const other = best.currency0.toLowerCase() === (token() as string).toLowerCase() ? best.currency1 : best.currency0;
           const usdg = routeForPools.via.find((v) => v !== NATIVE) ?? null;
@@ -762,7 +784,7 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
             ? `The token's deepest pool is v4 against ${other === NATIVE ? 'native ETH' : other} at fee ${best.fee}, spacing ${best.tickSpacing}${best.hooks === NATIVE ? ', no hook' : `, hook ${best.hooks}`}. Set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${path}.`
             : `The token's deepest pool is v4 against ${other} (fee ${best.fee}, spacing ${best.tickSpacing}, hook ${best.hooks}), but no v4 pool with liquidity leads from there to GLD, directly or through ${usdg ?? 'a stepping stone'}.`;
         } else {
-          const coverage = lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}, so an older pool may lie beyond it.` : '';
+          const coverage = lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}, so an older pool may lie before it.` : '';
           out.poolAdvice = made.length
             ? `The PoolManager knows ${made.length} pool(s) for the token but none holds liquidity.${coverage}`
             : `The PoolManager has no Initialize event for the token in the blocks scanned: it is not in any v4 pool this node can see, and no standard v3 pool holds liquidity.${coverage}`;
