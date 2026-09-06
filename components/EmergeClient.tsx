@@ -28,7 +28,6 @@ import {
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
-import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
@@ -197,18 +196,6 @@ export interface Visit {
    * the settlement's stewardship comes to while they have it open.
    */
   hand?: boolean;
-}
-
-/**
- * Hand a settlement the goodwill Gold, once, if it has not had it.
- *
- * Called wherever a world of the player's own is opened — on first mount and
- * on switching plots — and never on a visit, because a visitor's copy of
- * somebody else's settlement is not a settlement to pay anything into.
- */
-function makeGood(world: World) {
-  const gold = claimGoodwill(world);
-  if (gold > 0) fundTreasury(world, gold, `${gold.toLocaleString()} Gold arrived: ${GOODWILL.reason}`);
 }
 
 export default function EmergeClient() {
@@ -643,7 +630,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     worldRef.current = visit
       ? worldFromSave(visit.save, visit.seed, visit.worldName) ?? createWorld(visit.seed, visit.worldName)
       : loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
-    if (!visit) makeGood(worldRef.current);
     // A hand arriving is attention: their shift starts at full rate and
     // slides the same way an owner's does, so a tab left open all week
     // earns a hand about what it would earn an owner — very little.
@@ -806,7 +792,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const scene = sceneRef.current;
     if (!scene) return;
     const next = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
-    makeGood(next);
     worldRef.current = next;
     setSelected(null);
     setFollowing(null);
@@ -1093,9 +1078,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // their settlement jumped has the answer in front of them.
     console.info(`Emerge: the published copy of ${remote.name} is on day ${remote.day}; this browser has day ${local.day}.${ahead ? ' Continuing from the published copy.' : ''}`);
     if (!ahead) return;
-    // A world that was published was opened by a client that made good on
-    // it, whether or not it wrote that down: it is not owed the grant again.
-    markGoodwill(remote);
     worldRef.current = remote;
     selectedRef.current = null;
     setSelected(null);
