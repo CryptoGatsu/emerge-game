@@ -36,11 +36,13 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /**
  * The largest snapshot accepted.
  *
- * A large settlement saves at about 55KB; this leaves headroom for one that
- * has been played for months without letting a caller push arbitrary bulk into
- * the store.
+ * A settlement of two hundred people and a hundred buildings, played for
+ * months, saves at around 300KB now that the save is trimmed; the old limit
+ * of 400KB turned one such world away, and a world that cannot be published
+ * cannot advance an era. This leaves room for a world twice that size
+ * without letting a caller push arbitrary bulk into the store.
  */
-const MAX_SNAPSHOT = 400_000;
+const MAX_SNAPSHOT = 1_000_000;
 
 export async function GET(request: Request) {
   const seed = Number(new URL(request.url).searchParams.get('seed'));
@@ -138,7 +140,7 @@ export async function POST(request: Request) {
 
   const encoded = JSON.stringify(body.snapshot);
   if (encoded.length > MAX_SNAPSHOT) {
-    return NextResponse.json({ error: 'That world is too large to publish.' }, { status: 413 });
+    return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, and the relay takes ${Math.round(MAX_SNAPSHOT / 1024)}KB.` }, { status: 413 });
   }
 
   // Where the settlement is, read from the world itself rather than from
@@ -189,8 +191,9 @@ export async function POST(request: Request) {
       at: Date.now(),
       snapshot: body.snapshot,
     });
-    return NextResponse.json({ published: true });
-  } catch {
-    return NextResponse.json({ error: 'The world store is not reachable.' }, { status: 502 });
+    return NextResponse.json({ published: true, bytes: encoded.length });
+  } catch (error) {
+    const why = error instanceof Error && error.message ? error.message.slice(0, 120) : '';
+    return NextResponse.json({ error: why ? `The world store refused the copy: ${why}` : 'The world store is not reachable.' }, { status: 502 });
   }
 }

@@ -1856,7 +1856,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
       day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
     });
-    if (!put.ok && !put.behind) return t('The world could not be published, and the registry judges the step on the published copy. Try again in a moment.');
+    if (!put.ok && !put.behind) {
+      // Say why. "Try again in a moment" sent a player whose world was too
+      // large for the relay back to the same button for days.
+      return `${t('The world could not be published, and the registry judges the step on the published copy.')} ${put.error ? tx(put.error) : t('Try again in a moment.')}`;
+    }
     const target = gate.next.id;
     const paid = await spend(player.ledger, advanceCost(target), wallet.address);
     if (!paid.ok) return paid.refused;

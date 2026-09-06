@@ -485,6 +485,8 @@ export async function releasePlot(seed: number, owner: string): Promise<boolean>
 
 export interface PublishResult {
   ok: boolean;
+  /** Why the relay refused, in its own words, when it said. */
+  error?: string;
   /** The store holds a later copy of this world; read it back and continue from it. */
   behind?: boolean;
   /** Where that later copy is, when the store said. */
@@ -548,10 +550,10 @@ export async function publishWorld(input: {
     // that is being put in a pocket gets its last few minutes saved.
     const response = await fetch('/api/worlds', { method: 'POST', headers, body, keepalive });
     if (response.ok) return { ok: true };
-    const json = (await response.json().catch(() => ({}))) as { behind?: boolean; day?: number; hour?: number | null };
-    return { ok: false, behind: json.behind === true, day: json.day, hour: json.hour };
+    const json = (await response.json().catch(() => ({}))) as { error?: string; behind?: boolean; day?: number; hour?: number | null };
+    return { ok: false, error: json.error ?? `The relay answered ${response.status}.`, behind: json.behind === true, day: json.day, hour: json.hour };
   } catch {
-    return { ok: false };
+    return { ok: false, error: 'The relay could not be reached.' };
   }
 }
 
