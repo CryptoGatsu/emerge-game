@@ -18,6 +18,8 @@ import { sessionAddress } from '@/lib/server/session';
 import { settlePendingGld } from '@/lib/server/casino';
 
 export const dynamic = 'force-dynamic';
+// A GLD payout is a swap and a send, each awaited on chain.
+export const maxDuration = 60;
 
 const cronAllowed = (request: Request) => {
   const secret = process.env.EMERGE_CRON_SECRET ?? process.env.CRON_SECRET ?? '';
