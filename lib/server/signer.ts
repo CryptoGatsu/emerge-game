@@ -577,7 +577,7 @@ async function poolById(client: ReturnType<typeof reader>, id: Hex, startAt = 0n
     try {
       const [currency0, currency1, fee, tickSpacing, hooks] = await client.readContract({ address: positions, abi: V4_POSITION_MANAGER, functionName: 'poolKeys', args: [id.slice(0, 52) as Hex] });
       if (tickSpacing !== 0 && v4PoolId(currency0, currency1, fee, tickSpacing, hooks).toLowerCase() === id.toLowerCase()) {
-        let liquidity = '0';
+        let liquidity = 'unread';
         try { liquidity = String(await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [id] })); } catch { /* unread */ }
         lastScan = null;
         return { id, currency0, currency1, fee, tickSpacing, hooks, liquidity };
@@ -635,14 +635,17 @@ async function poolsMade(client: ReturnType<typeof reader>, filters: Record<stri
   const out: MadePool[] = [];
   for (const log of logs) {
     const a = log.args as { id: Hex; currency0: Hex; currency1: Hex; fee: number; tickSpacing: number; hooks: Hex };
-    let liquidity = '0';
+    // A read the node refuses is unknown, and unknown is not zero.
+    let liquidity = 'unread';
     if (/^0x[0-9a-fA-F]{40}$/.test(stateView)) {
       try { liquidity = String(await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [a.id] })); } catch { /* unread */ }
     }
     out.push({ id: a.id, currency0: a.currency0, currency1: a.currency1, fee: Number(a.fee), tickSpacing: Number(a.tickSpacing), hooks: a.hooks, liquidity });
   }
-  return out.sort((x, y) => (BigInt(y.liquidity) > BigInt(x.liquidity) ? 1 : -1));
+  const held = (p: MadePool) => (p.liquidity === 'unread' ? -1n : BigInt(p.liquidity));
+  return out.sort((x, y) => (held(y) > held(x) ? 1 : -1));
 }
+const holds = (p: MadePool) => p.liquidity !== 'unread' && BigInt(p.liquidity) > 0n;
 
 /** The deepest live v4 pool between two currencies at a standard fee, or null. */
 async function deepest(client: ReturnType<typeof reader>, a: Hex, b: Hex): Promise<PoolRow | null> {
@@ -741,18 +744,42 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
             : `The pool is v4 with fee ${pool.fee}, spacing ${pool.tickSpacing}, hook ${pool.hooks}, liquidity ${pool.liquidity}, but no v4 pool with liquidity leads on from its other side to GLD.`;
       }
     }
-    // The pools themselves, before any swap is simulated.
+    // The configured route, hop by hop, exactly as written — fee, spacing
+    // and hook — before anything is guessed. A route that stands needs no
+    // discovery, and discovery is what wears the node out.
     const routeForPools = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
-    const pools = await poolsAlong(client, [token() as Hex, ...routeForPools.via, GLD_ADDRESS as Hex]);
+    const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
+    const chain = [token() as Hex, ...routeForPools.via, GLD_ADDRESS as Hex];
+    const configured: { hop: string; fee: number; tickSpacing: number; hooks: Hex; initialized: boolean; liquidity: string }[] = [];
+    if ((out.kind as string) === 'v4' && /^0x[0-9a-fA-F]{40}$/.test(stateView)) {
+      for (let i = 0; i + 1 < chain.length; i++) {
+        const id = v4PoolId(chain[i], chain[i + 1], routeForPools.fees[i], routeForPools.ticks[i], routeForPools.hooks[i]);
+        let initialized = false, liquidity = 'unread';
+        try {
+          const [sqrtPrice] = await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getSlot0', args: [id] });
+          initialized = sqrtPrice !== 0n;
+          if (initialized) liquidity = String(await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [id] }));
+          else liquidity = '0';
+        } catch { /* unread */ }
+        configured.push({ hop: `${chain[i].slice(0, 8)}…→${chain[i + 1].slice(0, 8)}…`, fee: routeForPools.fees[i], tickSpacing: routeForPools.ticks[i], hooks: routeForPools.hooks[i], initialized, liquidity });
+      }
+      out.configured = configured;
+    }
+    const standing = configured.length > 0 && configured.every((h) => h.initialized && h.liquidity !== '0');
+    const pools = standing ? [] : await poolsAlong(client, chain);
     out.pools = pools.filter((r) => r.v3 || r.v4);
     out.poolsChecked = pools.length;
     const hops = [...new Set(pools.map((r) => r.hop))];
     const pick = (want: 'v4' | 'v3') => hops.map((h) => pools.find((r) => r.hop === h && live(r, want)) ?? null);
     const v4Route = pick('v4'), v3Route = pick('v3');
     const spec = (rs: (PoolRow | null)[]) => [rs[0]?.fee, ...routeForPools.via.flatMap((v, i) => [v, rs[i + 1]?.fee])].join(',');
-    if (v4Route.every((r) => r)) out.poolAdvice = `Every hop has a v4 pool with liquidity: set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${spec(v4Route)}.`;
+    if (standing) out.poolAdvice = `Every hop of the configured route is initialised${configured.some((h) => h.liquidity === 'unread') ? ' (a liquidity read was refused by the node)' : ' and holds liquidity'}; the simulation below is the last word.`;
+    else if (v4Route.every((r) => r)) out.poolAdvice = `Every hop has a v4 pool with liquidity: set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${spec(v4Route)}.`;
     else if (v3Route.every((r) => r)) out.poolAdvice = `Every hop has a v3 pool with liquidity: set EMERGE_SWAP_KIND=universal and EMERGE_SWAP_PATH=${spec(v3Route)}.`;
-    else {
+    else if (!search && !poolId) {
+      const missing = configured.filter((h) => !h.initialized).map((h) => h.hop);
+      out.poolAdvice = `${missing.length ? `The configured route has no initialised pool at ${missing.join(', ')}.` : 'The configured route does not stand.'} Add &search=1 to look for the token's pools, or &pool=<id> to read one by the id a chart shows.`;
+    } else {
       // The configured route is broken somewhere: look for another.
       const routes = await discoverRoutes(client, token() as Hex, routeForPools.via, GLD_ADDRESS as Hex);
       out.discovered = routes;
@@ -765,8 +792,8 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
         const made = await poolsMadeFor(client, token() as Hex, scanFrom > 0n ? scanFrom : envFrom);
         out.tokenPools = made;
         out.scan = lastScan ? { fromBlock: String(lastScan.from), toBlock: String(lastScan.to), head: String(lastScan.head), requests: lastScan.requests, complete: lastScan.complete } : null;
-        const usable = made.filter((p) => BigInt(p.liquidity) > 0n && p.fee <= FEE_TOO_HIGH);
-        const pricey = made.filter((p) => BigInt(p.liquidity) > 0n && p.fee > FEE_TOO_HIGH);
+        const usable = made.filter((p) => holds(p) && p.fee <= FEE_TOO_HIGH);
+        const pricey = made.filter((p) => holds(p) && p.fee > FEE_TOO_HIGH);
         const best = usable[0];
         if (!best && pricey.length) {
           out.poolAdvice = `The only pools of the token's with liquidity charge ${pricey.map((p) => `${(p.fee / 10_000).toFixed(2)}%`).join(', ')} — more than the ${FEE_TOO_HIGH / 10_000}% the vault will trade through.${lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}; an older pool may lie before it.` : ' If the token trades against ETH somewhere, that pool is not on this PoolManager.'}`;
@@ -785,8 +812,9 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
             : `The token's deepest pool is v4 against ${other} (fee ${best.fee}, spacing ${best.tickSpacing}, hook ${best.hooks}), but no v4 pool with liquidity leads from there to GLD, directly or through ${usdg ?? 'a stepping stone'}.`;
         } else {
           const coverage = lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}, so an older pool may lie before it.` : '';
+          const unread = made.filter((p) => p.liquidity === 'unread').length;
           out.poolAdvice = made.length
-            ? `The PoolManager knows ${made.length} pool(s) for the token but none holds liquidity.${coverage}`
+            ? `The PoolManager knows ${made.length} pool(s) for the token but none is known to hold liquidity${unread ? ` (${unread} could not be read: the node refused; try again)` : ''}.${coverage}`
             : `The PoolManager has no Initialize event for the token in the blocks scanned: it is not in any v4 pool this node can see, and no standard v3 pool holds liquidity.${coverage}`;
         }
       }
