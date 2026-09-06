@@ -44,6 +44,7 @@ import {
   type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
+import SoftStake from './SoftStake';
 import { music } from '@/lib/audio/music';
 import { eraName } from '@/lib/world/eras';
 import { BrandLine } from './Brand';
@@ -1116,6 +1117,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
           <span><b>{claimedTotal.toLocaleString()}</b> {t('of {total} plots claimed', { total: worldTotal.toLocaleString() })}</span>
           <span><b>{Math.max(0, worldTotal - claimedTotal).toLocaleString()}</b> {t('left to claim')}</span>
         </div>
+        {/* The soft stake needs a wallet, not land: a holder without a plot
+            can register it here, on the first screen they see. */}
+        <SoftStake address={wallet.address} balance={player.ledger.balance} hasLand={ownedSeeds.size > 0} />
         <Leaderboard me={wallet.address} onVisit={onVisit} onPick={(seed) => setSelectedSeed(seed)} />
 
         <div className="land-body">

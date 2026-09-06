@@ -3038,6 +3038,18 @@ button.fold:hover { color: var(--emerald); }
 @media (max-width: 780px) { .hud .hud-lang { top: 56px; } .landing-lang { top: 10px; right: 10px; } }
 
 /* ---- world count and resale ---- */
+.soft-stake { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px 18px; align-items: center; margin: 0 0 14px; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--panel-edge-soft); background: rgba(255, 255, 255, 0.03); }
+.soft-stake .eyebrow { display: block; margin-bottom: 4px; }
+.soft-stake-text p { margin: 0; line-height: 1.5; }
+.soft-stake-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.soft-stake-figures div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; min-width: 0; }
+.soft-stake-figures span { font-size: 9.5px; letter-spacing: 0.08em; color: var(--muted); }
+.soft-stake-figures b { font-size: 14px; color: var(--cream); overflow-wrap: anywhere; }
+.soft-stake-actions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.soft-stake-actions button { padding: 8px 14px; border-radius: 9px; border: 1px solid var(--emerald); background: rgba(184, 231, 86, 0.12); color: var(--emerald); font: inherit; font-size: 12px; cursor: pointer; }
+.soft-stake-actions button:disabled { opacity: 0.5; cursor: default; }
+.soft-stake-note { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 760px) { .soft-stake { grid-template-columns: 1fr; } }
 .world-count { display: flex; justify-content: center; gap: 22px; margin: 6px 0 12px; font-size: 13px; color: #9db89a; letter-spacing: 0.02em; }
 .world-count b { color: #e6f5c8; font-size: 15px; margin-right: 4px; }
 .region-pin .sale-tag, .region-pin .settled-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; }
