@@ -647,6 +647,52 @@ function waterfallFrame(frame: number): Pixels {
  * past the edge of the settlement is deep forest, not void. Blobs are drawn with
  * their wrapped copies so the texture tiles without a seam.
  */
+/*
+ * Ground that runs into ground.
+ *
+ * Every tile used to stop dead at its diamond, so a meadow met a wood along a
+ * sawtooth of perfect edges. Each kind of ground now spills a ragged, dithered
+ * tongue over the tile beside it along whichever edge they share: this is the
+ * tongue, one per edge per kind, laid over the neighbour by the scene.
+ */
+/** How far in from an edge a pixel is, 0 at that edge and 32 at the far one. */
+function blendDepth(edge: ShoreEdge, x: number, y: number): number {
+  const nw = x / 2 + y - 16 + 0.5;
+  const ne = y - x / 2 + 16 + 0.5;
+  return edge === 'nw' ? nw : edge === 'se' ? 32 - nw : edge === 'ne' ? ne : 32 - ne;
+}
+/** Where along the edge a pixel sits, so the raggedness follows the edge. */
+function edgeAlong(edge: ShoreEdge, x: number, y: number): number {
+  return edge === 'nw' || edge === 'se' ? x / 2 - y + 16 : x / 2 + y - 16;
+}
+export function blendEdge(base: string, edge: ShoreEdge, seed: number): Pixels {
+  const p = tile();
+  const r = rng(seed);
+  const coarse: number[] = [], fine: number[] = [];
+  for (let i = 0; i <= 40; i++) { coarse.push(r()); fine.push(r()); }
+  const at = (arr: number[], a: number) => {
+    const i = Math.max(0, Math.min(arr.length - 2, Math.floor(a))), f = Math.max(0, Math.min(1, a - i));
+    return arr[i] + (arr[i + 1] - arr[i]) * f;
+  };
+  const light = shade(base, 0.07), dark = shade(base, -0.1);
+  for (let y = 0; y < TILE_H; y++) {
+    for (let x = 0; x < TILE_W; x++) {
+      if (!insideDiamond(x, y)) continue;
+      const d = blendDepth(edge, x, y);
+      const a = edgeAlong(edge, x, y);
+      const depth = 5 + at(coarse, a * 0.28) * 9 + at(fine, a * 1.1) * 3;
+      const past = d - depth;
+      if (past < 0) {
+        const roll = r();
+        rect(p, x, y, 1, 1, roll < 0.12 ? dark : roll < 0.24 ? light : base);
+      } else if (past < 3 && (x + y + Math.floor(past)) % 2 === 0) {
+        rect(p, x, y, 1, 1, base);
+      }
+    }
+  }
+  return p;
+}
+
 export function canopyPattern(): Pixels {
   const size = 128;
   const p = surface(size, size);
@@ -704,6 +750,14 @@ export function buildTiles(): TileArt[] {
   add('tile.cliff.0', cliffFace(3400));
   for (const edge of ['nw', 'ne', 'se', 'sw'] as ShoreEdge[]) add(`tile.foam.${edge}`, foamEdge(edge, 3500 + edge.length));
   for (let f = 0; f < 4; f++) add(`tile.waterfall.${f}`, waterfallFrame(f));
+  const BLEND_BASE: Record<string, string> = {
+    grass: GROUND.grass, flowers: GROUND.grass, meadow: GROUND.meadow, forest: GROUND.forestFloor, soil: GROUND.soil,
+    sand: GROUND.sand, dune: GROUND.dune, marsh: GROUND.marsh, scrub: GROUND.scrub, rock: GROUND.rock,
+  };
+  let blendSeed = 4000;
+  for (const [kind, base] of Object.entries(BLEND_BASE)) {
+    for (const edge of ['nw', 'ne', 'se', 'sw'] as ShoreEdge[]) add(`tile.blend.${kind}.${edge}`, blendEdge(base, edge, blendSeed += 17));
+  }
   return out;
 }
 

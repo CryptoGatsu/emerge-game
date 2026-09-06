@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, POSTS_PER_ERA, OUTPUT_PER_ERA } from '@/lib/simulation';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, POSTS_PER_ERA, OUTPUT_PER_ERA , DIG_GOLD, FILL_GOLD } from '@/lib/simulation';
 import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
@@ -68,6 +68,9 @@ interface PanelsProps {
   onBridge: () => void;
   /** Arm the cursor for taking a crossing down. */
   onUnbridge: () => void;
+  /** Dig a pond, or fill one the player dug. */
+  onPond: () => void;
+  onFillPond: () => void;
   /** Pay the public works for the next city level; the refusal, or null. */
   onRaiseCity: () => string | null;
   /** Hold a festival; the refusal, or null. */
@@ -2020,8 +2023,8 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates }: {
   );
 }
 
-function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge }: {
-  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void; onUnbridge: () => void;
+function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge, onPond, onFillPond }: {
+  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void; onUnbridge: () => void; onPond: () => void; onFillPond: () => void;
 }) {
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
@@ -2089,6 +2092,25 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
             {view.bridges > 0 && (
               <button className="ghost" onClick={onUnbridge} title={t('Tap a deck to take that crossing down. Some of the timber comes back. A crossing that is the only way to buildings on the far bank stays.')}>
                 {t('Take a crossing down')}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="build-card tool">
+          <div className="build-icon">💧</div>
+          <h3>{t('Pond')}</h3>
+          <p>{t('Dig a pond where you tap, on open ground clear of the square, the buildings and the bridges. Dig beside it again and the two join into a channel; fishers cast into it and people walk round it. A pond you dug can be filled in again.')}</p>
+          <div className="build-cost">
+            <b>{t('{n} Gold a dig', { n: DIG_GOLD })}</b>
+            <small>{t('{n} Gold to fill one in', { n: FILL_GOLD })}</small>
+          </div>
+          <div className="build-actions">
+            <button disabled={view.treasury < DIG_GOLD} onClick={onPond}>
+              {view.treasury < DIG_GOLD ? t('Not enough Gold') : t('Dig a pond')}
+            </button>
+            {view.dug > 0 && (
+              <button className="ghost" onClick={onFillPond} title={t('Tap a pond you dug to fill it back in.')}>
+                {t('Fill a pond in')}
               </button>
             )}
           </div>
@@ -2614,7 +2636,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onGates, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2658,7 +2680,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     );
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
-  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} onUnbridge={onUnbridge} />;
+  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} onUnbridge={onUnbridge} onPond={onPond} onFillPond={onFillPond} />;
   if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} onGates={onGates} />;
   if (panel === 'connect') {
     return (

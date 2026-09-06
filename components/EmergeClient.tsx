@@ -24,7 +24,7 @@ import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
-  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, removeBridge,
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, removeBridge, digWater, fillWater, digProblem,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -856,6 +856,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   const [firstDay, setFirstDay] = useState<FirstDayRecord | null>(null);
   /** Photo mode: the interface hidden for a clean screenshot. */
   const [photo, setPhoto] = useState(false);
+  /** The frame's grade and bloom, remembered on this device; on unless turned off. */
+  const [fx, setFx] = useState(true);
+  useEffect(() => { try { setFx(localStorage.getItem('emerge.fx') !== '0'); } catch { /* no storage */ } }, []);
+  useEffect(() => { try { localStorage.setItem('emerge.fx', fx ? '1' : '0'); } catch { /* no storage */ } sceneRef.current?.setEffects(fx); }, [fx]);
+  /** The planning grid over the ground, remembered on this device. */
+  const [grid, setGrid] = useState(false);
+  useEffect(() => { try { setGrid(localStorage.getItem('emerge.grid') === '1'); } catch { /* no storage */ } }, []);
+  useEffect(() => { try { localStorage.setItem('emerge.grid', grid ? '1' : '0'); } catch { /* no storage */ } sceneRef.current?.setGrid(grid); }, [grid]);
   useEffect(() => {
     if (visit) { setFirstDay(null); return; }
     setFirstDay(readFirstDay(firstKey));
@@ -1438,6 +1446,26 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, []);
 
   /** Arm the cursor for taking a crossing down: the next tap on a deck removes it. */
+  const beginPond = useCallback((mode: 'Dig' | 'Fill') => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    setPanel(null);
+    setPlacing(mode);
+    scene.startWaterTool(mode, (x, y) => {
+      setPlacing(null);
+      const result = mode === 'Dig' ? digWater(world, x, y) : fillWater(world, x, y);
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `pond-${Date.now()}`, kind: 'sync', title: t('Nothing dug'), body: tx(result.message), lifetime: 8_000 });
+      } else {
+        soundRef.current?.cue('hammer');
+        announce({ id: `pond-${Date.now()}`, kind: 'sync', title: mode === 'Dig' ? t('Pond dug') : t('Pond filled'), body: tx(result.message), lifetime: 6_000 });
+      }
+      setView(snapshot(world, selectedRef.current));
+    });
+  }, [announce]);
+
   const beginUnbridge = useCallback(() => {
     const world = worldRef.current;
     const scene = sceneRef.current;
@@ -1501,7 +1529,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; bubbles: () => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; bubbles: () => unknown; digOk: (x: number, y: number) => unknown; centre: (x: number, y: number, zoom: number) => void; screenPoint: (x: number, y: number) => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1524,6 +1552,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       probe: (x: number, y: number) => sceneRef.current?.probe(x, y) ?? null,
       sprites: () => sceneRef.current?.spriteInfo() ?? null,
       bubbles: () => sceneRef.current?.bubbleInfo() ?? null,
+      digOk: (x: number, y: number) => (worldRef.current ? digProblem(worldRef.current, x, y) : 'no world'),
+      centre: (x: number, y: number, zoom: number) => sceneRef.current?.centreOn(x, y, zoom),
+      screenPoint: (x: number, y: number) => sceneRef.current?.screenPoint(x, y) ?? null,
       // Open a building's card, as a tap on it would.
       select: (id: string) => { setSelected({ kind: 'building', id }); },
       pick: (id: string) => { setSelected({ kind: 'citizen', id }); },
@@ -1985,6 +2016,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * -------------------------------------------------------------- */
 
   useEffect(() => { sceneRef.current?.setPhoto(photo); }, [photo]);
+  useEffect(() => { if (ready) sceneRef.current?.setGrid(grid); }, [ready, grid]);
+  useEffect(() => { if (ready) sceneRef.current?.setEffects(fx); }, [ready, fx]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1994,6 +2027,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       else if (e.key === '2') setSpeed(2);
       else if (e.key === 'f' || e.key === 'F') toggleFollow();
       else if (e.key === 'p' || e.key === 'P') setPhoto((v) => !v);
+      else if (e.key === 'g' || e.key === 'G') setGrid((v) => !v);
+      else if (e.key === 'v' || e.key === 'V') setFx((v) => !v);
       else if (e.key === 'Escape') { setPhoto(false); setPanel(null); cancelBuild(); setSelected(null); }
     };
     window.addEventListener('keydown', onKey);
@@ -2024,6 +2059,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         <>
           <Hud
             onPhoto={() => setPhoto(true)}
+            grid={grid}
+            onGrid={() => setGrid((v) => !v)}
+            effects={fx}
+            onEffects={() => setFx((v) => !v)}
             view={view}
             paused={paused}
             speed={speed}
@@ -2111,6 +2150,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onClearTrees={beginClear}
             onBridge={beginBridge}
             onUnbridge={beginUnbridge}
+            onPond={() => beginPond('Dig')}
+            onFillPond={() => beginPond('Fill')}
             onRaiseCity={raiseCityFor}
             onFestival={festivalFor}
             onCover={coverFor}

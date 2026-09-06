@@ -215,7 +215,10 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
       const riverHit = river.pts.length ? nearest(river, wx, wy) : { d: Infinity, w: 0 };
       const pondD = Math.hypot(wx - water.pond.x, wy - water.pond.y);
       const pondEdge = water.pond.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
-      const nearWater = riverHit.d < riverHit.w + 0.9 || pondD < pondEdge + 1.1;
+      // Dug water: how far outside (positive) or inside (negative) its rim.
+      let dugEdge = Infinity;
+      for (const d of world.dug ?? []) dugEdge = Math.min(dugEdge, Math.hypot(wx - d.x, wy - d.y) - d.r);
+      const nearWater = riverHit.d < riverHit.w + 0.9 || pondD < pondEdge + 1.1 || dugEdge < 1.1;
 
       const roadHit = nearest(roads, wx, wy);
       const roadEdge = roadHit.w + (valueNoise(seed + 191, wx * 0.3, wy * 0.3) - 0.5) * 1.0;
@@ -227,7 +230,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
       if (inWater) {
         // A deck carries the road over the water instead of interrupting it.
         tile = bridgeNear(wx, wy) && onRoad ? Tile.Path
-          : nearWater && !((riverHit.d < riverHit.w - 1.6) || pondD < pondEdge - 1.8) ? Tile.WaterShore
+          : nearWater && !((riverHit.d < riverHit.w - 1.6) || pondD < pondEdge - 1.8 || dugEdge < -1.8) ? Tile.WaterShore
             : Tile.Water;
       } else if (inPlaza) {
         tile = Tile.Plaza;
@@ -329,7 +332,7 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
   };
 
   if (options.props !== false) {
-    scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, roads, river, heightAt, profile });
+    scatterProps(props, { seed, grid, cell, tiles, steps, worldOf, blocked, water, roads, river, heightAt, profile });
     placeSettlementProps(props, world, roads, seed, water.pond, layout, profile.ground);
   }
 
@@ -345,6 +348,7 @@ interface ScatterCtx {
   tiles: Uint8Array; steps: Uint8Array;
   worldOf: (tx: number, ty: number) => [number, number];
   blocked: (wx: number, wy: number, pad?: number) => boolean;
+  water: WaterField;
   roads: Polyline; river: Polyline;
   heightAt: (wx: number, wy: number) => number;
   profile: BiomeProfile;
@@ -354,7 +358,7 @@ const bigTree = (species: string) => `prop.tree.${species}.big`;
 const smallTree = (species: string) => `prop.tree.${species}.small`;
 
 function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
-  const { seed, grid, tiles, steps, worldOf, blocked, roads, profile } = ctx;
+  const { seed, grid, tiles, steps, worldOf, blocked, water, roads, profile } = ctx;
   const TREES = profile.trees.map(bigTree);
   const SMALL_TREES = profile.trees.map(smallTree);
   for (let ty = 0; ty < grid; ty++) {
@@ -371,6 +375,9 @@ function scatterProps(out: PropInstance[], ctx: ScatterCtx) {
         const wx = bx + (r1 - 0.5) * ctx.cell * 0.95;
         const wy = by + (r2 - 0.5) * ctx.cell * 0.95;
         if (blocked(wx, wy)) continue;
+        // A tree on the tile beside a pond can still jitter into the water's
+        // ragged rim; only the water's own props stand in it.
+        if (tile !== Tile.Water && water.isWater(wx, wy)) continue;
         const roadHit = nearest(roads, wx, wy);
         const nearRoad = roadHit.d < roadHit.w + 1.4;
 

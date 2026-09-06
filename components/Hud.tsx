@@ -59,6 +59,12 @@ interface HudProps {
   onResetView: () => void;
   /** Hide the whole interface for a clean screenshot. */
   onPhoto: () => void;
+  /** The planning grid, and its toggle. */
+  grid: boolean;
+  onGrid: () => void;
+  /** The frame's grade and bloom, and its toggle. */
+  effects: boolean;
+  onEffects: () => void;
   onMinimapJump: (u: number, v: number) => void;
   drawMinimap: (canvas: HTMLCanvasElement) => void;
   onCancelBuild: () => void;
@@ -880,6 +886,12 @@ export function Hud(props: HudProps) {
           >
             {props.sound ? '♪' : '♪̸'}
           </button>
+          <button className={props.grid ? 'sel' : ''} onClick={props.onGrid} title={t('Show a tile grid over the ground, for planning (G)')} aria-label={t('Grid')}>
+            ⌗
+          </button>
+          <button className={props.effects ? 'sel' : ''} onClick={props.onEffects} title={t('The look: bloom, warmth and vignette over the frame (V)')} aria-label={t('Look')}>
+            ✧
+          </button>
           <button onClick={props.onPhoto} title={t('Photo mode: hide the interface for a clean screenshot (P)')} aria-label={t('Photo mode')}>
             ◉
           </button>
@@ -1042,6 +1054,10 @@ export function Hud(props: HudProps) {
                 ? <>{t('Bridge')} — {compact ? t('tap the water you want bridged, or the land across it.') : t('click the water you want bridged, or the land across it; Esc to cancel.')}</>
               : placing === 'Unbridge'
                 ? <>{t('Take a crossing down')} — {compact ? t('tap the deck you want taken down.') : t('click the deck you want taken down; Esc to cancel.')}</>
+              : placing === 'Dig'
+                ? <>{t('Dig a pond')} — {compact ? t('tap open ground where the ring is green.') : t('click open ground where the ring is green; Esc to cancel.')}</>
+              : placing === 'Fill'
+                ? <>{t('Fill a pond in')} — {compact ? t('tap a pond you dug.') : t('click a pond you dug; Esc to cancel.')}</>
                 : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
           </span>
           <button onClick={props.onCancelBuild}>{t('Cancel')}</button>

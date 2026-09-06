@@ -1,7 +1,7 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
+import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
 
@@ -464,6 +464,8 @@ export function WikiZh() {
           <h3>手动架桥</h3>
           <p>聚落足够富裕、对岸值得去时会自己架桥；建造面板里的<b>桥梁</b>工具则是你自己选对岸。点击水对岸的陆地，工队就会勘定通往那里最窄的可靠渡口，先付 <b>{n(BRIDGE_GOLD)} 金币</b>，木材和工钱按天计。料场木材不够时，工队会按市价的一倍半用金币买进而不是停工，所以伐木工不够的镇子也能修成渡口。一次只能修一处。</p>
           <p>桥也能拆。地块上有桥之后，同一张卡片上会多出<b>拆除一座桥</b>：点一下桥面它就没了，桥长<b>每单位 {UNBRIDGE_WOOD_PER_UNIT * 2} 木料</b>回到堆场，跨水的路被切断，桥上的人在较近的一岸下桥。通往有建筑的岛的唯一渡口会被拒绝拆除，直到那些建筑拆掉或另有渡口，所以不会有人被困住。</p>
+          <h3>池塘与水道</h3>
+          <p>建造面板里的<b>池塘</b>工具在你点的地方挖出水面，<b>每挖一次 {DIG_GOLD} 金币</b>，须是远离广场、建筑和桥的空地。在池塘旁边再挖，两个就连成一条水道；一直挖下去就是一条河。渔夫会来下钩，人会绕着走，穿过它的路会被切断，它造出的岛会像其他岛一样被架桥。自己挖的池塘可以再花 <b>{FILL_GOLD} 金币</b>填回去。天然的水面不会动。</p>
           <h3>清理树木</h3>
           <p>建造面板里有一件针对林地的工具：用它点一下地面，触及范围内每棵立着的树都会被伐倒，<b>每棵 {CLEAR_TREE_GOLD} 金币</b>，<b>每棵 {CLEAR_TREE_WOOD} 木料</b>进堆场。清理过的地面在重新加载后仍然是清理过的，并像伐木工的工作一样在接下来的几天里长回来，所以请在打算建造的地方清理，而不是为了风景。</p>
           <h3>搬迁与升级</h3>
@@ -524,7 +526,7 @@ export function WikiZh() {
         <section id="status">
           <h2>读懂你的聚落</h2>
           <p>角落里的面板是聚落的生命体征。这些都不是给你的分数——每一项都从住在那里的人身上量出来，每一项你都能做点什么。</p>
-          <p className="wiki-note">想给这地方拍一张干净的图：时钟旁的 <b>◉</b> 按钮或 <b>P</b> 键是拍照模式，整个界面连建筑上方的人手标记一起隐去，只剩角落里一枚淡淡的小按钮。<b>P</b>、<b>Esc</b> 或那枚按钮把界面叫回来。</p>
+          <p className="wiki-note">想给这地方拍一张干净的图：时钟旁的 <b>◉</b> 按钮或 <b>P</b> 键是拍照模式，整个界面连建筑上方的人手标记一起隐去，只剩角落里一枚淡淡的小按钮。<b>P</b>、<b>Esc</b> 或那枚按钮把界面叫回来。旁边的 <b>⌗</b> 或 <b>G</b> 键在地面上铺一层规划网格，<b>✧</b> 或 <b>V</b> 键关闭或打开画面的泛光、暖色和暗角。</p>
           <table className="wiki-table">
             <thead><tr><th>指标</th><th>它是什么</th><th>怎么改变它</th></tr></thead>
             <tbody>

@@ -123,9 +123,31 @@ const CLAIMS_POLL = 12_000;
  * and a poll survives a serverless deployment where a socket does not.
  */
 function useAllClaims() {
-  const [claims, setClaims] = useState<Claim[]>([]);
-  const [finds, setFinds] = useState<Find[]>([]);
+  const [claims, setClaimsRaw] = useState<Claim[]>([]);
+  const [finds, setFindsRaw] = useState<Find[]>([]);
   const [shared, setShared] = useState(true);
+  // A poll that returns the same land re-rendered the whole map, markers,
+  // labels and layout pass included, every twelve seconds. Only a change gets
+  // through.
+  const lastClaims = useRef(''), lastFinds = useRef('');
+  const setClaims = useCallback((next: Claim[] | ((prev: Claim[]) => Claim[])) => {
+    setClaimsRaw((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      const key = JSON.stringify(value);
+      if (key === lastClaims.current) return prev;
+      lastClaims.current = key;
+      return value;
+    });
+  }, []);
+  const setFinds = useCallback((next: Find[] | ((prev: Find[]) => Find[])) => {
+    setFindsRaw((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      const key = JSON.stringify(value);
+      if (key === lastFinds.current) return prev;
+      lastFinds.current = key;
+      return value;
+    });
+  }, []);
   useEffect(() => {
     let live = true;
     const tick = async () => {

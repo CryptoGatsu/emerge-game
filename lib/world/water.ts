@@ -173,7 +173,10 @@ function buildChannels(seed: number, profile: BiomeProfile, extent: Extent): Pol
  * privately, so the mask and the painted tiles agree by construction rather
  * than by two pieces of code happening to round the same way.
  */
-export function buildWater(seed: number, profile: BiomeProfile, extent: Extent = BASE_EXTENT): WaterField {
+/** A pond or channel the player dug: a circle of water where there was ground. */
+export interface DugWater { x: number; y: number; r: number }
+
+export function buildWater(seed: number, profile: BiomeProfile, extent: Extent = BASE_EXTENT, dug: DugWater[] = []): WaterField {
   const river = buildChannels(seed, profile, extent);
   const base = PONDS[profile.water];
   const pond = { x: base.x, y: base.y, r: base.r * profile.pondScale };
@@ -189,6 +192,11 @@ export function buildWater(seed: number, profile: BiomeProfile, extent: Extent =
       if (hit.d < hit.w) return true;
     }
     if (raised) return false;
+    // What the player dug, with a little noise on the rim so it reads as
+    // water and not as a stamp.
+    for (const d of dug) {
+      if (Math.hypot(wx - d.x, wy - d.y) < d.r + (valueNoise(seed + 77, wx * 0.3, wy * 0.3) - 0.5) * 1.4) return true;
+    }
     const pondD = Math.hypot(wx - pond.x, wy - pond.y);
     const edge = pond.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
     return pondD < edge;

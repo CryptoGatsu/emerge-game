@@ -16,10 +16,11 @@ import {
   type Resource,
 } from './world/goods';
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
+import { heightField } from './world/relief';
 import { BRIDGE_HALF_WIDTH, BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type Bridge, type WorldLayout } from './world/layout';
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
 import { compose, episodeNote, traitsOf, TRAIT_LABELS, type Brief, type Episode, type EpisodeKind, type Relation, type TownBrief } from './dialogue';
-import { buildWater, type WaterField } from './world/water';
+import { buildWater, type WaterField , type DugWater } from './world/water';
 import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
 import {
@@ -439,6 +440,8 @@ export interface World {
   feed: FeedEntry[]; gatherings: Gathering[]; bonds: Record<string, Bond>; projects: Project[];
   /** Conversations happening right now. */
   conversations: Conversation[];
+  /** Ponds and channels the player dug. */
+  dug?: DugWater[];
   /** Trades that could not work in full yesterday, and what they ran short of. */
   shortages?: Partial<Record<WorkingJob, { short: Resource; hands: number; workers: number }>>;
   /** Whatever is currently going wrong. */
@@ -717,13 +720,14 @@ export const ARROW_WOOD = 1;
  * plots does not accumulate fields for all of them.
  */
 const waterCache = new Map<string, WaterField>();
-export function waterOf(world: { seed: number; biome: BiomeKind; expanded?: boolean }): WaterField {
+const dugKey = (dug?: DugWater[]) => (dug?.length ? dug.map((d) => `${d.x.toFixed(1)},${d.y.toFixed(1)},${d.r.toFixed(1)}`).join(';') : '');
+export function waterOf(world: { seed: number; biome: BiomeKind; expanded?: boolean; dug?: DugWater[] }): WaterField {
   // An expanded plot is a different field: the same channels, carried on
-  // into the new ground, over a bigger grid.
-  const key = `${world.seed}:${world.expanded ? 'x' : ''}`;
+  // into the new ground, over a bigger grid. So is a plot with a pond dug.
+  const key = `${world.seed}:${world.expanded ? 'x' : ''}:${dugKey(world.dug)}`;
   const cached = waterCache.get(key);
   if (cached) return cached;
-  const field = buildWater(world.seed, biomeProfile(world.biome), extentOf(world));
+  const field = buildWater(world.seed, biomeProfile(world.biome), extentOf(world), world.dug ?? []);
   if (waterCache.size >= 12) waterCache.delete(waterCache.keys().next().value as string);
   waterCache.set(key, field);
   return field;
@@ -1495,7 +1499,7 @@ function stepCitizen(c: Citizen, hours: number, obstacles: Obstacle[], layout: W
 const navCache = new WeakMap<World, NavGrid>();
 function navOf(world: World, obstacles: Obstacle[], water: WaterField): NavGrid {
   ensureRamps(world, water);
-  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}${hasFerry(world) ? 'f' : ''}`;
+  const key = `${navKey(obstacles, world.layout)}|${world.expanded ? 'x' : ''}${hasFerry(world) ? 'f' : ''}|${dugKey(world.dug)}`;
   const held = navCache.get(world);
   if (held && held.key === key) return held;
   const built = buildNavGrid(water, world.layout, obstacles, key, extentOf(world));
@@ -4349,7 +4353,7 @@ const spotCache = new Map<string, [number, number][]>();
 export function fishingSpotsOf(world: World): [number, number][] {
   useWorld(world);
   const hut = findBuilding(world, 'Fishery');
-  const key = `${world.seed}:fish:${hut ? `${hut.x.toFixed(1)},${hut.y.toFixed(1)}` : 'none'}:${world.layout.bridges.length}:${world.buildings.length}`;
+  const key = `${world.seed}:fish:${hut ? `${hut.x.toFixed(1)},${hut.y.toFixed(1)}` : 'none'}:${world.layout.bridges.length}:${world.buildings.length}:${dugKey(world.dug)}`;
   const held = spotCache.get(key);
   if (held) return held;
   const water = waterOf(world);
@@ -5944,6 +5948,104 @@ export function removeBridge(world: World, x: number, y: number): { ok: boolean;
   noteAttention(world);
   pushFeed(world, 'build', `The crossing was taken down. ${wood} timber went back to the yard.${stranded.length ? ' The far bank is cut off again.' : ''}`);
   return { ok: true, message: `The crossing is down. ${wood} timber went back to the yard.` };
+}
+
+/* ------------------------------------------------------------------ *
+ * Ponds and channels by hand
+ * ------------------------------------------------------------------ */
+
+/** What a dig costs, and how big a pond one tap makes. Digs overlap into channels. */
+export const DIG_GOLD = 350;
+export const DIG_RADIUS = 3.2;
+export const FILL_GOLD = 120;
+
+/** Why a pond cannot be dug here, or null when it can. */
+export function digProblem(world: World, x: number, y: number): string | null {
+  useWorld(world);
+  const b = buildBounds(world);
+  if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) return 'That is off the plot.';
+  const water = waterOf(world);
+  if (water.isWater(x, y)) return 'That is water already.';
+  const near = world.buildings.find((bl) => Math.hypot(x - bl.x, y - bl.y) < DIG_RADIUS + 3.2);
+  if (near) return `Too close to the ${near.type.toLowerCase()}.`;
+  const plaza = world.layout.plaza;
+  if (Math.hypot(x - plaza.x, y - plaza.y) < plaza.r + DIG_RADIUS + 1) return 'Not in the square.';
+  if (world.layout.bridges.some((br) => Math.hypot(x - br.x, y - br.y) < br.span + DIG_RADIUS + 1)) return 'Not beside a bridge.';
+  if (heightField(world.seed, x, y, biomeProfile(world.biome).plateau) > 0.5) return 'The high ground cannot be dug.';
+  return null;
+}
+
+/** The dug pond under a point, or null. */
+export function dugAt(world: World, x: number, y: number): DugWater | null {
+  let best: DugWater | null = null, bestD = Infinity;
+  for (const d of world.dug ?? []) {
+    const dist = Math.hypot(x - d.x, y - d.y) - d.r;
+    if (dist < 0.8 && dist < bestD) { bestD = dist; best = d; }
+  }
+  return best;
+}
+
+/**
+ * The islands the water now makes, and which of them a bridge lands on.
+ * Digging renumbers the field's islands, so the list is read off the decks
+ * that stand rather than carried over.
+ */
+function reconnectIslands(world: World) {
+  const water = waterOf(world);
+  const ids = new Set<number>();
+  for (const b of world.layout.bridges) {
+    const c = Math.cos(b.angle), s = Math.sin(b.angle);
+    for (const [ex, ey] of [[b.x - c * b.span, b.y - s * b.span], [b.x + c * b.span, b.y + s * b.span]]) {
+      const i = water.landAt(ex, ey);
+      if (i >= 0 && i !== water.mainland) ids.add(i);
+    }
+  }
+  world.connectedIslands = [...ids];
+}
+
+/** Anybody now standing in water steps to the nearest bank; roads through it are cut. */
+function settleAfterWaterChange(world: World) {
+  const water = waterOf(world);
+  for (const c of world.citizens) {
+    if (c.afloat || !water.blocks(c.x, c.y) || onBridge(world.layout, c.x, c.y)) continue;
+    const out = water.toClear(c.x, c.y);
+    c.x = edge(c.x + out.x * (out.d + 0.3), 2, 98);
+    c.y = edge(c.y + out.y * (out.d + 0.3), 4, 96);
+    c.path = []; c.detour = undefined;
+  }
+  const layout = world.layout;
+  for (let i = 0; i < layout.nodes.length; i++) {
+    layout.edges[i] = layout.edges[i].filter((j) => dryLine(water, layout, layout.nodes[i][0], layout.nodes[i][1], layout.nodes[j][0], layout.nodes[j][1]));
+  }
+  reconnectIslands(world);
+  noteAttention(world);
+}
+
+/** Dig a pond where the player tapped. Two taps side by side make a channel. */
+export function digWater(world: World, x: number, y: number): { ok: boolean; message: string } {
+  useWorld(world);
+  const problem = digProblem(world, x, y);
+  if (problem) return { ok: false, message: problem };
+  if (world.treasury < DIG_GOLD) return { ok: false, message: `A pond costs ${DIG_GOLD} Gold to dig.` };
+  spend(world, 'works', DIG_GOLD);
+  world.dug = [...(world.dug ?? []), { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, r: DIG_RADIUS }];
+  settleAfterWaterChange(world);
+  pushFeed(world, 'build', `A pond was dug for ${DIG_GOLD} Gold. The water found it by evening.`);
+  return { ok: true, message: `The pond is dug, for ${DIG_GOLD} Gold.` };
+}
+
+/** Fill a dug pond back in. Only water the player made can be filled. */
+export function fillWater(world: World, x: number, y: number): { ok: boolean; message: string } {
+  useWorld(world);
+  const d = dugAt(world, x, y);
+  if (!d) return { ok: false, message: 'There is nothing dug there. Only a pond you dug can be filled in.' };
+  if (world.treasury < FILL_GOLD) return { ok: false, message: `Filling a pond costs ${FILL_GOLD} Gold.` };
+  spend(world, 'works', FILL_GOLD);
+  world.dug = (world.dug ?? []).filter((v) => v !== d);
+  if (world.dug.length === 0) world.dug = undefined;
+  settleAfterWaterChange(world);
+  pushFeed(world, 'build', `A pond was filled in for ${FILL_GOLD} Gold.`);
+  return { ok: true, message: `The pond is filled in, for ${FILL_GOLD} Gold.` };
 }
 
 export function startBridgeAt(world: World, x: number, y: number): { ok: boolean; message: string } {

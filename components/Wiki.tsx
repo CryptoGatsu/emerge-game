@@ -1,7 +1,7 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
+import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -899,6 +899,15 @@ export default function Wiki() {
             to an island with buildings on it is refused until they are pulled down or another
             crossing stands, so nothing is ever stranded.
           </p>
+          <h3>Ponds and channels</h3>
+          <p>
+            The Build panel&rsquo;s <b>Pond</b> tool digs water where you tap, for{' '}
+            <b>{DIG_GOLD} Gold</b> a dig, on open ground clear of the square, the buildings and the
+            bridges. Dig beside a pond and the two join into a channel; keep going and you have a
+            river. Fishers cast into it, people walk round it, a road that ran through it is cut,
+            and an island it makes is bridged like any other. A pond you dug can be filled in
+            again for <b>{FILL_GOLD} Gold</b>. Natural water stays where it is.
+          </p>
           <h3>Clearing trees</h3>
           <p>
             The Build panel carries a tool for the wood: tap the ground with it and every standing
@@ -1025,7 +1034,8 @@ export default function Wiki() {
             For a clean picture of the place, the <b>◉</b> button beside the clock, or <b>P</b>, is
             photo mode: the whole interface goes, including the crew badges over the buildings, and
             only a faint pill in the corner remains. <b>P</b>, <b>Esc</b> or the pill brings it
-            back.
+            back. Beside it, <b>⌗</b> or <b>G</b> lays a planning grid over the ground, and{' '}
+            <b>✧</b> or <b>V</b> turns the frame&rsquo;s bloom, warmth and vignette off and on.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Figure</th><th>What it is</th><th>How to move it</th></tr></thead>

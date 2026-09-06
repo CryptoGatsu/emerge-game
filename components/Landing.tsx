@@ -22,6 +22,7 @@ import { onChainClaimsLive } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT } from '@/lib/chain/vault';
 import { VERSION } from '@/lib/version';
 import TokenStats from './TokenStats';
+import LiveLedger from './LiveLedger';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { LanguageSwitch } from './LanguageSwitch';
 import { t, useLocale } from '@/lib/i18n';
@@ -210,6 +211,7 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
 
         <ContractAddress />
         <TokenStats />
+        <LiveLedger />
 
         <section className="notes">
           {notesFor(onChainClaimsLive()).map((note) => (
