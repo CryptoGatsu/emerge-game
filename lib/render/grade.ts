@@ -58,8 +58,8 @@ void main() {
   vec3 lin = pow(max(src.rgb, vec3(0.0)), vec3(2.2));
   vec3 glowLin = pow(max(glow, vec3(0.0)), vec3(2.2));
   vec3 col = lin + glowLin * uBloom;
-  col *= mix(vec3(1.0), vec3(1.08, 0.98, 0.89), uWarmth);
-  col = pow(filmic(col * 1.06), vec3(1.0 / 2.2));
+  col *= mix(vec3(1.0), vec3(1.06, 0.99, 0.92), uWarmth);
+  col = pow(filmic(col * 1.02), vec3(1.0 / 2.2));
   float g = dot(col, vec3(0.299, 0.587, 0.114));
   col = mix(vec3(g), col, uSaturation);
 
@@ -77,11 +77,11 @@ export class GradeFilter extends Filter {
 
   constructor() {
     const grade = new UniformGroup({
-      uBloom: { value: 0.35, type: 'f32' },
-      uWarmth: { value: 0.7, type: 'f32' },
-      uVignette: { value: 0.34, type: 'f32' },
-      uSaturation: { value: 1.12, type: 'f32' },
-      uAmount: { value: 0.9, type: 'f32' },
+      uBloom: { value: 0.2, type: 'f32' },
+      uWarmth: { value: 0.4, type: 'f32' },
+      uVignette: { value: 0.16, type: 'f32' },
+      uSaturation: { value: 1.05, type: 'f32' },
+      uAmount: { value: 0.65, type: 'f32' },
     });
     super({
       glProgram: GlProgram.from({ vertex: defaultFilterVert, fragment, name: 'grade-filter' }),
@@ -93,8 +93,8 @@ export class GradeFilter extends Filter {
   /** Night makes the glow matter and the warmth recede. */
   set night(n: number) {
     const u = this.grade.uniforms as { uBloom: number; uWarmth: number; uVignette: number };
-    u.uBloom = 0.35 + 0.45 * n;
-    u.uWarmth = 0.72 - 0.42 * n;
-    u.uVignette = 0.34 + 0.14 * n;
+    u.uBloom = 0.2 + 0.25 * n;
+    u.uWarmth = 0.4 - 0.25 * n;
+    u.uVignette = 0.16 + 0.08 * n;
   }
 }

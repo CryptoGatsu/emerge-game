@@ -227,6 +227,8 @@ export class EmergeScene {
   private objectLayer = new Container();
   private fxLayer = new Container();
   private lightsRoot = new Container();
+  /** Everything that is the picture, under the grade; the HUD sits beside it, ungraded. */
+  private sceneRoot = new Container();
   private hudRoot = new Container();
   private weatherLayer = new Container();
   private ambient = new Sprite(Texture.WHITE);
@@ -269,7 +271,7 @@ export class EmergeScene {
     this.effectsOn = on;
     if (!this.app.renderer) return;
     if (on && !this.grade) this.grade = new GradeFilter();
-    this.app.stage.filters = on && this.grade ? [this.grade] : [];
+    this.sceneRoot.filters = on && this.grade ? [this.grade] : [];
   }
   /** Photo mode: no panels to keep clear of, so bubbles go anywhere on screen. */
   private photo = false;
@@ -322,7 +324,11 @@ export class EmergeScene {
     this.vignette.texture = this.assets.get('fx.vignette');
     this.vignette.blendMode = 'multiply';
     this.vignette.alpha = 0.5;
-    this.app.stage.addChild(this.worldRoot, this.vignette, this.ambient, this.lightsRoot, this.weatherLayer, this.hudRoot);
+    // The picture and the words over it are two things: the frame's grade
+    // goes on the picture, and the speech bubbles and badges stay crisp
+    // on top of it. Players said the dialogue had become hard to read.
+    this.sceneRoot.addChild(this.worldRoot, this.vignette, this.ambient, this.lightsRoot, this.weatherLayer);
+    this.app.stage.addChild(this.sceneRoot, this.hudRoot);
     // Distant forest behind everything, so the diamond edge of the tile field
     // never shows as empty space at the corners of the viewport.
     this.backdrop = new TilingSprite({ texture: backdropTexture() });
@@ -339,7 +345,7 @@ export class EmergeScene {
     this.ambient.alpha = 0;
     this.seasonWash.blendMode = 'multiply';
     this.seasonWash.alpha = 0;
-    this.app.stage.addChildAt(this.seasonWash, this.app.stage.children.indexOf(this.ambient));
+    this.sceneRoot.addChildAt(this.seasonWash, this.sceneRoot.children.indexOf(this.ambient));
 
     this.buildTerrain();
     this.buildProps();
@@ -865,9 +871,10 @@ export class EmergeScene {
       const label = new Text({
         text: '',
         style: {
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 12,
-          fill: 0x22331f, wordWrap: true, wordWrapWidth: 150, lineHeight: 15,
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 13, fontWeight: '600',
+          fill: 0x1a2616, wordWrap: true, wordWrapWidth: 176, lineHeight: 17,
         },
+        resolution: 2,
       });
       label.position.set(9, 7);
       root.addChild(bg, label);
@@ -1207,8 +1214,8 @@ export class EmergeScene {
     const bw = Math.ceil(bubble.label.width) + 18;
     const bh = Math.ceil(bubble.label.height) + 14;
     bubble.bg.clear();
-    bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf1f3e4, alpha: 0.95 });
-    bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf1f3e4, alpha: 0.95 });
+    bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf6f4e6, alpha: 1 }).stroke({ width: 1.5, color: 0x2a3a24, alpha: 0.55 });
+    bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf6f4e6, alpha: 1 });
   }
 
   private setHover(target: PickTarget) {
