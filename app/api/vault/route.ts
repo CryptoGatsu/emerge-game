@@ -44,7 +44,8 @@ export async function GET(request: Request) {
     const pool = url.searchParams.get('pool') ?? '';
     const poolId = /^0x[0-9a-fA-F]{64}$/.test(pool) ? (pool as `0x${string}`) : null;
     // `approve=1` renews the vault's Permit2 approvals first, as the swap would; the only thing the probe ever sends.
-    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from, poolId, !!url.searchParams.get('approve')), { headers: { 'cache-control': 'no-store, max-age=0' } });
+    // `steps=1` takes the swap apart and simulates each thing the router does on its own.
+    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from, poolId, !!url.searchParams.get('approve'), !!url.searchParams.get('steps')), { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });

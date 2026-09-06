@@ -77,6 +77,11 @@ export function v4PoolId(a: Hex, b: Hex, fee: number, tickSpacing: number, hooks
   ));
 }
 
+/** Permit2's own transfer, the call the router makes to pay a swap. */
+export const PERMIT2_TRANSFER = [
+  { type: 'function', name: 'transferFrom', stateMutability: 'nonpayable', inputs: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'token', type: 'address' }], outputs: [] },
+] as const;
+
 /** Permit2, deployed at the same address on every chain Uniswap ships to. */
 export const PERMIT2_ADDRESS: Hex = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 

@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { NATIVE, PERMIT2, PERMIT2_ADDRESS, POOL_INITIALIZE, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
+import { NATIVE, PERMIT2, PERMIT2_ADDRESS, PERMIT2_TRANSFER, POOL_INITIALIZE, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -729,7 +729,7 @@ async function discoverRoutes(client: ReturnType<typeof reader>, tokenIn: Hex, v
  * decoded. For the operator, behind the cron secret, when a GLD payout
  * says the swap failed and the message alone does not say why.
  */
-export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n, poolId: Hex | null = null, approve = false): Promise<Record<string, unknown>> {
+export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n, poolId: Hex | null = null, approve = false, steps = false): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {
     kind: (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase(),
     router: SWAP_ROUTER, token: token(), gld: GLD_ADDRESS, permit2: process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS,
@@ -897,6 +897,36 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
         short: e.shortMessage, details: e.details, meta: (e.metaMessages ?? []).slice(0, 8),
         cause: e.cause ? { short: e.cause.shortMessage, details: e.cause.details, data: e.cause.data, inner: e.cause.cause ? { message: e.cause.cause.message, data: e.cause.cause.data } : undefined } : undefined,
       };
+    }
+    if (steps && kind === 'v4') {
+      // The swap taken apart: each thing the router does, simulated on its
+      // own, so the one that refuses is named. eth_call lets any address be
+      // the caller, so the router's own payment can be rehearsed as the
+      // router.
+      const manager = (process.env.EMERGE_V4_POOL_MANAGER ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4PoolManager : '')) as Hex;
+      const permit2 = ((process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex);
+      const attempt = async (what: () => Promise<unknown>) => { try { await what(); return 'ok'; } catch (error) { return `reverted: ${explainRevert(error)}`; } };
+      const path = v4PathKeys(route, GLD_ADDRESS as Hex);
+      const diag: Record<string, string> = {};
+      // 1. The token leaves the vault for the PoolManager through Permit2, as the router would move it.
+      diag.permit2TransferAsRouter = await attempt(() => client.simulateContract({ account: SWAP_ROUTER as Hex, address: permit2, abi: PERMIT2_TRANSFER, functionName: 'transferFrom', args: [account.address, manager, units, token() as Hex] }));
+      // 2. A plain transfer of the token from the vault to the PoolManager: the token's own rules, nothing else.
+      diag.plainTransferToPoolManager = await attempt(() => client.simulateContract({ account, address: token() as Hex, abi: ERC20, functionName: 'transfer', args: [manager, units] }));
+      // 3. The first hop alone through the router: the hooked pool, token in, ETH out.
+      const firstOnly = universalSwapV4(token() as Hex, units, 0n, [path[0]]);
+      diag.firstHopOnlyThroughRouter = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [firstOnly.commands, firstOnly.inputs, deadline()], gas: 4_000_000n }));
+      // 4. The same first hop through the quoter, for the contrast.
+      diag.firstHopOnlyThroughQuoter = await attempt(() => client.simulateContract({ address: quoterFor('v4') as Hex, abi: V4_QUOTER, functionName: 'quoteExactInput', args: [{ exactCurrency: token() as Hex, path: [path[0]], exactAmount: units }] }));
+      // 5. The whole route with no gas ceiling given, and with a very high one, in case the node's accounting is the difference.
+      diag.wholeRouteDefaultGas = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline()] }));
+      diag.wholeRoute30MGas = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline()], gas: 30_000_000n }));
+      // 6. A tiny amount, in case the hook or the token caps a trade.
+      const tiny = parseUnits('1', Number(decimals));
+      const tinyCall = universalSwapV4(token() as Hex, tiny, 0n, path);
+      diag.wholeRouteOneToken = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [tinyCall.commands, tinyCall.inputs, deadline()], gas: 4_000_000n }));
+      // 7. The vault's ETH, since a hook can ask the swapper for gas or value.
+      diag.vaultEthWei = String(await client.getBalance({ address: account.address }));
+      out.steps = diag;
     }
     if (search) {
       // Every kind and every standard fee tier per hop, along the configured
