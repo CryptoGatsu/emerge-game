@@ -121,7 +121,11 @@ export const V3_SWAP_EXACT_IN = 0x00;
 /** And for a V4 swap, whose input is a list of actions of its own. */
 export const V4_SWAP = 0x10;
 /** The v4 router actions a plain exact-input swap needs, from v4-periphery's Actions. */
-export const V4_ACTIONS = { SWAP_EXACT_IN: 0x07, SETTLE_ALL: 0x0c, TAKE_ALL: 0x0f } as const;
+export const V4_ACTIONS = { SWAP_EXACT_IN_SINGLE: 0x06, SWAP_EXACT_IN: 0x07, SETTLE: 0x0b, SETTLE_ALL: 0x0c, TAKE: 0x0e, TAKE_ALL: 0x0f } as const;
+/** The router's stand-ins: the caller, the router itself, and "whatever the last action left open". */
+export const MSG_SENDER: Hex = '0x0000000000000000000000000000000000000001';
+export const ADDRESS_THIS: Hex = '0x0000000000000000000000000000000000000002';
+export const OPEN_DELTA = 0n;
 
 /**
  * What the router and Permit2 can throw. Without these the client only
@@ -170,6 +174,26 @@ export const ROUTER_ERRORS = [
   { type: 'error', name: 'InsufficientAllowance', inputs: [{ name: 'amount', type: 'uint256' }] },
   { type: 'error', name: 'InvalidNonce', inputs: [] },
   { type: 'error', name: 'SignatureExpired', inputs: [{ name: 'signatureDeadline', type: 'uint256' }] },
+  // The Pons v2 launchpad hook, which stands on the token's pool.
+  { type: 'error', name: 'MinimumOutputRequired', inputs: [] },
+  { type: 'error', name: 'SlippageExceeded', inputs: [{ name: 'actual', type: 'uint256' }, { name: 'minimum', type: 'uint256' }] },
+  { type: 'error', name: 'InexactQuoteTransfer', inputs: [{ name: 'token', type: 'address' }, { name: 'expected', type: 'uint256' }, { name: 'received', type: 'uint256' }] },
+  { type: 'error', name: 'InternalSwapRequiresOperator', inputs: [] },
+  { type: 'error', name: 'UnknownPool', inputs: [] },
+  { type: 'error', name: 'InvalidPoolKey', inputs: [] },
+  { type: 'error', name: 'NotFeeSweepOperator', inputs: [] },
+  { type: 'error', name: 'NotFactory', inputs: [] },
+  { type: 'error', name: 'HookNotImplemented', inputs: [] },
+  { type: 'error', name: 'ReentrancyGuardReentrantCall', inputs: [] },
+  { type: 'error', name: 'SafeERC20FailedOperation', inputs: [{ name: 'token', type: 'address' }] },
+  { type: 'error', name: 'WrappedError', inputs: [{ name: 'target', type: 'address' }, { name: 'selector', type: 'bytes4' }, { name: 'reason', type: 'bytes' }, { name: 'details', type: 'bytes' }] },
+  { type: 'error', name: 'HookCallFailed', inputs: [] },
+  { type: 'error', name: 'InvalidHookResponse', inputs: [] },
+  { type: 'error', name: 'HookDeltaExceedsSwapAmount', inputs: [] },
+  { type: 'error', name: 'AlreadyUnlocked', inputs: [] },
+  { type: 'error', name: 'SwapAmountCannotBeZero', inputs: [] },
+  { type: 'error', name: 'PriceLimitAlreadyExceeded', inputs: [{ name: 'sqrtPriceCurrentX96', type: 'uint160' }, { name: 'sqrtPriceLimitX96', type: 'uint160' }] },
+  { type: 'error', name: 'PriceLimitOutOfBounds', inputs: [{ name: 'sqrtPriceLimitX96', type: 'uint160' }] },
   // ERC-20s that use custom errors
   { type: 'error', name: 'ERC20InsufficientBalance', inputs: [{ name: 'sender', type: 'address' }, { name: 'balance', type: 'uint256' }, { name: 'needed', type: 'uint256' }] },
   { type: 'error', name: 'ERC20InsufficientAllowance', inputs: [{ name: 'spender', type: 'address' }, { name: 'allowance', type: 'uint256' }, { name: 'needed', type: 'uint256' }] },
@@ -188,6 +212,10 @@ export function explainRevertData(raw: Hex | undefined): string {
     }
     if (decoded.errorName === 'UnexpectedRevertBytes') {
       return `the quoter's pool call reverted: ${explainRevertData(decoded.args?.[0] as Hex)}`;
+    }
+    if (decoded.errorName === 'WrappedError') {
+      const [target, selector, reason] = decoded.args as readonly [Hex, Hex, Hex, Hex];
+      return `${target} reverted in ${selector}: ${explainRevertData(reason)}`;
     }
     if (decoded.errorName === 'Error') return `"${String(decoded.args?.[0] ?? '')}"`;
     const args = (decoded.args ?? []).map((a) => String(a)).join(', ');
@@ -348,6 +376,46 @@ export function universalSwapV4(tokenIn: Hex, amountIn: bigint, minOut: bigint, 
   const settle = encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [tokenIn, amountIn]);
   const take = encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [tokenOut, minOut]);
   const input = encodeAbiParameters([{ type: 'bytes' }, { type: 'bytes[]' }], [actions, [swap, settle, take]]);
+  return { commands: `0x${V4_SWAP.toString(16).padStart(2, '0')}` as Hex, inputs: [input] };
+}
+
+const EXACT_IN_SINGLE = { type: 'tuple', components: [
+  { name: 'poolKey', type: 'tuple', components: [{ name: 'currency0', type: 'address' }, { name: 'currency1', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }] },
+  { name: 'zeroForOne', type: 'bool' }, { name: 'amountIn', type: 'uint128' }, { name: 'amountOutMinimum', type: 'uint128' }, { name: 'hookData', type: 'bytes' },
+] } as const;
+
+/** The pool key between two currencies, in address order, for one hop of a route. */
+export function v4PoolKey(a: Hex, b: Hex, hop: { fee: number; tickSpacing: number; hooks: Hex }) {
+  const [currency0, currency1] = BigInt(a) < BigInt(b) ? [a, b] : [b, a];
+  return { currency0, currency1, fee: hop.fee, tickSpacing: hop.tickSpacing, hooks: hop.hooks };
+}
+
+/**
+ * The swap the way the Pons launchpad's own tooling sends one through this
+ * router: the hooked pool as a single-pool action, then — when the route
+ * goes on — a path swap that starts from whatever that action left open,
+ * the input settled from the caller through Permit2, the output taken to
+ * the caller. One unlock, one transaction.
+ */
+export function universalSwapV4Chained(tokenIn: Hex, amountIn: bigint, minOut: bigint, path: PathKey[]): { commands: Hex; inputs: Hex[] } {
+  const first = path[0];
+  const key = v4PoolKey(tokenIn, first.intermediateCurrency, first);
+  const zeroForOne = key.currency0.toLowerCase() === tokenIn.toLowerCase();
+  const tokenOut = path[path.length - 1].intermediateCurrency;
+  const actions: number[] = [V4_ACTIONS.SWAP_EXACT_IN_SINGLE];
+  const params: Hex[] = [encodeAbiParameters([EXACT_IN_SINGLE], [{ poolKey: key, zeroForOne, amountIn, amountOutMinimum: path.length === 1 ? minOut : 0n, hookData: '0x' }])];
+  if (path.length > 1) {
+    actions.push(V4_ACTIONS.SWAP_EXACT_IN);
+    params.push(encodeAbiParameters(
+      [{ type: 'tuple', components: [{ name: 'currencyIn', type: 'address' }, { ...PATH_KEY, name: 'path', type: 'tuple[]' }, { name: 'amountIn', type: 'uint128' }, { name: 'amountOutMinimum', type: 'uint128' }] }],
+      [{ currencyIn: first.intermediateCurrency, path: path.slice(1), amountIn: OPEN_DELTA, amountOutMinimum: minOut }],
+    ));
+  }
+  actions.push(V4_ACTIONS.SETTLE_ALL, V4_ACTIONS.TAKE);
+  params.push(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [tokenIn, amountIn]));
+  params.push(encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'uint256' }], [tokenOut, MSG_SENDER, OPEN_DELTA]));
+  const bytes = `0x${actions.map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex;
+  const input = encodeAbiParameters([{ type: 'bytes' }, { type: 'bytes[]' }], [bytes, params]);
   return { commands: `0x${V4_SWAP.toString(16).padStart(2, '0')}` as Hex, inputs: [input] };
 }
 

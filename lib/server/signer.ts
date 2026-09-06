@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { NATIVE, PERMIT2, PERMIT2_ADDRESS, PERMIT2_TRANSFER, POOL_INITIALIZE, V4_HOOK, hookFlags, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
+import { NATIVE, PERMIT2, PERMIT2_ADDRESS, PERMIT2_TRANSFER, POOL_INITIALIZE, V4_HOOK, hookFlags, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, universalSwapV4Chained, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -440,6 +440,14 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
           minOut = (result[0] * 97n) / 100n;
         } else unquoted = true;
         call = universalSwapV4(token() as Hex, units, minOut, path);
+        // A hooked first pool has refused the path form of this swap while
+        // taking the launchpad's own single-pool form. Rehearse the path
+        // form; when it will not go, send the chained form instead.
+        try {
+          await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, BigInt(now + 600)], nonce });
+        } catch {
+          call = universalSwapV4Chained(token() as Hex, units, minOut, path);
+        }
       } else {
         const path = v3Path(token() as Hex, route, GLD_ADDRESS as Hex);
         if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
@@ -924,6 +932,13 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
       const tiny = parseUnits('1', Number(decimals));
       const tinyCall = universalSwapV4(token() as Hex, tiny, 0n, path);
       diag.wholeRouteOneToken = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [tinyCall.commands, tinyCall.inputs, deadline()], gas: 4_000_000n }));
+      // 6b. The launchpad's own shape of the swap: the hooked pool as a
+      // single-pool action, the rest of the route chained from what it
+      // leaves open, the output taken to the caller.
+      const chained = universalSwapV4Chained(token() as Hex, units, 0n, path);
+      diag.wholeRouteChainedLaunchpadStyle = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [chained.commands, chained.inputs, deadline()], gas: 4_000_000n }));
+      const firstChained = universalSwapV4Chained(token() as Hex, units, 0n, [path[0]]);
+      diag.firstHopOnlyLaunchpadStyle = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [firstChained.commands, firstChained.inputs, deadline()], gas: 4_000_000n }));
       // 7. The vault's ETH, since a hook can ask the swapper for gas or value.
       diag.vaultEthWei = String(await client.getBalance({ address: account.address }));
       // 8. The hook itself, called the way the PoolManager calls it, once as
