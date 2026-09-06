@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { NATIVE, PERMIT2, PERMIT2_ADDRESS, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
+import { NATIVE, PERMIT2, PERMIT2_ADDRESS, POOL_INITIALIZE, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -547,6 +547,55 @@ async function poolsAlong(client: ReturnType<typeof reader>, tokens: Hex[]): Pro
 
 const live = (r: PoolRow, kind: 'v4' | 'v3') => (kind === 'v4' ? r.v4 && BigInt(r.v4.liquidity) > 0n : r.v3 && BigInt(r.v3.liquidity) > 0n);
 
+/** A v4 pool as the PoolManager made it, with what it holds now. */
+interface MadePool { id: Hex; currency0: Hex; currency1: Hex; fee: number; tickSpacing: number; hooks: Hex; liquidity: string }
+
+/**
+ * Every v4 pool the token is in, read from the PoolManager's Initialize
+ * events, which carry the fee, tick spacing and hook the pool was made
+ * with. A pool a launchpad made has a hook and often an unusual spacing,
+ * and no amount of guessing at standard tiers finds it; this does. The
+ * chain is young, so the whole history is a few requests.
+ */
+async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex): Promise<MadePool[]> {
+  const manager = (process.env.EMERGE_V4_POOL_MANAGER ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4PoolManager : '')) as Hex;
+  const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(manager)) return [];
+  const head = await client.getBlockNumber();
+  const logs: { args: Record<string, unknown> }[] = [];
+  const pull = async (from: bigint, to: bigint, side: 'currency0' | 'currency1') => {
+    const got = await client.getLogs({ address: manager, event: POOL_INITIALIZE, args: { [side]: tokenIn } as Record<string, Hex>, fromBlock: from, toBlock: to });
+    logs.push(...(got as unknown as { args: Record<string, unknown> }[]));
+  };
+  for (const side of ['currency0', 'currency1'] as const) {
+    try {
+      await pull(0n, head, side);
+    } catch {
+      // The node caps a range: walk it in slices, newest first, forty at most.
+      const step = 50_000n;
+      for (let to = head, n = 0; to > 0n && n < 40; to -= step, n++) {
+        try { await pull(to > step ? to - step + 1n : 0n, to, side); } catch { break; }
+      }
+    }
+  }
+  const out: MadePool[] = [];
+  for (const log of logs) {
+    const a = log.args as { id: Hex; currency0: Hex; currency1: Hex; fee: number; tickSpacing: number; hooks: Hex };
+    let liquidity = '0';
+    if (/^0x[0-9a-fA-F]{40}$/.test(stateView)) {
+      try { liquidity = String(await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [a.id] })); } catch { /* unread */ }
+    }
+    out.push({ id: a.id, currency0: a.currency0, currency1: a.currency1, fee: Number(a.fee), tickSpacing: Number(a.tickSpacing), hooks: a.hooks, liquidity });
+  }
+  return out.sort((x, y) => (BigInt(y.liquidity) > BigInt(x.liquidity) ? 1 : -1));
+}
+
+/** A hop as EMERGE_SWAP_PATH writes it: the fee alone for a standard hookless pool, otherwise fee/spacing/hook. */
+function hopSpec(p: { fee: number; tickSpacing: number; hooks: Hex }): string {
+  const standard = TICK[p.fee] === p.tickSpacing && p.hooks === NATIVE;
+  return standard ? String(p.fee) : `${p.fee}/${p.tickSpacing}${p.hooks === NATIVE ? '' : `/${p.hooks}`}`;
+}
+
 /**
  * Find a way from the token to GLD when the configured route has none:
  * the token's pool against native ETH, WETH or the configured stepping
@@ -609,9 +658,33 @@ export async function probeSwap(wholeEmerge = 100, search = false): Promise<Reco
       // The configured route is broken somewhere: look for another.
       const routes = await discoverRoutes(client, token() as Hex, routeForPools.via, GLD_ADDRESS as Hex);
       out.discovered = routes;
-      out.poolAdvice = routes.length
-        ? `The configured route has no pool at ${hops.filter((h, i) => !v4Route[i] && !v3Route[i]).join(', ')}, but these fill: set EMERGE_SWAP_KIND=${routes[0].kind} and EMERGE_SWAP_PATH=${routes[0].path} (${routes[0].note}).`
-        : `No pool with liquidity was found for ${(token() as string).slice(0, 8)}… against ETH, WETH or the stepping stone at a standard fee, v3 or v4. Open the token's pool in the Uniswap app: if it shows a hook or an unusual fee, write that hop as fee/spacing/0xHook in EMERGE_SWAP_PATH (a dynamic fee is 8388608).`;
+      if (routes.length) {
+        out.poolAdvice = `The configured route has no pool at ${hops.filter((h, i) => !v4Route[i] && !v3Route[i]).join(', ')}, but these fill: set EMERGE_SWAP_KIND=${routes[0].kind} and EMERGE_SWAP_PATH=${routes[0].path} (${routes[0].note}).`;
+      } else {
+        // Nothing at a standard tier: read the token's pools off the
+        // PoolManager itself and build the route from the deepest one.
+        const made = await poolsMadeFor(client, token() as Hex);
+        out.tokenPools = made;
+        const best = made.find((p) => BigInt(p.liquidity) > 0n);
+        if (best) {
+          const other = best.currency0.toLowerCase() === (token() as string).toLowerCase() ? best.currency1 : best.currency0;
+          const usdg = routeForPools.via.find((v) => v !== NATIVE) ?? null;
+          // From the pool's other side to GLD: directly, or through the stepping stone, deepest v4 pools first.
+          const direct = (await poolsBetween(client, other, GLD_ADDRESS as Hex, 'last')).filter((r) => live(r, 'v4')).sort((a, b) => (BigInt(b.v4!.liquidity) > BigInt(a.v4!.liquidity) ? 1 : -1))[0];
+          const toStone = usdg && other.toLowerCase() !== usdg.toLowerCase() ? (await poolsBetween(client, other, usdg, 'middle')).filter((r) => live(r, 'v4')).sort((a, b) => (BigInt(b.v4!.liquidity) > BigInt(a.v4!.liquidity) ? 1 : -1))[0] : null;
+          const stoneToGld = usdg ? (await poolsBetween(client, usdg, GLD_ADDRESS as Hex, 'last')).filter((r) => live(r, 'v4')).sort((a, b) => (BigInt(b.v4!.liquidity) > BigInt(a.v4!.liquidity) ? 1 : -1))[0] : null;
+          const path = direct ? `${hopSpec(best)},${other},${direct.fee}`
+            : toStone && stoneToGld ? `${hopSpec(best)},${other},${toStone.fee},${usdg},${stoneToGld.fee}`
+              : null;
+          out.poolAdvice = path
+            ? `The token's deepest pool is v4 against ${other === NATIVE ? 'native ETH' : other} at fee ${best.fee}, spacing ${best.tickSpacing}${best.hooks === NATIVE ? ', no hook' : `, hook ${best.hooks}`}. Set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${path}.`
+            : `The token's deepest pool is v4 against ${other} (fee ${best.fee}, spacing ${best.tickSpacing}, hook ${best.hooks}), but no v4 pool with liquidity leads from there to GLD, directly or through ${usdg ?? 'a stepping stone'}.`;
+        } else {
+          out.poolAdvice = made.length
+            ? `The PoolManager knows ${made.length} pool(s) for the token but none holds liquidity.`
+            : `The PoolManager has no Initialize event for the token: it is not in any v4 pool this node can see, and no standard v3 pool holds liquidity. Check the token address and the chain.`;
+        }
+      }
     }
     out.vault = account.address;
     const decimals = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' });

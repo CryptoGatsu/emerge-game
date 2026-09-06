@@ -45,6 +45,16 @@ export const V4_STATE_VIEW = [
   { type: 'function', name: 'getLiquidity', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'liquidity', type: 'uint128' }] },
 ] as const;
 
+/** The PoolManager's record of every pool it has made: the one place a pool's key is written down. */
+export const POOL_INITIALIZE = {
+  type: 'event', name: 'Initialize',
+  inputs: [
+    { name: 'id', type: 'bytes32', indexed: true }, { name: 'currency0', type: 'address', indexed: true }, { name: 'currency1', type: 'address', indexed: true },
+    { name: 'fee', type: 'uint24', indexed: false }, { name: 'tickSpacing', type: 'int24', indexed: false }, { name: 'hooks', type: 'address', indexed: false },
+    { name: 'sqrtPriceX96', type: 'uint160', indexed: false }, { name: 'tick', type: 'int24', indexed: false },
+  ],
+} as const;
+
 /** A v4 pool's id: the hash of its key, currencies in address order, no hooks. */
 export function v4PoolId(a: Hex, b: Hex, fee: number, tickSpacing: number, hooks: Hex = '0x0000000000000000000000000000000000000000'): Hex {
   const [c0, c1] = BigInt(a) < BigInt(b) ? [a, b] : [b, a];
@@ -101,6 +111,11 @@ export const ROUTER_ERRORS = [
   { type: 'error', name: 'DeltaNotNegative', inputs: [{ name: 'currency', type: 'address' }] },
   { type: 'error', name: 'ManagerLocked', inputs: [] },
   { type: 'error', name: 'UnsafeCast', inputs: [] },
+  // The quoters wrap the pool's revert in one of their own.
+  { type: 'error', name: 'UnexpectedRevertBytes', inputs: [{ name: 'revertData', type: 'bytes' }] },
+  { type: 'error', name: 'NotEnoughLiquidity', inputs: [{ name: 'poolId', type: 'bytes32' }] },
+  { type: 'error', name: 'NotSelf', inputs: [] },
+  { type: 'error', name: 'UnexpectedCallSuccess', inputs: [] },
   // Permit2
   { type: 'error', name: 'AllowanceExpired', inputs: [{ name: 'deadline', type: 'uint256' }] },
   { type: 'error', name: 'InsufficientAllowance', inputs: [{ name: 'amount', type: 'uint256' }] },
@@ -121,6 +136,9 @@ export function explainRevertData(raw: Hex | undefined): string {
     if (decoded.errorName === 'ExecutionFailed') {
       const [index, inner] = decoded.args as readonly [bigint, Hex];
       return `ExecutionFailed at command ${index}: ${explainRevertData(inner)}`;
+    }
+    if (decoded.errorName === 'UnexpectedRevertBytes') {
+      return `the quoter's pool call reverted: ${explainRevertData(decoded.args?.[0] as Hex)}`;
     }
     if (decoded.errorName === 'Error') return `"${String(decoded.args?.[0] ?? '')}"`;
     const args = (decoded.args ?? []).map((a) => String(a)).join(', ');

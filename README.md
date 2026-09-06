@@ -1038,6 +1038,7 @@ EMERGE_SWAP_PATH=                          # universal/v4: fee,token,fee… e.g.
 EMERGE_SWAP_QUOTER=                        # universal: QuoterV2; v4: the V4Quoter — for the 3% floor; on Robinhood Chain Uniswap's own are the default
 EMERGE_V3_FACTORY=                         # for the probe's pool check; Uniswap's on Robinhood Chain by default
 EMERGE_V4_STATE_VIEW=                      # likewise, the v4 StateView
+EMERGE_V4_POOL_MANAGER=                    # likewise, the v4 PoolManager, whose Initialize events the probe reads to find the token's pools
 EMERGE_PERMIT2=                            # universal: default 0x000000000022D473030F116dDEE9F6B43aC78BA3
 EMERGE_SWAP_FEE=                           # v3: the pool's fee tier, default 3000
 KV_REST_API_URL=                           # required in production: the settlement ledger
