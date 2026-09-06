@@ -137,7 +137,7 @@ export interface WithdrawRequest {
 }
 
 export type PayoutResult =
-  | { ok: true; payout: Payout; txHash: string }
+  | { ok: true; payout: Payout; txHash: string; note: string | null }
   | { ok: false; reason: string };
 
 /** Take money out of the vault. Resolves once the transfer has been sent. */
@@ -152,11 +152,11 @@ export async function withdrawFromVault(request: WithdrawRequest): Promise<Payou
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { payout?: Payout; txHash?: string; error?: string };
+    const json = (await response.json()) as { payout?: Payout; txHash?: string; error?: string; note?: string | null };
     if (!response.ok || !json.payout || !json.txHash) {
       return { ok: false, reason: json.error ?? 'The vault refused the withdrawal.' };
     }
-    return { ok: true, payout: json.payout, txHash: json.txHash };
+    return { ok: true, payout: json.payout, txHash: json.txHash, note: json.note ?? null };
   } catch {
     return { ok: false, reason: 'Could not reach the vault. Nothing was taken.' };
   }

@@ -673,11 +673,12 @@ export async function claimEarnings(
   const fresh = await tokenBalance(who.address, config);
   return {
     ok: true, settled: true, txHash: paid.txHash,
-    message: `${paid.payout.confirmed === false ? 'Sending' : 'Sent'} ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet${paid.payout.confirmed === false ? ' — the chain has it and it lands within a minute' : ''}. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned. The transfer is listed under Paid out.`,
+    message: `${paid.payout.confirmed === false ? 'Sending' : 'Sent'} ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet${paid.payout.confirmed === false ? ' — the chain has it and it lands within a minute' : ''}. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned. The transfer is listed under Paid out.${paid.note ? ` ${paid.note}` : ''}`,
     ledger: {
       ...ledger,
       balance: fresh ?? ledger.balance + paid.payout.net,
-      earnedEmerge: ledger.earnedEmerge - amount,
+      // What the vault actually took, which is less than asked when the day's room had moved.
+      earnedEmerge: ledger.earnedEmerge - Math.min(amount, paid.payout.gross),
       withdrawnEmerge: ledger.withdrawnEmerge + paid.payout.net,
       vaultBurn: ledger.vaultBurn + paid.payout.burned,
     },

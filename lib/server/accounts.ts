@@ -88,9 +88,16 @@ export async function takePayoutSlot(address: string): Promise<PayoutAllowance> 
   }
   const today = await incrWindow(payoutCountKey(address, day), 1, 26 * 3600);
   if (today > MAX_PAYOUTS_PER_DAY) {
-    return { ok: false, reason: `That is ${MAX_PAYOUTS_PER_DAY} withdrawals today. Take the rest out tomorrow.` };
+    return { ok: false, reason: `That is ${MAX_PAYOUTS_PER_DAY} withdrawals since midnight UTC. The count resets in ${untilUtcMidnight()}.` };
   }
   return { ok: true };
+}
+
+/** How long until the daily counters roll over, as 'Nh Nm'. */
+export function untilUtcMidnight(now = Date.now()): string {
+  const next = new Date(now); next.setUTCHours(24, 0, 0, 0);
+  const minutes = Math.max(1, Math.round((next.getTime() - now) / 60000));
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 /* ------------------------------------------------------------------ *

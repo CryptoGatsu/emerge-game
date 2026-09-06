@@ -40,7 +40,7 @@ import { NextResponse } from 'next/server';
 import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
   MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
-  settlementFor, takePayoutSlot, utcDay,
+  settlementFor, takePayoutSlot, untilUtcMidnight, utcDay,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { receiptOf, sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
@@ -193,7 +193,7 @@ export async function POST(request: Request) {
   }
 
   // Ours, from the amount asked for — never from figures the client sent.
-  const money = settlementFor(kind, asked);
+  let money = settlementFor(kind, asked);
   if (money.gross < MIN_PAYOUT_EMERGE) {
     return NextResponse.json({
       error: `The smallest withdrawal is ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE.`,
@@ -266,10 +266,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const slot = await takePayoutSlot(address);
-  if (!slot.ok) return NextResponse.json({ error: slot.reason }, { status: 429 });
-
   let give: () => Promise<void>;
+  /** When the Bank's figure had moved on and less was sent than asked. */
+  let note: string | null = null;
 
   if (kind === 'principal') {
     /*
@@ -286,15 +285,50 @@ export async function POST(request: Request) {
     }
     give = async () => { await debitPrincipal(address, -money.gross); };
   } else {
+    /*
+     * The figure the Bank showed is a moving target: the judged yield
+     * accrues and attention slides between the read and the request, so a
+     * player asking for exactly what the Bank said could be refused by a
+     * few tokens, again and again. Asked for more than the day has room for,
+     * the vault pays the room and says so, as long as that clears the floor.
+     */
+    const room = await emissionRoom(address, ceiling);
+    const most = Math.floor(Math.min(room.left, room.globalLeft));
+    if (money.gross > most) {
+      if (most < MIN_PAYOUT_EMERGE) {
+        return NextResponse.json({
+          error: room.globalLeft <= 0
+            ? `The vault has paid out everything it will today. The day turns in ${untilUtcMidnight()}.`
+            : room.left <= 0
+              ? `Today's ${ceiling.toLocaleString()} $EMERGE is collected. The day turns in ${untilUtcMidnight()}.`
+              : `You can collect ${room.left.toLocaleString()} more $EMERGE today, which is under the ${MIN_PAYOUT_EMERGE.toLocaleString()} floor. The day turns in ${untilUtcMidnight()}.`,
+        }, { status: 429 });
+      }
+      money = settlementFor('earnings', most);
+      note = `The Bank's figure had moved on: ${most.toLocaleString()} $EMERGE was collectable, and that is what was sent.`;
+    }
     if (!(await reserveEmission(address, money.gross, ceiling))) {
-      const room = await emissionRoom(address, ceiling);
+      const again = await emissionRoom(address, ceiling);
       return NextResponse.json({
-        error: room.globalLeft <= 0
-          ? 'The vault has paid out everything it will today. Try again tomorrow.'
-          : `You can collect ${room.left.toLocaleString()} more $EMERGE today.`,
+        error: again.globalLeft <= 0
+          ? `The vault has paid out everything it will today. The day turns in ${untilUtcMidnight()}.`
+          : `You can collect ${again.left.toLocaleString()} more $EMERGE today.`,
       }, { status: 429 });
     }
     give = () => releaseEmission(address, money.gross);
+  }
+
+  /*
+   * The daily count is taken last, once the vault is actually about to
+   * sign. It used to be taken before the room was checked, so every refusal
+   * for room — and a player asking for the Bank's exact figure could collect
+   * eighteen of those in a row — spent one of the day's slots, and a player
+   * with six withdrawals on the ledger was told they had made twenty-four.
+   */
+  const slot = await takePayoutSlot(address);
+  if (!slot.ok) {
+    await give().catch(() => {});
+    return NextResponse.json({ error: slot.reason }, { status: 429 });
   }
 
   const sent = await sendFromVault(address, money.net);
@@ -320,5 +354,5 @@ export async function POST(request: Request) {
     confirmed: sent.confirmed,
   });
 
-  return NextResponse.json({ payout, txHash: sent.txHash });
+  return NextResponse.json({ payout, txHash: sent.txHash, note });
 }

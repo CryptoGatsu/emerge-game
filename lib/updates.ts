@@ -21,6 +21,7 @@ export const UPDATES: Update[] = [
     date: '2026-09-11',
     title: 'Ages that mean something, and a Bank that tells the truth',
     notes: [
+      'Twenty-four withdrawals that were six. The day’s count of withdrawals was taken before the vault checked the day’s room, so every refusal for room spent one, and a player asking for exactly the figure the Bank showed — a figure that moves as yield accrues and attention slides — could be refused a few tokens short again and again until the count said twenty-four with six on the ledger. The count is now taken only when the vault is about to sign; a refusal costs nothing. Asked for more than the day has room for, the vault pays the room and says so instead of refusing. The refusals name the time until the day turns, and speak Chinese.',
       'A second bakery works. Everybody in a trade used to walk to the first building of its type, so a second bakery or carpenter’s shop never had a soul inside: its card said quiet, its crew read nought, and players wrote in that it was broken while the trade as a whole was producing. Each worker now reports to a site of their own, chosen for the free posts it has, and a workplace’s card says how many of its posts are filled. When a trade cannot work in full for want of an input, the card says so: which input, and how many of them worked.',
       'Conversations you can watch. Two people who start talking now stop and face each other for it, and the bubble follows the exchange, hopping to whoever is speaking, so an exchange reads as one: before, people talked as they walked past each other, the talk was cut two paces later with one line said, and the answer went to somebody with no bubble to say it in. Every conversation now runs its course, and every line of it is drawn.',
       'Photo mode. The ◉ button beside the clock, or P, hides the whole interface for a clean screenshot; P, Esc or the pill in the corner brings it back.',
@@ -207,6 +208,7 @@ export const UPDATES_ZH: Update[] = [
     date: '2026-09-11',
     title: '有分量的时代，和说实话的银行',
     notes: [
+      '明明六次却说二十四次。每日提现次数在金库核对当日额度之前就被计入，所以每次因额度不足被拒都算一次；玩家按银行显示的数字精确提取——而这个数字随收益累积和关注度下滑而变动——可能因差几枚而一再被拒，直到账上只有六笔却被告知已提二十四次。现在只有金库真正要签名时才计数；被拒不计。要求的数额超过当日额度时，金库改为按额度支付并说明，而不是拒绝。拒绝信息会写明距离新的一天还有多久，并且有中文。',
       '第二家面包房开工了。以前同一行当的每个人都走去该类型的第一栋建筑，所以第二家面包房或木匠铺里永远没人：卡片写着「安静」，人手是零，玩家来信说它坏了，而整个行当其实在产出。现在每个工人都有自己报到的工作场所，按空岗位分配；工作场所的卡片会写明填了几个岗位。行当因缺原料不能全员开工时，卡片会说明缺什么、几个人开了工。',
       '看得见的对话。两个人开始交谈时会停下来面对面，气泡跟着这段对话走，跳到正在说话的那个人头上，所以一段对话读起来是完整的：以前人们边擦肩而过边说话，两步之后对话就被打断、只说了一句，而回答落在了一个没有气泡的人身上。现在每段对话都会说完，每一句都画出来。',
       '拍照模式。时钟旁的 ◉ 按钮或 P 键隐藏整个界面，截一张干净的图；P、Esc 或角落的小按钮把界面叫回来。',
