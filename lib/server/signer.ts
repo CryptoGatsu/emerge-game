@@ -898,6 +898,16 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
       await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline()], gas: 4_000_000n });
       out.simulation = 'ok: the swap would go through as configured';
     } catch (error) {
+      // The vault's own fallback: the launchpad's shape of the same route.
+      if (kind === 'v4') {
+        try {
+          const chained = universalSwapV4Chained(token() as Hex, units, 0n, v4PathKeys(route, GLD_ADDRESS as Hex));
+          await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [chained.commands, chained.inputs, deadline()], gas: 4_000_000n });
+          out.simulation = `ok: the path form reverted (${explainRevert(error)}) but the launchpad-style plan fills, which is what the vault sends`;
+          out.plan = 'chained';
+          return out;
+        } catch { /* fall through to the report */ }
+      }
       out.simulation = `reverted: ${explainRevert(error)}`;
       // Everything the node said, for when the decoded line is not enough.
       const e = error as { shortMessage?: string; details?: string; metaMessages?: string[]; cause?: { shortMessage?: string; details?: string; data?: unknown; cause?: { message?: string; data?: unknown } } };
