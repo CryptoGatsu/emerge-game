@@ -374,7 +374,7 @@ export async function sendNativeFromVault(to: string, wei: bigint): Promise<Toke
   }
 }
 
-export type Swap = { ok: true; txHash: string; received: bigint; unquoted?: boolean } | { ok: false; problem: string };
+export type Swap = { ok: true; txHash: string; received: bigint; unquoted?: boolean; plan?: string } | { ok: false; problem: string };
 
 /**
  * Swap $EMERGE the vault holds into GLD through the router.
@@ -422,6 +422,7 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     const kind = (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase();
     let txHash: Hex;
     let unquoted = false;
+    let planUsed = kind;
     if (kind === 'universal' || kind === 'v4') {
       // Permit2 pays the router out of the vault: the token approves Permit2
       // once, and Permit2 approves the router for a month of payouts.
@@ -439,15 +440,33 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
           const { result } = await client.simulateContract({ address: quoter as Hex, abi: V4_QUOTER, functionName: 'quoteExactInput', args: [{ exactCurrency: token() as Hex, path, exactAmount: units }] });
           minOut = (result[0] * 97n) / 100n;
         } else unquoted = true;
-        call = universalSwapV4(token() as Hex, units, minOut, path);
         // A hooked first pool has refused the path form of this swap while
-        // taking the launchpad's own single-pool form. Rehearse the path
-        // form; when it will not go, send the chained form instead.
-        try {
-          await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, BigInt(now + 600)], nonce, gas: SWAP_GAS });
-        } catch {
-          call = universalSwapV4Chained(token() as Hex, units, minOut, path);
+        // taking the launchpad's own single-pool form, and the vault's
+        // rehearsal of that form has differed from the probe's passing one
+        // only in carrying a nonce and a floor. Every form is rehearsed in
+        // turn and the first that fills is sent; what each said is kept
+        // for the payout record when none does.
+        const plans: { name: string; call: { commands: Hex; inputs: Hex[] }; withNonce: boolean }[] = [
+          { name: 'path', call: universalSwapV4(token() as Hex, units, minOut, path), withNonce: true },
+          { name: 'chained', call: universalSwapV4Chained(token() as Hex, units, minOut, path), withNonce: true },
+          { name: 'chained-no-nonce', call: universalSwapV4Chained(token() as Hex, units, minOut, path), withNonce: false },
+          { name: 'chained-floor-90', call: universalSwapV4Chained(token() as Hex, units, (minOut * 90n) / 97n, path), withNonce: false },
+          { name: 'chained-open', call: universalSwapV4Chained(token() as Hex, units, 0n, path), withNonce: false },
+        ];
+        const said: string[] = [];
+        let chosen: typeof plans[number] | null = null;
+        for (const plan of plans) {
+          try {
+            await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [plan.call.commands, plan.call.inputs, BigInt(now + 600)], gas: SWAP_GAS, ...(plan.withNonce ? { nonce } : {}) });
+            chosen = plan; break;
+          } catch (error) {
+            said.push(`${plan.name}: ${explainRevert(error)}`);
+          }
         }
+        if (!chosen) throw new Error(`no form of the swap fills — ${said.join('; ')}`);
+        call = chosen.call;
+        planUsed = chosen.name;
+        if (chosen.name === 'chained-open') unquoted = true;
       } else {
         const path = v3Path(token() as Hex, route, GLD_ADDRESS as Hex);
         if (/^0x[0-9a-fA-F]{40}$/.test(quoter)) {
@@ -457,11 +476,10 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
         call = universalSwap(account.address, units, minOut, path);
       }
       const deadline = BigInt(now + 600);
-      // With the node's default gas the launchpad hook's inner work ran dry,
-      // was swallowed by the hook, and left a balance open: CurrencyNotSettled.
-      // The swap is rehearsed and sent with a ceiling of its own.
-      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline], nonce, gas: SWAP_GAS });
-      txHash = await wallet.writeContract(request);
+      // Rehearsed once more exactly as it will be sent, with the swap's own
+      // gas ceiling; the nonce goes on the send, not the rehearsal.
+      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline], gas: SWAP_GAS });
+      txHash = await wallet.writeContract({ ...request, nonce });
     } else if (kind === 'v3') {
       const fee = Number(process.env.EMERGE_SWAP_FEE) || 3000;
       txHash = await wallet.writeContract({
@@ -478,9 +496,10 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     }
     await client.waitForTransactionReceipt({ hash: txHash });
     const after = await client.readContract({ address: GLD_ADDRESS as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
-    return { ok: true, txHash, received: after > before ? after - before : 0n, unquoted };
+    return { ok: true, txHash, received: after > before ? after - before : 0n, unquoted, plan: planUsed };
   } catch (error) {
-    return { ok: false, problem: `The swap could not be sent: ${explainRevert(error)}` };
+    const why = error instanceof Error && /^no form of the swap fills/.test(error.message) ? error.message : explainRevert(error);
+    return { ok: false, problem: `The swap could not be sent: ${why}` };
   } finally {
     await releaseLock(NONCE_LOCK);
   }

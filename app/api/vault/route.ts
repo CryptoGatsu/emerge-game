@@ -59,7 +59,11 @@ export async function GET(request: Request) {
     } catch (error) {
       report.pendingWins = `unread: ${error instanceof Error ? error.message : String(error)}`;
     }
-    return NextResponse.json(report, { headers: { 'cache-control': 'no-store, max-age=0' } });
+    // `brief=1` keeps only what the diagnosis turns on, for a terminal that cuts long answers.
+    const body = url.searchParams.get('brief')
+      ? { simulation: report.simulation, plan: report.plan, quote: report.quote, steps: report.steps, pendingWins: report.pendingWins, payment: report.payment, paidLately: report.paidLately }
+      : report;
+    return NextResponse.json(body, { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });

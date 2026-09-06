@@ -212,6 +212,8 @@ export interface GldPayout {
   units?: string;
   swapTx?: string | null;
   sendTx?: string | null;
+  /** Which form of the swap the vault sent. */
+  plan?: string;
   /** Why the last attempt did not go through, for the player and the operator. */
   problem?: string;
   tries?: number;
@@ -284,6 +286,7 @@ export async function settleGld(id: string): Promise<GldSettle> {
         if (!swap.ok) return fail(`The swap failed: ${swap.problem}`);
         if (!(swap.received > 0n)) return fail('The swap returned no GLD.');
         payout.swapTx = swap.txHash;
+        payout.plan = swap.plan;
         // Written down the moment the GLD is in the vault, so a send that
         // fails is retried as a send and never as a second swap.
         payout.units = String(swap.received);
