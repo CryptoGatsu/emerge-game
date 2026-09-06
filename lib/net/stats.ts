@@ -6,6 +6,14 @@ export interface GameStats {
   awaitingBurn: number;
   withdrawn: number;
   payouts: number;
+  casino: {
+    staked: number;
+    paidGold: number;
+    paidEmerge: number;
+    plays: number;
+    passes: number;
+    revenue: { emerge: number; eth: number; usd: number };
+  };
 }
 
 export async function fetchGameStats(): Promise<GameStats | null> {

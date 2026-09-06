@@ -58,6 +58,37 @@ export const STAKED_GOLD = serverKey('casino:staked-gold');
 export const PAID_GOLD = serverKey('casino:paid-gold');
 export const PAID_EMERGE = serverKey('casino:paid-emerge');
 export const PASSES_SOLD = serverKey('casino:passes');
+/** What the passes brought in: whole $EMERGE, gwei of ETH, and cents at the day's prices. */
+export const PASS_EMERGE = serverKey('casino:pass-emerge');
+export const PASS_GWEI = serverKey('casino:pass-gwei');
+export const PASS_CENTS = serverKey('casino:pass-cents');
+
+export interface CasinoTotals {
+  /** Gold staked at the tables, all time. */
+  staked: number;
+  /** Gold paid back to winners. */
+  paidGold: number;
+  /** $EMERGE won, whole tokens. */
+  paidEmerge: number;
+  /** Plays bought, and the passes that carried them. */
+  plays: number;
+  passes: number;
+  /** What those passes brought in. */
+  revenue: { emerge: number; eth: number; usd: number };
+}
+
+/** How the tables have done since they opened, for the public ledger. */
+export async function casinoTotals(): Promise<CasinoTotals> {
+  const [staked, paidGold, paidEmerge, passes, emerge, gwei, cents] = await Promise.all([
+    counter(STAKED_GOLD), counter(PAID_GOLD), counter(PAID_EMERGE), counter(PASSES_SOLD), counter(PASS_EMERGE), counter(PASS_GWEI), counter(PASS_CENTS),
+  ]);
+  const clean = (n: number) => Math.max(0, Math.round(n));
+  return {
+    staked: clean(staked), paidGold: clean(paidGold), paidEmerge: clean(paidEmerge),
+    plays: clean(passes) * PASS_PLAYS, passes: clean(passes),
+    revenue: { emerge: clean(emerge), eth: Math.max(0, gwei) / 1e9, usd: Math.max(0, cents) / 100 },
+  };
+}
 
 export const devWallet = () => {
   const w = process.env.EMERGE_DEV_WALLET ?? '';

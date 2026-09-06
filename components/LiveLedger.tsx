@@ -5,6 +5,7 @@
  * by the vault, and paid back out to players. Live, in the sense that they
  * are read again every half minute and count up to the new figure rather
  * than jumping, so a burn landing while the page is open is seen to land.
+ * Under them, one quiet line on how the casino's tables have done.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -36,6 +37,19 @@ function useCountUp(target: number | null): number | null {
   }, [target]);
   return shown;
 }
+
+/** A small figure for the tables line: a number and what it is. */
+function Stat({ value, label, unit }: { value: string; label: string; unit?: string }) {
+  return (
+    <span className="ledger-stat">
+      <b>{value}{unit && <small> {unit}</small>}</b>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+/** Dollars, without pretending to more precision than the day's prices give. */
+const dollars = (n: number) => '$' + (n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2));
 
 function Figure({ label, value, note }: { label: string; value: number | null; note?: string }) {
   const shown = useCountUp(value);
@@ -78,6 +92,16 @@ export default function LiveLedger() {
         <Figure label={t('Withdrawn to players')} value={stats ? stats.withdrawn : null}
           note={stats ? t('{n} withdrawals', { n: stats.payouts.toLocaleString() }) : undefined} />
       </div>
+      {stats && stats.casino && (
+        <div className="ledger-tables" aria-label={t('The tables')}>
+          <span className="ledger-tables-head">{t('The tables')}</span>
+          <Stat value={stats.casino.staked.toLocaleString()} unit={t('Gold')} label={t('bet')} />
+          <Stat value={stats.casino.paidGold.toLocaleString()} unit={t('Gold')} label={t('won')} />
+          <Stat value={stats.casino.paidEmerge.toLocaleString()} unit={TOKEN.ticker} label={t('won')} />
+          <Stat value={stats.casino.plays.toLocaleString()} label={t('plays bought')} />
+          <Stat value={dollars(stats.casino.revenue.usd)} label={t('in passes')} />
+        </div>
+      )}
     </section>
   );
 }

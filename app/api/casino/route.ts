@@ -15,7 +15,7 @@ import { addCasinoCredit, casinoCreditOf } from '@/lib/server/accounts';
 import { counter, incrBy } from '@/lib/server/kv';
 import {
   DEV_OWED_GWEI, DEV_PAID_GWEI, DEV_SHARE, EMERGE_PER_GOLD_WON, FREE_PLAYS_PER_DAY, GOLD_PAYS, MAX_BET_GOLD, MAX_BET_GOLD_FOR_EMERGE,
-  MAX_EMERGE_WON_PER_DAY, MIN_BET_GOLD, MIN_BET_GOLD_FOR_EMERGE, PAID_EMERGE, PAID_GOLD, PASSES_SOLD, PASS_PLAYS, PASS_USD, PICKS, STAKED_GOLD,
+  MAX_EMERGE_WON_PER_DAY, MIN_BET_GOLD, MIN_BET_GOLD_FOR_EMERGE, PAID_EMERGE, PAID_GOLD, PASSES_SOLD, PASS_CENTS, PASS_EMERGE, PASS_GWEI, PASS_PLAYS, PASS_USD, PICKS, STAKED_GOLD,
   devWallet, draw, grantPlays, mayPlay, noteWon, passPrices, playsOf, takePlay, wonToday, type CasinoGame, type CasinoPrize,
 } from '@/lib/server/casino';
 
@@ -107,17 +107,23 @@ export async function POST(request: Request) {
     // As many passes as they like in one payment, within reason.
     const passes = Math.max(1, Math.min(MAX_PASSES_AT_ONCE, Math.floor(Number(body.buy.passes) || 1)));
     const prices = await passPrices();
+    // What the passes brought in, for the public ledger: the asking price
+    // until the payment is read, then what was actually paid.
+    let emergeIn = method === 'emerge' ? prices.emerge * passes : 0;
+    let weiIn = method === 'eth' ? BigInt(prices.ethWei) * BigInt(passes) : 0n;
     if (tokenLive()) {
       if (!txHash) return NextResponse.json({ error: 'The pass has not been paid for.' }, { status: 402 });
       if (method === 'emerge') {
         const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, Math.floor(prices.emerge * passes * 0.97));
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
         if (!(await spendBurn(txHash, 'casino-pass', paid.whole))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+        emergeIn = paid.whole;
       } else {
         const wei = BigInt(prices.ethWei) * BigInt(passes);
         const paid = await verifyNative(txHash, address, VAULT_ADDRESS, (wei * 97n) / 100n);
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
         if (!(await spendBurn(txHash, 'casino-pass-eth'))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+        weiIn = paid.wei;
         // The development share, kept in gwei so it stays a safe integer.
         const devGwei = Number((paid.wei * BigInt(Math.round(DEV_SHARE * 100))) / 100n / 1_000_000_000n);
         if (devGwei > 0) await incrBy(DEV_OWED_GWEI, devGwei);
@@ -126,6 +132,13 @@ export async function POST(request: Request) {
     }
     await grantPlays(address, PASS_PLAYS * passes);
     await incrBy(PASSES_SOLD, passes);
+    // Book the take at the prices of the day, in cents, so the ledger can say
+    // what the tables made in dollars without re-pricing history.
+    const gweiIn = Number(weiIn / 1_000_000_000n);
+    const usd = method === 'emerge' ? emergeIn * (prices.emergeUsd ?? PASS_USD / prices.emerge) : (gweiIn / 1e9) * prices.ethUsd;
+    if (emergeIn > 0) await incrBy(PASS_EMERGE, Math.floor(emergeIn));
+    if (gweiIn > 0) await incrBy(PASS_GWEI, gweiIn);
+    if (usd > 0) await incrBy(PASS_CENTS, Math.round(usd * 100));
     return NextResponse.json({ plays: await playsOf(address) });
   }
 
