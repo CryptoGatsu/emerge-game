@@ -205,6 +205,8 @@ export interface GldPayout {
   /** What the win came to, in whole $EMERGE, before the swap. */
   emerge: number;
   game: CasinoGame;
+  /** The $EMERGE put down for it, when written down: a win booked before this field is without one. */
+  stake?: number;
   at: number;
   /** Set once the GLD is in the player's wallet. */
   settledAt?: number;
@@ -224,7 +226,7 @@ export const gldWonToday = (address: string) => counter(gldWonKey(address, utcDa
 export const gldTableToday = () => counter(gldTableKey(utcDay()));
 
 /** Book a win before it is paid, and say how much of it the day's caps allow. */
-export async function bookGldWin(address: string, game: CasinoGame, due: number): Promise<{ emerge: number; capped: boolean; payout: GldPayout | null }> {
+export async function bookGldWin(address: string, game: CasinoGame, due: number, stake?: number): Promise<{ emerge: number; capped: boolean; payout: GldPayout | null }> {
   const [mine, table] = await Promise.all([gldWonToday(address), gldTableToday()]);
   const room = Math.max(0, Math.min(MAX_GLD_WON_PER_DAY_EMERGE - mine, MAX_GLD_TABLE_PER_DAY_EMERGE - table));
   const emerge = Math.max(0, Math.min(Math.floor(due), room));
@@ -232,10 +234,16 @@ export async function bookGldWin(address: string, game: CasinoGame, due: number)
   await incrWindow(gldWonKey(address, utcDay()), emerge, 26 * 3600);
   await incrWindow(gldTableKey(utcDay()), emerge, 26 * 3600);
   await incrBy(GLD_PAID_EMERGE, emerge);
-  const payout: GldPayout = { id: `${Date.now().toString(36)}-${randomInt(1e9).toString(36)}`, address: address.toLowerCase(), emerge, game, at: Date.now(), tries: 0 };
+  const payout: GldPayout = { id: `${Date.now().toString(36)}-${randomInt(1e9).toString(36)}`, address: address.toLowerCase(), emerge, game, at: Date.now(), tries: 0, ...(stake && stake > 0 ? { stake: Math.floor(stake) } : {}) };
   await hset(GLD_PENDING, payout.id, JSON.stringify(payout));
   return { emerge, capped: emerge < due, payout };
 }
+
+/** Whole GLD from base units, to a millionth: enough for a win worth a few dollars. */
+export const gldFromUnits = (units: string | null | undefined): number => {
+  if (!units || !/^\d+$/.test(units)) return 0;
+  return Number(BigInt(units) / 1_000_000_000_000n) / 1e6;
+};
 
 /** Every win still waiting to be paid, oldest first; one wallet's when asked. */
 export async function pendingGld(address?: string): Promise<GldPayout[]> {

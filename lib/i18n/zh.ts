@@ -880,6 +880,10 @@ export const UI: Record<string, string> = {
   // ---- 通知 ----
   'Open chat': '打开聊天',
   'Land claimed': '土地被认领',
+  'in-game Gold': '游戏内金币',
+  'GLD won at the tables': '赌桌上赢得 GLD',
+  '{who} won {gld} GLD on a {stake} {ticker} stake.': '{who} 以 {stake} {ticker} 的赌注赢得了 {gld} GLD。',
+  '{who} won {gld} GLD at the tables.': '{who} 在赌桌上赢得了 {gld} GLD。',
   '{who} settled {region} and called it {world}.': '{who} 在 {region} 定居，命名为 {world}。',
   'Picked up where you left off': '从你上次离开的地方继续',
   '{name} is on day {day}, as you last left it on another device.': '{name} 在第 {day} 天，正如你上次在另一台设备上离开时那样。',

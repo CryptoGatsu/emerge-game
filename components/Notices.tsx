@@ -16,13 +16,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
+import { fetchGldWins, gldAmount } from '@/lib/net/casino';
 import { channelOf, loadChat, poll, worldChannel, type ChatState } from '@/lib/chat';
 import { TOKEN, shortAddress } from '@/lib/chain/emerge';
 import { t } from '@/lib/i18n';
 
 export interface Notice {
   id: string;
-  kind: 'chat' | 'claim' | 'sale' | 'sync' | 'danger';
+  kind: 'chat' | 'claim' | 'sale' | 'sync' | 'danger' | 'win';
   title: string;
   body: string;
   /** What tapping the card does, when there is something useful to do. */
@@ -243,14 +244,84 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
     return () => { live = false; window.clearInterval(timer); };
   }, [push]);
 
+  useGldWinNotices(push, () => mineRef.current.address);
+
   return { notices, dismiss, announce: push };
+}
+
+/** How often the tables are asked who won, in milliseconds. A win is minutes apart at best. */
+const WIN_POLL = 15_000;
+
+/** How far back a win still counts as news when a screen opens: a player arriving a moment later still hears about it. */
+const WIN_FRESH = 90_000;
+
+/**
+ * Watch the GLD table and raise a card for every win it pays, on every
+ * screen: a real token leaving the vault for a player's wallet is the kind
+ * of thing the whole game should see. The winner sees the result on the
+ * table itself, so the card is not raised for them.
+ */
+export function useGldWinNotices(push: (notice: Notice) => void, mine: () => string | null) {
+  // The caller's `mine` may be a fresh function every render; the watch is
+  // set up once and reads the latest through a ref, or a settlement's
+  // constant re-rendering would restart it before any poll could answer.
+  const mineRef = useRef(mine);
+  mineRef.current = mine;
+  useEffect(() => {
+    const mine = () => mineRef.current();
+    let since = Date.now() - WIN_FRESH;
+    const seen = new Set<string>();
+    let live = true;
+    const tick = async () => {
+      const { wins, now } = await fetchGldWins(since);
+      if (!live) return;
+      // The server's clock, so a device that is a minute out never misses a win or repeats one.
+      since = Math.max(since, now - 5_000);
+      const me = mine()?.toLowerCase() ?? null;
+      for (const w of [...wins].reverse()) {
+        if (seen.has(w.id)) continue;
+        seen.add(w.id);
+        if (me && w.address.toLowerCase() === me) continue;
+        push({
+          id: `win-${w.id}`,
+          kind: 'win',
+          title: t('GLD won at the tables'),
+          body: w.stake
+            ? t('{who} won {gld} GLD on a {stake} {ticker} stake.', { who: w.name?.trim() || shortAddress(w.address), gld: gldAmount(w.gld), stake: w.stake.toLocaleString(), ticker: TOKEN.ticker })
+            : t('{who} won {gld} GLD at the tables.', { who: w.name?.trim() || shortAddress(w.address), gld: gldAmount(w.gld) }),
+          lifetime: 15_000,
+        });
+      }
+      if (seen.size > 400) { for (const id of [...seen].slice(0, 200)) seen.delete(id); }
+    };
+    tick();
+    const timer = window.setInterval(tick, WIN_POLL);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [push]);
+}
+
+/**
+ * The GLD-win cards on their own, for a screen that has no chat or registry
+ * watch of its own — the world map.
+ */
+export function GldWinNotices({ address }: { address: string | null }) {
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const addressRef = useRef(address);
+  addressRef.current = address;
+  const push = useCallback((notice: Notice) => {
+    setNotices((held) => (held.some((n) => n.id === notice.id) ? held : [...held, notice].slice(-MAX_ON_SCREEN)));
+    window.setTimeout(() => setNotices((held) => held.filter((n) => n.id !== notice.id)), notice.lifetime ?? LIFETIME);
+  }, []);
+  const mine = useCallback(() => addressRef.current, []);
+  useGldWinNotices(push, mine);
+  return <Notices notices={notices} onDismiss={(id) => setNotices((held) => held.filter((n) => n.id !== id))} />;
 }
 
 const nameOf = (claim: Claim) =>
   claim.ownerName?.trim() ? claim.ownerName : shortAddress(claim.owner);
 
 /** One mark per kind, so a glance says what a card is before it is read. */
-const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎', sync: '⇄', danger: '⚠' };
+const NOTICE_ICON: Record<Notice['kind'], string> = { chat: '✎', claim: '◈', sale: '◎', sync: '⇄', danger: '⚠', win: '✦' };
 
 /** The cards themselves. */
 export function Notices({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: string) => void }) {

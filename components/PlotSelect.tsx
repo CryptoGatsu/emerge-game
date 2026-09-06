@@ -45,6 +45,7 @@ import {
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
 import SoftStake from './SoftStake';
+import { GldWinNotices } from './Notices';
 import { music } from '@/lib/audio/music';
 import { eraName } from '@/lib/world/eras';
 import { BrandLine } from './Brand';
@@ -1057,6 +1058,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
 
   return (
     <main className="world-map">
+      <GldWinNotices address={wallet.address ?? null} />
       <div className="land-inner">
         <header className="land-head">
           <BrandLine />

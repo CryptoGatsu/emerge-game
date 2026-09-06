@@ -76,3 +76,39 @@ export async function buyPass(address: string, method: 'emerge' | 'eth', txHash:
     return { ok: true, plays: json.plays };
   } catch { return { ok: false, error: 'Could not reach the casino.' }; }
 }
+
+/** One GLD win paid at the tables, as the feed tells it. */
+export interface GldWin {
+  id: string;
+  address: string;
+  name: string | null;
+  emerge: number;
+  /** The $EMERGE staked, when the win was booked with it. */
+  stake: number | null;
+  gld: number;
+  game: string;
+  at: number;
+}
+
+/** GLD wins paid since `since` (ms), newest first; empty when the feed is unreachable. */
+export async function fetchGldWins(since: number): Promise<{ wins: GldWin[]; now: number }> {
+  try {
+    const res = await fetch(`/api/casino?wins=1&since=${Math.max(0, Math.floor(since))}`, { cache: 'no-store' });
+    if (!res.ok) return { wins: [], now: Date.now() };
+    const body = (await res.json()) as { wins?: GldWin[]; now?: number };
+    return { wins: Array.isArray(body.wins) ? body.wins : [], now: typeof body.now === 'number' ? body.now : Date.now() };
+  } catch {
+    return { wins: [], now: Date.now() };
+  }
+}
+
+/**
+ * GLD as text. A win at the tables is a few thousandths of a token, so the
+ * usual two places would read as nothing: small amounts keep enough places
+ * to show three figures, and a whole token or more takes two.
+ */
+export function gldAmount(gld: number): string {
+  if (!(gld > 0)) return '0';
+  if (gld >= 1) return gld.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return gld.toLocaleString(undefined, { maximumSignificantDigits: 3, maximumFractionDigits: 6 });
+}

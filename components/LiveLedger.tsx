@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { TOKEN } from '@/lib/chain/emerge';
 import { fetchGameStats, type GameStats } from '@/lib/net/stats';
+import { gldAmount } from '@/lib/net/casino';
 import { t, useLocale } from '@/lib/i18n';
 
 const POLL_MS = 30_000;
@@ -95,11 +96,11 @@ export default function LiveLedger() {
       {stats && stats.casino && (
         <div className="ledger-tables" aria-label={t('The tables')}>
           <span className="ledger-tables-head">{t('The tables')}</span>
-          <Stat value={stats.casino.staked.toLocaleString()} unit={t('Gold')} label={t('bet')} />
-          <Stat value={stats.casino.paidGold.toLocaleString()} unit={t('Gold')} label={t('won')} />
+          <Stat value={stats.casino.staked.toLocaleString()} unit={t('in-game Gold')} label={t('bet')} />
+          <Stat value={stats.casino.paidGold.toLocaleString()} unit={t('in-game Gold')} label={t('won')} />
           <Stat value={stats.casino.paidEmerge.toLocaleString()} unit={TOKEN.ticker} label={t('won')} />
           <Stat value={(stats.casino.emergeStaked ?? 0).toLocaleString()} unit={TOKEN.ticker} label={t('staked')} />
-          <Stat value={(stats.casino.gldWon ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} unit="GLD" label={t('won')} />
+          <Stat value={gldAmount(stats.casino.gldWon ?? 0)} unit="GLD" label={t('won')} />
           <Stat value={stats.casino.plays.toLocaleString()} label={t('plays bought')} />
           <Stat value={dollars(stats.casino.revenue.usd)} label={t('in passes')} />
         </div>

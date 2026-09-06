@@ -2731,6 +2731,10 @@ button.fold:hover { color: var(--emerald); }
 
 /* The market sold something. Gold, like everything else to do with takings. */
 .notice.sale b { color: var(--gold); }
+.notice.win b { color: var(--gold); }
+.notice.win { border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+/* The world map scrolls, so its cards pin to the screen rather than the page. */
+.world-map .notices { position: fixed; }
 
 /* How many people are in the game, beside how many beings are in this world.
    Dimmer than the settlement's own count: it is context, not a reading. */

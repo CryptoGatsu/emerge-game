@@ -16,11 +16,12 @@ import { sendNativeFromVault } from '@/lib/server/signer';
 import { addCasinoCredit, casinoCreditOf } from '@/lib/server/accounts';
 import { counter, incrBy } from '@/lib/server/kv';
 import { noteCharge } from '@/lib/server/treasury';
+import { displayNames } from '@/lib/server/registry';
 import {
   DEV_OWED_GWEI, DEV_PAID_GWEI, DEV_SHARE, EMERGE_PER_GOLD_WON, FREE_PLAYS_PER_DAY, GLD_STAKED_EMERGE, GOLD_PAYS, MAX_BET_GOLD, MAX_BET_GOLD_FOR_EMERGE,
   MAX_GLD_TABLE_PER_DAY_EMERGE, MAX_GLD_WON_PER_DAY_EMERGE, MAX_STAKE_EMERGE, MIN_STAKE_EMERGE,
   MAX_EMERGE_WON_PER_DAY, MIN_BET_GOLD, MIN_BET_GOLD_FOR_EMERGE, PAID_EMERGE, PAID_GOLD, PASSES_SOLD, PASS_CENTS, PASS_EMERGE, PASS_GWEI, PASS_PLAYS, PASS_USD, PICKS, STAKED_GOLD,
-  bookGldWin, devWallet, draw, gldTableToday, gldWonToday, grantPlays, mayPlay, noteWon, passPrices, pendingGld, playsOf, settleGld, settlePendingGld, settledGld, takePlay, wonToday, type CasinoGame, type CasinoPrize,
+  bookGldWin, devWallet, draw, gldFromUnits, gldTableToday, gldWonToday, grantPlays, mayPlay, noteWon, passPrices, pendingGld, playsOf, settleGld, settlePendingGld, settledGld, takePlay, wonToday, type CasinoGame, type CasinoPrize,
 } from '@/lib/server/casino';
 
 export const dynamic = 'force-dynamic';
@@ -41,7 +42,9 @@ const rules = () => ({
 });
 
 export async function GET(request: Request) {
-  const address = new URL(request.url).searchParams.get('address') ?? '';
+  const params = new URL(request.url).searchParams;
+  if (params.get('wins')) return wins(Number(params.get('since')) || 0);
+  const address = params.get('address') ?? '';
   const known = ADDRESS.test(address);
   try {
     const [prices, plays, won, credit, gldWon, tableWon, waiting, paid] = await Promise.all([
@@ -54,6 +57,23 @@ export async function GET(request: Request) {
     }, { headers: { 'cache-control': 'no-store, max-age=0' } });
   } catch {
     return NextResponse.json({ error: 'The casino is closed for a moment.' }, { status: 503 });
+  }
+}
+
+/**
+ * `GET /api/casino?wins=1&since=<ms>` — GLD wins paid since `since`, newest
+ * first, with the winner's chosen name when they have one. Public: a win at
+ * the tables is news for every screen, and the wallet is on the chain anyway.
+ */
+async function wins(since: number) {
+  try {
+    const [paid, names] = await Promise.all([settledGld(undefined, 10), displayNames().catch(() => ({} as Record<string, string>))]);
+    const list = paid
+      .filter((p) => (p.settledAt ?? 0) > since)
+      .map((p) => ({ id: p.id, address: p.address, name: names[p.address] ?? names[p.address.toLowerCase()] ?? null, emerge: p.emerge, stake: p.stake ?? null, gld: gldFromUnits(p.units), game: p.game, at: p.settledAt ?? p.at }));
+    return NextResponse.json({ wins: list, now: Date.now() }, { headers: { 'cache-control': 'no-store, max-age=0' } });
+  } catch {
+    return NextResponse.json({ wins: [], now: Date.now() }, { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
 }
 
@@ -111,7 +131,7 @@ export async function POST(request: Request) {
     await incrBy(GLD_STAKED_EMERGE, stake);
     let emerge = 0, capped = false, payout = null;
     if (won) {
-      const booked = await bookGldWin(address, game, stake * GOLD_PAYS[game]);
+      const booked = await bookGldWin(address, game, stake * GOLD_PAYS[game], stake);
       emerge = booked.emerge; capped = booked.capped; payout = booked.payout;
       // The house keeps the stake either way; on a win it pays out more than
       // it took, from the kept share. What is not paid for the cap stays
