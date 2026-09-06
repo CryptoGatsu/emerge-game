@@ -98,6 +98,8 @@ export default function LiveLedger() {
           <Stat value={stats.casino.staked.toLocaleString()} unit={t('Gold')} label={t('bet')} />
           <Stat value={stats.casino.paidGold.toLocaleString()} unit={t('Gold')} label={t('won')} />
           <Stat value={stats.casino.paidEmerge.toLocaleString()} unit={TOKEN.ticker} label={t('won')} />
+          <Stat value={(stats.casino.emergeStaked ?? 0).toLocaleString()} unit={TOKEN.ticker} label={t('staked')} />
+          <Stat value={(stats.casino.gldWon ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} unit="GLD" label={t('won')} />
           <Stat value={stats.casino.plays.toLocaleString()} label={t('plays bought')} />
           <Stat value={dollars(stats.casino.revenue.usd)} label={t('in passes')} />
         </div>

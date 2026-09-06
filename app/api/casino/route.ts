@@ -3,7 +3,9 @@
  *
  * GET  ?address=  the tables' rules, prices, and this wallet's plays and winnings.
  * POST {address, play: {game, pick, bet, prize}}   one play, drawn here.
- * POST {address, buy:  {method: 'emerge'|'eth', txHash}}   a pass of five plays.
+ * POST {address, play: {game, pick, prize: 'gld', stake, txHash}}   the GLD table: $EMERGE in, GLD out.
+ * POST {address, buy:  {method: 'emerge'|'eth', txHash, passes}}   passes of five plays.
+ * POST {address, settle: true}   pay this wallet's GLD wins that are still waiting.
  */
 
 import { NextResponse } from 'next/server';
@@ -13,13 +15,17 @@ import { spendBurn, verifyNative, verifyTransfer } from '@/lib/server/burns';
 import { sendNativeFromVault } from '@/lib/server/signer';
 import { addCasinoCredit, casinoCreditOf } from '@/lib/server/accounts';
 import { counter, incrBy } from '@/lib/server/kv';
+import { noteCharge } from '@/lib/server/treasury';
 import {
-  DEV_OWED_GWEI, DEV_PAID_GWEI, DEV_SHARE, EMERGE_PER_GOLD_WON, FREE_PLAYS_PER_DAY, GOLD_PAYS, MAX_BET_GOLD, MAX_BET_GOLD_FOR_EMERGE,
+  DEV_OWED_GWEI, DEV_PAID_GWEI, DEV_SHARE, EMERGE_PER_GOLD_WON, FREE_PLAYS_PER_DAY, GLD_STAKED_EMERGE, GOLD_PAYS, MAX_BET_GOLD, MAX_BET_GOLD_FOR_EMERGE,
+  MAX_GLD_TABLE_PER_DAY_EMERGE, MAX_GLD_WON_PER_DAY_EMERGE, MAX_STAKE_EMERGE, MIN_STAKE_EMERGE,
   MAX_EMERGE_WON_PER_DAY, MIN_BET_GOLD, MIN_BET_GOLD_FOR_EMERGE, PAID_EMERGE, PAID_GOLD, PASSES_SOLD, PASS_CENTS, PASS_EMERGE, PASS_GWEI, PASS_PLAYS, PASS_USD, PICKS, STAKED_GOLD,
-  devWallet, draw, grantPlays, mayPlay, noteWon, passPrices, playsOf, takePlay, wonToday, type CasinoGame, type CasinoPrize,
+  bookGldWin, devWallet, draw, gldTableToday, gldWonToday, grantPlays, mayPlay, noteWon, passPrices, pendingGld, playsOf, settleGld, settlePendingGld, settledGld, takePlay, wonToday, type CasinoGame, type CasinoPrize,
 } from '@/lib/server/casino';
 
 export const dynamic = 'force-dynamic';
+// A GLD win is swapped and sent inside the request when the chain is quick enough.
+export const maxDuration = 60;
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** Below this the development share is left to accumulate rather than paid as dust. */
@@ -31,16 +37,21 @@ const rules = () => ({
   freePlays: FREE_PLAYS_PER_DAY, passPlays: PASS_PLAYS, passUsd: PASS_USD,
   minBet: MIN_BET_GOLD, minBetEmerge: MIN_BET_GOLD_FOR_EMERGE, maxBet: MAX_BET_GOLD, maxBetEmerge: MAX_BET_GOLD_FOR_EMERGE,
   goldPays: GOLD_PAYS, emergePerGold: EMERGE_PER_GOLD_WON, maxEmergeDay: MAX_EMERGE_WON_PER_DAY,
+  minStakeEmerge: MIN_STAKE_EMERGE, maxStakeEmerge: MAX_STAKE_EMERGE, maxGldDay: MAX_GLD_WON_PER_DAY_EMERGE, maxGldTableDay: MAX_GLD_TABLE_PER_DAY_EMERGE,
 });
 
 export async function GET(request: Request) {
   const address = new URL(request.url).searchParams.get('address') ?? '';
   const known = ADDRESS.test(address);
   try {
-    const [prices, plays, won, credit] = await Promise.all([
+    const [prices, plays, won, credit, gldWon, tableWon, waiting, paid] = await Promise.all([
       passPrices(), known ? playsOf(address) : Promise.resolve(null), known ? wonToday(address) : Promise.resolve(0), known ? casinoCreditOf(address) : Promise.resolve(0),
+      known ? gldWonToday(address) : Promise.resolve(0), gldTableToday(), known ? pendingGld(address) : Promise.resolve([]), known ? settledGld(address, 5) : Promise.resolve([]),
     ]);
-    return NextResponse.json({ live: tokenLive(), plays, prices, wonToday: won, credit, devWallet: devWallet() !== null, rules: rules() }, { headers: { 'cache-control': 'no-store, max-age=0' } });
+    return NextResponse.json({
+      live: tokenLive(), plays, prices, wonToday: won, credit, devWallet: devWallet() !== null, rules: rules(),
+      gld: { wonToday: gldWon, tableToday: tableWon, waiting, paid },
+    }, { headers: { 'cache-control': 'no-store, max-age=0' } });
   } catch {
     return NextResponse.json({ error: 'The casino is closed for a moment.' }, { status: 503 });
   }
@@ -59,11 +70,65 @@ async function sweepDev(): Promise<void> {
 }
 
 export async function POST(request: Request) {
-  let body: { address?: string; play?: { game?: string; pick?: number; bet?: number; prize?: string }; buy?: { method?: string; txHash?: string | null; passes?: number } };
+  let body: {
+    address?: string;
+    play?: { game?: string; pick?: number; bet?: number; prize?: string; stake?: number; txHash?: string | null };
+    buy?: { method?: string; txHash?: string | null; passes?: number };
+    settle?: boolean;
+  };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 }); }
   const address = String(body.address ?? '');
   if (!ADDRESS.test(address)) return NextResponse.json({ error: 'Connect a wallet to play.' }, { status: 400 });
   if (!holdsAddress(request, address)) return NextResponse.json({ error: 'Sign in with this wallet first.', needsSession: true }, { status: 401 });
+
+  if (body.settle) {
+    const result = await settlePendingGld(address, 3);
+    const [waiting, paid] = await Promise.all([pendingGld(address), settledGld(address, 5)]);
+    return NextResponse.json({ ...result, gld: { waiting, paid } });
+  }
+
+  if (body.play && body.play.prize === 'gld') {
+    // The GLD table. The stake is $EMERGE already in the vault; the draw is
+    // made once the chain says so, and never counts against the day's plays.
+    const game = body.play.game as CasinoGame;
+    if (game !== 'coin' && game !== 'cups') return NextResponse.json({ error: 'No such game.' }, { status: 400 });
+    const pick = Math.floor(Number(body.play.pick));
+    if (!(pick >= 0 && pick < PICKS[game])) return NextResponse.json({ error: 'Pick a side.' }, { status: 400 });
+    let stake = Math.floor(Number(body.play.stake) || 0);
+    if (stake < MIN_STAKE_EMERGE) return NextResponse.json({ error: `The GLD table takes ${MIN_STAKE_EMERGE.toLocaleString()} $EMERGE at least.` }, { status: 400 });
+    if (stake > MAX_STAKE_EMERGE) return NextResponse.json({ error: `The GLD table takes ${MAX_STAKE_EMERGE.toLocaleString()} $EMERGE at most.` }, { status: 400 });
+    const txHash = body.play.txHash ? String(body.play.txHash) : null;
+    if (tokenLive()) {
+      if (!txHash) return NextResponse.json({ error: 'The stake has not been paid.' }, { status: 402 });
+      const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, Math.floor(stake * 0.97));
+      if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+      stake = Math.min(stake, Math.floor(paid.whole));
+      // Not booked as a charge here: what the stake becomes depends on the draw.
+      if (!(await spendBurn(txHash, 'casino-gld'))) return NextResponse.json({ error: 'That stake has already been played.' }, { status: 409 });
+    } else if (!(await mayPlay(address))) return NextResponse.json({ error: 'One play at a time.' }, { status: 429 });
+    const drawn = draw(game);
+    const won = drawn === pick;
+    await incrBy(GLD_STAKED_EMERGE, stake);
+    let emerge = 0, capped = false, payout = null;
+    if (won) {
+      const booked = await bookGldWin(address, game, stake * GOLD_PAYS[game]);
+      emerge = booked.emerge; capped = booked.capped; payout = booked.payout;
+      // The house keeps the stake either way; on a win it pays out more than
+      // it took, from the kept share. What is not paid for the cap stays
+      // in the vault as a charge would.
+      if (emerge <= 0) await noteCharge(stake);
+    } else {
+      // The stake is the house's: burned, kept and pooled like every charge.
+      await noteCharge(stake);
+    }
+    // Pay now if the chain is quick; otherwise it waits on the list.
+    let settled = null;
+    if (payout) {
+      const r = await settleGld(payout.id);
+      settled = r.ok ? r.payout : r.payout ?? payout;
+    }
+    return NextResponse.json({ won, drawn, gold: 0, emerge, capped, stake, prize: 'gld', gldPayout: settled, plays: await playsOf(address) });
+  }
 
   if (body.play) {
     const game = body.play.game as CasinoGame;

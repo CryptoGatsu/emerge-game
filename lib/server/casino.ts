@@ -14,6 +14,13 @@
  * five more costs about five dollars, paid in $EMERGE into the vault (burned
  * and kept like every charge) or in ETH, of which a share goes to the
  * development wallet and the rest stays in the vault.
+ *
+ * The GLD table is the third game, played for $EMERGE rather than Gold and
+ * outside the daily plays. The stake goes into the vault before the draw. A
+ * loss is booked like any charge: burned, kept and pooled by the usual
+ * split. A win is paid in GLD: the vault swaps the winnings' worth of
+ * $EMERGE for GLD through the router and sends the GLD to the player's
+ * wallet, and while the chain is slow the payout waits here and is retried.
  */
 
 import { randomInt } from 'crypto';
@@ -21,9 +28,12 @@ import { serverKey } from '@/lib/limits';
 import { counter, getValue, incrBy, incrWindow, setValue } from './kv';
 import { utcDay } from './accounts';
 import { readTokenStats } from './tokenStats';
+import { GLD_ADDRESS, tokenLive } from '../chain/emerge';
+import { hdel, hgetall, hset, push, range, releaseLock, takeLock } from './kv';
+import { sendTokenFromVault, swapForGld, vaultCanSign } from './signer';
 
 export type CasinoGame = 'coin' | 'cups';
-export type CasinoPrize = 'gold' | 'emerge';
+export type CasinoPrize = 'gold' | 'emerge' | 'gld';
 
 export const FREE_PLAYS_PER_DAY = 3;
 export const PASS_PLAYS = 5;
@@ -43,6 +53,13 @@ export const DEV_SHARE = 0.3;
 export const FALLBACK_EMERGE_PER_PASS = 5_000;
 export const FALLBACK_ETH_USD = 3_000;
 export const PLAY_COOLDOWN_SECONDS = 2;
+/** The GLD table: staked in whole $EMERGE, paid in GLD at the Gold tables' odds. */
+export const MIN_STAKE_EMERGE = 5_000;
+export const MAX_STAKE_EMERGE = 100_000;
+/** The most one wallet can win at the GLD table in a day, in $EMERGE before the swap. */
+export const MAX_GLD_WON_PER_DAY_EMERGE = 500_000;
+/** The most the GLD table pays out in a day across everybody, in $EMERGE before the swap. */
+export const MAX_GLD_TABLE_PER_DAY_EMERGE = 3_000_000;
 export const PICKS: Record<CasinoGame, number> = { coin: 2, cups: 3 };
 
 const playsKey = (a: string, day: string) => serverKey(`casino:plays:${day}:${a.toLowerCase()}`);
@@ -62,8 +79,21 @@ export const PASSES_SOLD = serverKey('casino:passes');
 export const PASS_EMERGE = serverKey('casino:pass-emerge');
 export const PASS_GWEI = serverKey('casino:pass-gwei');
 export const PASS_CENTS = serverKey('casino:pass-cents');
+/** The GLD table: $EMERGE staked, $EMERGE paid out (before the swap), and GLD sent, in micro-GLD. */
+export const GLD_STAKED_EMERGE = serverKey('casino:gld-staked');
+export const GLD_PAID_EMERGE = serverKey('casino:gld-paid-emerge');
+export const GLD_PAID_MICRO = serverKey('casino:gld-paid-micro');
+const GLD_PENDING = serverKey('casino:gld-pending');
+const GLD_SETTLED = serverKey('casino:gld-settled');
+const gldWonKey = (a: string, day: string) => serverKey(`casino:gld-won:${day}:${a.toLowerCase()}`);
+const gldTableKey = (day: string) => serverKey(`casino:gld-table:${day}`);
+const gldLock = (id: string) => serverKey(`casino:gld-lock:${id}`);
 
 export interface CasinoTotals {
+  /** $EMERGE staked at the GLD table, and what it has paid: $EMERGE before the swap, GLD after. */
+  emergeStaked: number;
+  emergePaidForGld: number;
+  gldWon: number;
   /** Gold staked at the tables, all time. */
   staked: number;
   /** Gold paid back to winners. */
@@ -79,11 +109,13 @@ export interface CasinoTotals {
 
 /** How the tables have done since they opened, for the public ledger. */
 export async function casinoTotals(): Promise<CasinoTotals> {
-  const [staked, paidGold, paidEmerge, passes, emerge, gwei, cents] = await Promise.all([
+  const [staked, paidGold, paidEmerge, passes, emerge, gwei, cents, gldStaked, gldPaidEmerge, gldMicro] = await Promise.all([
     counter(STAKED_GOLD), counter(PAID_GOLD), counter(PAID_EMERGE), counter(PASSES_SOLD), counter(PASS_EMERGE), counter(PASS_GWEI), counter(PASS_CENTS),
+    counter(GLD_STAKED_EMERGE), counter(GLD_PAID_EMERGE), counter(GLD_PAID_MICRO),
   ]);
   const clean = (n: number) => Math.max(0, Math.round(n));
   return {
+    emergeStaked: clean(gldStaked), emergePaidForGld: clean(gldPaidEmerge), gldWon: Math.max(0, gldMicro) / 1e6,
     staked: clean(staked), paidGold: clean(paidGold), paidEmerge: clean(paidEmerge),
     plays: clean(passes) * PASS_PLAYS, passes: clean(passes),
     revenue: { emerge: clean(emerge), eth: Math.max(0, gwei) / 1e9, usd: Math.max(0, cents) / 100 },
@@ -160,4 +192,132 @@ export async function passPrices(): Promise<PassPrices> {
   const emerge = emergeUsd ? Math.max(100, Math.ceil(PASS_USD / emergeUsd)) : FALLBACK_EMERGE_PER_PASS;
   const ethWei = BigInt(Math.round((PASS_USD / eth) * 1e9)) * 1_000_000_000n;
   return { emerge, ethWei: ethWei.toString(), emergeUsd, ethUsd: eth };
+}
+
+/* ------------------------------------------------------------------ *
+ * The GLD table
+ * ------------------------------------------------------------------ */
+
+/** A win at the GLD table, waiting to be swapped and sent, or done. */
+export interface GldPayout {
+  id: string;
+  address: string;
+  /** What the win came to, in whole $EMERGE, before the swap. */
+  emerge: number;
+  game: CasinoGame;
+  at: number;
+  /** Set once the GLD is in the player's wallet. */
+  settledAt?: number;
+  /** GLD sent, in base units, as a string. */
+  units?: string;
+  swapTx?: string | null;
+  sendTx?: string | null;
+  /** Why the last attempt did not go through, for the player and the operator. */
+  problem?: string;
+  tries?: number;
+  simulated?: boolean;
+}
+
+export const gldWonToday = (address: string) => counter(gldWonKey(address, utcDay()));
+export const gldTableToday = () => counter(gldTableKey(utcDay()));
+
+/** Book a win before it is paid, and say how much of it the day's caps allow. */
+export async function bookGldWin(address: string, game: CasinoGame, due: number): Promise<{ emerge: number; capped: boolean; payout: GldPayout | null }> {
+  const [mine, table] = await Promise.all([gldWonToday(address), gldTableToday()]);
+  const room = Math.max(0, Math.min(MAX_GLD_WON_PER_DAY_EMERGE - mine, MAX_GLD_TABLE_PER_DAY_EMERGE - table));
+  const emerge = Math.max(0, Math.min(Math.floor(due), room));
+  if (emerge <= 0) return { emerge: 0, capped: true, payout: null };
+  await incrWindow(gldWonKey(address, utcDay()), emerge, 26 * 3600);
+  await incrWindow(gldTableKey(utcDay()), emerge, 26 * 3600);
+  await incrBy(GLD_PAID_EMERGE, emerge);
+  const payout: GldPayout = { id: `${Date.now().toString(36)}-${randomInt(1e9).toString(36)}`, address: address.toLowerCase(), emerge, game, at: Date.now(), tries: 0 };
+  await hset(GLD_PENDING, payout.id, JSON.stringify(payout));
+  return { emerge, capped: emerge < due, payout };
+}
+
+/** Every win still waiting to be paid, oldest first; one wallet's when asked. */
+export async function pendingGld(address?: string): Promise<GldPayout[]> {
+  const all = Object.values(await hgetall(GLD_PENDING))
+    .map((raw) => { try { return JSON.parse(raw) as GldPayout; } catch { return null; } })
+    .filter((p): p is GldPayout => !!p && (!address || p.address === address.toLowerCase()));
+  return all.sort((a, b) => a.at - b.at);
+}
+
+/** The last wins paid, newest first; one wallet's when asked. */
+export async function settledGld(address?: string, limit = 8): Promise<GldPayout[]> {
+  const lines = await range(GLD_SETTLED);
+  return lines.map((raw) => { try { return JSON.parse(raw) as GldPayout; } catch { return null; } })
+    .filter((p): p is GldPayout => !!p && (!address || p.address === address.toLowerCase()))
+    .sort((a, b) => (b.settledAt ?? 0) - (a.settledAt ?? 0)).slice(0, limit);
+}
+
+export type GldSettle = { ok: true; payout: GldPayout } | { ok: false; problem: string; payout: GldPayout | null };
+
+/**
+ * Pay one win: swap its $EMERGE for GLD and send the GLD on. Under a lock,
+ * so two calls cannot pay it twice; kept on the list with the problem when
+ * the chain will not have it, for the next try. Without a live token the
+ * payout is written down as one GLD per $EMERGE, so the tables can be
+ * played through on a test build.
+ */
+export async function settleGld(id: string): Promise<GldSettle> {
+  const raw = (await hgetall(GLD_PENDING))[id];
+  if (!raw) return { ok: false, problem: 'That win is not waiting.', payout: null };
+  let payout: GldPayout;
+  try { payout = JSON.parse(raw) as GldPayout; } catch { return { ok: false, problem: 'That win is unreadable.', payout: null }; }
+  if (!(await takeLock(gldLock(id), 120))) return { ok: false, problem: 'That win is being paid now.', payout };
+  try {
+    const fail = async (problem: string) => {
+      payout.tries = (payout.tries ?? 0) + 1;
+      payout.problem = problem;
+      await hset(GLD_PENDING, id, JSON.stringify(payout));
+      return { ok: false as const, problem, payout };
+    };
+    let units: bigint;
+    if (tokenLive()) {
+      if (!vaultCanSign()) return fail('The vault is not configured to pay out.');
+      if (payout.units && payout.swapTx) {
+        // Swapped on an earlier try; only the send is owed.
+        units = BigInt(payout.units);
+      } else {
+        const swap = await swapForGld(payout.emerge);
+        if (!swap.ok) return fail(`The swap failed: ${swap.problem}`);
+        if (!(swap.received > 0n)) return fail('The swap returned no GLD.');
+        payout.swapTx = swap.txHash;
+        // Written down the moment the GLD is in the vault, so a send that
+        // fails is retried as a send and never as a second swap.
+        payout.units = String(swap.received);
+        await hset(GLD_PENDING, id, JSON.stringify(payout));
+        units = swap.received;
+      }
+      const sent = await sendTokenFromVault(GLD_ADDRESS, payout.address, units);
+      if (!sent.ok) return fail(`The GLD could not be sent: ${sent.problem}`);
+      payout.sendTx = sent.txHash;
+    } else {
+      units = BigInt(payout.emerge) * 1_000_000_000_000_000_000n;
+      payout.units = String(units);
+      payout.simulated = true;
+      payout.swapTx = null; payout.sendTx = null;
+    }
+    payout.settledAt = Date.now();
+    delete payout.problem;
+    await incrBy(GLD_PAID_MICRO, Number(units / 1_000_000_000_000n));
+    await push(GLD_SETTLED, JSON.stringify(payout), 200);
+    await hdel(GLD_PENDING, id);
+    return { ok: true, payout };
+  } finally {
+    await releaseLock(gldLock(id));
+  }
+}
+
+/** Pay every win that is waiting, one after another, and say how it went. */
+export async function settlePendingGld(address?: string, limit = 10): Promise<{ paid: number; waiting: number; problems: string[] }> {
+  const queue = (await pendingGld(address)).slice(0, limit);
+  let paid = 0;
+  const problems: string[] = [];
+  for (const p of queue) {
+    const r = await settleGld(p.id);
+    if (r.ok) paid += 1; else problems.push(r.problem);
+  }
+  return { paid, waiting: (await pendingGld(address)).length, problems };
 }

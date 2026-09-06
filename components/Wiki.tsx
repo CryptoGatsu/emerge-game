@@ -1247,6 +1247,16 @@ export default function Wiki() {
             to the development wallet and the rest stays in the vault. The house keeps its edge on every
             game; it is entertainment, not income.
           </p>
+          <p>
+            <b>The GLD table</b> is the same two games staked in {TOKEN.ticker} instead of Gold, from{' '}
+            <b>5,000</b> to <b>100,000</b> a play, outside the daily plays. The stake goes into the vault
+            before the draw. Lose, and it is burned, kept and pooled like every other charge. Win, and the
+            vault swaps your winnings &mdash; the stake at the game&rsquo;s odds &mdash; for GLD through the
+            router and sends the GLD straight to your wallet; what the swap returns is what the market
+            gives at that moment. A wallet wins at most 500,000 {TOKEN.ticker} worth a day before the
+            swap, and the table as a whole 3,000,000. When the chain is slow the win waits in the casino
+            and is sent on the next try.
+          </p>
         </section>
 
         <section id="together">

@@ -7,6 +7,9 @@ export interface GameStats {
   withdrawn: number;
   payouts: number;
   casino: {
+    emergeStaked: number;
+    emergePaidForGld: number;
+    gldWon: number;
     staked: number;
     paidGold: number;
     paidEmerge: number;

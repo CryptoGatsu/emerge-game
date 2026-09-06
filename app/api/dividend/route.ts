@@ -8,12 +8,14 @@
  * POST { register: true } registers a soft stake for the session's wallet.
  * POST { claim: true } sends the session's wallet its GLD.
  * GET ?sample=1 and ?settle=1, with the cron secret, are the daily balance
- * sample and the weekly settlement.
+ * sample and the weekly settlement; ?gld=1 retries the casino's GLD wins
+ * that are still waiting to be paid.
  */
 
 import { NextResponse } from 'next/server';
 import { claimGld, registerStake, sampleBalances, settleEpoch, standingOf } from '@/lib/server/dividend';
 import { sessionAddress } from '@/lib/server/session';
+import { settlePendingGld } from '@/lib/server/casino';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +28,10 @@ const cronAllowed = (request: Request) => {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  if (url.searchParams.get('sample') || url.searchParams.get('settle')) {
+  if (url.searchParams.get('sample') || url.searchParams.get('settle') || url.searchParams.get('gld')) {
     if (!cronAllowed(request)) return NextResponse.json({ error: 'Not for you.' }, { status: 401 });
     try {
+      if (url.searchParams.get('gld')) return NextResponse.json(await settlePendingGld(undefined, 10));
       if (url.searchParams.get('sample')) return NextResponse.json({ sampled: await sampleBalances() });
       return NextResponse.json(await settleEpoch(url.searchParams.get('epoch') || undefined));
     } catch {
