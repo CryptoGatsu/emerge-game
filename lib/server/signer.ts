@@ -424,21 +424,9 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     let unquoted = false;
     if (kind === 'universal' || kind === 'v4') {
       // Permit2 pays the router out of the vault: the token approves Permit2
-      // once, and Permit2 approves the router for this amount and the hour.
-      const permit2 = ((process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex);
-      const toPermit = await client.readContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'allowance', args: [account.address, permit2] });
-      if (toPermit < units) {
-        const tx = await wallet.writeContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'approve', args: [permit2, 2n ** 256n - 1n], nonce });
-        await client.waitForTransactionReceipt({ hash: tx });
-        nonce += 1;
-      }
+      // once, and Permit2 approves the router for a month of payouts.
       const now = Math.floor(Date.now() / 1000);
-      const [granted, expires] = await client.readContract({ address: permit2, abi: PERMIT2, functionName: 'allowance', args: [account.address, token() as Hex, SWAP_ROUTER as Hex] });
-      if (granted < units || expires <= now + 300) {
-        const tx = await wallet.writeContract({ address: permit2, abi: PERMIT2, functionName: 'approve', args: [token() as Hex, SWAP_ROUTER as Hex, units, now + 3600], nonce });
-        await client.waitForTransactionReceipt({ hash: tx });
-        nonce += 1;
-      }
+      nonce = (await ensurePermit2(client, wallet, account, units, nonce, Number(decimals))).nonce;
       const route = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
       const quoter = quoterFor(kind);
       let minOut = 0n;
@@ -485,6 +473,36 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
   } finally {
     await releaseLock(NONCE_LOCK);
   }
+}
+
+/** How much the vault lets the router draw through Permit2 at a time, and for how long: a month of payouts in one approval. */
+const PERMIT2_GRANT_WHOLE = 10_000_000;
+const PERMIT2_GRANT_SECONDS = 30 * 86_400;
+
+/**
+ * Make sure Permit2 may take `units` of the token for the router: the token
+ * approved to Permit2 once, and Permit2's own allowance to the router
+ * renewed when it is short or within five minutes of expiring. Returns the
+ * next nonce to use and the transactions sent, if any.
+ */
+async function ensurePermit2(client: ReturnType<typeof reader>, wallet: ReturnType<typeof createWalletClient>, account: { address: Hex }, units: bigint, nonce: number, decimals: number): Promise<{ nonce: number; sent: string[] }> {
+  const sent: string[] = [];
+  const permit2 = ((process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex);
+  const toPermit = await client.readContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'allowance', args: [account.address, permit2] });
+  if (toPermit < units) {
+    const tx = await wallet.writeContract({ address: token() as Hex, abi: ERC20_APPROVE, functionName: 'approve', args: [permit2, 2n ** 256n - 1n], nonce, chain: chain(), account: account as never });
+    await client.waitForTransactionReceipt({ hash: tx });
+    sent.push(tx); nonce += 1;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const [granted, expires] = await client.readContract({ address: permit2, abi: PERMIT2, functionName: 'allowance', args: [account.address, token() as Hex, SWAP_ROUTER as Hex] });
+  if (granted < units || expires <= now + 300) {
+    const grant = units > parseUnits(String(PERMIT2_GRANT_WHOLE), decimals) ? units : parseUnits(String(PERMIT2_GRANT_WHOLE), decimals);
+    const tx = await wallet.writeContract({ address: permit2, abi: PERMIT2, functionName: 'approve', args: [token() as Hex, SWAP_ROUTER as Hex, grant, now + PERMIT2_GRANT_SECONDS], nonce, chain: chain(), account: account as never });
+    await client.waitForTransactionReceipt({ hash: tx });
+    sent.push(tx); nonce += 1;
+  }
+  return { nonce, sent };
 }
 
 /** The quoter for a kind: the environment's, else Uniswap's own on Robinhood Chain. */
@@ -711,7 +729,7 @@ async function discoverRoutes(client: ReturnType<typeof reader>, tokenIn: Hex, v
  * decoded. For the operator, behind the cron secret, when a GLD payout
  * says the swap failed and the message alone does not say why.
  */
-export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n, poolId: Hex | null = null): Promise<Record<string, unknown>> {
+export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n, poolId: Hex | null = null, approve = false): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {
     kind: (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase(),
     router: SWAP_ROUTER, token: token(), gld: GLD_ADDRESS, permit2: process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS,
@@ -749,11 +767,11 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
     // discovery, and discovery is what wears the node out.
     const routeForPools = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
     const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
-    const chain = [token() as Hex, ...routeForPools.via, GLD_ADDRESS as Hex];
+    const stops = [token() as Hex, ...routeForPools.via, GLD_ADDRESS as Hex];
     const configured: { hop: string; fee: number; tickSpacing: number; hooks: Hex; initialized: boolean; liquidity: string }[] = [];
     if ((out.kind as string) === 'v4' && /^0x[0-9a-fA-F]{40}$/.test(stateView)) {
-      for (let i = 0; i + 1 < chain.length; i++) {
-        const id = v4PoolId(chain[i], chain[i + 1], routeForPools.fees[i], routeForPools.ticks[i], routeForPools.hooks[i]);
+      for (let i = 0; i + 1 < stops.length; i++) {
+        const id = v4PoolId(stops[i], stops[i + 1], routeForPools.fees[i], routeForPools.ticks[i], routeForPools.hooks[i]);
         let initialized = false, liquidity = 'unread';
         try {
           const [sqrtPrice] = await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getSlot0', args: [id] });
@@ -761,12 +779,12 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
           if (initialized) liquidity = String(await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [id] }));
           else liquidity = '0';
         } catch { /* unread */ }
-        configured.push({ hop: `${chain[i].slice(0, 8)}…→${chain[i + 1].slice(0, 8)}…`, fee: routeForPools.fees[i], tickSpacing: routeForPools.ticks[i], hooks: routeForPools.hooks[i], initialized, liquidity });
+        configured.push({ hop: `${stops[i].slice(0, 8)}…→${stops[i + 1].slice(0, 8)}…`, fee: routeForPools.fees[i], tickSpacing: routeForPools.ticks[i], hooks: routeForPools.hooks[i], initialized, liquidity });
       }
       out.configured = configured;
     }
     const standing = configured.length > 0 && configured.every((h) => h.initialized && h.liquidity !== '0');
-    const pools = standing ? [] : await poolsAlong(client, chain);
+    const pools = standing ? [] : await poolsAlong(client, stops);
     out.pools = pools.filter((r) => r.v3 || r.v4);
     out.poolsChecked = pools.length;
     const hops = [...new Set(pools.map((r) => r.hop))];
@@ -823,6 +841,13 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
     const decimals = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' });
     const units = parseUnits(String(Math.floor(wholeEmerge)), Number(decimals));
     out.held = String(await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] }));
+    if (approve) {
+      // Renew the approvals the swap itself would renew, so the simulation
+      // below is the swap's own and not a stale allowance's.
+      const wallet = createWalletClient({ account: privateKeyToAccount(key), chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+      const nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
+      try { out.approved = (await ensurePermit2(client, wallet, account, units, nonce, Number(decimals))).sent; } catch (error) { out.approved = `failed: ${explainRevert(error)}`; }
+    }
     out.routerCode = (await client.getCode({ address: SWAP_ROUTER as Hex }))?.length ?? 0;
     const permit2 = (process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS) as Hex;
     out.permit2Code = (await client.getCode({ address: permit2 }))?.length ?? 0;
@@ -856,10 +881,22 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
     }
     const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 600);
     try {
-      await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline()] });
+      const gldDecimals = await client.readContract({ address: GLD_ADDRESS as Hex, abi: ERC20, functionName: 'decimals' }).catch(() => 18);
+      if (typeof out.quote === 'string' && /^\d+$/.test(out.quote)) out.quoteGld = (Number(BigInt(out.quote) / 10n ** BigInt(Math.max(0, Number(gldDecimals) - 6))) / 1e6).toString();
+      out.gldDecimals = Number(gldDecimals);
+    } catch { /* cosmetic */ }
+    try {
+      // The swap's own gas ceiling, so a node's low default for eth_call is not mistaken for a revert.
+      await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline()], gas: 4_000_000n });
       out.simulation = 'ok: the swap would go through as configured';
     } catch (error) {
       out.simulation = `reverted: ${explainRevert(error)}`;
+      // Everything the node said, for when the decoded line is not enough.
+      const e = error as { shortMessage?: string; details?: string; metaMessages?: string[]; cause?: { shortMessage?: string; details?: string; data?: unknown; cause?: { message?: string; data?: unknown } } };
+      out.simulationDetail = {
+        short: e.shortMessage, details: e.details, meta: (e.metaMessages ?? []).slice(0, 8),
+        cause: e.cause ? { short: e.cause.shortMessage, details: e.cause.details, data: e.cause.data, inner: e.cause.cause ? { message: e.cause.cause.message, data: e.cause.cause.data } : undefined } : undefined,
+      };
     }
     if (search) {
       // Every kind and every standard fee tier per hop, along the configured

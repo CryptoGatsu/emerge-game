@@ -12,7 +12,8 @@
  * configured and says what it would do, allowances and revert reason
  * included; `&search=1` also tries every kind and fee tier and lists the
  * routes that fill; `&pool=<id>` reads a v4 pool's key by the id a chart
- * shows and writes the route from it. Nothing is sent.
+ * shows and writes the route from it. Nothing is sent, except that
+ * `&approve=1` renews the vault's Permit2 approvals first, as a swap would.
  */
 
 import { NextResponse } from 'next/server';
@@ -42,7 +43,8 @@ export async function GET(request: Request) {
     // `pool=<id>` names a v4 pool by the id a chart shows; its key is read off the chain.
     const pool = url.searchParams.get('pool') ?? '';
     const poolId = /^0x[0-9a-fA-F]{64}$/.test(pool) ? (pool as `0x${string}`) : null;
-    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from, poolId), { headers: { 'cache-control': 'no-store, max-age=0' } });
+    // `approve=1` renews the vault's Permit2 approvals first, as the swap would; the only thing the probe ever sends.
+    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from, poolId, !!url.searchParams.get('approve')), { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });
