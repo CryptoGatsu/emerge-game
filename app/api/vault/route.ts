@@ -54,7 +54,7 @@ export async function GET(request: Request) {
       report.pendingWins = (await pendingGld()).map((p) => ({ id: p.id, address: p.address, emerge: p.emerge, tries: p.tries ?? 0, problem: p.problem ?? null, swapTx: p.swapTx ?? null, units: p.units ?? null, at: p.at }));
       if (url.searchParams.get('pay')) {
         report.payment = await settlePendingGld(undefined, 1);
-        report.paidLately = (await settledGld(undefined, 3)).map((p) => ({ id: p.id, address: p.address, emerge: p.emerge, units: p.units, swapTx: p.swapTx, sendTx: p.sendTx, settledAt: p.settledAt }));
+        report.paidLately = (await settledGld(undefined, 3)).map((p) => ({ id: p.id, address: p.address, emerge: p.emerge, units: p.units, plan: p.plan ?? null, swapTx: p.swapTx, sendTx: p.sendTx, settledAt: p.settledAt }));
       }
     } catch (error) {
       report.pendingWins = `unread: ${error instanceof Error ? error.message : String(error)}`;
