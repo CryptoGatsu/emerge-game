@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { NATIVE, PERMIT2, PERMIT2_ADDRESS, PERMIT2_TRANSFER, POOL_INITIALIZE, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
+import { NATIVE, PERMIT2, PERMIT2_ADDRESS, PERMIT2_TRANSFER, POOL_INITIALIZE, V4_HOOK, hookFlags, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V3_POOL, V4_POSITION_MANAGER, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -926,6 +926,26 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
       diag.wholeRouteOneToken = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [tinyCall.commands, tinyCall.inputs, deadline()], gas: 4_000_000n }));
       // 7. The vault's ETH, since a hook can ask the swapper for gas or value.
       diag.vaultEthWei = String(await client.getBalance({ address: account.address }));
+      // 8. The hook itself, called the way the PoolManager calls it, once as
+      // the router and once as the quoter: its own reason, unwrapped.
+      const hook = route.hooks[0];
+      if (hook !== NATIVE) {
+        diag.hookFlags = hookFlags(hook).join(', ');
+        const other = route.via[0] ?? (GLD_ADDRESS as Hex);
+        const [c0, c1] = BigInt(other) < BigInt(token() as Hex) ? [other, token() as Hex] : [token() as Hex, other];
+        const zeroForOne = c0.toLowerCase() === (token() as string).toLowerCase();
+        const key = { currency0: c0, currency1: c1, fee: route.fees[0], tickSpacing: route.ticks[0], hooks: hook };
+        const params = { zeroForOne, amountSpecified: -units, sqrtPriceLimitX96: zeroForOne ? 4295128740n : 1461446703485210103287273052203988822378723970341n };
+        // A plausible delta: the token owed to the pool, a little of the other side out.
+        const outGuess = 10n ** 15n;
+        const delta = zeroForOne ? ((-units) << 128n) | outGuess : (outGuess << 128n) | ((-units) & ((1n << 128n) - 1n));
+        const flags = hookFlags(hook);
+        for (const [who, sender] of [['Router', SWAP_ROUTER as Hex], ['Quoter', quoterFor('v4') as Hex]] as const) {
+          if (flags.includes('afterSwap')) diag[`hookAfterSwapAs${who}`] = await attempt(() => client.simulateContract({ account: manager, address: hook, abi: V4_HOOK, functionName: 'afterSwap', args: [sender, key, params, delta, '0x'] }));
+          if (flags.includes('beforeSwap')) diag[`hookBeforeSwapAs${who}`] = await attempt(() => client.simulateContract({ account: manager, address: hook, abi: V4_HOOK, functionName: 'beforeSwap', args: [sender, key, params, '0x'] }));
+        }
+        diag.hookCode = String((await client.getCode({ address: hook }))?.length ?? 0);
+      }
       out.steps = diag;
     }
     if (search) {

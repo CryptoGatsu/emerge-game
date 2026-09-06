@@ -77,6 +77,37 @@ export function v4PoolId(a: Hex, b: Hex, fee: number, tickSpacing: number, hooks
   ));
 }
 
+/** A v4 hook's swap callbacks, for calling one directly the way the PoolManager does. */
+export const V4_HOOK = [
+  {
+    type: 'function', name: 'afterSwap', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'sender', type: 'address' },
+      { name: 'key', type: 'tuple', components: [{ name: 'currency0', type: 'address' }, { name: 'currency1', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }] },
+      { name: 'params', type: 'tuple', components: [{ name: 'zeroForOne', type: 'bool' }, { name: 'amountSpecified', type: 'int256' }, { name: 'sqrtPriceLimitX96', type: 'uint160' }] },
+      { name: 'delta', type: 'int256' }, { name: 'hookData', type: 'bytes' },
+    ],
+    outputs: [{ type: 'bytes4' }, { type: 'int128' }],
+  },
+  {
+    type: 'function', name: 'beforeSwap', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'sender', type: 'address' },
+      { name: 'key', type: 'tuple', components: [{ name: 'currency0', type: 'address' }, { name: 'currency1', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }] },
+      { name: 'params', type: 'tuple', components: [{ name: 'zeroForOne', type: 'bool' }, { name: 'amountSpecified', type: 'int256' }, { name: 'sqrtPriceLimitX96', type: 'uint160' }] },
+      { name: 'hookData', type: 'bytes' },
+    ],
+    outputs: [{ type: 'bytes4' }, { type: 'int256' }, { type: 'uint24' }],
+  },
+] as const;
+
+/** Which callbacks a hook address declares, read off its low bits the way the PoolManager does. */
+export function hookFlags(hook: Hex): string[] {
+  const bits = Number(BigInt(hook) & 0x3fffn);
+  const names = ['afterRemoveLiquidityReturnsDelta', 'afterAddLiquidityReturnsDelta', 'afterSwapReturnsDelta', 'beforeSwapReturnsDelta', 'afterDonate', 'beforeDonate', 'afterSwap', 'beforeSwap', 'afterRemoveLiquidity', 'beforeRemoveLiquidity', 'afterAddLiquidity', 'beforeAddLiquidity', 'afterInitialize', 'beforeInitialize'];
+  return names.filter((_, i) => (bits >> i) & 1);
+}
+
 /** Permit2's own transfer, the call the router makes to pay a swap. */
 export const PERMIT2_TRANSFER = [
   { type: 'function', name: 'transferFrom', stateMutability: 'nonpayable', inputs: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'token', type: 'address' }], outputs: [] },
