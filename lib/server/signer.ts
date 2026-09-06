@@ -549,6 +549,10 @@ const live = (r: PoolRow, kind: 'v4' | 'v3') => (kind === 'v4' ? r.v4 && BigInt(
 
 /** A v4 pool as the PoolManager made it, with what it holds now. */
 interface MadePool { id: Hex; currency0: Hex; currency1: Hex; fee: number; tickSpacing: number; hooks: Hex; liquidity: string }
+/** How far the last event scan reached, for the probe to say. */
+let lastScan: { from: bigint; to: bigint; head: bigint; requests: number; complete: boolean } | null = null;
+/** A pool charging more than this is no market to buy GLD through, whatever it holds. */
+const FEE_TOO_HIGH = 30_000;
 
 /**
  * Every v4 pool the token is in, read from the PoolManager's Initialize
@@ -557,7 +561,7 @@ interface MadePool { id: Hex; currency0: Hex; currency1: Hex; fee: number; tickS
  * and no amount of guessing at standard tiers finds it; this does. The
  * chain is young, so the whole history is a few requests.
  */
-async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex): Promise<MadePool[]> {
+async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex, startAt = 0n): Promise<MadePool[]> {
   const manager = (process.env.EMERGE_V4_POOL_MANAGER ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4PoolManager : '')) as Hex;
   const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
   if (!/^0x[0-9a-fA-F]{40}$/.test(manager)) return [];
@@ -567,16 +571,35 @@ async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex): Pr
     const got = await client.getLogs({ address: manager, event: POOL_INITIALIZE, args: { [side]: tokenIn } as Record<string, Hex>, fromBlock: from, toBlock: to });
     logs.push(...(got as unknown as { args: Record<string, unknown> }[]));
   };
+  // The whole chain in one ask; when the node caps the range, walk it from
+  // the start in slices, halving a slice the node refuses, within a budget
+  // of requests. What was covered is reported, so a pool older than the
+  // scan is never mistaken for a pool that does not exist.
+  const start = startAt > 0n && startAt < head ? startAt : 0n;
+  lastScan = { from: start, to: head, head, requests: 0, complete: true };
   for (const side of ['currency0', 'currency1'] as const) {
+    lastScan.requests += 1;
     try {
-      await pull(0n, head, side);
-    } catch {
-      // The node caps a range: walk it in slices, newest first, forty at most.
-      const step = 50_000n;
-      for (let to = head, n = 0; to > 0n && n < 40; to -= step, n++) {
-        try { await pull(to > step ? to - step + 1n : 0n, to, side); } catch { break; }
+      await pull(start, head, side);
+      continue;
+    } catch { /* capped: slice it */ }
+    let from = start;
+    let step = 200_000n;
+    let covered = 0n;
+    while (from <= head && lastScan.requests < 160) {
+      const to = from + step - 1n > head ? head : from + step - 1n;
+      lastScan.requests += 1;
+      try {
+        await pull(from, to, side);
+        covered = to;
+        from = to + 1n;
+        if (step < 200_000n) step *= 2n;
+      } catch {
+        if (step <= 2_000n) { from = to + 1n; continue; }
+        step /= 2n;
       }
     }
+    if (from <= head) { lastScan.complete = false; lastScan.to = covered; }
   }
   const out: MadePool[] = [];
   for (const log of logs) {
@@ -630,7 +653,7 @@ async function discoverRoutes(client: ReturnType<typeof reader>, tokenIn: Hex, v
  * decoded. For the operator, behind the cron secret, when a GLD payout
  * says the swap failed and the message alone does not say why.
  */
-export async function probeSwap(wholeEmerge = 100, search = false): Promise<Record<string, unknown>> {
+export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {
     kind: (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase(),
     router: SWAP_ROUTER, token: token(), gld: GLD_ADDRESS, permit2: process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS,
@@ -663,10 +686,16 @@ export async function probeSwap(wholeEmerge = 100, search = false): Promise<Reco
       } else {
         // Nothing at a standard tier: read the token's pools off the
         // PoolManager itself and build the route from the deepest one.
-        const made = await poolsMadeFor(client, token() as Hex);
+        const envFrom = BigInt(Number(process.env.EMERGE_V4_SCAN_FROM) || 0);
+        const made = await poolsMadeFor(client, token() as Hex, scanFrom > 0n ? scanFrom : envFrom);
         out.tokenPools = made;
-        const best = made.find((p) => BigInt(p.liquidity) > 0n);
-        if (best) {
+        out.scan = lastScan ? { fromBlock: String(lastScan.from), toBlock: String(lastScan.to), head: String(lastScan.head), requests: lastScan.requests, complete: lastScan.complete } : null;
+        const usable = made.filter((p) => BigInt(p.liquidity) > 0n && p.fee <= FEE_TOO_HIGH);
+        const pricey = made.filter((p) => BigInt(p.liquidity) > 0n && p.fee > FEE_TOO_HIGH);
+        const best = usable[0];
+        if (!best && pricey.length) {
+          out.poolAdvice = `The only pools of the token's with liquidity charge ${pricey.map((p) => `${(p.fee / 10_000).toFixed(2)}%`).join(', ')} — more than the ${FEE_TOO_HIGH / 10_000}% the vault will trade through.${lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}; an older pool may lie beyond it: pass &from=<block> or set EMERGE_V4_SCAN_FROM.` : ' If the token trades against ETH somewhere, that pool is not on this PoolManager.'}`;
+        } else if (best) {
           const other = best.currency0.toLowerCase() === (token() as string).toLowerCase() ? best.currency1 : best.currency0;
           const usdg = routeForPools.via.find((v) => v !== NATIVE) ?? null;
           // From the pool's other side to GLD: directly, or through the stepping stone, deepest v4 pools first.
@@ -680,9 +709,10 @@ export async function probeSwap(wholeEmerge = 100, search = false): Promise<Reco
             ? `The token's deepest pool is v4 against ${other === NATIVE ? 'native ETH' : other} at fee ${best.fee}, spacing ${best.tickSpacing}${best.hooks === NATIVE ? ', no hook' : `, hook ${best.hooks}`}. Set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${path}.`
             : `The token's deepest pool is v4 against ${other} (fee ${best.fee}, spacing ${best.tickSpacing}, hook ${best.hooks}), but no v4 pool with liquidity leads from there to GLD, directly or through ${usdg ?? 'a stepping stone'}.`;
         } else {
+          const coverage = lastScan && !lastScan.complete ? ` The scan covered blocks ${lastScan.from}–${lastScan.to} of ${lastScan.head}, so an older pool may lie beyond it.` : '';
           out.poolAdvice = made.length
-            ? `The PoolManager knows ${made.length} pool(s) for the token but none holds liquidity.`
-            : `The PoolManager has no Initialize event for the token: it is not in any v4 pool this node can see, and no standard v3 pool holds liquidity. Check the token address and the chain.`;
+            ? `The PoolManager knows ${made.length} pool(s) for the token but none holds liquidity.${coverage}`
+            : `The PoolManager has no Initialize event for the token in the blocks scanned: it is not in any v4 pool this node can see, and no standard v3 pool holds liquidity.${coverage}`;
         }
       }
     }

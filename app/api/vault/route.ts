@@ -37,7 +37,8 @@ export async function GET(request: Request) {
     if (!cronAllowed(request)) return NextResponse.json({ error: 'Not for you.' }, { status: 401 });
     const amount = Number(url.searchParams.get('amount')) || 100;
     // `search=1` also tries every kind and standard fee tier along the configured tokens.
-    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search')), { headers: { 'cache-control': 'no-store, max-age=0' } });
+    const from = BigInt(Math.max(0, Math.floor(Number(url.searchParams.get('from')) || 0)));
+    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from), { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });
