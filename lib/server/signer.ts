@@ -493,7 +493,7 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
  * decoded. For the operator, behind the cron secret, when a GLD payout
  * says the swap failed and the message alone does not say why.
  */
-export async function probeSwap(wholeEmerge = 100): Promise<Record<string, unknown>> {
+export async function probeSwap(wholeEmerge = 100, search = false): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {
     kind: (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase(),
     router: SWAP_ROUTER, token: token(), gld: GLD_ADDRESS, permit2: process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS,
@@ -540,11 +540,41 @@ export async function probeSwap(wholeEmerge = 100): Promise<Record<string, unkno
       }
       call = universalSwap(account.address, units, 0n, path);
     }
+    const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 600);
     try {
-      await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, BigInt(Math.floor(Date.now() / 1000) + 600)] });
+      await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline()] });
       out.simulation = 'ok: the swap would go through as configured';
     } catch (error) {
       out.simulation = `reverted: ${explainRevert(error)}`;
+    }
+    if (search) {
+      // Every kind and every standard fee tier per hop, along the configured
+      // tokens: which of them the router would actually fill. The answer is
+      // the EMERGE_SWAP_KIND and EMERGE_SWAP_PATH to set.
+      const tiers = [100, 500, 3000, 10000];
+      const combos: number[][] = route.fees.length === 1 ? tiers.map((f) => [f]) : tiers.flatMap((a) => tiers.map((b) => [a, b]));
+      const found: { kind: string; path: string; result: string }[] = [];
+      for (const k of ['v4', 'universal'] as const) {
+        for (const fees of combos) {
+          const trial = { fees, ticks: fees.map((f) => ({ 100: 1, 500: 10, 3000: 60, 10000: 200 } as Record<number, number>)[f]), via: route.via };
+          const spec = [fees[0], ...route.via.flatMap((v, i) => [v, fees[i + 1]])].join(',');
+          const attempt = k === 'v4'
+            ? universalSwapV4(token() as Hex, units, 0n, v4PathKeys(trial, GLD_ADDRESS as Hex))
+            : universalSwap(account.address, units, 0n, v3Path(token() as Hex, trial, GLD_ADDRESS as Hex));
+          try {
+            await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [attempt.commands, attempt.inputs, deadline()] });
+            found.push({ kind: k, path: spec, result: 'ok' });
+          } catch (error) {
+            found.push({ kind: k, path: spec, result: explainRevert(error) });
+          }
+        }
+      }
+      out.search = found.filter((f) => f.result === 'ok');
+      out.searched = found.length;
+      out.reasons = [...new Set(found.map((f) => f.result))];
+      out.advice = (out.search as unknown[]).length
+        ? `Set EMERGE_SWAP_KIND and EMERGE_SWAP_PATH to one of the routes under "search"; for v4 also set EMERGE_SWAP_QUOTER to the V4Quoter so the trade carries a floor.`
+        : 'No standard route fills. Open the pools in the Uniswap app and read their version, fee and tick spacing; a v4 pool with an unusual fee is written as fee/spacing in EMERGE_SWAP_PATH.';
     }
   } catch (error) {
     out.probe = `failed: ${explainRevert(error)}`;

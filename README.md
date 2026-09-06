@@ -588,7 +588,8 @@ new chain are v4: for those set `EMERGE_SWAP_KIND=v4` with the same path
 syntax (a hop may carry its tick spacing as `fee/spacing`) and the V4Quoter
 in `EMERGE_SWAP_QUOTER`. `GET /api/vault?probe=1` with the cron secret
 simulates the swap as configured and reports allowances, the quote and the
-decoded revert reason, sending nothing. Without a live token the
+decoded revert reason, sending nothing; `&search=1` tries every kind and
+fee tier along the configured tokens and lists the routes that fill. Without a live token the
 settlement is simulated in $EMERGE units so the flow can be exercised.
 
 v2.3: stewardship is judged on the server (`judgedFor` in

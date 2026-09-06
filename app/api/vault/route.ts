@@ -10,7 +10,8 @@
  *
  * `GET /api/vault?probe=1`, with the cron secret, simulates the GLD swap as
  * configured and says what it would do, allowances and revert reason
- * included. Nothing is sent.
+ * included; `&search=1` also tries every kind and fee tier and lists the
+ * routes that fill. Nothing is sent.
  */
 
 import { NextResponse } from 'next/server';
@@ -20,6 +21,8 @@ import { serverKey } from '@/lib/limits';
 import { probeSwap } from '@/lib/server/signer';
 
 export const dynamic = 'force-dynamic';
+// A probe with search simulates a few dozen swaps.
+export const maxDuration = 60;
 
 const cronAllowed = (request: Request) => {
   const secret = process.env.EMERGE_CRON_SECRET ?? process.env.CRON_SECRET ?? '';
@@ -33,7 +36,8 @@ export async function GET(request: Request) {
   if (url.searchParams.get('probe')) {
     if (!cronAllowed(request)) return NextResponse.json({ error: 'Not for you.' }, { status: 401 });
     const amount = Number(url.searchParams.get('amount')) || 100;
-    return NextResponse.json(await probeSwap(amount), { headers: { 'cache-control': 'no-store, max-age=0' } });
+    // `search=1` also tries every kind and standard fee tier along the configured tokens.
+    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search')), { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });
