@@ -1240,6 +1240,8 @@ button.fold:hover { color: var(--emerald); }
 .build-card h3 { margin: 0; font-size: 15px; color: var(--cream); }
 .build-card p { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; min-height: 34px; }
 .build-cost { display: flex; justify-content: space-between; align-items: baseline; margin-top: 3px; }
+/* The room a form holds: beds for a home, posts for a workplace. */
+.build-room { margin: 2px 0 0; font-size: 11px; color: var(--gold); letter-spacing: 0.03em; }
 .build-cost b { color: var(--gold); font-size: 13px; }
 .build-cost small { font-size: 10px; color: var(--muted); }
 .build-card button {

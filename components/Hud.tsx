@@ -307,8 +307,8 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
               onClick={() => onUpgradeAll(focus.buildingType)}
             >
               {focus.upgradeAll.affordable >= focus.upgradeAll.count
-                ? t('Improve every {type} · {n} for {gold} Gold', { type: tn(focus.buildingType).toLowerCase(), n: focus.upgradeAll.count, gold: focus.upgradeAll.gold.toLocaleString() })
-                : t('Improve {n} of {total} {type}s · as far as the treasury goes', { n: focus.upgradeAll.affordable, total: focus.upgradeAll.count, type: tn(focus.buildingType).toLowerCase() })}
+                ? t('Improve every {type} · {n} for {gold} Gold', { type: tn(focus.kindName).toLowerCase(), n: focus.upgradeAll.count, gold: focus.upgradeAll.gold.toLocaleString() })
+                : t('Improve {n} of {total} {type}s · as far as the treasury goes', { n: focus.upgradeAll.affordable, total: focus.upgradeAll.count, type: tn(focus.kindName).toLowerCase() })}
               <em>
                 {t('{wood} timber · {stone} stone', { wood: focus.upgradeAll.wood, stone: focus.upgradeAll.stone })}
                 {focus.upgradeAll.affordable === 0 ? t(' — not yet') : t(' · one level each, cheapest first')}

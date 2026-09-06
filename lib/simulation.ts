@@ -27,6 +27,7 @@ import {
   ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec,
   MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, charterMultiplier, ERA_CITY_LEVEL, BUILDERS_DISCOUNT,
 } from './world/eras';
+import { formOf, formName, formPosts, MERGES_ON_ADVANCE, LINEAGE_TYPES } from './world/forms';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -42,6 +43,7 @@ export type Season = 'Spring' | 'Summer' | 'Autumn' | 'Winter';
 export type Weather = 'Clear' | 'Cloudy' | 'Rain' | 'Storm' | 'Fog' | 'Snow';
 export type { Resource };
 export { RESOURCES, RESOURCE_LABELS };
+export { formOf, formName, formPosts, LINEAGE_TYPES };
 export type { Animal, AnimalKind };
 export { ANIMAL_LABELS };
 
@@ -490,6 +492,8 @@ export interface World {
    */
   era?: number;
   eraSince?: number;
+  /** The age every building was last rebuilt into (see `rebuildForEra`). Absent on a save from before forms. */
+  formed?: number;
   /**
    * The public works the settlement has paid for: its city level.
    *
@@ -2817,7 +2821,7 @@ export function createWorld(seed = 481516, name?: string): World {
     families, citizens, buildings,
     resources: {
       wheat: 60, vegetables: 30, fish: 0, game: 0, berries: 0, wood: 50, stone: 20, ironOre: 10, wool: 8, hides: 0, herbs: 0,
-      flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10,
+      flour: 0, bread: 20, furniture: 0, tools: 5, clothing: 10, meals: 0, steel: 0,
     },
     market: createMarket(),
     feed: [], gatherings: [], bonds: {}, projects: [], conversations: [], hazards: [],
@@ -3585,7 +3589,7 @@ const ESSENTIAL_IMPORTS = new Set<Resource>(['wheat', 'vegetables', 'bread', 'wo
  * export income. It is why treasuries sat at nothing and why Gold put in
  * vanished.
  */
-const FOOD: Resource[] = ['bread', 'fish', 'game', 'vegetables', 'berries', 'wheat'];
+const FOOD: Resource[] = ['meals', 'bread', 'fish', 'game', 'vegetables', 'berries', 'wheat'];
 
 /** Everything in store that people can eat, in portions. */
 export function foodInStore(world: { resources: Record<Resource, number> }): number {
@@ -4149,6 +4153,13 @@ function jobScore(world: World, j: WorkingJob) {
 }
 
 /** How many workers a job can usefully employ, given the buildings that exist. */
+/** What a trade makes in the plot's age: the age's recipe for its workplace when it has one, the settlement's otherwise. */
+export function tradeRecipe(world: { era?: number }, j: WorkingJob): { output: Partial<Record<Resource, number>>; input?: Partial<Record<Resource, number>>; building: string; wage: number } {
+  const base = jobs[j];
+  const makes = formOf(base.building, eraOf(world)).makes;
+  return makes ? { ...base, output: makes.output, input: makes.input } : base;
+}
+
 function jobCapacity(world: World, j: WorkingJob) {
   // Summed per building rather than multiplied by a count, because two sheds
   // and one improved workshop are no longer the same thing.
@@ -4204,10 +4215,14 @@ export function upgradeEffect(type: string): string {
   return effects[type] ?? 'nothing yet';
 }
 
-/** Posts at one workplace: three at a mine, two elsewhere, one more per age the plot has reached. */
+/**
+ * Posts at one workplace: what its form holds. Three at a settlement's mine,
+ * two elsewhere, and doubled with every age the building was rebuilt into —
+ * a township's estate farm takes four, an AI-era agri-tower thirty-two.
+ */
 export function buildingPosts(b: Building, world: { era?: number }) {
-  const base = b.type === 'Mine' ? 3 : 2;
-  return buildingCapacity(b, base) + eraPosts(world);
+  void world;
+  return buildingCapacity(b, formPosts(b.type, b.era ?? 1));
 }
 /** How many people a trade can employ across its standing workplaces. */
 export const tradeCapacity = (world: World, job: WorkingJob) => { useWorld(world); return jobCapacity(world, job); };
@@ -4336,7 +4351,11 @@ function produce(world: World) {
   for (const c of world.citizens) counts[c.job] = (counts[c.job] || 0) + 1;
   for (const [job, count] of Object.entries(counts)) {
     if (!job || job === 'unemployed' || !count) continue;
-    const wj = job as WorkingJob, recipe = jobs[wj], workers = Math.min(count, jobCapacity(world, wj));
+    const wj = job as WorkingJob, workers = Math.min(count, jobCapacity(world, wj));
+    // What the trade makes in this age: the age's own recipe when it has
+    // one (a cannery puts up meals, an ironworks pours steel), the
+    // settlement's otherwise.
+    const recipe = tradeRecipe(world, wj);
     let seasonal = world.season === 'Winter' && wj === 'farmer' ? .65 : world.season === 'Summer' && wj === 'farmer' ? 1.15 : 1;
     // Nothing to pick under snow; the hedges are heavy in autumn.
     if (wj === 'forager') seasonal = world.season === 'Winter' ? 0.35 : world.season === 'Autumn' ? 1.3 : 1;
@@ -4392,11 +4411,13 @@ function produce(world: World) {
     // And the state of the places they work in. Averaged over the sites, so
     // improving one of three workshops lifts the trade by a third of a step.
     const sites = world.buildings.filter((b) => b.type === recipe.building && b.active);
+    // Each site's improvement and its age's form together: an estate farm
+    // gets more from a pair of hands than a farm, a mechanised one more still.
     const premises = sites.length
-      ? sites.reduce((sum, b) => sum + buildingOutput(b), 0) / sites.length
+      ? sites.reduce((sum, b) => sum + buildingOutput(b) * formOf(b.type, b.era ?? 1).output, 0) / sites.length
       : 1;
     for (const [r, n] of Object.entries(recipe.output)) {
-      const due = (n as number) * hands * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * eraOutput(world) * methodBonus(world) * gear;
+      const due = (n as number) * hands * terrainMultiplier(world, wj) * seasonal * weather * blighted * effort * craft * premises * methodBonus(world) * gear;
       // Less what was already booked as it happened, never below nothing.
       const made = Math.max(0, due - (taken[r as Resource] ?? 0));
       if (made <= 0) continue;
@@ -4923,11 +4944,12 @@ function damageBuilding(world: World, b: Building, amount: number, cause: string
 
 /** What raising a ruin again costs: less than new, since the ground and the footings are there. */
 export function rebuildCost(b: Building): { gold: number; wood: number; stone: number } {
+  const form = formOf(b.type, b.era ?? 1, BUILDING_ERA[b.type] ?? 1);
   const need = buildMaterials(b.type);
   return {
-    gold: Math.round((BUILD_COSTS[b.type] ?? 250) * 0.6),
-    wood: Math.ceil(need.wood * 0.6),
-    stone: Math.ceil(need.stone * 0.6),
+    gold: Math.round((BUILD_COSTS[b.type] ?? 250) * form.cost * 0.6),
+    wood: Math.ceil(need.wood * form.cost * 0.6),
+    stone: Math.ceil(need.stone * form.cost * 0.6),
   };
 }
 
@@ -5833,7 +5855,7 @@ function consume(world: World) {
       bill += take * world.market[r].price;
       // Bread goes further than raw grain, which is the point of the bakery;
       // a fish or a cut of game is a proper meal too.
-      eaten += take * (r === 'bread' ? 1.15 : r === 'fish' || r === 'game' ? 1.1 : 1);
+      eaten += take * (r === 'meals' ? 1.4 : r === 'bread' ? 1.15 : r === 'fish' || r === 'game' ? 1.1 : 1);
     }
     if (eaten <= 0) { unfed++; continue; }
     c.hunger = Math.min(100, c.hunger + (eaten / portion) * 26);
@@ -6606,8 +6628,21 @@ const TRADE_BUILD_COST: Record<string, number> = {
   'Data Centre': 1400, 'Research Campus': 1600, 'Vertical Farm': 1200, 'Pod Hub': 1300, 'Drone Port': 1100,
 };
 
-/** What a building costs to raise, by type. Everything the panel shows comes from here. */
+/** What a building costs to raise, by type, in the settlement age. Everything the panel shows starts from here. */
 export const BUILD_COSTS: Record<string, number> = { ...SELF_BUILD_COST, ...TRADE_BUILD_COST };
+
+/** What raising this kind costs in the plot's age: the settlement price times the age's form. */
+export function buildCostFor(world: { era?: number }, type: string): number {
+  return Math.round((BUILD_COSTS[type] ?? 250) * formOf(type, eraOf(world), BUILDING_ERA[type] ?? 1).cost);
+}
+/** What raising this kind takes out of the yard in the plot's age. */
+export function materialsFor(world: { era?: number }, type: string): { wood: number; stone: number } {
+  const need = buildMaterials(type);
+  const m = formOf(type, eraOf(world), BUILDING_ERA[type] ?? 1).cost;
+  return { wood: Math.round(need.wood * m), stone: Math.round(need.stone * m) };
+}
+/** The name over the door of this kind of building in the plot's age, for a feed line. */
+const named = (world: { era?: number }, type: string) => formName(type, eraOf(world)).toLowerCase();
 
 /**
  * What a building is made of, on top of what it costs.
@@ -6681,12 +6716,12 @@ export function buildMaterials(type: string) {
 /** Whether the stores can cover a building of this kind. */
 export function materialsInStore(world: World, type: string) {
   useWorld(world);
-  const need = buildMaterials(type);
+  const need = materialsFor(world, type);
   return world.resources.wood >= need.wood && world.resources.stone >= need.stone;
 }
 
 function drawMaterials(world: World, type: string) {
-  const need = buildMaterials(type);
+  const need = materialsFor(world, type);
   world.resources.wood -= need.wood;
   world.resources.stone -= need.stone;
   note(world, 'consumed', 'wood', need.wood);
@@ -6758,7 +6793,7 @@ function settlementBuilds(world: World) {
   const bySay = stillWanted && resolved !== ownChoice;
   if (!want) return;
 
-  const cost = SELF_BUILD_COST[want] ?? TRADE_BUILD_COST[want] ?? 250;
+  const cost = buildCostFor(world, want);
   // The cost multiple alone was not a brake: a desert kept raising houses it
   // could not staff, and every one of them added upkeep and wages until it
   // could not meet payroll on a hundred and thirty-seven days out of two
@@ -6780,8 +6815,8 @@ function settlementBuilds(world: World) {
   // house out of its treasury.
   if (!materialsInStore(world, want)) {
     if (world.hour < 1) {
-      const need = buildMaterials(want);
-      pushFeed(world, 'build', `A ${want.toLowerCase()} is wanted, but the yard is short of timber and stone — ${need.wood} wood and ${need.stone} stone are needed.`);
+      const need = materialsFor(world, want);
+      pushFeed(world, 'build', `A ${named(world, want)} is wanted, but the yard is short of timber and stone — ${need.wood} wood and ${need.stone} stone are needed.`);
     }
     return;
   }
@@ -7068,7 +7103,11 @@ export const HOUSE_ROOM_PER_LEVEL = 2;
 /** How many people this one house sleeps, whole. */
 /** One more bed per house per age: a town grows up before it grows out. */
 export const BEDS_PER_ERA = 1;
-export const houseRoom = (b: Building, world: { era?: number }) => Math.round(HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL + BEDS_PER_ERA * (eraOf(world) - 1));
+export const houseRoom = (b: Building, world: { era?: number }) => {
+  void world;
+  // The form's beds — a cabin's three, a townhouse's six, a tower's forty-eight — and two more per improvement.
+  return Math.round((formOf('House', b.era ?? 1).beds ?? HOUSE_ROOM) + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL);
+};
 
 /**
  * How many people the settlement's houses can sleep between them.
@@ -7309,7 +7348,7 @@ export function grantResource(world: World, key: Resource, amount: number) {
 export function upkeepOf(b: Building) {
   // A later era's building is a dearer one to keep: a quarter more per era
   // it was raised in. This is the Gold sink that scales with the city.
-  return maintenanceCost(b.type) * (1 + (levelOf(b) - 1) * UPKEEP_PER_LEVEL) * (1 + UPKEEP_PER_ERA * (Math.max(1, b.era ?? 1) - 1));
+  return maintenanceCost(b.type) * (1 + (levelOf(b) - 1) * UPKEEP_PER_LEVEL) * formOf(b.type, b.era ?? 1, BUILDING_ERA[b.type] ?? 1).upkeep;
 }
 export const UPKEEP_PER_ERA = 0.25;
 
@@ -7984,9 +8023,18 @@ export function buildBounds(world: World): { x0: number; x1: number; y0: number;
  * city grows" complaints were both answered.
  * ------------------------------------------------------------------ */
 
-/** The size that counts toward a level: people, and buildings that stand. */
+/**
+ * The size that counts toward a level: people, and the buildings that stand,
+ * weighed by their age. A township's building counts two settlement ones,
+ * an industrial four, and so on — the rebuild that merges pairs of them
+ * leaves a city exactly the size it was.
+ */
 function citySize(world: World) {
-  return { people: world.citizens.length, buildings: world.buildings.filter((b) => !b.ruined).length };
+  return { people: world.citizens.length, buildings: buildingWorth(world) };
+}
+/** What the standing buildings add up to, weighed by age. */
+export function buildingWorth(world: { buildings: Building[] }): number {
+  return world.buildings.filter((b) => !b.ruined).reduce((sum, b) => sum + formOf(b.type, b.era ?? 1).worth, 0);
 }
 
 /**
@@ -8241,13 +8289,13 @@ export function eraGate(world: World): EraGate {
   if (!next) return { era, next: null, open: false, days: { have, need: 0 }, checks: [], ready: false };
   const open = next.id <= OPEN_ERA;
   const has = (type: string) => world.buildings.some((b) => b.type === type && !b.ruined);
-  const count = world.buildings.filter((b) => !b.ruined).length;
+  const count = buildingWorth(world);
   const ruins = world.buildings.filter((b) => b.ruined).length;
   let checks: EraCheck[];
   if (next.id === 2) {
     checks = [
       { label: `${world.population} of 40 people`, done: world.population >= 40 },
-      { label: `${count} of 30 buildings standing`, done: count >= 30 },
+      { label: `${count} of 30 in buildings, weighed by age`, done: count >= 30 },
       { label: 'A Town Hall, a Bank, a School and a Jail', done: has('Town Hall') && has('Bank') && has('School') && has('Jail') },
       { label: `${Math.floor(world.treasury).toLocaleString()} of 20,000 Gold in the treasury`, done: world.treasury >= 20_000 },
       { label: ruins ? `${ruins} ruin${ruins === 1 ? '' : 's'} still standing` : 'No ruins standing', done: ruins === 0 },
@@ -8255,7 +8303,7 @@ export function eraGate(world: World): EraGate {
   } else if (next.id === 3) {
     checks = [
       { label: `${world.population} of 70 people`, done: world.population >= 70 },
-      { label: `${count} of 50 buildings standing`, done: count >= 50 },
+      { label: `${count} of 50 in buildings, weighed by age`, done: count >= 50 },
       { label: 'A Lab and a Library', done: has('Lab') && has('Library') },
       { label: `${Math.floor(world.resources.ironOre ?? 0)} of 300 iron ore in the store`, done: (world.resources.ironOre ?? 0) >= 300 },
       { label: 'The plot expanded', done: !!world.expanded },
@@ -8263,14 +8311,14 @@ export function eraGate(world: World): EraGate {
   } else if (next.id === 4) {
     checks = [
       { label: `${world.population} of 110 people`, done: world.population >= 110 },
-      { label: `${count} of 75 buildings standing`, done: count >= 75 },
+      { label: `${count} of 75 in buildings, weighed by age`, done: count >= 75 },
       { label: 'A Hospital and a Stadium', done: has('Hospital') && has('Stadium') },
       { label: 'The plot expanded', done: !!world.expanded },
     ];
   } else {
     checks = [
       { label: `${world.population} of 160 people`, done: world.population >= 160 },
-      { label: `${count} of 100 buildings standing`, done: count >= 100 },
+      { label: `${count} of 100 in buildings, weighed by age`, done: count >= 100 },
       { label: 'A Research Campus and a Power Plant', done: has('Research Campus') && has('Power Plant') },
       { label: 'The plot expanded', done: !!world.expanded },
       { label: 'Stewardship above 0.7', done: world.stewardship.score >= 0.7 },
@@ -8308,7 +8356,86 @@ export function setEra(world: World, era: number): boolean {
   const spec = eraSpec(target);
   if (!world.unlockedAreas.includes(spec.name)) world.unlockedAreas.push(spec.name);
   pushFeed(world, 'build', `The settlement has entered the ${spec.name.toLowerCase()} era. ${spec.arrives}`);
+  rebuildForEra(world);
   return true;
+}
+
+/**
+ * Rebuild the plot into its age.
+ *
+ * Every building becomes the age's form of itself — the cabin a townhouse,
+ * the farm an estate farm — and pairs of the same kind become one, nearest
+ * first: two cabins are one townhouse with the beds of both, two farms one
+ * estate farm with the posts of both. Families and workers move with their
+ * building. The land the second of each pair stood on is open again, which
+ * is the point: a plot that was wall to wall to hold its people has room to
+ * grow into the age.
+ *
+ * Runs once per age, stamped on the world, so a save that reaches an age
+ * on another device or from before forms existed catches up on load.
+ */
+export function rebuildForEra(world: World): string | null {
+  useWorld(world);
+  const era = eraOf(world);
+  if ((world.formed ?? 1) >= era) return null;
+  const water = waterOf(world);
+  const before = new Map<string, number>();
+  for (const b of world.buildings) if (LINEAGE_TYPES.includes(b.type)) before.set(b.type, (before.get(b.type) ?? 0) + 1);
+  const fromEra = world.formed ?? 1;
+  // Pairs, kind by kind: the nearest two together, then the next nearest
+  // of what is left. A ruin is rebuilt in the new age's shape but not
+  // merged; a merge is for buildings that work.
+  const gone = new Map<string, Building>();
+  for (const type of MERGES_ON_ADVANCE) {
+    const pool = world.buildings.filter((b) => b.type === type && !b.ruined && b.active && !gone.has(b.id));
+    const pairs: [number, Building, Building][] = [];
+    for (let i = 0; i < pool.length; i++) for (let j = i + 1; j < pool.length; j++) pairs.push([Math.hypot(pool[i].x - pool[j].x, pool[i].y - pool[j].y), pool[i], pool[j]]);
+    pairs.sort((a, b) => a[0] - b[0]);
+    const taken = new Set<string>();
+    for (const [, a, b] of pairs) {
+      if (taken.has(a.id) || taken.has(b.id)) continue;
+      taken.add(a.id); taken.add(b.id);
+      // The better of the two stands; the other is folded into it.
+      const [keep, fold] = levelOf(b) > levelOf(a) ? [b, a] : [a, b];
+      gone.set(fold.id, keep);
+    }
+  }
+  for (const [foldId, keep] of gone) {
+    for (const f of world.families) if (f.homeId === foldId) f.homeId = keep.id;
+    for (const c of world.citizens) {
+      if (c.workplaceId === foldId) c.workplaceId = keep.id;
+      if (c.destId === foldId) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; }
+      if (c.targetBuildingId === foldId) c.targetBuildingId = undefined;
+    }
+    const fold = world.buildings.find((b) => b.id === foldId);
+    if (fold) keep.workers = [...new Set([...keep.workers, ...fold.workers])];
+  }
+  world.buildings = world.buildings.filter((b) => !gone.has(b.id));
+  // Everything left is the age's own now: its picture, its posts, its beds.
+  for (const b of world.buildings) if ((b.era ?? 1) < era) b.era = era;
+  world.formed = era;
+  world.amenities = buildAmenities(world.buildings, world.layout, water);
+  // A merged house may hold more families than its beds; rehouse sorts it.
+  rehouse(world);
+  staffNow(world);
+  const lines: string[] = [];
+  for (const [type, n] of before) {
+    const now = world.buildings.filter((b) => b.type === type).length;
+    const was = formName(type, fromEra).toLowerCase();
+    const is = formName(type, era).toLowerCase();
+    const plural = (name: string, k: number) => (k === 1 ? name : name.endsWith('y') && !/[aeiou]y$/.test(name) ? `${name.slice(0, -1)}ies` : name.endsWith('s') ? name : `${name}s`);
+    if (now < n) lines.push(`${n} ${plural(was, n)} became ${now} ${plural(is, now)}`);
+    else if (was !== is) lines.push(`the ${plural(was, n)} became ${plural(is, n)}`);
+  }
+  const said = lines.length ? `The plot was rebuilt for the ${eraSpec(era).name.toLowerCase()}: ${lines.join(', ')}.` : null;
+  if (said) pushFeed(world, 'build', said);
+  noteAttention(world);
+  return said;
+}
+
+/** Bring a loaded world's buildings up to its age, when a rebuild is owed. */
+export function catchUpForms(world: World): void {
+  if ((world.formed ?? 1) < eraOf(world)) rebuildForEra(world);
 }
 
 /**
@@ -8503,7 +8630,10 @@ export function bridgeBlockers(world: World): Building[] {
 
 export function constructBuilding(world: World, type: string, cost: number, x: number, y: number): Building | null {
   useWorld(world);
-  cost = Math.round(cost * buildDiscount(world));
+  // The price is the plot's to set, not the caller's: the age's form of the
+  // building, at the builders' discount when one is running.
+  void cost;
+  cost = Math.round(buildCostFor(world, type) * buildDiscount(world));
   if (world.treasury < cost) return null;
   const problem = placementProblem(world, type, x, y);
   if (problem) {
@@ -8518,7 +8648,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   // a player who clicked on water should be told no, not have their choice
   // silently overridden.
   if (waterOf(world).blocks(x, y)) return null;
-  const need = buildMaterials(type);
+  const need = materialsFor(world, type);
   const bb = buildBounds(world);
   const building: Building = { id: `b${world.counter++}`, type, x: clamp(x, bb.x0, bb.x1), y: clamp(y, bb.y0, bb.y1), workers: [], active: true, era: eraOf(world) };
   noteAttention(world);
@@ -8529,12 +8659,12 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   // lane is run out to it if it stands off the plan, amenities are laid out
   // around it, and somebody changes trade to work in it.
   if (linkToRoads(world, building)) {
-    pushFeed(world, 'build', `A lane was cut through to the new ${type.toLowerCase()}.`);
+    pushFeed(world, 'build', `A lane was cut through to the new ${named(world, type)}.`);
   }
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   staffNow(world);
   if (type === 'House') rehouse(world);
-  pushFeed(world, 'build', `A new ${type.toLowerCase()} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
+  pushFeed(world, 'build', `A new ${named(world, type)} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
   checkUnlocks(world);
   return building;
 }
@@ -8647,7 +8777,7 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   staffNow(world);
   noteAttention(world);
-  pushFeed(world, 'build', `The ${building.type.toLowerCase()} was pulled down. ${wood} timber and ${stone} stone were salvaged.`);
+  pushFeed(world, 'build', `The ${formName(building.type, building.era ?? 1).toLowerCase()} was pulled down. ${wood} timber and ${stone} stone were salvaged.`);
   return { ok: true, message: `Salvaged ${wood} timber and ${stone} stone. The Gold is gone.` };
 }
 
@@ -8664,7 +8794,7 @@ export const MAX_BUILDING_LEVEL = 3;
  */
 export const LEVELS_PER_ERA = 1;
 export const MAX_BUILDING_LEVEL_EVER = MAX_BUILDING_LEVEL + LEVELS_PER_ERA * (ERAS.length - 1);
-export const maxLevelFor = (world: { era?: number }) => MAX_BUILDING_LEVEL + LEVELS_PER_ERA * (eraOf(world) - 1);
+export const maxLevelFor = (world: { era?: number }) => formOf('House', eraOf(world)).cap;
 
 /** What level a building is, whatever version of the game raised it. */
 export const levelOf = (b: Building) => Math.max(1, Math.min(MAX_BUILDING_LEVEL_EVER, Math.round(b.level ?? 1)));
@@ -8717,8 +8847,9 @@ export const UPGRADE_STEPS = [0.8, 1.4, 2.0, 2.6, 3.2, 3.8];
 export function upgradeCost(b: Building, world: { era?: number }): { gold: number; wood: number; stone: number } | null {
   const level = levelOf(b);
   if (level >= maxLevelFor(world)) return null;
-  const base = SELF_BUILD_COST[b.type] ?? TRADE_BUILD_COST[b.type] ?? 250;
-  const need = buildMaterials(b.type);
+  const form = formOf(b.type, b.era ?? 1, BUILDING_ERA[b.type] ?? 1);
+  const base = (SELF_BUILD_COST[b.type] ?? TRADE_BUILD_COST[b.type] ?? 250) * form.cost;
+  const need = { wood: buildMaterials(b.type).wood * form.cost, stone: buildMaterials(b.type).stone * form.cost };
   // Each step costs more than the last, so the third level is a decision.
   const step = UPGRADE_STEPS[Math.min(UPGRADE_STEPS.length, level) - 1];
   return {
@@ -8768,7 +8899,7 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
     }
   }
   noteAttention(world);
-  pushFeed(world, 'build', `The ${building.type.toLowerCase()} was moved, at a cost of ${cost} Gold.`);
+  pushFeed(world, 'build', `The ${formName(building.type, building.era ?? 1).toLowerCase()} was moved, at a cost of ${cost} Gold.`);
   return { ok: true, message: `Moved for ${cost} Gold.` };
 }
 
@@ -8806,7 +8937,7 @@ export function upgradeBuilding(world: World, id: string): { ok: boolean; messag
   building.level = levelOf(building) + 1;
   staffNow(world);
   noteAttention(world);
-  pushFeed(world, 'build', `The ${building.type.toLowerCase()} was improved to level ${building.level}.`);
+  pushFeed(world, 'build', `The ${formName(building.type, building.era ?? 1).toLowerCase()} was improved to level ${building.level}.`);
   return { ok: true, message: `Improved to level ${building.level}.` };
 }
 

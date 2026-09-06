@@ -20,7 +20,7 @@
  * cost a player their progress, never their ability to open the game.
  */
 
-import { createWorld, type Citizen, type World } from '../simulation';
+import { catchUpForms, createWorld, type Citizen, type World } from '../simulation';
 import { RESOURCES } from './goods';
 import { clientKey } from '../limits';
 
@@ -55,7 +55,7 @@ const KEEP = [
   'families', 'citizens', 'buildings', 'resources', 'market',
   'feed', 'gatherings', 'bonds', 'projects', 'hazards', 'resolution',
   'artworks', 'unlockedAreas', 'wageRate', 'marketClock', 'flow', 'flowYesterday', 'ledger',
-  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'wildlife', 'hunt', 'counter', 'expanded', 'era', 'eraSince', 'works', 'charterUntil', 'insuredUntil', 'buildersUntil', 'banner', 'festivalDay', 'gatesClosed', 'keep', 'dug',
+  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'wildlife', 'hunt', 'counter', 'expanded', 'era', 'eraSince', 'works', 'charterUntil', 'insuredUntil', 'buildersUntil', 'banner', 'festivalDay', 'gatesClosed', 'keep', 'dug', 'formed',
 ] as const;
 
 /**
@@ -174,6 +174,9 @@ export function worldFromSave(parsed: SavedWorld | null, seed: number, name: str
     if (!Number.isFinite(world.resources[r])) world.resources[r] = 0;
     if (!world.market[r]) world.market[r] = freshMarket[r];
   }
+  // A save that reached its age before buildings had forms, or on a device
+  // without them, owes the age its rebuild: done here, once, before play.
+  catchUpForms(world);
   // Never revived: see above.
   world.conversations = [];
   // The name comes from the claim, which the player can have changed in the

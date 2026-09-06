@@ -17,6 +17,18 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '3.0',
+    date: '2026-09-20',
+    title: 'Ages that replace, and war on the islands',
+    notes: [
+      'A new age rebuilds the town. Advancing used to add a post to every workplace and a level to the cap, and players said what that felt like: a longer list, not a new age. Now every building has a form for each era, with its own name, look, room and output. Step into the township and the cabins become townhouses, the farms estate farms, the bakery a bakehouse, the mine a pit mine; the industrial age makes them terraces, mechanised farms, a cannery and a deep mine; the modern age apartment blocks and a food plant; the AI age habitat towers and an agri-tower. The rebuild also merges pairs of the same kind into one — two cabins into one townhouse with the beds of both, two farms into one estate farm with the posts of both — so a plot that was wall to wall to hold its people has open ground again. Every building raised after the step holds twice what the last age’s did on the same land.',
+      'New goods for the later ages. From the industrial age the bakery’s cannery puts up meals from flour and vegetables, and a meal feeds better than a loaf; the food plant and the synth kitchen make nothing else. The ironworks pours steel beside its tools, and the machine works and the fabricator pour more. Both trade on the market like everything else, and steel is what an army will be made of.',
+      'The city level and the era gates count homes and workplaces by age — a township one counts two settlement ones, an industrial four — so a rebuilt town is at least the size it was, and a smaller, better city is not a lower one.',
+      'The improvement cap is the age’s: three in a settlement and a township, four in the industrial and modern ages, five in the AI age. A building keeps its level through a rebuild.',
+      'Every plot already past the settlement is rebuilt the first time it opens on this build, with a line in the feed saying what became what.',
+    ],
+  },
+  {
     version: '2.6',
     date: '2026-09-11',
     title: 'Ages that mean something, and a Bank that tells the truth',

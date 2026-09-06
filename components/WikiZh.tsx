@@ -1,5 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
@@ -21,7 +22,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA, BEDS_PER_ERA,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -470,7 +471,7 @@ export function WikiZh() {
           <p>建造面板里有一件针对林地的工具：用它点一下地面，触及范围内每棵立着的树都会被伐倒，<b>每棵 {CLEAR_TREE_GOLD} 金币</b>，<b>每棵 {CLEAR_TREE_WOOD} 木料</b>进堆场。清理过的地面在重新加载后仍然是清理过的，并像伐木工的工作一样在接下来的几天里长回来，所以请在打算建造的地方清理，而不是为了风景。</p>
           <h3>搬迁与升级</h3>
           <p>建筑卡上除了它的行当还有两个按钮。<b>搬迁</b>把它拎起来并激活放置光标：点地面它就过去，费用是<b>建造价的 {Math.round(MOVE_SHARE * 100)}%</b>。路会修到新地点，正走向旧地点的人会被安排去别处。搬迁除了金币什么都不损失。放置任何东西——不管是搬的还是新的——只有一条规则：它必须<b>与邻居之间留出可以走人的空隙</b>。两栋挨在一起的建筑会形成谁也过不去的缝，光标会拒绝这个位置并说明原因。</p>
-          <p><b>升级</b>花金币和材料让建筑升一级，聚落阶段最高 <b>{MAX_BUILDING_LEVEL}</b> 级。<b>每进一个时代多开一级</b>：城镇可升到 {MAX_BUILDING_LEVEL + 1} 级，AI 时代的城市可到 {MAX_BUILDING_LEVEL_EVER} 级，地块进入新时代时建筑保留已达到的等级。升级早期时代建的建筑，也会把它换成地块当前时代的样式——木厅就是这样变成石厅的。第一步花原价的 {Math.round(UPGRADE_STEPS[0] * 100)}%，第二步 {Math.round(UPGRADE_STEPS[1] * 100)}%，之后每步更多，金币和木料石头都要——所以顶级是一个决定，不是走过场。每一级<b>约多产 {Math.round(OUTPUT_PER_LEVEL * 100)}%</b>，<b>维护费多 {Math.round(UPKEEP_PER_LEVEL * 100)}%</b>。它不会容纳更多工人——但看得出来：二级有灯笼和旗帜，三级有玻璃附楼、更高的框架和沿檐的金饰。升级过的作坊有人有料就值回票价；闲置的升级建筑只是每天更大的一张账单。</p>
+          <p><b>升级</b>花金币和材料让建筑升一级，聚落和城镇最高 <b>{MAX_BUILDING_LEVEL}</b> 级，工业和现代 {formOf('House', 3).cap} 级，人工智能时代 {formOf('House', 5).cap} 级。地块进入新时代时建筑保留已达到的等级，并被重建成新时代的形态（见"时代"）。第一步花原价的 {Math.round(UPGRADE_STEPS[0] * 100)}%，第二步 {Math.round(UPGRADE_STEPS[1] * 100)}%，之后每步更多，金币和木料石头都要——所以顶级是一个决定，不是走过场。每一级<b>约多产 {Math.round(OUTPUT_PER_LEVEL * 100)}%</b>，<b>维护费多 {Math.round(UPKEEP_PER_LEVEL * 100)}%</b>。它不会容纳更多工人——但看得出来：二级有灯笼和旗帜，三级有玻璃附楼、更高的框架和沿檐的金饰。升级过的作坊有人有料就值回票价；闲置的升级建筑只是每天更大的一张账单。</p>
           <p className="wiki-note">除了市场、银行和镇公所——它们撑着整个聚落——以及还有人住的房子，任何建筑都可以从卡片上拆除。拆除回收<b>一半的木料和石头</b>进堆场。金币没了；你得到的是停掉的维护费，而那通常就是拆它的目的。</p>
         </section>
 
@@ -482,22 +483,31 @@ export function WikiZh() {
             <thead><tr><th>时代</th><th>天数</th><th>要求</th><th>带来什么</th></tr></thead>
             <tbody>
               <tr><td>聚落</td><td className="num">—</td><td>—</td><td>每块地的起点：转角咬合的木屋、木瓦和茅草屋顶、木板搭的大屋作公共建筑。</td></tr>
-              <tr><td>城镇</td><td className="num">60</td><td>40 人、30 栋建筑、镇公所、银行、学校和监狱、金库 20,000 金币、没有废墟</td><td>两层木架瓦顶的住房、切石覆石板瓦的公共建筑、石板街、马车、渡船；礼拜堂、行会大厅、酿酒坊、印刷所、马厩、港口</td></tr>
-              <tr><td>工业</td><td className="num">90</td><td>70 人、50 栋建筑、实验室和图书馆、300 铁矿石、地块已扩建</td><td>砖与铁、带铁轨的石板路、铁路出行、蒸汽船、烟雾；工厂、铸造厂、火车站、电报局、煤气厂</td></tr>
-              <tr><td>现代</td><td className="num">120</td><td>110 人、75 栋建筑、医院和体育场、地块已扩建</td><td>混凝土与玻璃、柏油路、汽车和自行车、摩托艇；医院、体育场、超市、写字楼、公交车站、发电厂</td></tr>
-              <tr><td>人工智能</td><td className="num">150</td><td>160 人、100 栋建筑、研究园区和发电厂、地块已扩建、管理分高于 0.7</td><td>白色复合材料与灯光、浅色道路、出行舱、水翼船；数据中心、研究园区、垂直农场、出行舱站、无人机港</td></tr>
+              <tr><td>城镇</td><td className="num">60</td><td>40 人、30 点建筑（按时代计）、镇公所、银行、学校和监狱、金库 20,000 金币、没有废墟</td><td>两层木架瓦顶的住房、切石覆石板瓦的公共建筑、石板街、马车、渡船；礼拜堂、行会大厅、酿酒坊、印刷所、马厩、港口</td></tr>
+              <tr><td>工业</td><td className="num">90</td><td>70 人、50 点建筑（按时代计）、实验室和图书馆、300 铁矿石、地块已扩建</td><td>砖与铁、带铁轨的石板路、铁路出行、蒸汽船、烟雾；工厂、铸造厂、火车站、电报局、煤气厂</td></tr>
+              <tr><td>现代</td><td className="num">120</td><td>110 人、75 点建筑（按时代计）、医院和体育场、地块已扩建</td><td>混凝土与玻璃、柏油路、汽车和自行车、摩托艇；医院、体育场、超市、写字楼、公交车站、发电厂</td></tr>
+              <tr><td>人工智能</td><td className="num">150</td><td>160 人、100 点建筑（按时代计）、研究园区和发电厂、地块已扩建、管理分高于 0.7</td><td>白色复合材料与灯光、浅色道路、出行舱、水翼船；数据中心、研究园区、垂直农场、出行舱站、无人机港</td></tr>
             </tbody>
           </table>
           <p>天数按地块所在的时代计算，清单取自聚落本来就在衡量的东西。两者都显示在"链上"面板的<b>时代</b>卡片上，逐行列出，达成的打勾。全部达成后，按钮以 {n(ADVANCE_COST_EMERGE)} {T} 提供推进，和其他收费一样销毁。世界会先发布，登记处按它持有的副本判断清单，所以你自己设备上的任何改动都不能把地块改进一个时代。时代记在地块上，跟着它走到任何设备和买家手里。</p>
           <h3>每个时代改变了什么</h3>
-          <p>时代是整座城的一次升级，不只是更长的货架。地块每推进一个时代：</p>
+          <p>自 v3.0 起，时代是一座新城，不只是更长的货架。每栋建筑在每个时代都有自己的<b>形态</b>——自己的名字、样子、容量、产出，产品会变的行当还有自己的配方——地块一推进，<b>所有建筑都重建成下一个形态</b>，<b>同类建筑两两合并为一栋</b>，先合最近的：两间木屋合成一栋联排石屋，床位是两间之和；两座农场合成一座庄园农场，岗位是两座之和。家庭和工人跟着建筑走，每对里第二栋原来的地重新空出来。</p>
+          <table className="wiki-table">
+            <thead><tr><th>种类</th><th>聚落</th><th>城镇</th><th>工业</th><th>现代</th><th>人工智能</th></tr></thead>
+            <tbody>
+              {LINEAGE_TYPES.map((type) => (
+                <tr key={type}><td>{tn(type)}</td>{formNames(type).map((name, i) => <td key={i}>{tn(name)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
           <ul>
-            <li><b>每个工作场所多容纳 {POSTS_PER_ERA} 人</b>，聚落里容两人的伐木场到人工智能时代容六人。</li>
-            <li><b>每座房子多睡 {BEDS_PER_ERA} 人</b>，城先向上长，再向外长。</li>
-            <li><b>每双手多产出 {Math.round(OUTPUT_PER_ERA * 100)}%</b>，叠加在技能、升级和方法之上。</li>
-            <li><b>升级上限提高一级</b>，从聚落的 {MAX_BUILDING_LEVEL} 级到人工智能时代的 {MAX_BUILDING_LEVEL_EVER} 级。</li>
+            <li><b>容量每个时代翻倍。</b>木屋睡 {formOf('House', 1).beds} 人，联排石屋 {formOf('House', 2).beds} 人，排屋 {formOf('House', 3).beds} 人，公寓楼 {formOf('House', 4).beds} 人，居住塔 {formOf('House', 5).beds} 人，每升一级再加两张床。农场 {formPosts('Farm', 1)} 个岗位，庄园农场 {formPosts('Farm', 2)} 个，机械化农场 {formPosts('Farm', 3)} 个，农业综合体 {formPosts('Farm', 4)} 个，农业塔 {formPosts('Farm', 5)} 个。因为重建把数量减半，地块推进时床位和岗位都保住了；之后每一栋新建筑在同样的地上容纳上一个时代的两倍。</li>
+            <li><b>每双手产出更多</b>：城镇多 {Math.round((formOf('Farm', 2).output - 1) * 100)}%，工业时代多 {Math.round((formOf('Farm', 3).output - 1) * 100)}%，现代多 {Math.round((formOf('Farm', 4).output - 1) * 100)}%，人工智能时代多 {Math.round((formOf('Farm', 5).output - 1) * 100)}%，叠加在技能、升级和方法之上。</li>
+            <li><b>新货物。</b>从工业时代起，面包房的形态罐头厂用面粉和蔬菜做出<b>餐食</b>，一份餐食比一条面包更顶饱；食品厂和合成厨房只做餐食。铁匠铺的形态炼铁厂在工具之外炼出<b>钢材</b>，机械厂和制造机炼得更多。庄园农场养一群羊，多出一点羊毛。两种新货物和别的东西一样在市场上交易。</li>
+            <li><b>更大的建筑更贵</b>：城镇形态的金币和材料是聚落的 {formOf('Farm', 2).cost} 倍，工业 {formOf('Farm', 3).cost} 倍，现代 {formOf('Farm', 4).cost} 倍，人工智能 {formOf('Farm', 5).cost} 倍；维护费涨得慢一些（{formOf('Farm', 2).upkeep} 倍到 {formOf('Farm', 5).upkeep} 倍），所以合并后的城比原来拥挤的那座略便宜。</li>
+            <li><b>升级上限看时代</b>：聚落和城镇 {formOf('House', 1).cap} 级，工业和现代 {formOf('House', 3).cap} 级，人工智能时代 {formOf('House', 5).cap} 级。重建时建筑保留等级。</li>
+            <li><b>城市等级和时代门槛按时代计算住房和工作场所</b>：一栋城镇的住房或作坊算两栋聚落的，工业算四栋，现代八栋，人工智能十六栋；礼拜堂或工厂在任何时代都算一栋。所以重建后的城至少和原来一样大，更小更好的城不会更低级。</li>
             <li><b>每日管理收益上限提高基数的 {Math.round(ERA_YIELD_STEP * 100)}%</b>。</li>
-            <li><b>本时代建的建筑维护费高 {Math.round(UPKEEP_PER_ERA * 100)}%</b>：更大的城自己付账。</li>
             <li>本时代的建筑开放，建造面板默认打开它们；早期时代在旁边的标签里。</li>
           </ul>
           <h3>城镇改变了什么</h3>

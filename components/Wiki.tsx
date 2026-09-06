@@ -1,5 +1,6 @@
 'use client';
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
@@ -28,7 +29,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, MAX_BUILDING_LEVEL_EVER, OUTPUT_PER_ERA, POSTS_PER_ERA, UPKEEP_PER_ERA, BEDS_PER_ERA,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -928,10 +929,9 @@ export default function Wiki() {
           </p>
           <p>
             <b>Improve</b> spends Gold and materials to take a building up a level, to a maximum of{' '}
-            <b>{MAX_BUILDING_LEVEL}</b> in a settlement. <b>Each age opens one level more</b>: a township
-            can take a building to {MAX_BUILDING_LEVEL + 1}, an AI-era city to {MAX_BUILDING_LEVEL_EVER}, and a building keeps whatever level it reached
-            when the plot advanced. Improving a building raised in an earlier age also re-dresses it in the
-            plot's current one, which is how a timber hall becomes a stone one. The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
+            <b>{MAX_BUILDING_LEVEL}</b> in a settlement or a township, {formOf('House', 3).cap} in the industrial and modern ages
+            and {formOf('House', 5).cap} in the AI age. A building keeps whatever level it reached
+            when the plot advanced, and the advance rebuilds it into the new age&rsquo;s form (see Eras). The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
             of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, and each step after
             more again, in Gold and in
             timber and stone both — so the top level is a decision, not a formality. Each level adds
@@ -962,10 +962,10 @@ export default function Wiki() {
             <thead><tr><th>Era</th><th>Days</th><th>What it asks</th><th>What arrives</th></tr></thead>
             <tbody>
               <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts: log cabins notched at the corners, shake and thatch roofs, plank lodges for the halls.</td></tr>
-              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 buildings, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Timber-framed homes on two floors under fired tile, halls in dressed stone under slate, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
-              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 buildings, a Lab and a Library, 300 iron ore, the plot expanded</td><td>Brick and iron, setts with rails, rail travel, a steamboat, smog; Factory, Foundry, Railway Station, Telegraph, Gasworks</td></tr>
-              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 buildings, a Hospital and a Stadium, the plot expanded</td><td>Concrete and glass, tarmac, cars and bikes, a motorboat; Hospital, Stadium, Supermarket, Office, Bus Depot, Power Plant</td></tr>
-              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 buildings, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td>White composite and light, pale roads, pods, a hydrofoil; Data Centre, Research Campus, Vertical Farm, Pod Hub, Drone Port</td></tr>
+              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 in buildings by age, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Timber-framed homes on two floors under fired tile, halls in dressed stone under slate, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
+              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 in buildings by age, a Lab and a Library, 300 iron ore, the plot expanded</td><td>Brick and iron, setts with rails, rail travel, a steamboat, smog; Factory, Foundry, Railway Station, Telegraph, Gasworks</td></tr>
+              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 in buildings by age, a Hospital and a Stadium, the plot expanded</td><td>Concrete and glass, tarmac, cars and bikes, a motorboat; Hospital, Stadium, Supermarket, Office, Bus Depot, Power Plant</td></tr>
+              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 in buildings by age, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td>White composite and light, pale roads, pods, a hydrofoil; Data Centre, Research Campus, Vertical Farm, Pod Hub, Drone Port</td></tr>
             </tbody>
           </table>
           <p>
@@ -979,20 +979,35 @@ export default function Wiki() {
           </p>
           <h3>What an age changes</h3>
           <p>
-            An age is a step up for the whole town, not a longer shelf. With each one the plot advances:
+            Since v3.0 an age is a new town, not a longer shelf. Every building has a <b>form</b> for
+            each era &mdash; its own name, its own look, its own room, its own output and, for the
+            trades whose goods change, its own recipe &mdash; and the moment the plot advances,
+            <b>every building is rebuilt into the next form</b> and <b>pairs of the same kind
+            become one</b>, nearest first: two cabins are one townhouse with the beds of both, two
+            farms one estate farm with the posts of both. Families and workers move with their
+            building, and the land the second of each pair stood on is open again.
           </p>
+          <table className="wiki-table">
+            <thead><tr><th>Kind</th><th>Settlement</th><th>Township</th><th>Industrial</th><th>Modern</th><th>AI</th></tr></thead>
+            <tbody>
+              {LINEAGE_TYPES.map((type) => (
+                <tr key={type}><td>{type}</td>{formNames(type).map((name, i) => <td key={i}>{name}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
           <ul>
-            <li><b>Every workplace takes {POSTS_PER_ERA} more {POSTS_PER_ERA === 1 ? 'person' : 'people'}</b>, so a woodcutter that held two in the settlement holds six in the AI age.</li>
-            <li><b>Every house sleeps {BEDS_PER_ERA} more</b>, so a town grows up before it grows out.</li>
-            <li><b>Every pair of hands makes {Math.round(OUTPUT_PER_ERA * 100)}% more</b>, on top of skill, improvements and methods.</li>
-            <li><b>The improvement cap rises by one</b>, from {MAX_BUILDING_LEVEL} in a settlement to {MAX_BUILDING_LEVEL_EVER} in the AI age.</li>
+            <li><b>Room doubles with every age.</b> A cabin sleeps {formOf('House', 1).beds}, a townhouse {formOf('House', 2).beds}, a terrace {formOf('House', 3).beds}, an apartment block {formOf('House', 4).beds}, a habitat tower {formOf('House', 5).beds}, plus two a level. A farm takes {formPosts('Farm', 1)} hands, an estate farm {formPosts('Farm', 2)}, a mechanised farm {formPosts('Farm', 3)}, an agri complex {formPosts('Farm', 4)}, an agri-tower {formPosts('Farm', 5)}. Because the rebuild halves the count, a plot keeps its beds and its posts through an advance; every building raised afterwards holds twice what the last age&rsquo;s did on the same ground.</li>
+            <li><b>Every pair of hands makes more</b>: {Math.round((formOf('Farm', 2).output - 1) * 100)}% more in a township, {Math.round((formOf('Farm', 3).output - 1) * 100)}% in the industrial age, {Math.round((formOf('Farm', 4).output - 1) * 100)}% in the modern, {Math.round((formOf('Farm', 5).output - 1) * 100)}% in the AI age, on top of skill, improvements and methods.</li>
+            <li><b>New goods.</b> From the industrial age the bakery&rsquo;s form, the cannery, puts up <b>meals</b> from flour and vegetables beside its bread, and a meal feeds better than a loaf; the food plant and the synth kitchen make nothing else. The blacksmith&rsquo;s form, the ironworks, pours <b>steel</b> beside its tools, and the machine works and the fabricator pour more. An estate farm keeps a flock and adds a little wool. Both new goods trade on the market like everything else.</li>
+            <li><b>Bigger buildings cost more</b>: a township form costs {formOf('Farm', 2).cost}&times; the settlement&rsquo;s in Gold and materials, an industrial one {formOf('Farm', 3).cost}&times;, a modern one {formOf('Farm', 4).cost}&times;, an AI one {formOf('Farm', 5).cost}&times;, with upkeep rising more slowly ({formOf('Farm', 2).upkeep}&times; to {formOf('Farm', 5).upkeep}&times;), so a merged town is a little cheaper to keep than the crowded one it was.</li>
+            <li><b>The improvement cap is the age&rsquo;s</b>: {formOf('House', 1).cap} in a settlement and a township, {formOf('House', 3).cap} in the industrial and modern ages, {formOf('House', 5).cap} in the AI age. A building keeps its level through a rebuild.</li>
+            <li><b>The city level and the era gates count homes and workplaces by age.</b> A township home or workplace counts two settlement ones, an industrial four, a modern eight, an AI sixteen; a chapel or a factory is one building in any age. So a rebuilt town is at least the size it was, and a smaller, better city is not a lower one.</li>
             <li><b>The daily stewardship ceiling rises {Math.round(ERA_YIELD_STEP * 100)}%</b> of the base, per age.</li>
-            <li><b>Upkeep rises {Math.round(UPKEEP_PER_ERA * 100)}%</b> per age on every building raised in it: the bigger town pays for itself.</li>
-            <li>The age's own buildings open, and the Build panel opens on them; earlier ages are a tab away.</li>
+            <li>The age&rsquo;s own buildings open, and the Build panel opens on them; earlier ages are a tab away, raised in the current age&rsquo;s form.</li>
           </ul>
           <h3>What a township changes</h3>
           <ul>
-            <li><b>The look.</b> Buildings raised or improved after the step are stone with tiled roofs; the ones you already had keep their timber until you improve them, so an old stone chapel in the middle of a modern town is the right picture. Dirt lanes become cobbles. People wear wool coats and hats.</li>
+            <li><b>The look.</b> Every building is rebuilt in stone with tiled roofs the moment the plot advances, in its township form. Dirt lanes become cobbles. People wear wool coats and hats.</li>
             <li><b>Carts.</b> A Stables puts the well-off on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them. Transport is a luxury in every age: each morning everybody is ranked by their purse, the top slice are well off, and only they ride. The class shows on the person&rsquo;s card.</li>
             <li><b>The ferry.</b> A Harbour puts boats on the water for the well-off, who cross anywhere in a boat of their own. Everybody else needs a bridge, and a workplace on an island still has to be bridged to count as reachable, so the settlement builds crossings as it did before. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
             <li><b>Six buildings.</b> Chapel (company and purpose), Guildhall (learning), Brewery (company), Printer (purpose and learning), Stables, Harbour. They cost Gold, timber and stone like everything else and appear on their shelves in the Build panel once the plot is a township.</li>

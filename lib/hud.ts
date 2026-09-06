@@ -17,7 +17,7 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith, WEALTH_WORDS, wealthOf,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD } from './simulation';
+  type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD, formName } from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -50,6 +50,8 @@ export interface FocusBuilding {
   id: string; type: string; occupants: number; production: string | null;
   /** The building's kind as the simulation names it, under whatever the card calls it. */
   buildingType: string;
+  /** What the kind is called in the plot's age: the townhouse behind "Carter Townhouse". */
+  kindName: string;
   /** Why the trade did not work in full yesterday, when it did not. */
   idle: string | null;
   /** The people posted here against its posts, for a workplace. */
@@ -218,6 +220,8 @@ export interface RosterTrade {
 }
 export interface RosterBuilding {
   id: string; type: string; level: number; ruined: boolean; era: number;
+  /** The name over the door in the age it was raised or rebuilt in. */
+  name: string;
   /** People at their posts inside right now, and the posts it has; null for a building that employs nobody. */
   crew: number; posts: number | null;
   /** The trade that works here, if one does. */
@@ -261,7 +265,7 @@ function rosterOf(world: World): Roster {
   const buildings: RosterBuilding[] = world.buildings.filter((b) => b.type !== 'House').map((b) => {
     const trade = byType(b.type);
     return {
-      id: b.id, type: b.type, level: levelOf(b), ruined: !!b.ruined, era: b.era ?? 1,
+      id: b.id, type: b.type, name: formName(b.type, b.era ?? 1), level: levelOf(b), ruined: !!b.ruined, era: b.era ?? 1,
       crew: b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? JOB_LABELS[trade] : null,
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
@@ -363,8 +367,9 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
   return {
     kind: 'building',
     id: b.id,
-    type: family ? `${family.name} House` : b.type,
+    type: family ? `${family.name} ${formName('House', b.era ?? 1)}` : formName(b.type, b.era ?? 1),
     buildingType: b.type,
+    kindName: formName(b.type, b.era ?? 1),
     occupants: b.workers.length,
     production: b.production ? JOB_LABELS[b.production as keyof typeof JOB_LABELS] ?? b.production : null,
     idle: (() => {

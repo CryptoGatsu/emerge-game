@@ -11,7 +11,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, POSTS_PER_ERA, OUTPUT_PER_ERA , DIG_GOLD, FILL_GOLD } from '@/lib/simulation';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
+/** The kinds that employ somebody, for the room line on a build card. */
+const WORKPLACE_TYPES = new Set(Object.values(JOBS).map((j) => j.building));
 import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
@@ -2010,7 +2012,7 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates }: {
         <div className="people-rows">
           {roster.buildings.map((b) => (
             <div key={b.id} className={`people-row ${b.ruined ? 'idle' : b.posts !== null && b.crew < b.posts ? 'short' : ''}`}>
-              <b>{tn(b.type)}</b>
+              <b>{tn(b.name)}</b>
               <span className="muted">{t('level {n}', { n: b.level })}</span>
               <span className="people-trade">{b.trade ? tn(b.trade) : t('civic')}</span>
               <span className={b.ruined ? 'people-open' : 'muted'}>{b.ruined ? t('ruin') : b.posts !== null ? t('{c} of {p} at their posts', { c: b.crew, p: b.posts }) : t('{c} inside', { c: b.crew })}</span>
@@ -2127,8 +2129,8 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
       <p className="muted small build-age-note">
         {age === view.era.id
           ? (view.era.id > 1
-            ? t('What the {era} brought. Everything from earlier ages is still yours to raise: pick its tab. In this age every workplace holds {posts} more than a settlement’s, every house sleeps {posts} more, and every pair of hands makes {pct}% more.', { era: tn(eraName(view.era.id)).toLowerCase(), posts: POSTS_PER_ERA * (view.era.id - 1), pct: Math.round(OUTPUT_PER_ERA * (view.era.id - 1) * 100) })
-            : t('Where every plot begins. Each age the plot advances adds a post to every workplace, a bed to every house, {pct}% to what each pair of hands makes, and a level to the improvement cap — and its own buildings, on the tabs above.', { pct: Math.round(OUTPUT_PER_ERA * 100) }))
+            ? t('What the {era} brought. Every building here is the age’s own form of itself: a {house} holds {beds} beds, a workplace {posts} posts, and each pair of hands makes {pct}% more than in a settlement. Earlier ages are a tab away, raised in this age’s form.', { era: tn(eraName(view.era.id)).toLowerCase(), house: tn(formName('House', view.era.id)).toLowerCase(), beds: formOf('House', view.era.id).beds ?? 0, posts: formPosts('Farm', view.era.id), pct: Math.round((formOf('Farm', view.era.id).output - 1) * 100) })
+            : t('Where every plot begins. Each age the plot advances rebuilds every building into that age’s form — new name, new look, twice the room — and merges pairs of the same kind into one, so the land opens up again. The age’s own buildings are on the tabs above.'))
           : age === 'all'
             ? t('Every building in the game, by shelf.')
             : typeof age === 'number' && age < view.era.id
@@ -2143,8 +2145,11 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
       </div>
       <div className="build-grid">
         {shown.map((option) => {
-          const need = buildMaterials(option.type);
-          const price = Math.round(option.cost * (view.cover.builders ? 1 - BUILDERS_DISCOUNT : 1));
+          // The age's form of it: its name, its blurb, and its price, which
+          // grows with the room it holds.
+          const form = formOf(option.type, view.era.id, BUILDING_ERA[option.type] ?? 1);
+          const need = { wood: Math.round(buildMaterials(option.type).wood * form.cost), stone: Math.round(buildMaterials(option.type).stone * form.cost) };
+          const price = Math.round(option.cost * form.cost * (view.cover.builders ? 1 - BUILDERS_DISCOUNT : 1));
           const paid = view.treasury >= price;
           const stocked = wood >= need.wood && stone >= need.stone;
           const minEra = BUILDING_ERA[option.type] ?? 1;
@@ -2155,11 +2160,16 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
           return (
             <div key={option.type} className={`build-card ${ready ? '' : 'locked'} ${inEra ? '' : 'later-era'} ${one ? 'built' : ''}`}>
               <div className="build-icon">{option.icon}</div>
-              <h3>{tn(option.type)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}{one && <i className="era-lock">{one.ruined ? t('In ruins') : t('Built')}</i>}</h3>
-              <p>{t(option.blurb)}</p>
+              <h3>{tn(form.name)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}{one && <i className="era-lock">{one.ruined ? t('In ruins') : t('Built')}</i>}</h3>
+              <p>{t(form.blurb || option.blurb)}</p>
+              {(option.type === 'House' || WORKPLACE_TYPES.has(option.type)) && (
+                <p className="build-room">
+                  {option.type === 'House' ? t('{n} beds', { n: form.beds ?? 0 }) : t('{n} posts', { n: formPosts(option.type, view.era.id) })}
+                </p>
+              )}
               <div className="build-cost">
                 <b>{t('{n} Gold', { n: price })}{view.cover.builders && <em className="build-discount"> {t('builders’ price')}</em>}</b>
-                <small>{t('{n}/day upkeep', { n: maintenanceCost(option.type) })}</small>
+                <small>{t('{n}/day upkeep', { n: Math.round(maintenanceCost(option.type) * form.upkeep) })}</small>
               </div>
               <div className="build-materials">
                 <span className={wood >= need.wood ? '' : 'short'}>{t('{n} wood', { n: need.wood })}</span>
