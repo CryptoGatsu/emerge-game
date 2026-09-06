@@ -734,6 +734,20 @@ async function burnViaToken(
   }
 }
 
+/** Send the chain's own coin from the player's wallet, for a casino pass. */
+export async function sendEth(from: string, to: string, wei: bigint): Promise<{ ok: true; txHash: string } | { ok: false; message: string }> {
+  if (!walletAvailable()) return { ok: false, message: 'No wallet to sign with.' };
+  try {
+    const txHash = (await activeProvider()!.request({
+      method: 'eth_sendTransaction',
+      params: [{ from, to, value: '0x' + wei.toString(16) }],
+    })) as string;
+    return { ok: true, txHash };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'The transaction was rejected.' };
+  }
+}
+
 export function tokenActions(config: ChainConfig = ACTIVE_CHAIN): TokenAction[] {
   const ready = tokenLive(config);
   return [

@@ -3608,6 +3608,26 @@ export function stakeOnBout(world: World, gold: number, on: string): boolean {
   return true;
 }
 
+/** Gold staked at the casino's tables. */
+export function casinoStake(world: World, gold: number, note: string): boolean {
+  useWorld(world);
+  const amount = Math.floor(gold);
+  if (!(amount > 0) || world.treasury < amount) return false;
+  noteAttention(world);
+  spend(world, 'arena', amount);
+  pushFeed(world, 'world', note);
+  return true;
+}
+
+/** Gold won at the casino, paid into the treasury. */
+export function casinoPayout(world: World, gold: number, note: string): void {
+  useWorld(world);
+  const amount = Math.floor(gold);
+  if (!(amount > 0)) return;
+  earn(world, 'arena', amount);
+  pushFeed(world, 'world', note);
+}
+
 /** Pay a winning bet back into the treasury. */
 export function settleBout(world: World, gold: number, note: string): void {
   useWorld(world);

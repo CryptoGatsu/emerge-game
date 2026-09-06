@@ -30,6 +30,7 @@ import { UPDATES, UPDATES_ZH } from '@/lib/updates';
 
 /** Where to find the project outside the game. */
 export const X_URL = 'https://x.com/emergerh';
+export const DISCORD_URL = 'https://discord.gg/X2nzKeSnfN';
 export const SITE_DOMAIN = 'emergerh.world';
 
 /**
@@ -231,6 +232,8 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
             <span className="foot-version">v{VERSION}</span>
             <span aria-hidden>·</span>
             <a href={X_URL} target="_blank" rel="noreferrer noopener">@emergerh</a>
+            <span aria-hidden>·</span>
+            <a href={DISCORD_URL} target="_blank" rel="noreferrer noopener">Discord</a>
             <span aria-hidden>·</span>
             <span>{SITE_DOMAIN}</span>
             <span aria-hidden>·</span>

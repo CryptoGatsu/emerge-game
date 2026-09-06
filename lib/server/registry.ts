@@ -311,6 +311,15 @@ export async function markBanner(seed: number, owner: string, emblem: string): P
   return row;
 }
 
+/** The owner renamed the world: the map and the leaderboard show the claim's name, so it follows. */
+export async function renameClaim(seed: number, owner: string, worldName: string): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const row: Claim = { ...existing, worldName };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
 export type CoverKind = 'charter' | 'insurance' | 'builders';
 export const COVER_KEY: Record<CoverKind, 'charterUntil' | 'insuredUntil' | 'buildersUntil'> = { charter: 'charterUntil', insurance: 'insuredUntil', builders: 'buildersUntil' };
 export async function markCover(seed: number, owner: string, kind: CoverKind, days: number): Promise<{ claim: Claim; until: number } | null> {

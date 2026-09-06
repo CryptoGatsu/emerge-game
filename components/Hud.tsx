@@ -794,6 +794,7 @@ const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; shor
   { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
   { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
   { key: 'arena', icon: '⚔', label: 'ARENA', short: 'ARENA', blurb: 'Duels and betting' },
+  { key: 'casino', icon: '⚄', label: 'CASINO', short: 'CASINO', blurb: 'Coin, cups, Gold or $EMERGE' },
   { key: 'gacha', icon: '⛏', label: 'PROSPECT', short: 'DIG', blurb: 'Send a party out' },
   { key: 'connect', icon: '◈', label: 'ON-CHAIN', short: 'CHAIN', blurb: 'Plot, wallet and vault' },
 ];

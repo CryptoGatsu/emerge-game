@@ -1230,6 +1230,25 @@ export default function Wiki() {
         </section>
 
         {/* ---------------------------------------------------------- */}
+        <section id="casino">
+          <h2>The casino</h2>
+          <p>
+            A door on the action bar with two games of chance: a <b>coin flip</b> that pays 1.9 to 1
+            and <b>three cups</b> that pay 2.7 to 1. Stakes are in Gold, from <b>100</b> a play (from{' '}
+            <b>500</b> when the prize is {TOKEN.ticker}), up to 5,000 (2,500 for {TOKEN.ticker}). The draw is
+            made in the vault, never in your browser. Choose the prize before you play: <b>Gold</b> into
+            the treasury, or <b>{TOKEN.ticker}</b> &mdash; 2 per Gold staked on the coin, 3 on the cups &mdash;
+            which lands as credit the Bank pays out under the same daily room, withdrawal count and burn
+            share as stewardship. No wallet wins more than 15,000 {TOKEN.ticker} a day at the tables.
+          </p>
+          <p>
+            Three plays a day are free, from midnight UTC. A pass of five more is about $5, paid in{' '}
+            {TOKEN.ticker} into the vault (burned and kept like every charge) or in ETH, of which 30% goes
+            to the development wallet and the rest stays in the vault. The house keeps its edge on every
+            game; it is entertainment, not income.
+          </p>
+        </section>
+
         <section id="together">
           <h2>Other players</h2>
           <figure className="wiki-figure">

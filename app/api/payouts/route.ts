@@ -40,7 +40,7 @@ import { NextResponse } from 'next/server';
 import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
   MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
-  settlementFor, takePayoutSlot, untilUtcMidnight, utcDay,
+  settlementFor, takePayoutSlot, untilUtcMidnight, utcDay, casinoCreditOf, takeCasinoCredit,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { receiptOf, sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
@@ -118,9 +118,13 @@ export async function GET(request: Request) {
       judged = await judgedFor(address);
       ceiling = judged.yield;
     }
+    // Winnings from the tables sit on top of whatever the land or the job pays.
+    const casino = await casinoCreditOf(address);
+    if (land !== 'holds' && hand !== 'hand') ceiling = 0;
+    ceiling += casino;
     const room = await emissionRoom(address, ceiling);
     return NextResponse.json({
-      payouts, principal, room, judged,
+      payouts, principal, room, judged, casino,
       // Whether stewardship can be collected at all, and if not, why — so the
       // Bank can say so before somebody presses the button.
       land,
@@ -225,11 +229,12 @@ export async function POST(request: Request) {
    * a successful one, so the slot is not given back.
    */
   let ceiling = DAILY_EARN_CEILING;
+  const casino = kind === 'earnings' ? await casinoCreditOf(address) : 0;
   if (kind === 'earnings') {
     const land = await landCheck(address);
     // No land, but a job: a hired hand is paid up to a hand's ceiling.
     const hand = land === 'none' ? await handCheck(address) : 'none';
-    if (hand === 'hand') ceiling = Math.min(HAND_DAILY_CEILING, await handCeilingFor(address));
+    if (hand === 'hand') ceiling = Math.min(HAND_DAILY_CEILING, await handCeilingFor(address)) + casino;
     else if (hand === 'unreachable') {
       return NextResponse.json({ error: 'We could not read this wallet\u2019s balance to confirm your job. Nothing was taken — try again in a minute.', land }, { status: 403 });
     } else if (land === 'holds') {
@@ -238,12 +243,15 @@ export async function POST(request: Request) {
       // world, times the attention the heartbeats show. The client's figure
       // is paid only up to this.
       const judged = await judgedFor(address);
-      ceiling = judged.yield;
+      ceiling = judged.yield + casino;
       if (ceiling < 1) {
         return NextResponse.json({
           error: 'Nothing is judged earned yet: publish your world by opening it, and keep it well run and attended. Nothing was taken.', land, judged,
         }, { status: 403 });
       }
+    } else if (casino > 0 && land === 'none') {
+      // No land and no job, but winnings from the tables: those are paid.
+      ceiling = casino;
     } else {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.
@@ -338,6 +346,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: sent.problem }, { status: 502 });
   }
 
+  // Casino credit is spent first, so a win does not linger as room for ever.
+  if (kind === 'earnings' && casino > 0) await takeCasinoCredit(address, money.gross).catch(() => {});
   // The held share stayed in the vault; half of it is owed to the burn address.
   if (money.burned > 0) await noteHold(money.burned).catch(() => {});
   const payout = await recordPayout({

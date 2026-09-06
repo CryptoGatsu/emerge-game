@@ -194,6 +194,38 @@ async function verifyPayment(
   }
 }
 
+/**
+ * Confirm an ETH payment landed: from this wallet, to this address, at least
+ * this much, mined and confirmed. The same shape as the token check, for the
+ * chain's own coin.
+ */
+export type NativeCheck =
+  | { ok: true; wei: bigint }
+  | { ok: false; reason: string; retry: boolean };
+export async function verifyNative(txHash: string, payer: string, recipient: string, atLeastWei: bigint): Promise<NativeCheck> {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { ok: false, reason: 'That is not a transaction hash.', retry: false };
+  if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) return { ok: false, reason: 'That is not a wallet address.', retry: false };
+  const client = createPublicClient({ chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+  let receipt, tx;
+  try {
+    [receipt, tx] = await Promise.all([client.getTransactionReceipt({ hash: txHash as Hex }), client.getTransaction({ hash: txHash as Hex })]);
+  } catch {
+    return { ok: false, reason: 'The chain has not seen that payment yet.', retry: true };
+  }
+  if (!receipt || !tx) return { ok: false, reason: 'The chain has not seen that payment yet.', retry: true };
+  if (receipt.status !== 'success') return { ok: false, reason: 'That payment failed on chain.', retry: false };
+  if (!same(tx.from, payer)) return { ok: false, reason: 'That payment was made from a different wallet.', retry: false };
+  if (!same(tx.to, recipient)) return { ok: false, reason: 'That payment went somewhere else.', retry: false };
+  if (tx.value < atLeastWei) return { ok: false, reason: 'That payment was short.', retry: false };
+  try {
+    const head = await client.getBlockNumber();
+    if (head - receipt.blockNumber + 1n < BigInt(CONFIRMATIONS)) return { ok: false, reason: 'Waiting for the chain to confirm the payment.', retry: true };
+  } catch {
+    return { ok: false, reason: 'Waiting for the chain to confirm the payment.', retry: true };
+  }
+  return { ok: true, wei: tx.value };
+}
+
 const SPENT = serverKey('burns');
 
 /**

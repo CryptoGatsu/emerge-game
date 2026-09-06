@@ -21,6 +21,10 @@ export const UPDATES: Update[] = [
     date: '2026-09-11',
     title: 'Ages that mean something, and a Bank that tells the truth',
     notes: [
+      'The Casino. A new door on the action bar: a coin flip that pays 1.9 to 1 and three cups that pay 2.7 to 1, staked in Gold from 100 (500 when the prize is $EMERGE). The draw is made in the vault, never in the browser. Win Gold, or win $EMERGE that the Bank pays out under the same daily room and burn share as stewardship — 2 $EMERGE per Gold staked on the coin, 3 on the cups, capped at 15,000 a day per wallet so the tables cannot drain the vault. Three plays a day are free; a pass of five more is about $5, paid in $EMERGE into the vault (burned and kept like every charge) or in ETH, of which 30% goes to development and the rest stays in the vault.',
+      'Names that stay. A nickname chosen on one device was lost when the game opened on another: the fresh device’s random name was newer, so it won the merge and was written back over the server’s copy. The name now follows whoever actually changed it.',
+      'The world map shows the name you gave your world. Renaming carried to the plot’s token but not to the claim row the map and the leaderboard read, so they kept the old name. It travels there now.',
+      'Discord. The invite is in the footer of the front page.',
       'The look. The finished frame now goes through one pass that does what a camera does to a scene: a bloom round every lit window, lantern and torch, a warm grade, a filmic tone curve so the brights roll off instead of clipping, a little more saturation and a vignette toward the corners. It is toned in linear light, not on the pixels, so shadows stay shadows. The ✧ button beside the clock, or V, turns it off and on; the choice is kept on the device.',
       'Ground that runs into ground. Every tile used to stop dead at its diamond, so a meadow met a wood along a sawtooth of perfect edges. Each kind of ground now spills a ragged, dithered tongue over its lower neighbour along the edge they share — grass over sand, the wood’s floor over the meadow, never the other way — so the land reads as one surface.',
       'A grid for planning. The ⌗ button beside the clock, or G, lays a tile grid over the ground, drawn at each tile’s own height with the buildable edge picked out in gold. Off by default; remembered on the device.',
@@ -214,6 +218,10 @@ export const UPDATES_ZH: Update[] = [
     date: '2026-09-11',
     title: '有分量的时代，和说实话的银行',
     notes: [
+      '赌场。行动栏上新开一扇门：抛硬币赔 1.9 比 1，三个纸杯赔 2.7 比 1，用金币下注，最少 100（奖品是 $EMERGE 时最少 500）。开奖在金库进行，从不在浏览器里。可以赢金币，也可以赢由银行按与经营收益相同的每日额度和销毁比例支付的 $EMERGE——硬币每押 1 金币赢 2 $EMERGE，纸杯赢 3，每个钱包每天最多 15,000，牌桌不会掏空金库。每天三次免费；再买五次约 $5，用 $EMERGE 支付进金库（和每笔收费一样销毁并留存），或用 ETH 支付，其中 30% 归开发，其余留在金库。',
+      '名字会留住。在一台设备上改的昵称，换台设备打开就没了：新设备的随机名字更新，合并时赢了，还被写回了服务器。现在名字跟随真正改过它的那份记录。',
+      '世界地图显示你给世界起的名字。改名以前只写到了地块代币上，没写到地图和排行榜读取的认领记录里，所以它们仍显示旧名。现在会一起更新。',
+      'Discord。邀请链接在首页页脚。',
       '画面效果。完成的每一帧现在会过一道处理，做的是相机对场景做的事：每扇亮着的窗、每盏灯和火把周围有泛光，暖色调，胶片式的曲线让高光柔和滚落而不是溢出，饱和度略高，四角有暗角。它在线性光下调色而不是在像素上，所以暗部仍是暗部。时钟旁的 ✧ 按钮或 V 键可以关闭和打开；选择保存在本设备。',
       '地面连成一片。以前每块地砖到菱形边缘就戛然而止，草地和林地相接是一排锯齿般的直边。现在每种地面沿共享的边向较低的邻居伸出一条参差、抖色的舌头——草压过沙、林地压过草甸，绝不反过来——所以土地读起来是一整块。',
       '规划网格。时钟旁的 ⌗ 按钮或 G 键在地面上铺一层网格，按每块地砖自己的高度绘制，可建造范围的边缘用金色标出。默认关闭；本设备记住选择。',

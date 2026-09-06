@@ -45,7 +45,7 @@ import {
   allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
-  type Claim, type CoverKind, markCover } from '@/lib/server/registry';
+  type Claim, type CoverKind, markCover, renameClaim } from '@/lib/server/registry';
 import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
 import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
@@ -122,6 +122,8 @@ export async function POST(request: Request) {
     /** The owner answers a bidder's offer. */
     answer?: 'accept' | 'decline';
     bidder?: string;
+    /** The world's new name, from its owner. */
+    rename?: string;
     /** Expand the plot, once; `burnTx` paid for it where the token is live. */
     expand?: boolean;
     /** Advance the plot to `era`; `burnTx` paid for it where the token is live. */
@@ -246,6 +248,17 @@ export async function POST(request: Request) {
    * pay, and an accepted one reserves the plot for them at that price for a
    * while. The payment happens the same way as any sale, wallet to wallet.
    */
+  // The world's name lives on the claim row too: the map and the leaderboard
+  // read it from there, and a rename that stayed in the browser left the old
+  // name on every other screen.
+  if (typeof body.rename === 'string') {
+    const name = clean(body.rename, MAX_NAME);
+    if (!name) return NextResponse.json({ error: 'A world needs a name.' }, { status: 400 });
+    const row = await renameClaim(seed, owner, name);
+    if (!row) return NextResponse.json({ error: 'That plot is not yours to rename.' }, { status: 403 });
+    return NextResponse.json({ claim: row });
+  }
+
   if (body.offer || body.withdrawOffer) {
     if (registryConfigured()) {
       return NextResponse.json({ error: 'A plot on the land contract changes hands as a token.' }, { status: 409 });

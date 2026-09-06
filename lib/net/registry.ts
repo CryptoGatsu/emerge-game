@@ -293,6 +293,24 @@ export type ExpandResult =
  * first, then ask — and a plot already expanded comes back `already` rather
  * than refused, so a lost reply can be asked for again.
  */
+/** Carry a world's new name to its claim row, so the map shows it. */
+export async function renamePlot(seed: number, owner: string, name: string): Promise<boolean> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, rename: name }),
+      }),
+      async (r) => r,
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function expandPlot(seed: number, owner: string, burnTx?: string): Promise<ExpandResult> {
   try {
     const response = await withSession(

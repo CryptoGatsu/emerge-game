@@ -351,6 +351,29 @@ export async function sendTokenFromVault(tokenAddress: string, to: string, units
   }
 }
 
+/** Send the chain's own coin from the vault: the development share of an ETH pass. */
+export async function sendNativeFromVault(to: string, wei: bigint): Promise<TokenSend> {
+  const key = vaultKey();
+  if (!key) return { ok: false, problem: 'The vault is not configured to pay out.' };
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return { ok: false, problem: 'That is not a wallet address.' };
+  if (!(wei > 0n)) return { ok: false, problem: 'There is nothing to send.' };
+  if (!(await takeLock(NONCE_LOCK, LOCK_SECONDS))) return { ok: false, problem: 'The vault is sending something else.' };
+  try {
+    const account = privateKeyToAccount(key);
+    const client = reader();
+    const wallet = createWalletClient({ account, chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+    const held = await client.getBalance({ address: account.address });
+    // Keep a little back for gas on the vault's own transfers.
+    if (held < wei + 50_000_000_000_000_000n) return { ok: false, problem: 'The vault cannot cover that right now.' };
+    const txHash = await wallet.sendTransaction({ to: to as Hex, value: wei });
+    return { ok: true, txHash };
+  } catch (error) {
+    return { ok: false, problem: error instanceof Error ? error.message : 'The transfer failed.' };
+  } finally {
+    await releaseLock(NONCE_LOCK);
+  }
+}
+
 export type Swap = { ok: true; txHash: string; received: bigint; unquoted?: boolean } | { ok: false; problem: string };
 
 /**

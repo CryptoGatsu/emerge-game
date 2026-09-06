@@ -45,7 +45,7 @@ import { WalletPicker, useWallet } from './WalletPicker';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
 import { GuideZh } from './GuideZh';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | 'casino' | null;
 
 interface PanelsProps {
   panel: PanelKey;

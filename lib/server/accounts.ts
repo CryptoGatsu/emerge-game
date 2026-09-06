@@ -101,6 +101,32 @@ export function untilUtcMidnight(now = Date.now()): string {
 }
 
 /* ------------------------------------------------------------------ *
+ * Casino credit
+ * ------------------------------------------------------------------ */
+
+/**
+ * $EMERGE won at the tables, not yet paid out. It widens the wallet's daily
+ * room by exactly this much and is consumed as withdrawals go out, so a win
+ * is paid under the same rules as stewardship: the burn share, the day's
+ * count, the vault's cover.
+ */
+const casinoKey = (address: string) => serverKey(`casino:credit:${address.toLowerCase()}`);
+export async function casinoCreditOf(address: string): Promise<number> {
+  return Math.max(0, await counter(casinoKey(address)));
+}
+export async function addCasinoCredit(address: string, whole: number): Promise<void> {
+  const n = Math.floor(whole);
+  if (n > 0) await incrBy(casinoKey(address), n);
+}
+/** Consume up to `upTo` of the credit; returns what was taken. */
+export async function takeCasinoCredit(address: string, upTo: number): Promise<number> {
+  const have = await casinoCreditOf(address);
+  const take = Math.min(have, Math.floor(upTo));
+  if (take > 0) await incrBy(casinoKey(address), -take);
+  return take;
+}
+
+/* ------------------------------------------------------------------ *
  * Principal
  * ------------------------------------------------------------------ */
 

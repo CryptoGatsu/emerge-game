@@ -221,9 +221,11 @@ const MAX_MARKER_NUDGE = 0.09;
 /** Below this map width, in pixels, there is no room to lay names out at all. */
 const LABELS_NEED_WIDTH = 560;
 
-function RegionMap({ plots, selected, chart, owned, taken, banners, claimedEverywhere, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, taken, banners, names, claimedEverywhere, onSelect }: {
   /** Which emblem each plot flies, by seed, mine and theirs alike. */
   banners: Map<number, string>;
+  /** What each claimed world is called, by seed, from the claim rows — the name its owner gave it. */
+  names: Map<number, string>;
   plots: Plot[];
   selected: Plot | null;
   chart: number;
@@ -510,7 +512,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, claimedEvery
             <span className="pin-label">
               <b>
                 {(() => { const flown = banners.get(plot.seed); return flown && isEmblem(flown) ? <i className="banner-glyph" title={EMBLEM_NAME[flown]}>{EMBLEM_GLYPH[flown]}</i> : null; })()}
-                {plot.region}
+                {names.get(plot.seed) ?? plot.region}
                 {mine && <i className="yours">{t('yours')}</i>}
                 {theirs && !theirs.forSale && !(theirs.hiring && !theirs.hand) && <i className="settled-tag">{t('settled')}</i>}
                 {theirs && !!theirs.forSale && <i className="sale-tag">{t('for sale')}</i>}
@@ -1119,7 +1121,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
         <div className="land-body">
           <RegionMap
             plots={plots} selected={selected} chart={chart} owned={ownedSeeds}
-            taken={takenByOthers} banners={new Map(allClaims.filter((c) => c.banner).map((c) => [c.seed, c.banner as string]))} claimedEverywhere={allClaims.length} onSelect={choose}
+            taken={takenByOthers} banners={new Map(allClaims.filter((c) => c.banner).map((c) => [c.seed, c.banner as string]))} names={new Map(allClaims.filter((c) => c.worldName).map((c) => [c.seed, c.worldName]))} claimedEverywhere={allClaims.length} onSelect={choose}
           />
 
           {!selected ? (
@@ -1148,7 +1150,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
             {/* The registry decides, not this browser's memory. A stale local
                 claim on land somebody else now holds must read as theirs. */}
             <span className="eyebrow">{heldByOther ? (buyable !== null ? t('FOR SALE') : t('SETTLED')) : mine ? t('YOUR WORLD') : t('CLAIM')}</span>
-            <h2>{heldByOther ? heldByOther.worldName : mine ? mine.name : selected.region}</h2>
+            <h2>{heldByOther ? heldByOther.worldName : mine ? (allClaims.find((c) => c.seed === selected.seed)?.worldName || mine.name) : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{tn(selected.biomeLabel)}</span>
               <span>{selected.island}</span>

@@ -24,7 +24,7 @@ import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
-  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, removeBridge, digWater, fillWater, digProblem,
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -40,10 +40,11 @@ import {
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
-  coverPlot, boonPlot,
+  coverPlot, boonPlot, renamePlot,
 } from '@/lib/net/registry';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
+import Casino from './Casino';
 import { disconnectWallet, useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
@@ -1714,10 +1715,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!paid.ok) return;
     renameWorld(world, next);
     // The name belongs to the token, not to this browser, so where there is a
-    // token it is written there too and travels with the plot.
+    // token it is written there too and travels with the plot. The claim row
+    // carries it as well: that is what the world map and the leaderboard show.
     if (wallet.address && onChainClaimsLive()) {
       void renameOnChain(wallet.address, claimed.seed, world.name);
     }
+    if (wallet.address) void renamePlot(claimed.seed, wallet.address, world.name);
     onPlayer({ ...player, ledger: paid.ledger });
     onRename({ ...claimed, name: world.name });
     refresh();
@@ -1962,6 +1965,20 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * one is a stake going out. Both are booked under the arena, where the Bank
    * shows them.
    */
+  /** Gold at the casino: a negative delta stakes, a positive one pays. */
+  const goldAtCasino = useCallback((delta: number, note: string) => {
+    const world = worldRef.current;
+    if (!world || spectating) return false;
+    if (delta < 0) {
+      const ok = casinoStake(world, -delta, note);
+      if (ok) refresh();
+      return ok;
+    }
+    casinoPayout(world, delta, note);
+    refresh();
+    return true;
+  }, [refresh, spectating]);
+
   const stakeAtArena = useCallback((gold: number, on: string) => {
     const world = worldRef.current;
     // Never on a visit: the treasury in front of a visitor is not theirs, and
@@ -2121,6 +2138,18 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onFirstDayDismiss={() => markFirst('dismissed')}
           />
           <Notices notices={notices} onDismiss={dismiss} />
+          {panel === 'casino' && (
+            <Casino
+              address={wallet.address}
+              treasury={view.treasury}
+              ledger={player.ledger}
+              onLedger={(ledger) => onPlayer({ ...player, ledger })}
+              onGold={goldAtCasino}
+              onCue={(kind) => { if (kind === 'win') soundRef.current?.cue('hammer'); else if (kind === 'lose') soundRef.current?.tick('deny'); else soundRef.current?.tick('deny'); }}
+              onClose={() => setPanel(null)}
+              spectating={!!spectating}
+            />
+          )}
           {panel === 'arena' && (
             <Arena
               world={spectating ? null : worldRef.current}
