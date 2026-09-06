@@ -444,7 +444,7 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
         // taking the launchpad's own single-pool form. Rehearse the path
         // form; when it will not go, send the chained form instead.
         try {
-          await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, BigInt(now + 600)], nonce });
+          await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, BigInt(now + 600)], nonce, gas: SWAP_GAS });
         } catch {
           call = universalSwapV4Chained(token() as Hex, units, minOut, path);
         }
@@ -457,7 +457,10 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
         call = universalSwap(account.address, units, minOut, path);
       }
       const deadline = BigInt(now + 600);
-      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline], nonce });
+      // With the node's default gas the launchpad hook's inner work ran dry,
+      // was swallowed by the hook, and left a balance open: CurrencyNotSettled.
+      // The swap is rehearsed and sent with a ceiling of its own.
+      const { request } = await client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [call.commands, call.inputs, deadline], nonce, gas: SWAP_GAS });
       txHash = await wallet.writeContract(request);
     } else if (kind === 'v3') {
       const fee = Number(process.env.EMERGE_SWAP_FEE) || 3000;
@@ -482,6 +485,9 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
     await releaseLock(NONCE_LOCK);
   }
 }
+
+/** The gas a v4 swap through a hooked pool is rehearsed and sent with; the node's own default has proved too little. */
+const SWAP_GAS = 4_000_000n;
 
 /** How much the vault lets the router draw through Permit2 at a time, and for how long: a month of payouts in one approval. */
 const PERMIT2_GRANT_WHOLE = 10_000_000;
@@ -947,6 +953,9 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
       // leaves open, the output taken to the caller.
       const chained = universalSwapV4Chained(token() as Hex, units, 0n, path);
       diag.wholeRouteChainedLaunchpadStyle = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [chained.commands, chained.inputs, deadline()], gas: 4_000_000n }));
+      diag.wholeRouteChainedDefaultGas = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [chained.commands, chained.inputs, deadline()] }));
+      const chainedFloor = universalSwapV4Chained(token() as Hex, units, typeof out.quote === 'string' && /^\d+$/.test(out.quote) ? (BigInt(out.quote) * 97n) / 100n : 0n, path);
+      diag.wholeRouteChainedWithFloor = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [chainedFloor.commands, chainedFloor.inputs, deadline()], gas: 4_000_000n }));
       const firstChained = universalSwapV4Chained(token() as Hex, units, 0n, [path[0]]);
       diag.firstHopOnlyLaunchpadStyle = await attempt(() => client.simulateContract({ account, address: SWAP_ROUTER as Hex, abi: UNIVERSAL_ROUTER, functionName: 'execute', args: [firstChained.commands, firstChained.inputs, deadline()], gas: 4_000_000n }));
       // 7. The vault's ETH, since a hook can ask the swapper for gas or value.
