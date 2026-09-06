@@ -925,7 +925,12 @@ function homeOf(world: World, c: Citizen) {
 function jobBuilding(world: World, c: Citizen): Building | undefined {
   if (c.job === 'unemployed') return undefined;
   const type = jobs[c.job].building;
-  const sites = world.buildings.filter((b) => b.type === type && b.active && !b.ruined);
+  // Only sites they can get to. A workplace on an island with no bridge is
+  // the ferry's to serve, and the ferry carries the well-off; posting anyone
+  // else there sent them to the shore to stand facing it.
+  const water = waterOf(world);
+  const walks = !(hasFerry(world) && wealthOf(c) === 'wealthy');
+  const sites = world.buildings.filter((b) => b.type === type && b.active && !b.ruined && (!walks || reachable(world, water, water.landAt(b.x, b.y))));
   if (sites.length === 0) return findBuilding(world, type);
   if (sites.length === 1) { c.workplaceId = sites[0].id; return sites[0]; }
   const posted = new Map<string, number>();
@@ -1191,6 +1196,18 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     const out = water.toLand(c.destX, c.destY);
     c.destX = edge(c.destX + out.x * (out.d + 1.2), 3, 97);
     c.destY = edge(c.destY + out.y * (out.d + 1.2), 5, 95);
+  }
+  // Nobody sets out for a place they cannot walk to. The ferry carries the
+  // well-off; everybody else was being handed a workplace, a bench, a friend
+  // or a wander spot across the water and spent the day pushing at the shore.
+  if (!(hasFerry(world) && wealthOf(c) === 'wealthy') && !afoot(world, water, c, c.destX, c.destY)) {
+    releaseAmenity(world, c);
+    const spot = nearestAfoot(world, water, c);
+    c.destX = spot ? spot[0] : c.x;
+    c.destY = spot ? spot[1] : c.y;
+    c.destId = undefined;
+    c.errand = false;
+    if (phase === 'sleeping') c.roughSleeper = true;
   }
   const full = roadPath(
     world.layout,
@@ -1758,6 +1775,7 @@ function moveCitizens(world: World, hours: number) {
         for (const spot of world.layout.wanderSpots) {
           const d = (spot[0] - c.x) ** 2 + (spot[1] - c.y) ** 2;
           if (d >= bestD || d < 4) continue;
+          if (!boats && !afoot(world, dryWater, c, spot[0], spot[1])) continue;
           if (!dryLine(water, world.layout, c.x, c.y, spot[0], spot[1])) continue;
           bestD = d; best = spot;
         }
@@ -3827,14 +3845,18 @@ export function rehouse(world: World): number {
     f.members = f.members.filter((id) => alive.has(id));
     if (!f.members.length) f.homeId = '';
   }
-  const standing = (id: string) => world.buildings.some((b) => b.id === id && b.type === 'House' && b.active);
+  // A house on an island with no bridge is no home to a family on foot: they
+  // are matched to one on the mainland when a bed is free, like anyone else.
+  const water = waterOf(world);
+  const onFoot = (b: Building) => reachable(world, water, water.landAt(b.x, b.y));
+  const standing = (id: string) => world.buildings.some((b) => b.id === id && b.type === 'House' && b.active && onFoot(b));
   // How many people each house already sleeps. A house is not one family's:
   // it holds as many as it has room for, so a newcomer who came alone shares
   // a roof rather than taking a whole house for one bed. "One house, one
   // person" was the single most-asked question in the feedback.
   const sleeping = new Map<string, number>();
   for (const f of world.families) if (f.members.length && standing(f.homeId)) sleeping.set(f.homeId, (sleeping.get(f.homeId) ?? 0) + f.members.length);
-  const houses = world.buildings.filter((b) => b.type === 'House' && b.active);
+  const houses = world.buildings.filter((b) => b.type === 'House' && b.active && onFoot(b));
   const roomIn = (b: Building) => houseRoom(b, world) - (sleeping.get(b.id) ?? 0);
   // The largest family first: the most people off the street per house.
   const homeless = world.families
@@ -8383,6 +8405,34 @@ function reachable(world: { buildings: Building[]; connectedIslands: number[] },
   // The ferry is not counted: it carries the well-off, and a workplace on an
   // island has to be reachable by everybody who works there.
   return land === water.mainland || world.connectedIslands.includes(land);
+}
+
+/**
+ * Whether somebody on foot can get from where they stand to a point: the
+ * same piece of dry land, or two landmasses the settlement has bridged. The
+ * ferry is never counted here — that is `moveCitizens`' business, and only
+ * for the well-off. Somebody already in the water is left to the swimming
+ * rules; a point in the water is nowhere to walk to.
+ */
+export function afoot(world: { buildings: Building[]; connectedIslands: number[] }, water: WaterField, c: { x: number; y: number }, x: number, y: number): boolean {
+  const from = water.landAt(c.x, c.y);
+  const to = water.landAt(x, y);
+  if (from < 0) return true;
+  if (to < 0) return false;
+  if (from === to) return true;
+  return reachable(world, water, from) && reachable(world, water, to);
+}
+
+/** The nearest wander spot they can walk to, or null on a scrap of land with none. */
+function nearestAfoot(world: World, water: WaterField, c: Citizen): [number, number] | null {
+  let best: [number, number] | null = null;
+  let bestD = Infinity;
+  for (const spot of world.layout.wanderSpots) {
+    if (!afoot(world, water, c, spot[0], spot[1])) continue;
+    const d = (spot[0] - c.x) ** 2 + (spot[1] - c.y) ** 2;
+    if (d < bestD) { bestD = d; best = spot; }
+  }
+  return best;
 }
 
 /**
