@@ -8760,6 +8760,69 @@ export function upgradeBuilding(world: World, id: string): { ok: boolean; messag
   return { ok: true, message: `Improved to level ${building.level}.` };
 }
 
+/**
+ * What improving every building of a type at once would come to.
+ *
+ * `count` is how many can still go up a level; `gold`, `wood` and `stone`
+ * are the whole bill; `affordable` is how many of them the treasury and the
+ * yard can cover right now, taken cheapest first, so the card can say
+ * "3 of 7" instead of refusing the lot over the last one.
+ */
+export function upgradeAllQuote(world: World, type: string): { count: number; gold: number; wood: number; stone: number; affordable: number } | null {
+  const bills = world.buildings
+    .filter((b) => b.type === type && !b.ruined)
+    .map((b) => upgradeCost(b, world))
+    .filter((c): c is { gold: number; wood: number; stone: number } => !!c)
+    .map((c) => ({ ...c, gold: Math.round(c.gold * buildDiscount(world)) }))
+    .sort((a, b) => a.gold - b.gold);
+  if (bills.length < 2) return null;
+  let gold = 0, wood = 0, stone = 0, affordable = 0;
+  let treasury = world.treasury, yardWood = world.resources.wood, yardStone = world.resources.stone;
+  for (const c of bills) {
+    gold += c.gold; wood += c.wood; stone += c.stone;
+    if (treasury >= c.gold && yardWood >= c.wood && yardStone >= c.stone) {
+      affordable += 1; treasury -= c.gold; yardWood -= c.wood; yardStone -= c.stone;
+    }
+  }
+  return { count: bills.length, gold, wood, stone, affordable };
+}
+
+/**
+ * Improve every building of a type by one level, as far as the treasury and
+ * the yard go, cheapest first. Stops at the first one it cannot pay for and
+ * says how many it managed, so a player with seven houses and Gold for four
+ * gets four better houses rather than a refusal.
+ */
+export function upgradeAllOfType(world: World, type: string): { ok: boolean; message: string; improved: number; gold: number } {
+  useWorld(world);
+  const candidates = world.buildings
+    .filter((b) => b.type === type && !b.ruined && upgradeCost(b, world))
+    .sort((a, b) => (upgradeCost(a, world)?.gold ?? 0) - (upgradeCost(b, world)?.gold ?? 0));
+  if (candidates.length === 0) return { ok: false, message: `No ${type.toLowerCase()} here can be improved.`, improved: 0, gold: 0 };
+  let improved = 0, gold = 0;
+  let stopped: string | null = null;
+  for (const b of candidates) {
+    const cost = upgradeCost(b, world);
+    if (!cost) continue;
+    const price = Math.round(cost.gold * buildDiscount(world));
+    if (world.treasury < price) { stopped = `The treasury cannot cover the next one (${price} Gold).`; break; }
+    if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) { stopped = `The yard ran short: the next one needs ${cost.wood} timber and ${cost.stone} stone.`; break; }
+    spend(world, 'building', price);
+    world.resources.wood -= cost.wood;
+    world.resources.stone -= cost.stone;
+    note(world, 'consumed', 'wood', cost.wood);
+    note(world, 'consumed', 'stone', cost.stone);
+    b.level = levelOf(b) + 1;
+    improved += 1; gold += price;
+  }
+  if (improved === 0) return { ok: false, message: stopped ?? 'Nothing was improved.', improved: 0, gold: 0 };
+  staffNow(world);
+  noteAttention(world);
+  const plural = candidates.length === 1 ? type.toLowerCase() : `${type.toLowerCase()}s`;
+  pushFeed(world, 'build', `${improved} of ${candidates.length} ${plural} were improved for ${gold.toLocaleString()} Gold.`);
+  return { ok: true, message: stopped ? `Improved ${improved} of ${candidates.length}. ${stopped}` : `All ${improved} improved.`, improved, gold };
+}
+
 /** Add Gold to the treasury from outside the settlement's own economy. */
 export function fundTreasury(world: World, gold: number, note: string) {
   useWorld(world);

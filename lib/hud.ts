@@ -12,7 +12,7 @@ import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom,
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
-  skillLevel, skillOutput, upgradeCost, upkeepOf,
+  skillLevel, skillOutput, upgradeCost, upgradeAllQuote, upkeepOf,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith, WEALTH_WORDS, wealthOf,
@@ -48,6 +48,8 @@ const tradeOf = (type: string): WorkingJob | null => (Object.keys(JOBS) as Worki
 export interface FocusBuilding {
   kind: 'building';
   id: string; type: string; occupants: number; production: string | null;
+  /** The building's kind as the simulation names it, under whatever the card calls it. */
+  buildingType: string;
   /** Why the trade did not work in full yesterday, when it did not. */
   idle: string | null;
   /** The people posted here against its posts, for a workplace. */
@@ -70,6 +72,8 @@ export interface FocusBuilding {
   /** The age the cap belongs to, and the next one that lifts it, or null at the last. */
   cap: { era: string; next: string | null };
   upgrade: { gold: number; wood: number; stone: number; stocked: boolean } | null;
+  /** Improving every building of this type at once, when there is more than one to improve. */
+  upgradeAll: { count: number; gold: number; wood: number; stone: number; affordable: number } | null;
   /** What moving it costs, in Gold. */
   moveGold: number;
   /** For a house: who sleeps here against the beds, and the beds an improvement would add. */
@@ -360,6 +364,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     kind: 'building',
     id: b.id,
     type: family ? `${family.name} House` : b.type,
+    buildingType: b.type,
     occupants: b.workers.length,
     production: b.production ? JOB_LABELS[b.production as keyof typeof JOB_LABELS] ?? b.production : null,
     idle: (() => {
@@ -393,6 +398,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
         stocked: world.resources.wood >= next.wood && world.resources.stone >= next.stone,
       };
     })(),
+    upgradeAll: upgradeAllQuote(world, b.type),
     moveGold: moveCost(b.type),
     improves: upgradeEffect(b.type),
     beds: b.type === 'House'

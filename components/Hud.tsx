@@ -53,6 +53,7 @@ interface HudProps {
   /** Which building the player is placing, if any. */
   movingBuilding: string | null;
   onUpgradeBuilding: (id: string) => void;
+  onUpgradeAll: (type: string) => void;
   onMoveBuilding: (id: string | null) => void;
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
@@ -181,7 +182,7 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onDismiss, onRebuild, onUpgrade, onMove }: {
+function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onDismiss, onRebuild, onUpgrade, onUpgradeAll, onMove }: {
   focus: Focus; following: string | null; player: PlayerRecord;
   /** True on somebody else's world: you can look and follow, not change. */
   readOnly: boolean;
@@ -195,6 +196,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
   /** The building the player is currently placing, if any. */
   moving: string | null;
   onUpgrade: (id: string) => void;
+  onUpgradeAll: (type: string) => void;
   onMove: (id: string | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -294,6 +296,23 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
               onClick={() => onMove(moving === focus.id ? null : focus.id)}
             >
               {moving === focus.id ? t('Tap the ground') : t('Move · {gold} Gold', { gold: focus.moveGold })}
+            </button>
+          </div>
+        )}
+        {focus.upgradeAll && !readOnly && !focus.ruined && (
+          <div className="building-work improve-all">
+            <button
+              className="improve"
+              disabled={focus.upgradeAll.affordable === 0}
+              onClick={() => onUpgradeAll(focus.buildingType)}
+            >
+              {focus.upgradeAll.affordable >= focus.upgradeAll.count
+                ? t('Improve every {type} · {n} for {gold} Gold', { type: tn(focus.buildingType).toLowerCase(), n: focus.upgradeAll.count, gold: focus.upgradeAll.gold.toLocaleString() })
+                : t('Improve {n} of {total} {type}s · as far as the treasury goes', { n: focus.upgradeAll.affordable, total: focus.upgradeAll.count, type: tn(focus.buildingType).toLowerCase() })}
+              <em>
+                {t('{wood} timber · {stone} stone', { wood: focus.upgradeAll.wood, stone: focus.upgradeAll.stone })}
+                {focus.upgradeAll.affordable === 0 ? t(' — not yet') : t(' · one level each, cheapest first')}
+              </em>
             </button>
           </div>
         )}
@@ -982,6 +1001,7 @@ export function Hud(props: HudProps) {
               treasury={view.treasury}
               moving={props.movingBuilding}
               onUpgrade={props.onUpgradeBuilding}
+              onUpgradeAll={props.onUpgradeAll}
               onMove={props.onMoveBuilding}
             />
           )

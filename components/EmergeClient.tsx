@@ -24,7 +24,7 @@ import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
-  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -1643,6 +1643,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     setView(snapshot(world, selectedRef.current));
   }, []);
 
+  /** Improve every building of a type at once, as far as the treasury and the yard go. */
+  const improveAll = useCallback((type: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = upgradeAllOfType(world, type);
+    if (!result.ok) {
+      soundRef.current?.tick('deny');
+      announce({ id: `improve-all-${Date.now()}`, kind: 'sync', title: t('Not improved'), body: tx(result.message), lifetime: 8_000 });
+      return;
+    }
+    sceneRef.current?.syncBuildings();
+    soundRef.current?.cue('anvil');
+    announce({ id: `improve-all-${Date.now()}`, kind: 'sync', title: t('Improved'), body: tx(result.message), lifetime: 8_000 });
+    setView(snapshot(world, selectedRef.current));
+  }, []);
+
   const cancelBuild = useCallback(() => {
     sceneRef.current?.cancelPlacement();
     setPlacing(null);
@@ -2091,6 +2107,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onCancelBuild={cancelBuild}
             movingBuilding={movingBuilding}
             onUpgradeBuilding={improveBuilding}
+            onUpgradeAll={improveAll}
             onMoveBuilding={moveBuildingTo}
             watching={watching}
             online={online}
