@@ -562,13 +562,22 @@ const FEE_TOO_HIGH = 30_000;
  * chain is young, so the whole history is a few requests.
  */
 async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex, startAt = 0n): Promise<MadePool[]> {
+  return poolsMade(client, [{ currency0: tokenIn }, { currency1: tokenIn }], startAt);
+}
+
+/** One pool, by the id a chart or a pair page shows, which is the hash of its key. */
+async function poolById(client: ReturnType<typeof reader>, id: Hex, startAt = 0n): Promise<MadePool | null> {
+  return (await poolsMade(client, [{ id }], startAt))[0] ?? null;
+}
+
+async function poolsMade(client: ReturnType<typeof reader>, filters: Record<string, Hex>[], startAt = 0n): Promise<MadePool[]> {
   const manager = (process.env.EMERGE_V4_POOL_MANAGER ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4PoolManager : '')) as Hex;
   const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
   if (!/^0x[0-9a-fA-F]{40}$/.test(manager)) return [];
   const head = await client.getBlockNumber();
   const logs: { args: Record<string, unknown> }[] = [];
-  const pull = async (from: bigint, to: bigint, side: 'currency0' | 'currency1') => {
-    const got = await client.getLogs({ address: manager, event: POOL_INITIALIZE, args: { [side]: tokenIn } as Record<string, Hex>, fromBlock: from, toBlock: to });
+  const pull = async (from: bigint, to: bigint, filter: Record<string, Hex>) => {
+    const got = await client.getLogs({ address: manager, event: POOL_INITIALIZE, args: filter, fromBlock: from, toBlock: to });
     logs.push(...(got as unknown as { args: Record<string, unknown> }[]));
   };
   // The whole chain in one ask; when the node caps the range, walk it from
@@ -577,10 +586,10 @@ async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex, sta
   // scan is never mistaken for a pool that does not exist.
   const start = startAt > 0n && startAt < head ? startAt : 0n;
   lastScan = { from: start, to: head, head, requests: 0, complete: true };
-  for (const side of ['currency0', 'currency1'] as const) {
+  for (const filter of filters) {
     lastScan.requests += 1;
     try {
-      await pull(start, head, side);
+      await pull(start, head, filter);
       continue;
     } catch { /* capped: slice it */ }
     let from = start;
@@ -590,7 +599,7 @@ async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex, sta
       const to = from + step - 1n > head ? head : from + step - 1n;
       lastScan.requests += 1;
       try {
-        await pull(from, to, side);
+        await pull(from, to, filter);
         covered = to;
         from = to + 1n;
         if (step < 200_000n) step *= 2n;
@@ -611,6 +620,30 @@ async function poolsMadeFor(client: ReturnType<typeof reader>, tokenIn: Hex, sta
     out.push({ id: a.id, currency0: a.currency0, currency1: a.currency1, fee: Number(a.fee), tickSpacing: Number(a.tickSpacing), hooks: a.hooks, liquidity });
   }
   return out.sort((x, y) => (BigInt(y.liquidity) > BigInt(x.liquidity) ? 1 : -1));
+}
+
+/** The deepest live v4 pool between two currencies at a standard fee, or null. */
+async function deepest(client: ReturnType<typeof reader>, a: Hex, b: Hex): Promise<PoolRow | null> {
+  return (await poolsBetween(client, a, b, 'hop')).filter((r) => live(r, 'v4')).sort((x, y) => (BigInt(y.v4!.liquidity) > BigInt(x.v4!.liquidity) ? 1 : -1))[0] ?? null;
+}
+
+/**
+ * From a pool the token is in, the whole path to GLD: the pool itself as
+ * its first hop, then the other side to GLD directly or through the
+ * stepping stone, deepest pools first. Null when there is no way on.
+ */
+async function routeFromPool(client: ReturnType<typeof reader>, tokenIn: Hex, pool: MadePool, via: Hex[], gld: Hex): Promise<{ path: string; note: string } | null> {
+  const other = pool.currency0.toLowerCase() === tokenIn.toLowerCase() ? pool.currency1 : pool.currency0;
+  const name = (a: Hex) => (a === NATIVE ? 'native ETH' : a);
+  const first = `${hopSpec(pool)},${other}`;
+  const direct = await deepest(client, other, gld);
+  if (direct) return { path: `${first},${direct.fee}`, note: `${name(other)} → GLD at ${direct.fee}` };
+  for (const stone of via.filter((v) => v.toLowerCase() !== other.toLowerCase())) {
+    const middle = await deepest(client, other, stone);
+    const last = middle ? await deepest(client, stone, gld) : null;
+    if (middle && last) return { path: `${first},${middle.fee},${stone},${last.fee}`, note: `${name(other)} → ${stone} at ${middle.fee} → GLD at ${last.fee}` };
+  }
+  return null;
 }
 
 /** A hop as EMERGE_SWAP_PATH writes it: the fee alone for a standard hookless pool, otherwise fee/spacing/hook. */
@@ -653,7 +686,7 @@ async function discoverRoutes(client: ReturnType<typeof reader>, tokenIn: Hex, v
  * decoded. For the operator, behind the cron secret, when a GLD payout
  * says the swap failed and the message alone does not say why.
  */
-export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n): Promise<Record<string, unknown>> {
+export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n, poolId: Hex | null = null): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {
     kind: (process.env.EMERGE_SWAP_KIND ?? 'v2').toLowerCase(),
     router: SWAP_ROUTER, token: token(), gld: GLD_ADDRESS, permit2: process.env.EMERGE_PERMIT2 ?? PERMIT2_ADDRESS,
@@ -666,6 +699,26 @@ export async function probeSwap(wholeEmerge = 100, search = false, scanFrom = 0n
     const account = privateKeyToAccount(key);
     const client = reader();
     out.quoterInUse = quoterFor(out.kind as string) || '(none)';
+    if (poolId) {
+      // A pool named by its id: read its key off the chain and route from it.
+      const envFrom = BigInt(Number(process.env.EMERGE_V4_SCAN_FROM) || 0);
+      const pool = await poolById(client, poolId, scanFrom > 0n ? scanFrom : envFrom);
+      out.scan = lastScan ? { fromBlock: String(lastScan.from), toBlock: String(lastScan.to), head: String(lastScan.head), requests: lastScan.requests, complete: lastScan.complete } : null;
+      if (!pool) {
+        out.poolById = null;
+        out.poolAdvice = `No Initialize event carries the id ${poolId} in the blocks scanned${lastScan && !lastScan.complete ? ` (${lastScan.from}–${lastScan.to} of ${lastScan.head}; pass &from= to go on)` : ''}. Either it is not a Uniswap v4 pool on this PoolManager, or the id is something else.`;
+      } else {
+        out.poolById = pool;
+        const mine = [pool.currency0, pool.currency1].some((c) => c.toLowerCase() === (token() as string).toLowerCase());
+        const viaFromEnv = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000).via.filter((v) => v !== NATIVE);
+        const route = mine ? await routeFromPool(client, token() as Hex, pool, viaFromEnv.length ? viaFromEnv : ['0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as Hex], GLD_ADDRESS as Hex) : null;
+        out.poolAdvice = !mine
+          ? `That pool is ${pool.currency0} / ${pool.currency1}; the token is not in it.`
+          : route
+            ? `The pool is v4 ${pool.currency0 === NATIVE ? 'native ETH' : pool.currency0} / ${pool.currency1}, fee ${pool.fee}${pool.fee === 0x800000 ? ' (dynamic)' : ''}, spacing ${pool.tickSpacing}, hook ${pool.hooks === NATIVE ? 'none' : pool.hooks}, liquidity ${pool.liquidity}. Set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${route.path} (${route.note}).`
+            : `The pool is v4 with fee ${pool.fee}, spacing ${pool.tickSpacing}, hook ${pool.hooks}, liquidity ${pool.liquidity}, but no v4 pool with liquidity leads on from its other side to GLD.`;
+      }
+    }
     // The pools themselves, before any swap is simulated.
     const routeForPools = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
     const pools = await poolsAlong(client, [token() as Hex, ...routeForPools.via, GLD_ADDRESS as Hex]);

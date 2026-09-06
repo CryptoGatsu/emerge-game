@@ -589,7 +589,9 @@ syntax (a hop may carry its tick spacing as `fee/spacing`) and the V4Quoter
 in `EMERGE_SWAP_QUOTER`. `GET /api/vault?probe=1` with the cron secret
 simulates the swap as configured and reports allowances, the quote and the
 decoded revert reason, sending nothing; `&search=1` tries every kind and
-fee tier along the configured tokens and lists the routes that fill. Without a live token the
+fee tier along the configured tokens and lists the routes that fill;
+`&pool=<id>` reads a v4 pool's key by the id a chart shows and writes the
+route from it, hook included. Without a live token the
 settlement is simulated in $EMERGE units so the flow can be exercised.
 
 v2.3: stewardship is judged on the server (`judgedFor` in

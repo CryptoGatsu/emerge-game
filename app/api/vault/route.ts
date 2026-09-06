@@ -11,7 +11,8 @@
  * `GET /api/vault?probe=1`, with the cron secret, simulates the GLD swap as
  * configured and says what it would do, allowances and revert reason
  * included; `&search=1` also tries every kind and fee tier and lists the
- * routes that fill. Nothing is sent.
+ * routes that fill; `&pool=<id>` reads a v4 pool's key by the id a chart
+ * shows and writes the route from it. Nothing is sent.
  */
 
 import { NextResponse } from 'next/server';
@@ -38,7 +39,10 @@ export async function GET(request: Request) {
     const amount = Number(url.searchParams.get('amount')) || 100;
     // `search=1` also tries every kind and standard fee tier along the configured tokens.
     const from = BigInt(Math.max(0, Math.floor(Number(url.searchParams.get('from')) || 0)));
-    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from), { headers: { 'cache-control': 'no-store, max-age=0' } });
+    // `pool=<id>` names a v4 pool by the id a chart shows; its key is read off the chain.
+    const pool = url.searchParams.get('pool') ?? '';
+    const poolId = /^0x[0-9a-fA-F]{64}$/.test(pool) ? (pool as `0x${string}`) : null;
+    return NextResponse.json(await probeSwap(amount, !!url.searchParams.get('search'), from, poolId), { headers: { 'cache-control': 'no-store, max-age=0' } });
   }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });
