@@ -12,7 +12,40 @@
  * Pure encoding, no chain access, so the harness can check every byte.
  */
 
-import { BaseError, ContractFunctionRevertedError, decodeErrorResult, encodeAbiParameters, encodePacked, type Abi, type Hex } from 'viem';
+import { BaseError, ContractFunctionRevertedError, decodeErrorResult, encodeAbiParameters, encodePacked, keccak256, type Abi, type Hex } from 'viem';
+
+/**
+ * Uniswap on Robinhood Chain (4663), as @uniswap/sdk-core and
+ * @uniswap/universal-router-sdk publish it. Defaults for anything the
+ * environment does not name.
+ */
+export const UNISWAP_ON_ROBINHOOD = {
+  universalRouter: '0x8876789976decbfcbbbe364623c63652db8c0904',
+  v3Factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa',
+  quoterV2: '0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7',
+  swapRouter02: '0xcaf681a66d020601342297493863e78c959e5cb2',
+  v4PoolManager: '0x8366a39cc670b4001a1121b8f6a443a643e40951',
+  v4Quoter: '0x8dc178efb8111bb0973dd9d722ebeff267c98f94',
+  v4StateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b',
+} as const;
+
+/** The v3 factory's pool lookup, and the v4 StateView's pool reads. */
+export const V3_FACTORY = [
+  { type: 'function', name: 'getPool', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }], outputs: [{ type: 'address' }] },
+] as const;
+export const V4_STATE_VIEW = [
+  { type: 'function', name: 'getSlot0', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' }, { name: 'protocolFee', type: 'uint24' }, { name: 'lpFee', type: 'uint24' }] },
+  { type: 'function', name: 'getLiquidity', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ name: 'liquidity', type: 'uint128' }] },
+] as const;
+
+/** A v4 pool's id: the hash of its key, currencies in address order, no hooks. */
+export function v4PoolId(a: Hex, b: Hex, fee: number, tickSpacing: number, hooks: Hex = '0x0000000000000000000000000000000000000000'): Hex {
+  const [c0, c1] = BigInt(a) < BigInt(b) ? [a, b] : [b, a];
+  return keccak256(encodeAbiParameters(
+    [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' }],
+    [c0, c1, fee, tickSpacing, hooks],
+  ));
+}
 
 /** Permit2, deployed at the same address on every chain Uniswap ships to. */
 export const PERMIT2_ADDRESS: Hex = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
@@ -73,7 +106,7 @@ export const ROUTER_ERRORS = [
 
 /** Revert bytes, in words: the error's name and arguments, nested through the router's wrapper. */
 export function explainRevertData(raw: Hex | undefined): string {
-  if (!raw || raw === '0x') return 'reverted without a reason (no pool on that route at that fee, or the router is not what its address says)';
+  if (!raw || raw === '0x') return 'reverted without a reason (the node returned no revert data: a v3 call to a pool that is not there does this, and so does a node that strips reasons)';
   try {
     // Widened: viem also decodes Solidity's own Error(string) and Panic, which
     // the typed ABI does not name.

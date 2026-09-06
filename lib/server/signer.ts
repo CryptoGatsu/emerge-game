@@ -33,7 +33,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
 import { releaseLock, takeLock } from './kv';
-import { PERMIT2, PERMIT2_ADDRESS, QUOTER_V2, UNIVERSAL_ROUTER, V4_QUOTER, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys } from '../chain/universal';
+import { PERMIT2, PERMIT2_ADDRESS, QUOTER_V2, UNISWAP_ON_ROBINHOOD, UNIVERSAL_ROUTER, V3_FACTORY, V4_QUOTER, V4_STATE_VIEW, explainRevert, parseRoute, universalSwap, universalSwapV4, v3Path, v4PathKeys, v4PoolId } from '../chain/universal';
 
 /** The key, or null when this deployment is not configured to pay anybody. */
 function vaultKey(): Hex | null {
@@ -440,7 +440,7 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
         nonce += 1;
       }
       const route = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
-      const quoter = process.env.EMERGE_SWAP_QUOTER ?? '';
+      const quoter = quoterFor(kind);
       let minOut = 0n;
       let call: { commands: Hex; inputs: Hex[] };
       if (kind === 'v4') {
@@ -487,6 +487,52 @@ export async function swapForGld(wholeEmerge: number): Promise<Swap> {
   }
 }
 
+/** The quoter for a kind: the environment's, else Uniswap's own on Robinhood Chain. */
+function quoterFor(kind: string): string {
+  const set = process.env.EMERGE_SWAP_QUOTER ?? '';
+  if (/^0x[0-9a-fA-F]{40}$/.test(set)) return set;
+  if (ACTIVE_CHAIN.chainId !== 4663) return '';
+  return kind === 'v4' ? UNISWAP_ON_ROBINHOOD.v4Quoter : kind === 'universal' ? UNISWAP_ON_ROBINHOOD.quoterV2 : '';
+}
+
+const TIERS = [100, 500, 3000, 10000];
+const TICK: Record<number, number> = { 100: 1, 500: 10, 3000: 60, 10000: 200 };
+
+/**
+ * Which pools actually exist along a route, read from the factory and the
+ * v4 StateView rather than inferred from a swap's revert — which the node
+ * may return without a reason. One row per hop and fee tier.
+ */
+async function poolsAlong(client: ReturnType<typeof reader>, tokens: Hex[]): Promise<{ hop: string; fee: number; v3: string | null; v4: { liquidity: string } | null }[]> {
+  const factory = (process.env.EMERGE_V3_FACTORY ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v3Factory : '')) as Hex;
+  const stateView = (process.env.EMERGE_V4_STATE_VIEW ?? (ACTIVE_CHAIN.chainId === 4663 ? UNISWAP_ON_ROBINHOOD.v4StateView : '')) as Hex;
+  const rows: { hop: string; fee: number; v3: string | null; v4: { liquidity: string } | null }[] = [];
+  for (let i = 0; i + 1 < tokens.length; i++) {
+    const [a, b] = [tokens[i], tokens[i + 1]];
+    for (const fee of TIERS) {
+      let v3: string | null = null, v4: { liquidity: string } | null = null;
+      if (/^0x[0-9a-fA-F]{40}$/.test(factory)) {
+        try {
+          const pool = await client.readContract({ address: factory, abi: V3_FACTORY, functionName: 'getPool', args: [a, b, fee] });
+          if (BigInt(pool) !== 0n) v3 = pool;
+        } catch { /* no factory there */ }
+      }
+      if (/^0x[0-9a-fA-F]{40}$/.test(stateView)) {
+        try {
+          const id = v4PoolId(a, b, fee, TICK[fee]);
+          const [sqrtPrice] = await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getSlot0', args: [id] });
+          if (sqrtPrice !== 0n) {
+            const liquidity = await client.readContract({ address: stateView, abi: V4_STATE_VIEW, functionName: 'getLiquidity', args: [id] });
+            v4 = { liquidity: String(liquidity) };
+          }
+        } catch { /* no state view there */ }
+      }
+      rows.push({ hop: `${a.slice(0, 8)}…→${b.slice(0, 8)}…`, fee, v3, v4 });
+    }
+  }
+  return rows;
+}
+
 /**
  * What the swap would do, without sending it: every setting the vault reads,
  * every allowance, the quote, and the simulated `execute` with its revert
@@ -505,6 +551,21 @@ export async function probeSwap(wholeEmerge = 100, search = false): Promise<Reco
   try {
     const account = privateKeyToAccount(key);
     const client = reader();
+    out.quoterInUse = quoterFor(out.kind as string) || '(none)';
+    // The pools themselves, before any swap is simulated.
+    const routeForPools = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
+    const pools = await poolsAlong(client, [token() as Hex, ...routeForPools.via, GLD_ADDRESS as Hex]);
+    out.pools = pools.filter((r) => r.v3 || r.v4);
+    out.poolsChecked = pools.length;
+    const hops = [...new Set(pools.map((r) => r.hop))];
+    const pick = (want: 'v4' | 'v3') => hops.map((h) => pools.find((r) => r.hop === h && (want === 'v4' ? r.v4 && BigInt(r.v4.liquidity) > 0n : r.v3)) ?? null);
+    const v4Route = pick('v4'), v3Route = pick('v3');
+    const spec = (rs: (typeof pools[number] | null)[]) => [rs[0]?.fee, ...routeForPools.via.flatMap((v, i) => [v, rs[i + 1]?.fee])].join(',');
+    out.poolAdvice = v4Route.every((r) => r)
+      ? `Every hop has a v4 pool with liquidity: set EMERGE_SWAP_KIND=v4 and EMERGE_SWAP_PATH=${spec(v4Route)}.`
+      : v3Route.every((r) => r)
+        ? `Every hop has a v3 pool: set EMERGE_SWAP_KIND=universal and EMERGE_SWAP_PATH=${spec(v3Route)}.`
+        : `Not every hop has a pool at a standard fee: ${hops.map((h, i) => `${h} ${v4Route[i] ? 'v4 ok' : v3Route[i] ? 'v3 ok' : 'none'}`).join('; ')}. Check the pools' tokens, fees and hooks in the Uniswap app.`;
     out.vault = account.address;
     const decimals = await client.readContract({ address: token() as Hex, abi: ERC20, functionName: 'decimals' });
     const units = parseUnits(String(Math.floor(wholeEmerge)), Number(decimals));
@@ -517,8 +578,8 @@ export async function probeSwap(wholeEmerge = 100, search = false): Promise<Reco
     out.permit2ToRouter = { amount: String(granted), expires: Number(expires), expired: Number(expires) <= Math.floor(Date.now() / 1000) };
     const route = parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000);
     out.route = route;
-    const quoter = process.env.EMERGE_SWAP_QUOTER ?? '';
     const kind = out.kind as string;
+    const quoter = quoterFor(kind);
     let call: { commands: Hex; inputs: Hex[] };
     if (kind === 'v4') {
       const path = v4PathKeys(route, GLD_ADDRESS as Hex);
