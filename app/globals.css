@@ -3249,6 +3249,25 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 .leaders-list > p { margin: 0; text-align: center; }
 .leader-row { display: grid; grid-template-columns: 28px 22px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; text-align: left; padding: 8px 12px; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 12px; background: rgba(1, 10, 6, 0.55); color: #e6f5c8; font: inherit; cursor: pointer; min-height: 46px; }
 .leader-row:hover { border-color: rgba(184, 231, 86, 0.45); }
+.land-market { margin: -4px 0 12px; display: grid; justify-items: center; gap: 8px; }
+.land-list { width: 100%; max-width: 860px; display: grid; gap: 6px; }
+.land-list > p { margin: 0; text-align: center; }
+.land-sort { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
+.land-sort button.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); }
+.land-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) auto auto; gap: 10px 14px; align-items: center; text-align: left; padding: 9px 12px; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 12px; background: rgba(1, 10, 6, 0.55); color: #e6f5c8; }
+.land-row.mine { border-color: rgba(240, 208, 94, 0.6); }
+.land-who { display: grid; gap: 2px; min-width: 0; }
+.land-who b, .land-who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.land-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.land-stats > span { display: grid; line-height: 1.2; }
+.land-stats > span > b { font-size: 13px; }
+.land-stats > span > small { font-size: 10.5px; color: var(--muted); }
+.land-price { display: grid; text-align: right; gap: 2px; }
+.land-price b { font-size: 14px; white-space: nowrap; }
+.land-price small { max-width: 180px; }
+.land-actions { display: flex; flex-direction: column; gap: 6px; }
+.land-actions .claim-button.small { padding: 6px 10px; font-size: 11px; }
+@media (max-width: 720px) { .land-row { grid-template-columns: 1fr 1fr; } .land-price { text-align: left; } .land-actions { flex-direction: row; } }
 .leader-row.mine { border-color: rgba(240, 208, 94, 0.6); }
 .leader-row .rank { font-size: 14px; color: #f0d05e; text-align: center; }
 .leader-row .glyph { color: #b8e756; text-align: center; }

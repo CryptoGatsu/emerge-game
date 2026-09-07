@@ -26,7 +26,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { defaultWorldName } from '@/lib/simulation';
 import {
   CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, chartRoom, claimOf, drawPlotPreview,
-  drawRegionMap, inspectPlot, islandsFor, marketPlots, withoutClaim,
+  drawRegionMap, inspectPlot, islandsFor, marketPlots, withoutClaim, chartOfSeed,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
 import { worldCapacity } from '@/lib/world/charts';
@@ -44,6 +44,7 @@ import {
   type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader,
 } from '@/lib/net/registry';
 import { WalletPicker, useWallet } from './WalletPicker';
+import { LandMarket } from './LandMarket';
 import SoftStake from './SoftStake';
 import { GldWinNotices } from './Notices';
 import { music } from '@/lib/audio/music';
@@ -601,7 +602,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
   );
 }
 
-export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect }: {
+export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect, focusSeed = null }: {
   player: PlayerRecord;
   onPlayer: (record: PlayerRecord) => void;
   onEnter: (world: ClaimedWorld) => void;
@@ -609,6 +610,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   onVisit: (seed: number) => Promise<string | null>;
   /** Back to the front page. */
   onHome: () => void;
+  /** A plot to open the map on, from the land list inside a world. */
+  focusSeed?: number | null;
   /** Let go of the wallet, staying on the map as a spectator. */
   onDisconnect: () => void;
 }) {
@@ -636,6 +639,14 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     [finds],
   );
   const plots = useMemo(() => marketPlots(player, chart, discovered), [player, chart, discovered]);
+  /** Put a plot on screen wherever it is: its chart, selected, the sheet open on a phone. */
+  const showPlot = useCallback((seed: number) => {
+    const where = chartOfSeed(seed, player, discovered);
+    if (where !== null) setChart(where);
+    setSelectedSeed(seed);
+    setSheetOpen(true);
+  }, [player, discovered]);
+  useEffect(() => { if (focusSeed !== null) showPlot(focusSeed); }, [focusSeed, showPlot]);
   const room = useMemo(() => chartRoom(player, chart, discovered), [player, chart, discovered]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
   const registry = useChainOwner(selected?.seed ?? null);
@@ -1198,6 +1209,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
             can register it here, on the first screen they see. */}
         <SoftStake address={wallet.address} balance={player.ledger.balance} hasLand={ownedSeeds.size > 0} />
         <Leaderboard me={wallet.address} onVisit={onVisit} onPick={(seed) => setSelectedSeed(seed)} />
+        <LandMarket me={wallet.address} onVisit={onVisit} onShow={showPlot} />
 
         <div className="land-body">
           <RegionMap

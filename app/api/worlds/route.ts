@@ -189,16 +189,20 @@ export async function POST(request: Request) {
 
     // The level and the score, read here off the copy rather than taken from
     // the client, so the leaderboard ranks what was actually published.
-    let level: number | undefined, score: number | undefined;
+    let level: number | undefined, score: number | undefined, buildings: number | undefined;
     try {
       const world = worldFromSave(body.snapshot as SavedWorld, seed, String(body.worldName ?? claim.worldName ?? ''));
-      if (world) { level = cityLevel(world); score = Math.round(stewardshipScore(world) * 1000) / 1000; }
+      if (world) {
+        level = cityLevel(world); score = Math.round(stewardshipScore(world) * 1000) / 1000;
+        buildings = world.buildings.filter((b) => b.active && !b.ruined).length;
+      }
     } catch { /* the headline goes without them */ }
 
     await publishWorld({
       seed,
       level,
       score,
+      buildings,
       owner: owner.toLowerCase(),
       ownerName: String(body.ownerName ?? claim.ownerName ?? '').slice(0, 32),
       worldName: String(body.worldName ?? claim.worldName ?? '').slice(0, 32),

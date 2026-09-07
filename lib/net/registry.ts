@@ -723,6 +723,30 @@ export async function fetchLeaderboard(): Promise<{ rows: Leader[]; total: numbe
 }
 
 /* ------------------------------------------------------------------ *
+ * The land market
+ * ------------------------------------------------------------------ */
+
+export interface LandListing {
+  seed: number; region: string; worldName: string; owner: string; ownerName: string;
+  price: number; listedAt: number; offers: number; bestOffer: number | null;
+  era: number; expanded: boolean; banner: string | null; biome: string;
+  level: number | null; score: number | null; population: number | null; buildings: number | null; day: number | null; publishedAt: number | null;
+  charter: boolean; insured: boolean;
+}
+
+/** Every plot up for sale, with what its owner last published about it, or null when the relay could not say. */
+export async function fetchLandMarket(): Promise<{ rows: LandListing[]; total: number } | null> {
+  try {
+    const response = await fetch('/api/land', { cache: 'no-store' });
+    if (!response.ok) return null;
+    const json = (await response.json()) as { rows?: LandListing[]; total?: number };
+    return { rows: json.rows ?? [], total: json.total ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Presence
  * ------------------------------------------------------------------ */
 

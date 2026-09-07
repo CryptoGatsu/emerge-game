@@ -509,6 +509,15 @@ export default function EmergeClient() {
     setClaimed(null);
   }, []);
 
+  /** The plot the world map should open on, set from the land list inside a world. */
+  const [mapFocus, setMapFocus] = useState<number | null>(null);
+  const openMapAt = useCallback((seed: number) => {
+    setMapFocus(seed);
+    setVisit(null);
+    clearClaimedWorld();
+    setClaimed(null);
+  }, []);
+
   /**
    * Give a plot up for good. The land goes back on the market.
    *
@@ -577,6 +586,7 @@ export default function EmergeClient() {
           onPlayer={updatePlayer}
           onEarn={earn}
           onVisit={goVisit}
+          onOpenMap={openMapAt}
         />
       )}
       {/* A visit is its own scene. Keying it on the seed means walking from one
@@ -603,17 +613,18 @@ export default function EmergeClient() {
           onPlayer={updatePlayer}
           onEarn={visit.hand ? earnAsHand : () => 0}
           onVisit={goVisit}
+          onOpenMap={openMapAt}
         />
       )}
       {wantsLanding && <Landing onEnter={() => setEntered(true)} onSpectate={spectate} />}
       {claimed === null && !visit && !wantsLanding && (
-        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} />
+        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} focusSeed={mapFocus} />
       )}
     </>
   );
 }
 
-function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRename, onPlayer, onEarn, onVisit }: {
+function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRename, onPlayer, onEarn, onVisit, onOpenMap }: {
   claimed: ClaimedWorld;
   player: PlayerRecord;
   /** True while the world map is open over the top of a running world. */
@@ -621,6 +632,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   /** Set when this is somebody else's settlement, being looked at. */
   visit?: Visit | null;
   onLeave: () => void;
+  /** Leave for the world map with a plot on screen. */
+  onOpenMap: (seed: number) => void;
   /** Give this plot up entirely, rather than merely stepping out of it. */
   onRelease: () => void;
   onRename: (world: ClaimedWorld) => void;
@@ -2258,6 +2271,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onHire={hireFor}
             onDismissNotable={dismissNotableFor}
             onGates={gatesFor}
+            onOpenMap={onOpenMap}
             onKeep={keepFor}
             onClearTrees={beginClear}
             onBridge={beginBridge}

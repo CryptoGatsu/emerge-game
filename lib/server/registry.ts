@@ -745,6 +745,8 @@ export interface PublishedWorld {
   /** The city level and stewardship score the server read off the copy when it was published. */
   level?: number;
   score?: number;
+  /** Buildings standing, read off the copy the same way. */
+  buildings?: number;
   /** The saved world, exactly as the owner's browser keeps it. */
   snapshot: unknown;
 }

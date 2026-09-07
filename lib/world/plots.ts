@@ -677,6 +677,13 @@ export function marketPlots(
   return all;
 }
 
+/** Which chart a seed sits on: the home chart's catalogue, else wherever it was surveyed, else null. */
+export function chartOfSeed(seed: number, record: PlayerRecord | null, shared: FoundPlot[] = []): number | null {
+  if (catalogue().some((p) => p.seed === seed)) return HOME_CHART_INDEX;
+  const found = [...(record?.prospected ?? []), ...shared].find((p) => p.seed === seed);
+  return found ? found.chart : null;
+}
+
 /** How much room is left on a chart. */
 export function chartRoom(record: PlayerRecord, chart: number, shared: FoundPlot[] = []) {
   const capacity = chartCapacity(chart);

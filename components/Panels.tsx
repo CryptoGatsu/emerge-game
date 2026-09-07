@@ -43,11 +43,12 @@ import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payou
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
-import { WalletPicker, useWallet } from './WalletPicker';
+import { WalletPicker, useWallet, currentWallet } from './WalletPicker';
+import { LandMarket } from './LandMarket';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
 import { GuideZh } from './GuideZh';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | 'casino' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | 'casino' | 'land' | null;
 
 interface PanelsProps {
   panel: PanelKey;
@@ -110,6 +111,8 @@ interface PanelsProps {
   onDig: () => Promise<{ prize: Prize; story: string } | string>;
   /** Travel to somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
+  /** Leave for the world map with this plot on screen: the buying lives there. */
+  onOpenMap: (seed: number) => void;
   /** True when this is somebody else's world, being looked at. */
   spectating: boolean;
   /** Whose world it is, when spectating. */
@@ -2772,7 +2775,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onOpenMap, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2806,6 +2809,13 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
   // Everything that changes the settlement is the owner's alone.
   if (spectating && (panel === 'build' || panel === 'people' || panel === 'gacha' || panel === 'connect')) return null;
   if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
+  if (panel === 'land') {
+    return (
+      <Shell title={t('LAND FOR SALE')} subtitle={t('Every plot on the market, with what its owner last published')} onClose={onClose} wide>
+        <LandMarket embedded me={currentWallet().address} onVisit={onVisit} onShow={onOpenMap} />
+      </Shell>
+    );
+  }
   if (panel === 'chat') {
     return (
       <ChatPanel
