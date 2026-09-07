@@ -159,8 +159,6 @@ const CIVIC_BUILDINGS = [
 
 /** What a plot's status figures mean, and what actually moves them. */
 const STATUS = [
-  ['Notables', 'The professionals who keep the civic buildings, from the township on: a teacher for the school, a physician for the clinic or hospital, a banker, a researcher for the laboratory or research campus, an administrator for the town hall. Without one the building runs at three quarters; with one at full strength and more, by how good they are. They turn up in town on their own for a few days, are engaged for a fee and kept on a salary from the treasury, and leave after three days unpaid. The People panel’s Notables tab lists who is in town and who is engaged.'],
-  ['Trade titles', 'What a trade is called in the plot’s age. A farmer in a settlement is a farm worker in a township, an agricultural mechanic in the industrial age, a technician in the modern age and an engineer in the AI age. The post and the person are the same; the title changes with the age on its own.'],
   ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and when word gets round: a well-run plot with a spare roof draws settlers on the road, and a cafe, a school, a clinic and improved houses draw more — up to three a day. It falls in a hard winter or a bad hazard. Since v2.7 it is bounded by beds and posts: a family has a child and a newcomer is taken only while there is a bed and a post to spare, children counted against both, and after five days of more adults than posts, or more people than beds, somebody takes the road every day or so until they match. A founding handful of eight never leaves.',
     'Build houses before you build anything else, and improve them: an improved house sleeps more. Nobody moves to a town with no spare roof, however good it is.'],
   ['Happiness', 'The average of six things each person carries: how fed, how rested, how sociable, how well clothed, how purposeful and how warm they are.',
@@ -784,6 +782,23 @@ export default function Wiki() {
             effect at once, gives the trainee a head start in skill (doubled by a School), and
             holds them to the trade for forty days against the settlement&rsquo;s own daily
             reshuffling. After that they are the settlement&rsquo;s to move again.
+          </p>
+          <p>
+            <b>Notables</b> keep the civic buildings, from the township on: a teacher for the
+            school, a physician for the clinic or hospital, a banker, a researcher for the
+            laboratory or research campus, an administrator for the town hall. Without one the
+            building runs at three quarters; with one at full strength and more, by how good they
+            are: competent, accomplished or renowned. They turn up in town on their own for the
+            buildings that stand unkept, stay three days, are engaged for a fee and kept on a
+            salary from the treasury, and leave after three days unpaid. The Notables tab lists
+            who is in town and who is engaged; a building&rsquo;s card says who keeps it.
+          </p>
+          <p>
+            <b>Trade titles</b> follow the plot&rsquo;s age. A farmer in a settlement is a farm
+            worker in a township, an agricultural mechanic in the industrial age, an agricultural
+            technician in the modern age and an agriculture engineer in the AI age, and so for
+            every trade. The post and the person are the same; the title changes with the age on
+            its own.
           </p>
 
           <h3>The trades</h3>

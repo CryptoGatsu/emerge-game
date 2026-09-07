@@ -2000,7 +2000,7 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates, onHire, on
   const [retraining, setRetraining] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const trades = roster.trades;
-  const shown = roster.people.filter((p) => filter === 'all' ? true : filter === 'unemployed' ? p.job === 'unemployed' : p.job === filter);
+  const shown = roster.people.filter((p) => filter === 'all' ? true : filter === 'unemployed' ? p.job === 'unemployed' || p.idle : p.job === filter);
   const canPay = (n: number) => view.treasury >= roster.trainCost * n;
   const act = (fn: () => string | null) => { const why = fn(); setNote(why); if (!why) setRetraining(null); };
   return (
@@ -2040,10 +2040,10 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates, onHire, on
           </div>
           <div className="people-rows">
             {shown.map((p) => (
-              <div key={p.id} className={`people-row ${p.job === 'unemployed' ? 'idle' : ''}`}>
+              <div key={p.id} className={`people-row ${p.job === 'unemployed' || p.idle ? 'idle' : ''}`}>
                 <b>{p.name}</b>
                 <span className="muted">{t('{n} yrs', { n: p.age })}</span>
-                <span className="people-trade">{tn(p.jobLabel)}{p.trained && <i title={t('Trained')}>✦</i>}</span>
+                <span className="people-trade">{tn(p.jobLabel)}{p.trained && <i title={t('Trained')}>✦</i>}{p.idle && <small className="people-open"> · {t('no post')}</small>}</span>
                 <span className="muted">{p.skill ? tx(p.skill.title) : t('no trade')}</span>
                 <span className="muted">{p.workplace ? (p.at ? t('at the {b}', { b: tn(p.at).toLowerCase() }) : t('works at a {b}', { b: tn(p.workplace).toLowerCase() })) : t('nowhere to work')}</span>
                 {retraining === p.id ? (

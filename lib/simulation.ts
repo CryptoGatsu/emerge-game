@@ -580,7 +580,7 @@ export interface World {
    * many trees as the woodcutters really cut, and the market panel shows real
    * throughput rather than a guess from stock levels.
    */
-  flow: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>> };
+  flow: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>>; granted?: Partial<Record<Resource, number>> };
   /**
    * The same figures for the day that just closed.
    *
@@ -588,7 +588,7 @@ export interface World {
    * out, and a stock figure on its own cannot tell a full barn from a barn
    * that is being emptied.
    */
-  flowYesterday: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>> };
+  flowYesterday: { produced: Partial<Record<Resource, number>>; consumed: Partial<Record<Resource, number>>; granted?: Partial<Record<Resource, number>> };
   /**
    * Where the settlement's Gold came from and went, today and on the last full
    * day. Every movement in or out of the treasury is booked against a heading,
@@ -3701,7 +3701,8 @@ export function foodBalance(world: World): { made: number; used: number } {
   useWorld(world);
   const flow = world.flowYesterday ?? { produced: {}, consumed: {} };
   const sum = (side: Partial<Record<Resource, number>>) => FOOD.reduce((n, r) => n + (side[r] ?? 0), 0);
-  return { made: Math.round(sum(flow.produced)), used: Math.round(sum(flow.consumed)) };
+  // Less what was bought in as a shipment: that is the treasury's doing, not the fields'.
+  return { made: Math.max(0, Math.round(sum(flow.produced) - sum(flow.granted ?? {}))), used: Math.round(sum(flow.consumed)) };
 }
 /** True when yesterday's food kept pace with yesterday's eating, so a thin larder is the market's doing. */
 export function fieldsKeepUp(world: World): boolean {
@@ -3914,8 +3915,9 @@ function refreshTalent(world: World) {
   const talent = world.talent ?? (world.talent = { offers: [] });
   talent.offers = talent.offers.filter((o) => (o.until ?? 0) >= world.day);
   const rand = mulberry32(world.seed * 31 + world.day * 977);
-  const roles = (Object.keys(NOTABLE_ROLES) as NotableRole[])
-    .filter((r) => world.buildings.some((b) => b.active && !b.ruined && NOTABLE_ROLES[r].buildings.includes(b.type)));
+  // Only roles with a post nobody keeps: an offer for a school that has
+  // its teacher is a dead row on the panel and a slot the banker could use.
+  const roles = (Object.keys(NOTABLE_ROLES) as NotableRole[]).filter((r) => !!postFor(world, r));
   if (!roles.length) return;
   let coming = (rand() < 0.5 ? 1 : 0) + (rand() < 0.15 ? 1 : 0);
   while (coming-- > 0 && talent.offers.length < 3) {
@@ -3926,8 +3928,8 @@ function refreshTalent(world: World) {
     const name = `${SETTLER_NAMES[hash % SETTLER_NAMES.length]} ${NOTABLE_SURNAMES[Math.floor(hash / 64) % NOTABLE_SURNAMES.length]}`;
     const terms = notableTerms(world, tier);
     talent.offers.push({ id: `n${world.counter++}`, name, role, tier, hash, ...terms, until: world.day + OFFER_DAYS - 1 });
-    const post = postFor(world, role) ?? world.buildings.find((b) => NOTABLE_ROLES[role].buildings.includes(b.type));
-    pushFeed(world, 'social', `${name}, ${NOTABLE_TIERS[tier] === 'accomplished' ? 'an' : 'a'} ${NOTABLE_TIERS[tier]} ${NOTABLE_ROLES[role].label.toLowerCase()}, is in town and would keep the ${post ? formWord(post) : NOTABLE_ROLES[role].buildings[0].toLowerCase()}: ${terms.fee} Gold to engage, ${terms.salary} a day.`);
+    const post = postFor(world, role)!;
+    pushFeed(world, 'social', `${name}, ${NOTABLE_TIERS[tier] === 'accomplished' ? 'an' : 'a'} ${NOTABLE_TIERS[tier]} ${NOTABLE_ROLES[role].label.toLowerCase()}, is in town and would keep the ${formWord(post)}: ${terms.fee} Gold to engage, ${terms.salary} a day.`);
   }
 }
 
@@ -3970,6 +3972,11 @@ function paySalaries(world: World) {
   if (!world.notables?.length) return;
   const gone: Notable[] = [];
   for (const n of world.notables) {
+    const post = world.buildings.find((b) => b.id === n.buildingId);
+    // Nothing to keep: a ruin draws no salary and counts no unpaid day
+    // until it is raised again; a building that is gone lets them go.
+    if (!post) { gone.push(n); continue; }
+    if (post.ruined || !post.active) continue;
     if (world.treasury >= n.salary) { spend(world, 'wages', n.salary); n.unpaid = 0; continue; }
     n.unpaid = (n.unpaid ?? 0) + 1;
     if (n.unpaid >= NOTABLE_PATIENCE) gone.push(n);
@@ -3977,7 +3984,9 @@ function paySalaries(world: World) {
   for (const n of gone) {
     world.notables = world.notables.filter((x) => x.id !== n.id);
     const post = world.buildings.find((b) => b.id === n.buildingId);
-    pushFeed(world, 'social', `${n.name} left the ${post ? formWord(post) : NOTABLE_ROLES[n.role].buildings[0].toLowerCase()}: ${NOTABLE_PATIENCE} days without a salary.`);
+    pushFeed(world, 'social', post
+      ? `${n.name} left the ${formWord(post)}: ${NOTABLE_PATIENCE} days without a salary.`
+      : `${n.name} left: the ${NOTABLE_ROLES[n.role].buildings[0].toLowerCase()} they kept is gone.`);
   }
 }
 /** The highest level among buildings of these types that stand, or 0. */
@@ -7495,7 +7504,9 @@ function departures(world: World, rand: () => number) {
   const idle = Math.max(0, adults.length - postsOf(world));
   const crowded = Math.max(0, world.citizens.length - housingRoom(world));
   const pressure = Math.max(idle, crowded);
-  if (pressure <= 0 || world.citizens.length <= FOUNDING_HANDFUL || adults.length <= 1) {
+  // Counted in adults, as births count the founding handful in people: a
+  // founder's child made nine people and sent a founder down the road.
+  if (pressure <= 0 || adults.length <= FOUNDING_HANDFUL || adults.length <= 1) {
     world.idleDays = undefined;
     return;
   }
@@ -7637,9 +7648,14 @@ function migration(world: World, rand: () => number) {
   // moves people between them in the morning, and does not take a newcomer
   // for a post it already has somebody for. Children count against the
   // posts, as they do for births, since they grow into them.
-  const posts = Math.min(openPostsOf(world), roomToGrow(world).posts);
+  const open = openPostsOf(world);
+  const posts = Math.min(open, roomToGrow(world).posts);
   if (!desperate && posts <= 0) {
-    if (world.day % 4 === 0) pushFeed(world, 'social', `Nobody new is moving to ${world.name}: every post is filled.`);
+    if (world.day % 4 === 0) {
+      pushFeed(world, 'social', open > 0
+        ? `Nobody new is moving to ${world.name}: the posts that stand open are spoken for by the children growing up.`
+        : `Nobody new is moving to ${world.name}: every post is filled.`);
+    }
     return;
   }
 
@@ -7809,6 +7825,10 @@ export function grantResource(world: World, key: Resource, amount: number) {
   if (!(amount > 0)) return;
   world.resources[key] += amount;
   note(world, 'produced', key, amount);
+  // Counted apart as well, so a bought shipment does not read as a harvest
+  // to the helper's food balance.
+  world.flow.granted = world.flow.granted ?? {};
+  world.flow.granted[key] = (world.flow.granted[key] ?? 0) + amount;
 }
 
 /**

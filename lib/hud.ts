@@ -9,7 +9,7 @@
 
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, idleAdults, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -209,11 +209,25 @@ export interface Snapshot {
   focus: Focus | null;
 }
 
-/** How many people report to this workplace: those posted here, and anyone of the trade not yet posted anywhere when this is its first site. */
-function postedAt(world: World, b: Building, trade: WorkingJob): number {
-  const first = world.buildings.find((x) => x.type === b.type && x.active && !x.ruined)?.id === b.id;
-  return world.citizens.filter((c) => c.age >= 16 && c.job === trade && (c.workplaceId === b.id || (!c.workplaceId && first))).length;
+/**
+ * Who reports where, in one pass: those posted to a building, and anyone of
+ * a trade not yet posted anywhere counted at the trade's first standing site.
+ * A map rather than a filter per building, because the roster reads it for
+ * every workplace on every snapshot and a city has a hundred of them.
+ */
+function postedCounts(world: World): Map<string, number> {
+  const first = new Map<string, string>();
+  for (const b of world.buildings) if (b.active && !b.ruined && !first.has(b.type)) first.set(b.type, b.id);
+  const counts = new Map<string, number>();
+  for (const c of world.citizens) {
+    if (c.age < 16 || c.job === 'unemployed') continue;
+    const id = c.workplaceId ?? first.get(JOBS[c.job as WorkingJob].building);
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
 }
+/** How many people report to this one workplace. */
+const postedAt = (world: World, b: Building) => postedCounts(world).get(b.id) ?? 0;
 
 export interface TalentOffer {
   id: string; name: string; role: NotableRole; roleLabel: string; tier: number; tierWord: string;
@@ -250,6 +264,8 @@ function talentOf(world: World): Talent {
 
 export interface RosterPerson {
   id: string; name: string; age: number; job: Job; jobLabel: string;
+  /** Of age and in a trade, but beyond the posts the trade has: paid for a day that counts for nothing. */
+  idle?: boolean;
   /** The kind of building their trade works at, or null for the unemployed. */
   workplace: string | null;
   /** The building they are in right now, if they are at work in one. */
@@ -306,6 +322,19 @@ function rosterOf(world: World): Roster {
   });
   // The unemployed first, then by trade, then by name.
   people.sort((a, b) => (a.job === 'unemployed' ? 0 : 1) - (b.job === 'unemployed' ? 0 : 1) || a.jobLabel.localeCompare(b.jobLabel) || a.name.localeCompare(b.name));
+  const posted = postedCounts(world);
+  // Who is beyond the posts: in each trade with more hands than posts, the
+  // least learned are the ones without one. This is who the "without work"
+  // figure and filter mean, since everybody of age carries a trade.
+  const idle = new Set<string>();
+  for (const t of trades) {
+    if (t.workers <= t.capacity) continue;
+    world.citizens.filter((c) => c.age >= 16 && c.job === t.job)
+      .sort((a, b) => skillDays(a, t.job) - skillDays(b, t.job))
+      .slice(0, t.workers - t.capacity)
+      .forEach((c) => idle.add(c.id));
+  }
+  for (const p of people) if (idle.has(p.id)) p.idle = true;
   const buildings: RosterBuilding[] = world.buildings.filter((b) => b.type !== 'House').map((b) => {
     const trade = byType(b.type);
     return {
@@ -313,12 +342,12 @@ function rosterOf(world: World): Roster {
       // Who is posted here, not who happens to be inside this minute: at
       // night every farm read "0 of 4 at their posts", and a player with
       // fourteen farms took that for a town that would not work them.
-      crew: trade ? postedAt(world, b, trade) : b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? tradeTitle(trade, eraOf(world)) : null,
+      crew: trade ? posted.get(b.id) ?? 0 : b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? tradeTitle(trade, eraOf(world)) : null,
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
   return {
     people, trades, buildings,
-    unemployed: Math.max(people.filter((p) => p.job === 'unemployed').length, idleAdults(world)),
+    unemployed: people.filter((p) => p.job === 'unemployed' || p.idle).length,
     openPosts: trades.reduce((s, t) => s + t.open, 0),
     trainCost: TRAIN_COST_GOLD,
     hasSchool: world.buildings.some((b) => b.type === 'School' && b.active && !b.ruined),
@@ -431,7 +460,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     crew: (() => {
       const trade = tradeOf(b.type);
       if (!trade) return null;
-      return { posted: postedAt(world, b, trade), posts: buildingPosts(b, world) };
+      return { posted: postedAt(world, b), posts: buildingPosts(b, world) };
     })(),
     keeper: (() => {
       const role = roleOf(b.type);
