@@ -717,3 +717,20 @@ export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
 export function credit(ledger: VaultLedger, amount: number): VaultLedger {
   return { ...ledger, balance: ledger.balance + amount };
 }
+
+/**
+ * A wallet's share of the vault's day.
+ *
+ * The vault pays at most `budget` in stewardship a day across everybody. When
+ * what everybody is judged to earn fits inside that, each wallet is paid
+ * what it is judged; when it does not, the day is shared out in proportion,
+ * so a wallet judged a tenth of the total is paid a tenth of the budget,
+ * whatever hour it arrives. It used to be first come first served, which
+ * made every day a race to the button and left the player who woke last
+ * with "the vault has paid out everything it will today".
+ */
+export function fairShare(budget: number, mine: number, total: number): number {
+  if (!(mine > 0) || !(budget > 0)) return 0;
+  if (!(total > budget)) return Math.floor(mine);
+  return Math.floor((mine * budget) / total);
+}

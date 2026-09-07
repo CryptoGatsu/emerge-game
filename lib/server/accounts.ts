@@ -186,61 +186,50 @@ export const dailyEmissionBudget = () => {
 };
 
 /**
- * How much of the day's budget has opened by now.
+ * The day's budget is shared out, not raced for.
  *
- * The whole day's budget used to be there the moment UTC midnight passed, so
- * the day belonged to whoever was awake for it: a player in one timezone
- * collected at 00:05 and a player in another woke to "the vault has paid out
- * everything it will today" with nothing they could do about it and no idea
- * why. The budget now opens through the day — a share to start with so the
- * first hour is not dead, the rest evenly — so somebody arriving at any hour
- * finds their share of it waiting rather than somebody else's leavings.
- *
- * The total for the day is unchanged. Only when it becomes collectable is.
+ * It used to be there in full at UTC midnight for whoever was awake, and
+ * then, for a week, opened through the day by the hour — which only made
+ * the race hourly: a player who refreshed at ten in the evening was told
+ * "this hour's are taken" and to come back in two minutes, and whoever
+ * pressed the button most won. Now each wallet has its own share of the day
+ * (see `fairShare`), in proportion to what it is judged to earn against what
+ * everybody is judged to earn, and that share waits for it all day. The
+ * global counter stays as the hard stop it always was.
  */
-const OPEN_AT_MIDNIGHT = 0.15;
-export function emissionUnlocked(now = Date.now()): number {
-  const budget = dailyEmissionBudget();
-  const through = ((now % 86_400_000) + 86_400_000) % 86_400_000 / 86_400_000;
-  return Math.floor(budget * (OPEN_AT_MIDNIGHT + (1 - OPEN_AT_MIDNIGHT) * through));
-}
-
-/** When the next whole $EMERGE of the day's budget opens, in ms from now. */
-export function nextUnlockMs(amount: number, now = Date.now()): number {
-  const budget = dailyEmissionBudget();
-  const perMs = (budget * (1 - OPEN_AT_MIDNIGHT)) / 86_400_000;
-  if (!(perMs > 0)) return 0;
-  return Math.max(0, Math.ceil(Math.max(1, amount) / perMs));
-}
-
 export interface EmissionRoom {
   /** What this address has already been paid today. */
   spent: number;
   /** What it may still be paid. */
   left: number;
-  /** What the vault as a whole has left of what has opened so far. */
+  /** What the vault as a whole has left of the day's budget. */
   globalLeft: number;
-  /** The whole day's budget, and how much of it has opened by now. */
+  /** The whole day's budget. */
   budget: number;
-  unlocked: number;
   /** What the vault has paid out today, across everybody. */
   emitted: number;
+  /** This wallet's share of the day, when the day is being shared out; null when it is paid what it is judged. */
+  share: number | null;
+  /** What everybody is judged to earn today, added up. */
+  demand: number | null;
 }
 
 /** How much stewardship this address may still be paid today. */
-export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING): Promise<EmissionRoom> {
+export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING, share: number | null = null, demand: number | null = null): Promise<EmissionRoom> {
   const day = utcDay();
   const [spent, emitted] = await Promise.all([
     counter(earnedKey(address, day)),
     counter(globalKey(day)),
   ]);
+  const bound = share === null ? ceiling : Math.min(ceiling, share);
   return {
     spent,
-    left: Math.max(0, ceiling - spent),
-    globalLeft: Math.max(0, emissionUnlocked() - emitted),
+    left: Math.max(0, bound - spent),
+    globalLeft: Math.max(0, dailyEmissionBudget() - emitted),
     budget: dailyEmissionBudget(),
-    unlocked: emissionUnlocked(),
     emitted,
+    share,
+    demand,
   };
 }
 
@@ -254,19 +243,20 @@ export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING
  * atomically, and a reservation that turns out to breach either is rolled back
  * before anything is signed.
  */
-export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING): Promise<boolean> {
+export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING, share: number | null = null): Promise<boolean> {
   const day = utcDay();
   const amount = Math.floor(whole);
   if (!(amount > 0)) return false;
+  const bound = share === null ? ceiling : Math.min(ceiling, share);
 
   // Expiring, so a day's tally does not become a key that lives for ever.
   const mine = await incrWindow(earnedKey(address, day), amount, 26 * 3600);
-  if (mine > ceiling) {
+  if (mine > bound) {
     await incrBy(earnedKey(address, day), -amount);
     return false;
   }
   const all = await incrWindow(globalKey(day), amount, 26 * 3600);
-  if (all > emissionUnlocked()) {
+  if (all > dailyEmissionBudget()) {
     await incrBy(globalKey(day), -amount);
     await incrBy(earnedKey(address, day), -amount);
     return false;

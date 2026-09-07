@@ -36,7 +36,9 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
 import { HAND_MIN_EMERGE } from '../chain/vault';
-import { allClaims, jobOf, readWorld, type Claim, presenceDays, lastSeenAt, lastSeenAnywhere } from './registry';
+import { allClaims, jobOf, readWorld, worldHeadlines, type Claim, presenceDays, lastSeenAt, lastSeenAnywhere } from './registry';
+import { getValue, setValue } from './kv';
+import { serverKey } from '../limits';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -162,6 +164,60 @@ export async function judgedFor(address: string): Promise<Judged> {
   }
   // Five plots at the top would come to more than a wallet may take in a day.
   return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), days, plots };
+}
+
+/**
+ * What everybody is judged to earn today, added up: the demand on the vault.
+ *
+ * Read off the published headlines — the level and score the registry took
+ * when each world was published — with each owner's presence days, charter
+ * and attention, the same way one wallet is judged, and capped per wallet
+ * the same way. Reading every world in full for every payout would be far
+ * too slow, so this is an estimate from the headlines, and it is kept for a
+ * quarter of an hour: the day's shares must not shift under a player
+ * between the Bank's figure and the button.
+ */
+export interface Demand { total: number; wallets: number; at: number }
+const DEMAND_TTL_SECONDS = 900;
+const demandKey = (day: string) => serverKey(`judged-total:${day}`);
+
+export async function judgedTotal(now = Date.now()): Promise<Demand> {
+  const day = new Date(now).toISOString().slice(0, 10);
+  try {
+    const cached = await getValue(demandKey(day));
+    if (cached) {
+      const parsed = JSON.parse(cached) as Demand;
+      if (parsed && Number.isFinite(parsed.total) && now - parsed.at < DEMAND_TTL_SECONDS * 1000) return parsed;
+    }
+  } catch { /* recomputed below */ }
+  let rows: Claim[] = [];
+  let heads: Awaited<ReturnType<typeof worldHeadlines>> = [];
+  try { [rows, heads] = await Promise.all([allClaims(), worldHeadlines()]); } catch { return { total: 0, wallets: 0, at: now }; }
+  const headOf = new Map(heads.map((h) => [h.seed, h]));
+  const byOwner = new Map<string, Claim[]>();
+  for (const c of rows) {
+    const me = c.owner.toLowerCase();
+    byOwner.set(me, [...(byOwner.get(me) ?? []), c]);
+  }
+  let total = 0, wallets = 0;
+  for (const [owner, mine] of byOwner) {
+    const days = await presenceDays(owner).catch(() => 0);
+    const anywhere = await lastSeenAnywhere(owner).catch(() => 0);
+    const attention = attentionFrom(anywhere, now);
+    const fromPresence = 1 + Math.floor(Math.max(0, days) / LEVEL_PRESENCE_DAYS);
+    let yieldSum = 0;
+    for (const row of mine.sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT)) {
+      const head = headOf.get(row.seed);
+      const level = Math.max(1, Math.min(head?.level ?? 1, fromPresence));
+      const cap = Math.round(plotCeiling(level, row.era ?? 1) * charterMultiplier(row.charterUntil, now));
+      yieldSum += cap * (head?.score ?? 0) * attention;
+    }
+    const judged = Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum));
+    if (judged > 0) { total += judged; wallets += 1; }
+  }
+  const out = { total, wallets, at: now };
+  try { await setValue(demandKey(day), JSON.stringify(out), DEMAND_TTL_SECONDS); } catch { /* served uncached */ }
+  return out;
 }
 
 /** Kept for callers that only want the ceiling. */

@@ -272,9 +272,9 @@ cannot be verified. It is capped instead, in three ways at once:
 
 | Guard | Value |
 | --- | --- |
-| Per wallet, per UTC day | `DAILY_EARN_CEILING` — 100,000 $EMERGE |
+| Per wallet, per UTC day | `DAILY_EARN_CEILING` — 1,000,000 $EMERGE, and its fair share of the day when everybody's judgement exceeds the vault's day |
 | Must hold land | `balanceOf` on the registry must be > 0 |
-| Whole vault, per UTC day | `EMERGE_DAILY_EMISSION`, default 1,000,000 |
+| Whole vault, per UTC day | `EMERGE_DAILY_EMISSION`, default 10,000,000, shared out in proportion to judged yield |
 | Any single withdrawal | `MAX_PAYOUT_EMERGE` — 700,000 |
 | Smallest withdrawal | `MIN_PAYOUT_EMERGE` — 1,000 |
 | Withdrawals per wallet per day | `MAX_PAYOUTS_PER_DAY` — 24, one every 20 seconds |

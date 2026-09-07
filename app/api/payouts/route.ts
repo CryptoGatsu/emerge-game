@@ -39,16 +39,16 @@
 import { NextResponse } from 'next/server';
 import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
-  MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, nextUnlockMs, principalOf, releaseEmission, reserveEmission,
+  MIN_PAYOUT_EMERGE, dailyEmissionBudget, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
   settlementFor, takePayoutSlot, untilUtcMidnight, utcDay, casinoCreditOf, takeCasinoCredit,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 import { receiptOf, sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { handCheck, landCheck, judgedFor, handCeilingFor, type Judged } from '@/lib/server/land';
+import { handCheck, landCheck, judgedFor, judgedTotal, handCeilingFor, type Judged } from '@/lib/server/land';
 import { noteHold } from '@/lib/server/treasury';
-import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
+import { DAILY_EARN_CEILING, HAND_DAILY_CEILING, fairShare } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
 // A payout waits for its receipt before answering, so the request needs
@@ -68,15 +68,18 @@ const MAX_NAME = 32;
  * the row. A hash the chain has never seen, an hour on, was dropped.
  */
 /**
- * How long until enough of the day's budget has opened to be worth asking
- * again, said the way a person would say it.
+ * The wallet's share of today's vault, alongside what it is judged, when the
+ * day is being shared out — null when everybody's judgement fits the day.
  */
-function untilMore(amount: number): string {
-  const ms = nextUnlockMs(amount);
-  const minutes = Math.max(1, Math.ceil(ms / 60_000));
-  if (minutes < 60) return `about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
-  const hours = Math.round(minutes / 60);
-  return `about ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+async function shareFor(judgedYield: number): Promise<{ share: number | null; demand: number | null }> {
+  const demand = await judgedTotal().catch(() => null);
+  if (!demand || demand.total <= dailyEmissionBudget()) return { share: null, demand: demand?.total ?? null };
+  return { share: fairShare(dailyEmissionBudget(), judgedYield, demand.total), demand: demand.total };
+}
+
+/** What a share that is collected says, with the figures that make it. */
+function shareCollected(share: number, demand: number): string {
+  return `Today the vault pays ${dailyEmissionBudget().toLocaleString()} $EMERGE across everybody, and ${demand.toLocaleString()} is judged in all, so your share is ${share.toLocaleString()} and it is collected. The day turns in ${untilUtcMidnight()}.`;
 }
 
 async function confirmPayouts(address: string, rows: Payout[]): Promise<Payout[]> {
@@ -126,15 +129,18 @@ export async function GET(request: Request) {
      */
     let judged: Judged | null = null;
     let ceiling = hand === 'hand' ? HAND_DAILY_CEILING : DAILY_EARN_CEILING;
+    let share: number | null = null, demand: number | null = null;
     if (land === 'holds') {
       judged = await judgedFor(address);
       ceiling = judged.yield;
+      ({ share, demand } = await shareFor(judged.yield));
     }
     // Winnings from the tables sit on top of whatever the land or the job pays.
     const casino = await casinoCreditOf(address);
     if (land !== 'holds' && hand !== 'hand') ceiling = 0;
     ceiling += casino;
-    const room = await emissionRoom(address, ceiling);
+    if (share !== null) share += casino;
+    const room = await emissionRoom(address, ceiling, share, demand);
     return NextResponse.json({
       payouts, principal, room, judged, casino,
       // Whether stewardship can be collected at all, and if not, why — so the
@@ -241,6 +247,7 @@ export async function POST(request: Request) {
    * a successful one, so the slot is not given back.
    */
   let ceiling = DAILY_EARN_CEILING;
+  let share: number | null = null, demand: number | null = null;
   const casino = kind === 'earnings' ? await casinoCreditOf(address) : 0;
   if (kind === 'earnings') {
     const land = await landCheck(address);
@@ -256,6 +263,8 @@ export async function POST(request: Request) {
       // is paid only up to this.
       const judged = await judgedFor(address);
       ceiling = judged.yield + casino;
+      ({ share, demand } = await shareFor(judged.yield));
+      if (share !== null) share += casino;
       if (ceiling < 1) {
         return NextResponse.json({
           error: 'Nothing is judged earned yet: publish your world by opening it, and keep it well run and attended. Nothing was taken.', land, judged,
@@ -312,27 +321,31 @@ export async function POST(request: Request) {
      * few tokens, again and again. Asked for more than the day has room for,
      * the vault pays the room and says so, as long as that clears the floor.
      */
-    const room = await emissionRoom(address, ceiling);
+    const room = await emissionRoom(address, ceiling, share, demand);
     const most = Math.floor(Math.min(room.left, room.globalLeft));
     if (money.gross > most) {
       if (most < MIN_PAYOUT_EMERGE) {
         return NextResponse.json({
-          error: room.globalLeft <= 0
-            ? `The vault's payouts open through the day and this hour's are taken. Enough for ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE opens in ${untilMore(MIN_PAYOUT_EMERGE)}, and the day turns in ${untilUtcMidnight()}.`
+          error: room.left <= 0 && share !== null && demand !== null && share < ceiling
+            ? shareCollected(share, demand)
             : room.left <= 0
               ? `Today's ${ceiling.toLocaleString()} $EMERGE is collected. The day turns in ${untilUtcMidnight()}.`
-              : `You can collect ${room.left.toLocaleString()} more $EMERGE today, which is under the ${MIN_PAYOUT_EMERGE.toLocaleString()} floor. The day turns in ${untilUtcMidnight()}.`,
+              : room.globalLeft <= 0
+                ? `The vault has paid today's ${dailyEmissionBudget().toLocaleString()} $EMERGE across everybody. The day turns in ${untilUtcMidnight()}.`
+                : `You can collect ${room.left.toLocaleString()} more $EMERGE today, which is under the ${MIN_PAYOUT_EMERGE.toLocaleString()} floor. The day turns in ${untilUtcMidnight()}.`,
         }, { status: 429 });
       }
       money = settlementFor('earnings', most);
       note = `The Bank's figure had moved on: ${most.toLocaleString()} $EMERGE was collectable, and that is what was sent.`;
     }
-    if (!(await reserveEmission(address, money.gross, ceiling))) {
-      const again = await emissionRoom(address, ceiling);
+    if (!(await reserveEmission(address, money.gross, ceiling, share))) {
+      const again = await emissionRoom(address, ceiling, share, demand);
       return NextResponse.json({
-        error: again.globalLeft <= 0
-          ? `The vault's payouts open through the day and this hour's are taken. Enough for ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE opens in ${untilMore(MIN_PAYOUT_EMERGE)}, and the day turns in ${untilUtcMidnight()}.`
-          : `You can collect ${again.left.toLocaleString()} more $EMERGE today.`,
+        error: again.left <= 0 && share !== null && demand !== null && share < ceiling
+          ? shareCollected(share, demand)
+          : again.globalLeft <= 0
+            ? `The vault has paid today's ${dailyEmissionBudget().toLocaleString()} $EMERGE across everybody. The day turns in ${untilUtcMidnight()}.`
+            : `You can collect ${again.left.toLocaleString()} more $EMERGE today.`,
       }, { status: 429 });
     }
     give = () => releaseEmission(address, money.gross);

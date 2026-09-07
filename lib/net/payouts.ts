@@ -43,11 +43,15 @@ export interface JudgedYield {
   plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
 }
 
-/** How much of today's ceiling a wallet has left. */
+/** How much of today's ceiling a wallet has left, and its share of the day when the day is shared out. */
 export interface EmissionRoom {
   spent: number;
   left: number;
   globalLeft: number;
+  budget?: number;
+  emitted?: number;
+  share?: number | null;
+  demand?: number | null;
 }
 
 export interface PayoutHistory {

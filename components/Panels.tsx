@@ -1813,9 +1813,21 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
           */}
         {history?.room && collectable === 0 && (
           <p className="muted small">
-            {history.room.left <= 0
-              ? t('Today’s judgement is collected. What the plots earn from here goes to tomorrow.')
-              : t('The vault’s payouts open through the day and this hour’s are taken. More opens every few minutes.')}
+            {history.room.left <= 0 && typeof history.room.share === 'number' && typeof history.room.demand === 'number' && typeof history.room.budget === 'number'
+              ? t('Today the vault pays {budget} {ticker} across everybody and {demand} is judged in all, so your share is {share}, and it is collected. The day turns at midnight UTC.', { budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), share: history.room.share.toLocaleString(), ticker: TOKEN.ticker })
+              : history.room.left <= 0
+                ? t('Today’s judgement is collected. What the plots earn from here goes to tomorrow.')
+                : t('The vault has paid today’s {budget} {ticker} across everybody. The day turns at midnight UTC.', { budget: (history.room.budget ?? 0).toLocaleString(), ticker: TOKEN.ticker })}
+          </p>
+        )}
+        {/*
+          * When the day is being shared out, the share is the figure that
+          * bounds the collectable, and it is smaller than the judgement above.
+          * Said here, so the gap between the two numbers has its reason.
+          */}
+        {history?.room && collectable !== null && collectable > 0 && typeof history.room.share === 'number' && typeof history.room.demand === 'number' && typeof history.room.budget === 'number' && (
+          <p className="muted small">
+            {t('Your share of today’s vault: {share} of {budget} {ticker}, with {demand} judged across everybody. It waits for you all day; nobody else can take it.', { share: history.room.share.toLocaleString(), budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), ticker: TOKEN.ticker })}
           </p>
         )}
         {history?.judged && (
