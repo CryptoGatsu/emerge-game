@@ -20,11 +20,11 @@ import 'server-only';
  */
 
 import { createHash, createHmac, randomBytes } from 'crypto';
-import { allClaims, claimOf, displayNames, writeClaim, type Claim } from './registry';
+import { allClaims, claimOf, displayNames, readWorld, writeClaim, type Claim } from './registry';
 import { push, range, releaseLock, takeLock } from './kv';
 import { serverKey } from '../limits';
 import {
-  MAX_TRAIN_PER_DAY, MIN_ATTACK, OCCUPY_PAID_DAYS_MAX, SHIELD_MS, armyCap, occupyUpkeepGold, resolveBattle,
+  MAX_TRAIN_PER_DAY, MIN_ATTACK, OCCUPY_PAID_DAYS_MAX, SHIELD_MS, UNITS, armyCap, occupyUpkeepGold, resolveBattle,
   type Battle, type BattleKind, type BattleSide, type Occupation, type WarEvent, type WarEventKind,
 } from '../world/war';
 
@@ -50,6 +50,31 @@ async function withLock<T>(work: () => Promise<T>): Promise<T | { ok: false; rea
   if (!(await takeLock(LOCK, 15))) return { ok: false, reason: 'The registry is settling another fight. Try again in a moment.', status: 409 };
   try { return await work(); } finally { await releaseLock(LOCK); }
 }
+
+/**
+ * The Gold the registry believes a settlement has: the figure in the copy its
+ * owner last published.
+ *
+ * War used to be counted here and paid for in the browser, which meant it was
+ * not paid for at all by anyone willing to call the API themselves: troops
+ * were free and an occupation could be held for ever for nothing, while it
+ * took three fifths of somebody's yield. The published copy is what the server
+ * already judges a plot's level and stewardship from, so war Gold is judged
+ * there too. It lags the browser by a publish, so a day's spending is tallied
+ * against it rather than each charge separately.
+ */
+async function publishedGold(seed: number): Promise<number | null> {
+  try {
+    const published = await readWorld(seed);
+    const saved = published?.snapshot as { world?: { treasury?: number } } | undefined;
+    const gold = saved?.world?.treasury;
+    return typeof gold === 'number' && Number.isFinite(gold) ? gold : null;
+  } catch {
+    return null;
+  }
+}
+
+const NOT_PUBLISHED = 'The registry has not seen this settlement yet. Open it once so its treasury is published, then try again.';
 
 /** What a wallet is called: the name it chose in the game, else the name on its claim, else nothing. */
 async function nameOf(address: string, fallback: string): Promise<string> {
@@ -152,8 +177,21 @@ export async function trainTroops(seed: number, owner: string, count: number): P
     if (room <= 0) {
       return { ok: false, reason: today >= MAX_TRAIN_PER_DAY ? `The base has trained its ${MAX_TRAIN_PER_DAY} for today.` : `The base holds ${cap} in this age, and it is full.`, status: 409 };
     }
-    const trained = Math.min(n, room);
-    claim.army = { ...claim.army, troops: claim.army.troops + trained, day, today: today + trained };
+    const each = UNITS[Math.min(5, Math.max(1, claim.era ?? 1)) as 1 | 2 | 3 | 4 | 5].gold;
+    const gold = await publishedGold(seed);
+    if (gold === null) return { ok: false, reason: NOT_PUBLISHED, status: 409 };
+    // The published copy lags the browser by a publish, so what the registry
+    // has already authorised against this same copy is counted against it too.
+    // Once a smaller treasury is published the spending has been booked there
+    // and the tally starts again.
+    const booked = typeof claim.army.goldSeen === 'number' && gold < claim.army.goldSeen;
+    const spentToday = claim.army.goldDay === day && !booked ? (claim.army.goldToday ?? 0) : 0;
+    const affordable = Math.floor(Math.max(0, gold - spentToday) / each);
+    if (affordable <= 0) {
+      return { ok: false, reason: `The treasury the registry last saw holds ${Math.floor(Math.max(0, gold - spentToday)).toLocaleString()} Gold, and one costs ${each.toLocaleString()}.`, status: 409 };
+    }
+    const trained = Math.min(n, room, affordable);
+    claim.army = { ...claim.army, troops: claim.army.troops + trained, day, today: today + trained, goldDay: day, goldToday: spentToday + trained * each, goldSeen: gold };
     await writeClaim(claim);
     return { ok: true, claim, trained };
   });
@@ -187,6 +225,11 @@ export async function invade(targetSeed: number, attacker: string, fromSeed: num
     if (!home || !same(home.owner, attacker)) return { ok: false, reason: 'That plot is not yours.', status: 409 };
     if (!home.army) return { ok: false, reason: 'The plot has no base. Open one first.', status: 409 };
     if (home.occupying) return { ok: false, reason: 'Your army is already holding a plot. Withdraw it first.', status: 409 };
+    // One occupation to a wallet, not one to a plot. The flag above is only on
+    // the plot the army marched from, so a player with three plots and three
+    // bases held three plots at once, against the rule everybody was told.
+    const elsewhere = (await allClaims()).find((c) => c.occupation && same(c.occupation.by, attacker) && !lapsed(c, now));
+    if (elsewhere) return { ok: false, reason: `Your army is already holding ${elsewhere.worldName || 'another plot'}. Withdraw it first.`, status: 409 };
     if (home.army.troops < sent) return { ok: false, reason: `The base holds ${home.army.troops}, not ${sent}.`, status: 409 };
     let target = await claimOf(targetSeed);
     if (!target) return { ok: false, reason: 'Nobody holds that plot.', status: 404 };
@@ -305,9 +348,14 @@ export async function payOccupation(seed: number, occupier: string): Promise<War
     if (!occ || !same(occ.by, occupier)) return { ok: false, reason: 'Your army is not holding that plot.', status: 409 };
     if (occ.paidUntil < now) return { ok: false, reason: 'The occupation has already run out.', status: 409 };
     if (occ.paidUntil - now > (OCCUPY_PAID_DAYS_MAX - 1) * DAY_MS) return { ok: false, reason: `It is paid ${OCCUPY_PAID_DAYS_MAX} days ahead already.`, status: 409 };
+    // The army is fed from home, so home's treasury is what has to cover it.
+    const due = occupyUpkeepGold(occ.era);
+    const gold = await publishedGold(occ.fromSeed);
+    if (gold === null) return { ok: false, reason: NOT_PUBLISHED, status: 409 };
+    if (gold < due) return { ok: false, reason: `Holding it costs ${due.toLocaleString()} Gold a day, and the treasury the registry last saw at ${occ.fromName || 'your plot'} holds ${Math.floor(gold).toLocaleString()}.`, status: 409 };
     claim.occupation = { ...occ, paidUntil: occ.paidUntil + DAY_MS };
     await writeClaim(claim);
-    return { ok: true, claim, gold: occupyUpkeepGold(occ.era) };
+    return { ok: true, claim, gold: due };
   });
 }
 

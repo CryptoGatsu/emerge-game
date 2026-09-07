@@ -12,7 +12,7 @@
  */
 
 import {
-  BASE_PRICES, MARKET_BUFFERS, RESOURCE_LABELS, RESOURCES, shortageOf, targetPrice,
+  BASE_PRICES, MARKET_BUFFERS, RESOURCE_LABELS, RESOURCES, shortageOf, targetPrice, tradedIn,
   type Resource,
 } from './world/goods';
 import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
@@ -3492,7 +3492,14 @@ function marketStep(world: World, hours: number) {
     // The settlement imports what it cannot make for itself. For goods it does
     // produce, the market only steps in during a real shortage — otherwise it
     // spends the treasury buying back the bread its own bakery is making.
+    // Nothing from a later age is imported at all: a settlement has no use for
+    // steel and nowhere to serve a prepared meal, and buying them was a
+    // standing charge on every young treasury in the game.
     const importer = !localOutputs.has(r);
+    // A good from a later age is not bought at all, at any price, however
+    // empty the shelf: a settlement has no use for steel and nowhere to serve
+    // a prepared meal. Anything the plot somehow holds can still be sold.
+    const buyable = tradedIn(r, eraOf(world));
     // What this order would cost, and whether the settlement can responsibly
     // afford it — see `importReserve`.
     const essential = ESSENTIAL_IMPORTS.has(r);
@@ -3501,7 +3508,7 @@ function marketStep(world: World, hours: number) {
     // A market day is a market day: stock moves faster in both directions while
     // one is running, which is what makes it worth walking to.
     const pace = busy ? 1.8 : 1;
-    if (stock < buffer * (importer ? 0.65 : 0.3)) {
+    if (buyable && stock < buffer * (importer ? 0.65 : 0.3)) {
       const qty = Math.min(Math.max(1, Math.round((buffer - stock) * .2 * pace * hours)), Math.max(0, buffer - stock)), cost = qty * q.price;
       // The market keeps something back. Without this it bought whenever it
       // could afford that single order, which meant it bought until the
@@ -7128,9 +7135,16 @@ export const houseRoom = (b: Building, world: { era?: number }) => {
  */
 export function housingRoom(world: World): number {
   useWorld(world);
+  // Summed with `houseRoom`, so the age's own form counts. This used to add
+  // up a settlement cabin's three beds whatever the houses actually were: a
+  // township of townhouses was judged to have half the room it had, an AI-age
+  // town of habitat towers a sixteenth. The town then believed itself full —
+  // it refused the settlers a player had paid $EMERGE for, told them to raise
+  // houses they did not need, and stopped forming the households that new
+  // children come from.
   return world.buildings
     .filter((b) => b.type === 'House' && b.active)
-    .reduce((sum, b) => sum + HOUSE_ROOM + (levelOf(b) - 1) * HOUSE_ROOM_PER_LEVEL, 0);
+    .reduce((sum, b) => sum + houseRoom(b, world), 0);
 }
 
 /** What draws people: the most a well-run town can expect in one day. */

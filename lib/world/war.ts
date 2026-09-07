@@ -189,6 +189,11 @@ export interface Army {
   /** The UTC day of the last training and how many were trained on it, for the daily cap. */
   day?: string;
   today?: number;
+  /** The same day and the Gold the registry has authorised on it, so a day's drilling cannot outrun the treasury. */
+  goldDay?: string;
+  goldToday?: number;
+  /** The published treasury that authorisation was read against; a smaller one means the spending has been published and the tally starts again. */
+  goldSeen?: number;
 }
 
 /** What a war event is, for the feed every screen watches. */

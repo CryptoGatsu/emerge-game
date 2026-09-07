@@ -1025,6 +1025,12 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         const occ = held?.occupation;
         if (held && occ && wallet.address && occ.by.toLowerCase() === wallet.address.toLowerCase() && occ.paidUntil - Date.now() < 8 * 3_600_000 && Date.now() - (payingRef.current ?? 0) > 60_000) {
           payingRef.current = Date.now();
+          // As with training: the registry reads the Gold off the published
+          // copy, so it goes up before the day is asked for.
+          void publishWorld({
+            seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
+            day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
+          });
           const paid = payForOccupation(world, occ.era, held.worldName);
           if (paid.ok) {
             void payOccupation(held.seed, wallet.address).then((r) => {
@@ -1936,6 +1942,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const world = worldRef.current;
     if (!world || spectating) return null;
     if (!wallet.address) return t('Connect a wallet first.');
+    // The registry checks the Gold against the copy this plot has published,
+    // the way it judges an era step, so the copy goes up first. Otherwise a
+    // settlement that opened a minute ago has no treasury on record and its
+    // first drill is refused for no reason a player could see.
+    await publishWorld({
+      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
+      day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
+    });
     const paid = payForTroops(world, count);
     if (!paid.ok) return paid.message;
     const result = await trainTroops(claimed.seed, wallet.address, count);
