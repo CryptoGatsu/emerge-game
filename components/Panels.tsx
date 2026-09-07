@@ -28,7 +28,7 @@ import {
   advanceCost, charterCost, HIRE_FEE_EMERGE,
 } from '@/lib/chain/vault';
 import { EMBLEMS, EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
-import { claimDividend, fetchDividend, registerSoftStake, type DividendStanding } from '@/lib/net/dividend';
+import { claimDividend, fetchDividend, registerSoftStake, stakeWords, type DividendStanding } from '@/lib/net/dividend';
 import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, LEVEL_PRESENCE_DAYS, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
 import { spend as spendEmerge } from '@/lib/chain/spend';
 import { Sparkline } from './Sparkline';
@@ -1421,7 +1421,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
     setDividendBusy(false);
     if (!r.ok) { setDividendNote(r.error); return; }
     setDividend(r.standing);
-    setDividendNote(t('Registered. Your lowest balance each week counts, from the next daily sample.'));
+    setDividendNote(r.standing.lowBalance === null
+      ? t('Registered. Your lowest balance each week counts, from the next daily sample.')
+      : t('Registered, and sampled now: {n} {ticker}. The lowest balance sampled each week is the stake.', { n: r.standing.lowBalance.toLocaleString(), ticker: TOKEN.ticker }));
   };
   const claimNow = async () => {
     if (!wallet.address) return;
@@ -1685,13 +1687,18 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
               * them, when it is the same standing beginning again.
               */}
             <div><span>{t('YOUR LAND WEIGHT THIS WEEK')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present · it grows with every day you play, and starts again on Monday', { n: dividend.presentDays })}</em></div>
-            <div><span>{t('YOUR SOFT STAKE')}</span><b>{dividend.registered ? (dividend.lowBalance === null ? t('registered') : dividend.lowBalance.toLocaleString()) : t('not registered')}</b></div>
+            {(() => { const w = stakeWords(dividend, STAKE_MIN_EMERGE, TOKEN.ticker); return (
+              <div><span>{t('YOUR SOFT STAKE')}</span><b>{tx(w.figure)}</b><em className="muted small">{tx(w.note)}</em></div>
+            ); })()}
             <div><span>{t('GLD TO CLAIM')}</span><b>{gld(dividend.claimable)}</b></div>
           </div>
         )}
         <div className="dividend-actions">
           {dividend && !dividend.registered && (
             <button onClick={() => void stakeNow()} disabled={dividendBusy || !wallet.address}>{wallet.address ? t('Register a soft stake') : t('Connect a wallet first')}</button>
+          )}
+          {dividend && dividend.registered && (
+            <span className="muted small">{t('Soft stake registered · once per wallet, and it stays registered')}</span>
           )}
           <button onClick={() => void claimNow()} disabled={dividendBusy || !wallet.address || !dividend || dividend.claimable === '0'}>{t('Claim GLD')}</button>
         </div>

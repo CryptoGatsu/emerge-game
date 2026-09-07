@@ -81,8 +81,25 @@ export function shareOut(units: bigint, weights: Map<string, number>): Map<strin
 
 /* ---------------- soft stake ---------------- */
 
-export async function registerStake(who: string): Promise<boolean> {
-  return hsetnx(STAKERS, who.toLowerCase(), String(Date.now()));
+export async function registerStake(who: string, now = Date.now()): Promise<boolean> {
+  const first = await hsetnx(STAKERS, who.toLowerCase(), String(now));
+  // Sampled the moment it registers, so the card shows a figure straight
+  // away rather than a blank until the next morning's cron — and so a wallet
+  // registered on a Sunday afternoon is in that week's book at all.
+  if (first) await sampleOne(who, now).catch(() => {});
+  return first;
+}
+/** One staker's balance now, folded into the week's lowest. Null when the chain could not be read. */
+export async function sampleOne(who: string, now = Date.now()): Promise<number | null> {
+  if (!tokenLive()) return null;
+  const held = await tokenBalance(who);
+  if (held === null) return null;
+  const epoch = epochOf(now);
+  const me = who.toLowerCase();
+  const prior = await hget(MIN(epoch), me);
+  const low = prior === null ? held : Math.min(Number(prior), held);
+  await hset(MIN(epoch), me, String(Math.floor(low)));
+  return Math.floor(low);
 }
 export async function stakers(): Promise<string[]> {
   return Object.keys(await hgetall(STAKERS));
@@ -90,15 +107,9 @@ export async function stakers(): Promise<string[]> {
 /** Read every staker's balance and keep the week's lowest. Meant to run daily. */
 export async function sampleBalances(now = Date.now()): Promise<number> {
   if (!tokenLive()) return 0;
-  const epoch = epochOf(now);
   let sampled = 0;
   for (const who of await stakers()) {
-    const held = await tokenBalance(who);
-    if (held === null) continue;
-    const prior = await hget(MIN(epoch), who);
-    const low = prior === null ? held : Math.min(Number(prior), held);
-    await hset(MIN(epoch), who, String(Math.floor(low)));
-    sampled += 1;
+    if ((await sampleOne(who, now)) !== null) sampled += 1;
   }
   return sampled;
 }

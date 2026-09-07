@@ -7,6 +7,28 @@ export interface DividendStanding {
   gld: string; automatic: boolean;
 }
 
+/**
+ * What the soft-stake figure means, in words.
+ *
+ * The card used to show a bare number — "0" for a registered wallet whose
+ * lowest sampled balance this week was nothing — and, because a registered
+ * wallet has no register button, a player read it as a stake they could not
+ * make. The stake is the balance the wallet holds through the week and it is
+ * registered once, so the figure needs its sentence beside it.
+ */
+export function stakeWords(s: Pick<DividendStanding, 'registered' | 'lowBalance'> | null, min: number, ticker: string): { figure: string; note: string; state: 'unregistered' | 'waiting' | 'short' | 'counting' } {
+  if (!s || !s.registered) return { figure: 'not registered', note: 'Register once; the balance your wallet holds through each week is the stake.', state: 'unregistered' };
+  if (s.lowBalance === null) return { figure: 'registered', note: 'Counted from the first daily sample, at 03:00 UTC. Nothing more to do.', state: 'waiting' };
+  if (s.lowBalance < min) {
+    return {
+      figure: s.lowBalance.toLocaleString(),
+      note: `Registered. The lowest balance sampled in your wallet this week was ${s.lowBalance.toLocaleString()} ${ticker}, under the ${min.toLocaleString()} floor, so this week pays nothing. Hold ${min.toLocaleString()} or more from Monday to Sunday and next week counts; there is nothing to register again.`,
+      state: 'short',
+    };
+  }
+  return { figure: s.lowBalance.toLocaleString(), note: `Registered. The lowest balance sampled in your wallet this week; it counts toward Monday's payout.`, state: 'counting' };
+}
+
 export async function fetchDividend(address: string | null): Promise<DividendStanding | null> {
   try {
     const get = () => fetch('/api/dividend', { cache: 'no-store' });

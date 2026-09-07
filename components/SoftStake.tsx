@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react';
 import { TOKEN } from '@/lib/chain/emerge';
 import { DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, STAKE_CAP_EMERGE } from '@/lib/chain/vault';
-import { claimDividend, fetchDividend, registerSoftStake, type DividendStanding } from '@/lib/net/dividend';
+import { claimDividend, fetchDividend, registerSoftStake, stakeWords, type DividendStanding } from '@/lib/net/dividend';
 import { t, tx, useLocale } from '@/lib/i18n';
 
 const gld = (units: string) => (Number(BigInt(units) / 1_000_000_000_000n) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -39,7 +39,9 @@ export default function SoftStake({ address, balance, hasLand }: { address: stri
     setBusy(false);
     if (!r.ok) { setNote(tx(r.error)); return; }
     setStanding(r.standing);
-    setNote(t('Registered. Your lowest balance each week counts, from the next daily sample.'));
+    setNote(r.standing.lowBalance === null
+      ? t('Registered. Your lowest balance each week counts, from the next daily sample.')
+      : t('Registered, and sampled now: {n} {ticker}. The lowest balance sampled each week is the stake.', { n: r.standing.lowBalance.toLocaleString(), ticker: TOKEN.ticker }));
   };
 
   const claim = async () => {
@@ -63,7 +65,7 @@ export default function SoftStake({ address, balance, hasLand }: { address: stri
         </p>
       </div>
       <div className="soft-stake-figures">
-        <div><span>{t('YOUR SOFT STAKE')}</span><b>{!address ? '—' : !standing ? '…' : standing.registered ? (standing.lowBalance === null ? t('registered') : standing.lowBalance.toLocaleString()) : t('not registered')}</b></div>
+        <div><span>{t('YOUR SOFT STAKE')}</span><b>{!address ? '—' : !standing ? '…' : tx(stakeWords(standing, STAKE_MIN_EMERGE, TOKEN.ticker).figure)}</b>{address && standing && <em className="muted small">{tx(stakeWords(standing, STAKE_MIN_EMERGE, TOKEN.ticker).note)}</em>}</div>
         <div><span>{t('THIS WEEK’S POOL')}</span><b>{standing ? `${standing.pool.toLocaleString()} ${TOKEN.ticker}` : '…'}</b></div>
         <div><span>{t('GLD TO CLAIM')}</span><b>{standing ? gld(standing.claimable) : '…'}</b></div>
       </div>
@@ -74,6 +76,8 @@ export default function SoftStake({ address, balance, hasLand }: { address: stri
           <button onClick={() => void register()} disabled={busy}>
             {busy ? t('Registering…') : t('Register a soft stake')}
           </button>
+        ) : standing ? (
+          <span className="muted small">{t('Soft stake registered · once per wallet, and it stays registered')}</span>
         ) : null}
         <button onClick={() => void claim()} disabled={busy || !address || !standing || standing.claimable === '0'}>{t('Claim GLD')}</button>
         {address && short && <span className="muted small">{t('Your wallet holds {n} {ticker}; a stake counts from {min}.', { n: Math.floor(balance).toLocaleString(), ticker: TOKEN.ticker, min: STAKE_MIN_EMERGE.toLocaleString() })}</span>}
