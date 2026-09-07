@@ -9,7 +9,7 @@
 
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, idleAdults, upgradeEffect, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, idleAdults, upgradeEffect, type CityGate, type Building } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -205,6 +205,12 @@ export interface Snapshot {
   focus: Focus | null;
 }
 
+/** How many people report to this workplace: those posted here, and anyone of the trade not yet posted anywhere when this is its first site. */
+function postedAt(world: World, b: Building, trade: WorkingJob): number {
+  const first = world.buildings.find((x) => x.type === b.type && x.active && !x.ruined)?.id === b.id;
+  return world.citizens.filter((c) => c.age >= 16 && c.job === trade && (c.workplaceId === b.id || (!c.workplaceId && first))).length;
+}
+
 export interface RosterPerson {
   id: string; name: string; age: number; job: Job; jobLabel: string;
   /** The kind of building their trade works at, or null for the unemployed. */
@@ -267,7 +273,10 @@ function rosterOf(world: World): Roster {
     const trade = byType(b.type);
     return {
       id: b.id, type: b.type, name: formName(b.type, b.era ?? 1), level: levelOf(b), ruined: !!b.ruined, era: b.era ?? 1,
-      crew: b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? JOB_LABELS[trade] : null,
+      // Who is posted here, not who happens to be inside this minute: at
+      // night every farm read "0 of 4 at their posts", and a player with
+      // fourteen farms took that for a town that would not work them.
+      crew: trade ? postedAt(world, b, trade) : b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? JOB_LABELS[trade] : null,
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
   return {
@@ -385,7 +394,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     crew: (() => {
       const trade = tradeOf(b.type);
       if (!trade) return null;
-      return { posted: world.citizens.filter((c) => c.job === trade && (c.workplaceId === b.id || (!c.workplaceId && world.buildings.find((x) => x.type === b.type && x.active && !x.ruined)?.id === b.id))).length, posts: buildingPosts(b, world) };
+      return { posted: postedAt(world, b, trade), posts: buildingPosts(b, world) };
     })(),
     x: b.x, y: b.y,
     upkeep: Math.round(upkeepOf(b)),

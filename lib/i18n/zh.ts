@@ -1573,6 +1573,9 @@ export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
   // ---- 地块助手 ----
   [/^Raise a house$/, '盖一栋房子'],
   [/^Raise a workplace$/, '新建工作场所'],
+  [/^Keep more food back$/, '多留些存粮'],
+  [/^The fields and the water made (\d+) food yesterday against (\d+) eaten and baked, and (\d+) in store is about ([\d.]+) days for (\d+) people: the market is selling the surplus\.$/, '田地和水面昨天产出 $1 份食物，吃掉和烘焙用掉 $2 份，库存 $3 份约够 $5 人吃 $4 天：市场正在把富余卖掉。'],
+  [/^Set a keep on the Market panel and the surplus stays in the larder for the winter\. More farms would only give the market more to sell\.$/, '在市场面板设一个保留量，富余就会留在粮仓里过冬。再建农场只会给市场更多可卖的。'],
   [/^Raise a (.+)$/, (m) => `盖一栋${name(m[1])}`],
   [/^Break more ground$/, '开垦更多土地'],
   [/^Put hands to the timber$/, '派人去砍柴'],

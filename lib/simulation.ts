@@ -3622,6 +3622,29 @@ function fedFromStores(world: World): boolean {
   return held >= world.citizens.length * FOOD_PER_HEAD;
 }
 
+/**
+ * What the fields, the water and the ovens made yesterday against what was
+ * eaten and baked, in units of food.
+ *
+ * The larder alone is a poor judge of a town's farming, because the market
+ * sells everything above the keep: a town of two hundred and fifty with
+ * fourteen farms sat at two days of food in store — the market took the rest
+ * every hour — and was told to break more ground. Fourteen times. What
+ * decides whether a town is feeding itself is the day's balance, not the
+ * shelf.
+ */
+export function foodBalance(world: World): { made: number; used: number } {
+  useWorld(world);
+  const flow = world.flowYesterday ?? { produced: {}, consumed: {} };
+  const sum = (side: Partial<Record<Resource, number>>) => FOOD.reduce((n, r) => n + (side[r] ?? 0), 0);
+  return { made: Math.round(sum(flow.produced)), used: Math.round(sum(flow.consumed)) };
+}
+/** True when yesterday's food kept pace with yesterday's eating, so a thin larder is the market's doing. */
+export function fieldsKeepUp(world: World): boolean {
+  const { made, used } = foodBalance(world);
+  return used > 0 && made >= used;
+}
+
 /** How many days of wages and upkeep the market leaves untouched. */
 const IMPORT_RESERVE_DAYS = 2;
 
@@ -3970,7 +3993,17 @@ function adviseBuildAll(world: World): Advice[] {
       gain: 'Tap it and move it off the ramp. Nothing can be placed on a deck or its ramps any more.' });
   }
   const food = foodInStore(world);
-  if (food < people * 2.5) {
+  const balance = foodBalance(world);
+  if (food < people * 2.5 && fieldsKeepUp(world)) {
+    // The fields keep up and the shelf is still thin: the market is selling
+    // the surplus above the keep. Another farm would only give it more to
+    // sell. Say so only when the larder is thin enough to matter.
+    if (food < people * 1.5) {
+      out.push({ kind: 'wages', title: 'Keep more food back',
+        why: `The fields and the water made ${balance.made} food yesterday against ${balance.used} eaten and baked, and ${Math.round(food)} in store is about ${(food / Math.max(1, people)).toFixed(1)} days for ${people} people: the market is selling the surplus.`,
+        gain: 'Set a keep on the Market panel and the surplus stays in the larder for the winter. More farms would only give the market more to sell.' });
+    }
+  } else if (food < people * 2.5) {
     const farms = world.buildings.filter((b) => b.type === 'Farm' && b.active);
     const farmHands = world.citizens.filter((c) => c.age >= 16 && c.job === 'farmer').length;
     const farmPosts = Math.max(0, jobCapacity(world, 'farmer') - farmHands);
@@ -6872,7 +6905,9 @@ function settlementBuilds(world: World) {
   let needSaid: string | null = null;
   if (homeless > 0 || crowded) ownChoice = 'House';
   else if (world.resources.wood < 22 && !world.buildings.some((b) => b.type === 'Woodcutter')) ownChoice = 'Woodcutter';
-  else if (foodInStore(world) < world.citizens.length * 2.5) {
+  else if (foodInStore(world) < world.citizens.length * 2.5 && !fieldsKeepUp(world)) {
+    // A thin larder with the fields keeping up is the market selling the
+    // surplus, not a shortage: no farm for that, see `foodBalance`.
     // A shore town feeds itself from the water first, if the land is that kind of land.
     const shore = biomeProfile(world.biome).trades.indexOf('Fishery');
     const farm = biomeProfile(world.biome).trades.indexOf('Farm');
