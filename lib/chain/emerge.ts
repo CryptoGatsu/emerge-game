@@ -199,28 +199,97 @@ export function discoverWallets(onChange: (wallets: DiscoveredWallet[]) => void)
   window.addEventListener('eip6963:announceProvider', onAnnounce);
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 
-  // Fall back to the injected objects for wallets that do not announce.
-  const legacy = window.ethereum;
-  const list: Eip1193Provider[] = legacy ? (legacy.providers?.length ? legacy.providers : [legacy]) : [];
-  const binance = binanceProviders();
-  if (list.length || binance.length) {
+  /*
+   * The injected objects, for wallets that do not announce — looked for
+   * now, and again for a while.
+   *
+   * A wallet app's browser injects its provider on its own schedule, often
+   * after the page has run: Trust Wallet and the Binance app both do, and a
+   * player who opened the game from the Binance app saw "No wallet detected"
+   * because the one look at `window.ethereum` came before the wallet had put
+   * anything there. So the look repeats for a few seconds, fires again on
+   * the `ethereum#initialized` event wallets send when they are ready, and
+   * asks the announcing wallets a second and third time for the ones that
+   * register their listener late. Every provider found is reported once,
+   * by object and by name.
+   */
+  const seen = new Set<Eip1193Provider>();
+  const legacyLook = () => {
+    let changed = false;
+    const legacy = window.ethereum;
+    const list: Eip1193Provider[] = legacy ? (legacy.providers?.length ? legacy.providers : [legacy]) : [];
     list.forEach((provider, i) => {
+      if (seen.has(provider)) return;
+      seen.add(provider);
       const named = nameFromLegacy(provider as Window['ethereum']);
       const id = `legacy:${named}:${i}`;
-      if (![...found.values()].some((w) => w.name === named)) {
+      if (![...found.values()].some((w) => w.name === named || w.provider === provider)) {
         found.set(id, { id, name: named, icon: null, rdns: null, provider });
+        changed = true;
       }
     });
-    binance.forEach((provider, i) => {
+    binanceProviders().forEach((provider, i) => {
+      if (seen.has(provider)) return;
+      seen.add(provider);
       const id = `binance:${i}`;
-      if (![...found.values()].some((w) => w.name === 'Binance Wallet' || /binance/i.test(w.rdns ?? ''))) {
+      if (![...found.values()].some((w) => w.name === 'Binance Wallet' || /binance/i.test(w.rdns ?? '') || w.provider === provider)) {
         found.set(id, { id, name: 'Binance Wallet', icon: null, rdns: null, provider });
+        changed = true;
       }
     });
-    publish();
-  }
+    if (changed) publish();
+  };
+  legacyLook();
+  if (!found.size) publish();
 
-  return () => window.removeEventListener('eip6963:announceProvider', onAnnounce);
+  const timers: number[] = [];
+  const again = () => { window.dispatchEvent(new Event('eip6963:requestProvider')); legacyLook(); };
+  for (const ms of [300, 1000, 2500, 5000, 8000]) timers.push(window.setTimeout(again, ms));
+  const poll = window.setInterval(legacyLook, 400);
+  timers.push(window.setTimeout(() => window.clearInterval(poll), 8000));
+  window.addEventListener('ethereum#initialized', again);
+  window.addEventListener('focus', again);
+
+  return () => {
+    window.removeEventListener('eip6963:announceProvider', onAnnounce);
+    window.removeEventListener('ethereum#initialized', again);
+    window.removeEventListener('focus', again);
+    window.clearInterval(poll);
+    for (const id of timers) window.clearTimeout(id);
+  };
+}
+
+/**
+ * What the page can see of a wallet, for the line under "No wallet detected".
+ *
+ * Written for the support channel: a player's screenshot of this line says
+ * whether the wallet injected anything at all, under which name, and whether
+ * the page is inside a wallet app's browser or a plain mobile browser where
+ * no extension can exist. Nothing here is a secret.
+ */
+export function walletSighting(): { line: string; mobile: boolean; inApp: string | null } {
+  if (typeof window === 'undefined') return { line: '', mobile: false, inApp: null };
+  const ua = navigator.userAgent || '';
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const inApp = /BNC|Binance/i.test(ua) ? 'Binance app' : /Trust/i.test(ua) ? 'Trust Wallet' : /MetaMaskMobile/i.test(ua) ? 'MetaMask' : null;
+  const eth = window.ethereum;
+  const parts: string[] = [];
+  parts.push(eth ? `ethereum: ${nameFromLegacy(eth)}${eth.providers?.length ? ` (${eth.providers.length})` : ''}` : 'ethereum: none');
+  parts.push(`binancew3w: ${window.binancew3w?.ethereum ? 'yes' : 'none'}`);
+  parts.push(`BinanceChain: ${window.BinanceChain ? 'yes' : 'none'}`);
+  parts.push(mobile ? `mobile${inApp ? `, ${inApp}` : ', plain browser'}` : 'desktop');
+  return { line: parts.join(' · '), mobile, inApp };
+}
+
+/** Where a phone can open this page inside a wallet's own browser. */
+export function walletDeepLinks(): { name: string; href: string }[] {
+  if (typeof window === 'undefined') return [];
+  const here = window.location.href;
+  const bare = here.replace(/^https?:\/\//, '');
+  return [
+    { name: 'MetaMask', href: `https://metamask.app.link/dapp/${bare}` },
+    { name: 'Trust Wallet', href: `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(here)}` },
+  ];
 }
 
 export interface WalletState {

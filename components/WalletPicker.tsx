@@ -8,10 +8,10 @@
  * rather than having whichever one won the injection race picked for them.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   ACTIVE_CHAIN, INITIAL_WALLET, PREFERRED_WALLETS, connectWallet, discoverWallets,
-  resumeWallet, shortAddress, switchToEmergeChain,
+  resumeWallet, shortAddress, switchToEmergeChain, walletDeepLinks, walletSighting,
   type DiscoveredWallet, type WalletState,
 } from '@/lib/chain/emerge';
 import { t, useLocale } from '@/lib/i18n';
@@ -166,12 +166,32 @@ export function WalletPicker({ compact = false }: { compact?: boolean }) {
   }
 
   if (!available.length) {
+    const sighting = walletSighting();
     return (
       <div className="wallet-box">
         <small className="muted">
           {t('No wallet detected. {wallets} works with {chain}', { wallets: listOf(PREFERRED_WALLETS, t(' or ')), chain: ACTIVE_CHAIN.label })}
           {compact ? t(' — you can still claim and play.') : '.'}
         </small>
+        {sighting.mobile && !sighting.inApp && (
+          <small className="muted wallet-open">
+            {t('A phone browser has no wallet in it. Open this page inside your wallet’s own browser:')}
+            {' '}
+            {walletDeepLinks().map((l) => <a key={l.name} href={l.href}>{l.name}</a>).reduce<ReactNode[]>((acc, el, i) => (i ? [...acc, ' · ', el] : [el]), [])}
+            {' · '}
+            {t('Binance: in the Binance app, open Wallet → Web3 and enter emergerh.world on its Discover page.')}
+          </small>
+        )}
+        {!compact && (
+          <details className="wallet-why">
+            <summary>{t('Why can’t the game see my wallet?')}</summary>
+            <small className="muted">
+              {t('The game listens for wallets that announce themselves and looks for the ones that only inject, for eight seconds after the page opens. What it can see right now:')}
+              {' '}<code>{sighting.line}</code>{' '}
+              {t('If your wallet is installed and this says none, send this line to support.')}
+            </small>
+          </details>
+        )}
       </div>
     );
   }

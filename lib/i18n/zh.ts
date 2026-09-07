@@ -145,6 +145,11 @@ export const UI: Record<string, string> = {
   'No wallet detected. {wallets} works with {chain}': '未检测到钱包。{wallets} 支持 {chain}',
   '{wallets} both work with {chain}.': '{wallets} 都支持 {chain}。',
   '{wallets} all work with {chain}.': '{wallets} 都支持 {chain}。',
+  'A phone browser has no wallet in it. Open this page inside your wallet’s own browser:': '手机浏览器里没有钱包。请在钱包自带的浏览器里打开本页：',
+  'Binance: in the Binance app, open Wallet → Web3 and enter emergerh.world on its Discover page.': 'Binance：在币安 App 里打开 钱包 → Web3，在“发现”页输入 emergerh.world。',
+  'Why can’t the game see my wallet?': '为什么游戏看不到我的钱包？',
+  'The game listens for wallets that announce themselves and looks for the ones that only inject, for eight seconds after the page opens. What it can see right now:': '页面打开后的八秒内，游戏会监听主动宣告的钱包，并查找只做注入的钱包。它现在能看到的是：',
+  'If your wallet is installed and this says none, send this line to support.': '如果你已安装钱包而这里显示 none，请把这一行发给客服。',
 
   // ---- 世界地图 ----
   'Every plot is a world waiting to happen, and no two are the same land. Claim one with {ticker}, give it a name, and the beings who live there will call it that.':
