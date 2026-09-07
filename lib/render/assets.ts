@@ -25,7 +25,7 @@ import {
 } from './character';
 import { buildBuildingArt, buildBuildings, type BuildingArt } from './buildings';
 import { buildProps } from './props';
-import { animalFrame, fishingRod, huntingBow } from './wildlifeArt';
+import { animalFrame, fishingRod, huntingBow, rifle, spear } from './wildlifeArt';
 import { clash, funnel, rubble, torch } from './dangerArt';
 import { ANIMAL_KINDS } from '../world/wildlife';
 import { buildTiles, canopyPattern } from './tiles';
@@ -593,6 +593,8 @@ export function loadAssets(): AssetLibrary {
   put('fx.clash', clash());
   put('overlay.rubble', rubble());
   put('fx.bow', huntingBow());
+  put('fx.spear', spear());
+  put('fx.rifle', rifle());
   for (const kind of ANIMAL_KINDS) {
     put(`wild.${kind}.0`, animalFrame(kind, 0));
     put(`wild.${kind}.1`, animalFrame(kind, 1));

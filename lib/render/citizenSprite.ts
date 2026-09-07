@@ -46,7 +46,7 @@ const CARRIED: Record<string, string> = {
 /** Trades whose load only exists on the way back: nobody walks *to* the water with a fish. */
 const CARRY_ON_ERRAND = new Set(['fisher', 'hunter', 'forager']);
 /** What the outdoor trades hold while they work. */
-const TOOLS: Record<string, string> = { fisher: 'fx.rod', hunter: 'fx.bow' };
+const TOOLS: Record<string, string> = { fisher: 'fx.rod', hunter: 'fx.bow', spearman: 'fx.spear', rifleman: 'fx.rifle' };
 
 export interface CitizenView {
   /** Interpolated world position used for depth sorting and label anchoring. */
@@ -358,8 +358,16 @@ export class CitizenSprite {
     // The rod is out while the fisher stands at the water; the bow is up
     // while the hunter has something in sight.
     const working = citizen.activity === 'working' && !citizen.inside && !citizen.errand;
-    const holding = citizen.job === 'fisher' ? working && !moving : citizen.job === 'hunter' ? !!citizen.hunting && !citizen.inside : false;
+    // A soldier's weapon is out whenever they are in view: shouldered on the march, levelled in a fight.
+    const job = citizen.job as string;
+    const armed = (job === 'spearman' || job === 'rifleman') && !citizen.inside;
+    const holding = citizen.job === 'fisher' ? working && !moving : citizen.job === 'hunter' ? !!citizen.hunting && !citizen.inside : armed;
     this.tool.visible = holding;
+    // In cover they crouch: the whole figure drops and squats a little.
+    const cover = !!(citizen as { cover?: boolean }).cover && !moving;
+    const base = this.appearance.scale;
+    const squat = base * (cover ? 0.72 : 1);
+    if (Math.abs(this.stack.scale.y - squat) > 0.001) this.stack.scale.set(base, squat);
     // The torch: out whenever the rogue is in view, flickering.
     const torching = !!citizen.rogue && !citizen.inside;
     this.torch.visible = torching;
@@ -370,9 +378,19 @@ export class CitizenSprite {
     if (holding) {
       const scale = 0.9;
       this.tool.scale.set(scale, scale);
-      if (this.dir === 'e') this.tool.position.set(6, -9);
-      else if (this.dir === 's') this.tool.position.set(4, -8);
-      else this.tool.position.set(3, -14);
+      if ((citizen.job as string) === 'rifleman') {
+        // Levelled at the enemy while firing, at the hip otherwise.
+        const firing = !!(citizen as { firing?: boolean }).firing;
+        this.tool.rotation = firing ? -0.15 : -0.6;
+        if (this.dir === 'e') this.tool.position.set(firing ? 2 : 4, firing ? -11 : -8);
+        else if (this.dir === 's') this.tool.position.set(1, -8);
+        else this.tool.position.set(0, -12);
+      } else {
+        this.tool.rotation = 0;
+        if (this.dir === 'e') this.tool.position.set(6, -9);
+        else if (this.dir === 's') this.tool.position.set(4, -8);
+        else this.tool.position.set(3, -14);
+      }
     }
     if (hauling) {
       const scale = 0.8;

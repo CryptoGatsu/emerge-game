@@ -656,6 +656,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!host || !worldRef.current) return;
 
     const scene = new EmergeScene();
+    scene.onCue = (cue) => soundRef.current?.cue(cue);
     sceneRef.current = scene;
     let frame = 0;
 

@@ -1097,9 +1097,11 @@ export default function Wiki() {
           <h3>Watching a fight</h3>
           <p>
             Open the plot &mdash; your own, or a visit to somebody else&rsquo;s &mdash; and the last battle the
-            registry recorded there plays out: the attackers march in from the gate, the garrison forms up in
-            the square, and each round somebody goes down, in the order the registry rolled it. Afterwards the
-            winner&rsquo;s survivors take up their places and the losers march off.
+            registry recorded there plays out: the attackers come in from the gate in bounds, the garrison takes
+            cover beside the buildings round the square, spears and rifles are aimed and fired with every round,
+            and the ones caught in the open fall first, in the order the registry rolled it. The townsfolk run
+            home and bar the doors until it is over. Afterwards the winner&rsquo;s survivors take up their places,
+            walking the buildings they hold and going in and out of them, and the losers march off.
           </p>
         </section>
 

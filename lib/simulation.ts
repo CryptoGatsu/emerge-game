@@ -1650,6 +1650,8 @@ function moveCitizens(world: World, hours: number) {
     else if (c.rogue) phase = 'rogue';
     else if (c.chasing) phase = 'pursuit';
     else if (c.fleeing && c.fleeing > 0) phase = 'fleeing';
+    // A fight in the square: everybody who has a door goes in behind it.
+    else if (world.war?.playing && homeOf(world, c)) phase = 'athome';
     // Anyone genuinely freezing goes in out of it, and stays in until they have
     // properly warmed up. People do not stand in a blizzard until they drop,
     // and children — who wander all day by definition and are never counted as
@@ -8230,6 +8232,8 @@ export interface BattlePlay {
   survivors: { attacker: number; defender: number };
   attackerName: string;
   defenderName: string;
+  /** How many rounds have been played, for the sound of each. */
+  played: number;
 }
 
 export interface Soldier {
@@ -8247,6 +8251,13 @@ export interface Soldier {
   fallen?: number;
   /** Marching off the plot, gone at the edge. */
   leaving?: boolean;
+  /** Crouched behind a wall or a corner. */
+  cover?: boolean;
+  /** Hours left of the shot or the lunge just made, and where it went. */
+  firing?: number;
+  aimX?: number; aimY?: number;
+  /** Inside a building, by id: a patrol clearing it, or a squad holding it. */
+  inside?: string;
 }
 
 /** How many soldiers stand for a force on the ground: a squad, not the whole roll. */
@@ -8321,13 +8332,39 @@ export function applyWar(world: World, row: { army: { troops: number } | null; o
 export function raiseBase(world: World): Building | null {
   useWorld(world);
   if (world.buildings.some((b) => b.type === 'Barracks')) return null;
-  const site = freeSite(world, false);
-  if (!site) return null;
-  const gold = world.treasury;
-  const raised = constructBuilding(world, 'Barracks', 0, site[0], site[1]);
-  world.treasury = gold;
-  if (raised) pushFeed(world, 'build', `A ${formName('Barracks', eraOf(world)).toLowerCase()} was raised. ${world.name} can train an army now.`);
-  return raised;
+  // The base was paid for on the registry, so it must stand somewhere: a work
+  // site, a house plot, or failing those any open ground in rings round the
+  // square. A swamp plot whose last spot went to a fishery used to swallow
+  // the purchase without a building.
+  const tries: [number, number][] = [];
+  for (const site of [freeSite(world, false), freeSite(world, true)]) if (site) tries.push(site);
+  tries.push(...groundRings(world));
+  for (const [x, y] of tries) {
+    if (placementProblem(world, 'Barracks', x, y)) continue;
+    const gold = world.treasury;
+    const raised = constructBuilding(world, 'Barracks', 0, x, y);
+    world.treasury = gold;
+    if (!raised) continue;
+    pushFeed(world, 'build', `A ${formName('Barracks', eraOf(world)).toLowerCase()} was raised. ${world.name} can train an army now.`);
+    return raised;
+  }
+  return null;
+}
+
+/** Points in widening rings round the square, nearest first, for a building that has to go somewhere. */
+function groundRings(world: World): [number, number][] {
+  const out: [number, number][] = [];
+  const { x0, x1, y0, y1 } = buildBounds(world);
+  const plaza = world.layout.plaza;
+  for (let r = plaza.r + 8; r <= 48; r += 4) {
+    const n = Math.max(8, Math.round(r * 1.2));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r * 0.37;
+      const x = Math.round(plaza.x + Math.cos(a) * r), y = Math.round(plaza.y + Math.sin(a) * r);
+      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) out.push([x, y]);
+    }
+  }
+  return out;
 }
 
 /** Put the battle on the ground: both sides in their places, the attackers on the march. */
@@ -8346,13 +8383,29 @@ function startBattle(world: World, battle: Battle): void {
   while (world.soldiers.length < fielded.defender) world.soldiers.push(...raiseSoldiers(world, defenderSide, battle.defender.era, 1, square));
   for (const so of world.soldiers) { so.role = 'defender'; so.wait = 99; so.destX = square[0] + (so.x - square[0]) * 0.1; so.destY = square[1] + (so.y - square[1]) * 0.1; so.moving = true; }
   const attackers = raiseSoldiers(world, attackerSide, battle.attacker.era, fielded.attacker, attackerSide === 'home' ? musterPoint(world) : gate, 'attacker');
-  for (const so of attackers) { const [ox, oy] = standingOffset(so.look, 3.2); so.destX = square[0] + ox; so.destY = square[1] + oy; so.moving = true; so.wait = 99; }
+  // The first bound: a line about twelve units short of the square, on the way in.
+  for (const so of attackers) {
+    const [ox, oy] = standingOffset(so.look, 3.2);
+    const d = Math.hypot(square[0] - so.x, square[1] - so.y) || 1;
+    const stop = Math.max(0, d - 12);
+    so.destX = so.x + ((square[0] - so.x) / d) * stop + ox; so.destY = so.y + ((square[1] - so.y) / d) * stop + oy; so.moving = true; so.wait = 99;
+  }
   world.soldiers.push(...attackers);
   war.playing = {
     id: battle.id, rounds: battle.rounds, step: 0, t: 0, phase: 'march', winner: battle.winner, attackerSide,
     attackerEra: battle.attacker.era, defenderEra: battle.defender.era, fielded, survivors: battle.survivors,
     attackerName: battle.attacker.name || shortName(battle.attacker.address), defenderName: battle.defender.name || shortName(battle.defender.address),
+    played: 0,
   };
+  // The defenders take cover at the walls and corners between the square and
+  // the gate; the attackers come on in bounds, cover to cover.
+  const posts = coverPosts(world, gate);
+  const defenders = world.soldiers.filter((so) => so.role === 'defender');
+  defenders.forEach((so, i) => {
+    const post = posts[i % Math.max(1, posts.length)];
+    if (post) { so.destX = post[0]; so.destY = post[1]; so.moving = true; }
+  });
+  pushFeed(world, 'world', 'People run for their homes and bar the doors.');
   pushFeed(world, 'world', battle.kind === 'retake'
     ? `${war.playing.attackerName} marches on the garrison holding ${world.name}.`
     : battle.kind === 'ambush'
@@ -8394,6 +8447,41 @@ function patrolTargets(world: World): Building[] {
   return civic.length ? civic : world.buildings.filter((b) => !b.ruined);
 }
 
+/**
+ * Where a soldier can take cover: beside the buildings that stand between
+ * the square and the gate, on the side facing the enemy, closest to the
+ * square first. A plot with nothing standing fights in the open.
+ */
+function coverPosts(world: World, gate: [number, number]): [number, number][] {
+  const sq: [number, number] = [world.layout.plaza.x, world.layout.plaza.y];
+  const water = waterOf(world);
+  const toGate = Math.atan2(gate[1] - sq[1], gate[0] - sq[0]);
+  const posts: [number, number][] = [];
+  const near = world.buildings.filter((b) => !b.ruined && Math.hypot(b.x - sq[0], b.y - sq[1]) < 30)
+    .sort((a, b) => Math.hypot(a.x - sq[0], a.y - sq[1]) - Math.hypot(b.x - sq[0], b.y - sq[1]));
+  for (const b of near) {
+    const r = footprintRadius(b) + 0.7;
+    for (const turn of [0, 0.7, -0.7]) {
+      const x = b.x + Math.cos(toGate + turn) * r, y = b.y + Math.sin(toGate + turn) * r;
+      if (!water.blocks(x, y)) posts.push([x, y]);
+    }
+  }
+  // The square's edge itself, for a squad with no wall to spare.
+  for (let i = 0; i < 6; i++) posts.push([sq[0] + Math.cos(toGate + (i - 2.5) * 0.5) * 5, sq[1] + Math.sin(toGate + (i - 2.5) * 0.5) * 5]);
+  return posts;
+}
+
+/** The nearest standing enemy to a soldier, for aiming. */
+function nearestEnemy(world: World, so: Soldier): Soldier | null {
+  let best: Soldier | null = null, bestD = Infinity;
+  for (const other of world.soldiers ?? []) {
+    if (other.role === so.role || !other.role || other.fallen !== undefined) continue;
+    const d = Math.hypot(other.x - so.x, other.y - so.y);
+    if (d < bestD) { bestD = d; best = other; }
+  }
+  return best;
+}
+
 /** Move the soldiers, and play the fight. Called every tick. */
 function stepWar(world: World, hours: number): void {
   const war = world.war;
@@ -8414,14 +8502,22 @@ function stepWar(world: World, hours: number): void {
     } else {
       so.moving = false;
       if (so.leaving) { so.fallen = FALLEN_HOURS; continue; }
-      if (play && so.role) continue;
+      if (play && so.role) { so.cover = so.role === 'defender' || play.phase === 'clash'; continue; }
+      so.cover = false;
       so.wait -= hours;
       if (so.wait <= 0) {
-        // A new post: an invader walks the buildings it holds, the garrison drills round the base.
+        // A new post: an invader walks the buildings it holds, going in to
+        // clear one now and then; the garrison drills round the base.
+        if (so.inside) so.inside = undefined;
         if (so.side === 'invader' && war.occupation) {
           const targets = patrolTargets(world);
           const b = targets[(so.look + Math.floor(world.hour) + Math.floor(so.x)) % Math.max(1, targets.length)];
-          if (b) { const [ox, oy] = standingOffset(so.look + Math.floor(world.hour), 2.6); so.destX = b.x + ox; so.destY = b.y + 2.4 + oy; }
+          if (b) {
+            const [ox, oy] = standingOffset(so.look + Math.floor(world.hour), 2.6);
+            so.destX = b.x + ox; so.destY = b.y + 2.4 + oy;
+            // One in three goes inside: the door, then out of sight until the next post.
+            if ((so.look + Math.floor(world.hour)) % 3 === 0) { so.inside = b.id; so.destX = b.x; so.destY = b.y + footprintRadius(b) * 0.6; }
+          }
         } else {
           const m = musterPoint(world);
           const [ox, oy] = standingOffset(so.look + Math.floor(world.hour * 3), 3.4);
@@ -8431,6 +8527,7 @@ function stepWar(world: World, hours: number): void {
       }
     }
   }
+  for (const so of world.soldiers) if (so.firing !== undefined) { so.firing -= hours; if (so.firing <= 0) so.firing = undefined; }
   // Fallen soldiers are cleared after a while.
   world.soldiers = world.soldiers.filter((so) => so.fallen === undefined || so.fallen < FALLEN_HOURS);
   if (!play) return;
@@ -8444,15 +8541,36 @@ function stepWar(world: World, hours: number): void {
     while (play.t >= ROUND_HOURS && play.step < play.rounds.length) {
       play.t -= ROUND_HOURS;
       const round = play.rounds[play.step++];
-      // Whoever was hit loses a share of their squad; the record says how much fight is left.
+      play.played = play.step;
+      // The side that landed the blow fires: a few of them level their
+      // weapons at the nearest enemy (a spear lunges, a rifle flashes).
+      const firingSide = round.by;
+      const shooters = world.soldiers.filter((so) => so.role === firingSide && so.fallen === undefined);
+      for (const so of shooters.slice(0, 2 + (play.step % 3))) {
+        const target = nearestEnemy(world, so);
+        if (!target) break;
+        so.firing = 0.12; so.aimX = target.x; so.aimY = target.y;
+        so.facing = Math.abs(target.x - so.x) > Math.abs(target.y - so.y) ? (target.x > so.x ? 'e' : 'w') : (target.y > so.y ? 's' : 'n');
+      }
+      // Whoever was hit loses a share of their squad; the record says how much
+      // fight is left. The exposed go first: cover is worth something.
       const hitSide: 'attacker' | 'defender' = round.by === 'attacker' ? 'defender' : 'attacker';
       const left = hitSide === 'attacker' ? round.attackerLeft : round.defenderLeft;
       const fielded = play.fielded[hitSide];
       const shouldStand = Math.max(left > 0 ? 1 : 0, Math.round(fielded * left / 100));
-      const standing = world.soldiers.filter((so) => so.role === hitSide && so.fallen === undefined);
-      for (const so of standing.slice(shouldStand)) { so.fallen = 0; so.moving = false; }
-      // Everybody still up squares off at the middle.
-      for (const so of world.soldiers) if (so.role && so.fallen === undefined) { so.facing = so.x < world.layout.plaza.x ? 'e' : 'w'; }
+      const standing = world.soldiers.filter((so) => so.role === hitSide && so.fallen === undefined).sort((a, b) => Number(!!a.cover) - Number(!!b.cover));
+      for (const so of standing.slice(shouldStand)) { so.fallen = 0; so.moving = false; so.cover = false; }
+      // Every third round the attackers bound forward to the next cover.
+      if (play.step % 3 === 0) {
+        const sq = world.layout.plaza;
+        for (const so of world.soldiers) {
+          if (so.role !== 'attacker' || so.fallen !== undefined) continue;
+          const d = Math.hypot(sq.x - so.x, sq.y - so.y);
+          if (d > 4) { const step = Math.min(4, d - 3); so.destX = so.x + ((sq.x - so.x) / d) * step; so.destY = so.y + ((sq.y - so.y) / d) * step; so.moving = true; so.cover = false; }
+        }
+      }
+      // Everybody still up faces the enemy.
+      for (const so of world.soldiers) if (so.role && so.fallen === undefined && so.firing === undefined) { const e = nearestEnemy(world, so); if (e) so.facing = Math.abs(e.x - so.x) > Math.abs(e.y - so.y) ? (e.x > so.x ? 'e' : 'w') : (e.y > so.y ? 's' : 'n'); }
     }
     if (play.step >= play.rounds.length && play.t >= ROUND_HOURS) {
       play.phase = 'done'; play.t = 0;
@@ -8468,6 +8586,7 @@ function finishBattle(world: World): void {
   const attackerWon = play.winner === 'attacker';
   const losers: 'attacker' | 'defender' = attackerWon ? 'defender' : 'attacker';
   for (const so of world.soldiers ?? []) {
+    so.cover = false; so.firing = undefined;
     if (so.fallen !== undefined) continue;
     if (so.role === losers) {
       // The routed side: fewer than fielded walk away.

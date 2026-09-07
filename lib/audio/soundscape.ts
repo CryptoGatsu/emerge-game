@@ -35,7 +35,8 @@ export interface SoundState {
 export type Cue =
   | 'hammer' | 'saw' | 'anvil' | 'coin' | 'sell' | 'bell'
   | 'birth' | 'death' | 'alarm' | 'discover' | 'levelup'
-  | 'crowd' | 'blow' | 'win' | 'lose';
+  | 'crowd' | 'blow' | 'win' | 'lose'
+  | 'shot' | 'clash';
 
 /** A looping buffer of white noise, the source of wind and rain. */
 function noiseBuffer(ctx: AudioContext) {
@@ -398,6 +399,18 @@ export class Soundscape {
         // A roar: noise swelling and falling away, low and wide.
         this.burst(now, 380, 1.6, 0.055, 0.7);
         this.burst(now + 0.1, 700, 1.3, 0.03, 0.5);
+        break;
+      case 'shot':
+        // A rifle: a sharp crack and a short tail of report.
+        this.burst(now, 2600, 0.03, 0.06, 0.6);
+        this.burst(now + 0.01, 900, 0.16, 0.05, 1.2);
+        this.tone(now, 160, 70, 0.14, 0.03, 'triangle');
+        break;
+      case 'clash':
+        // Steel on steel: a bright strike, a shorter ring than the anvil's.
+        this.tone(now, 2100 + rand() * 300, 2050, 0.22, 0.04);
+        this.tone(now, 3100, 3050, 0.12, 0.018);
+        this.burst(now, 2800, 0.04, 0.03);
         break;
       case 'blow':
         // A hit landing: a thud with a slap on top.
