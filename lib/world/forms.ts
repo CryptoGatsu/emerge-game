@@ -57,7 +57,7 @@ const COST = [1, 1.9, 3.6, 6.8, 13];
 const UPKEEP = [1, 1.7, 2.9, 5, 8.5];
 const WORTH = [1, 2, 4, 8, 16];
 /** The improvement cap by age: three, then a level more every second age. */
-const CAP = [3, 3, 4, 4, 5];
+const CAP = [3, 4, 4, 4, 5];
 
 /** Posts at a settlement-age workplace: three at a mine, two elsewhere. */
 export const BASE_POSTS: Record<string, number> = { Mine: 3 };

@@ -39,7 +39,7 @@ import {
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchNames } from '@/lib/net/names';
 import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
-import { fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
+import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
@@ -1439,7 +1439,8 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
   const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [claimNote, setClaimNote] = useState<string | null>(null);
-  const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | null>(null);
+  const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | 'recover' | null>(null);
+  const [recoverHash, setRecoverHash] = useState('');
   const [history, setHistory] = useState<PayoutHistory | null>(null);
   const ledger = player.ledger;
   const steward = view.stewardship;
@@ -1539,6 +1540,22 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
   };
 
   const netYesterday = view.earnedYesterday - view.spentYesterday;
+
+  /** A deposit the vault holds but the game has no record of: credited from its receipt. */
+  const doRecover = async () => {
+    if (!who.address) return;
+    const hash = recoverHash.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) { setMessage(t('Paste the full transaction hash: 0x followed by 64 characters.')); return; }
+    setBusy('recover');
+    setMessage(t('Checking the deposit on chain…'));
+    const result = await creditDeposit(who.address, hash);
+    setBusy(null);
+    if (!result.ok) { setMessage(tx(result.reason)); return; }
+    setRecoverHash('');
+    const gold = Math.floor(result.credited / EMERGE_PER_GOLD * 100) / 100;
+    setMessage(t('Credited: {n} {ticker} of deposit, {gold} Gold. Your principal stands at {p} {ticker}.', { n: result.credited.toLocaleString(), gold, p: result.principal.toLocaleString(), ticker: TOKEN.ticker }));
+    void refreshHistory();
+  };
 
   const doWithdraw = async () => {
     setBusy('withdraw');
@@ -1899,6 +1916,18 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
           >
             {busy === 'deposit' ? t('Signing…') : t('Deposit')}
           </button>
+          {liveToken() && who.address && (
+            <details className="redeem">
+              <summary>{t('Deposited and the Gold never came, or is gone? Recover the deposit')}</summary>
+              <p className="muted small">
+                {t('Paste the transaction hash of a deposit to the vault, from your wallet\'s activity. The vault checks it on chain and credits the Gold it bought; a deposit already credited is refused, so this is safe to try.')}
+              </p>
+              <div className="redeem-row">
+                <input value={recoverHash} placeholder="0x…" spellCheck={false} onChange={(e) => setRecoverHash(e.target.value)} />
+                <button className="ghost" disabled={busy !== null || !recoverHash.trim()} onClick={() => void doRecover()}>{busy === 'recover' ? t('Checking…') : t('Recover')}</button>
+              </div>
+            </details>
+          )}
         </div>
 
         <div className="vault-card">

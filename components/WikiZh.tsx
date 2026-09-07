@@ -505,7 +505,7 @@ export function WikiZh() {
             <li><b>每双手产出更多</b>：城镇多 {Math.round((formOf('Farm', 2).output - 1) * 100)}%，工业时代多 {Math.round((formOf('Farm', 3).output - 1) * 100)}%，现代多 {Math.round((formOf('Farm', 4).output - 1) * 100)}%，人工智能时代多 {Math.round((formOf('Farm', 5).output - 1) * 100)}%，叠加在技能、升级和方法之上。</li>
             <li><b>新货物。</b>从工业时代起，面包房的形态罐头厂用面粉和蔬菜做出<b>餐食</b>，一份餐食比一条面包更顶饱；食品厂和合成厨房只做餐食。铁匠铺的形态炼铁厂在工具之外炼出<b>钢材</b>，机械厂和制造机炼得更多。庄园农场养一群羊，多出一点羊毛。两种新货物和别的东西一样在市场上交易。</li>
             <li><b>更大的建筑更贵</b>：城镇形态的金币和材料是聚落的 {formOf('Farm', 2).cost} 倍，工业 {formOf('Farm', 3).cost} 倍，现代 {formOf('Farm', 4).cost} 倍，人工智能 {formOf('Farm', 5).cost} 倍；维护费涨得慢一些（{formOf('Farm', 2).upkeep} 倍到 {formOf('Farm', 5).upkeep} 倍），所以合并后的城比原来拥挤的那座略便宜。</li>
-            <li><b>升级上限看时代</b>：聚落和城镇 {formOf('House', 1).cap} 级，工业和现代 {formOf('House', 3).cap} 级，人工智能时代 {formOf('House', 5).cap} 级。重建时建筑保留等级。</li>
+            <li><b>升级上限看时代</b>：聚落 {formOf('House', 1).cap} 级，城镇到现代 {formOf('House', 2).cap} 级，人工智能时代 {formOf('House', 5).cap} 级。重建时建筑保留等级。</li>
             <li><b>城市等级和时代门槛按时代计算住房和工作场所</b>：一栋城镇的住房或作坊算两栋聚落的，工业算四栋，现代八栋，人工智能十六栋；礼拜堂或工厂在任何时代都算一栋。所以重建后的城至少和原来一样大，更小更好的城不会更低级。</li>
             <li><b>每日管理收益上限提高基数的 {Math.round(ERA_YIELD_STEP * 100)}%</b>。</li>
             <li>本时代的建筑开放，建造面板默认打开它们；早期时代在旁边的标签里。</li>

@@ -7,6 +7,7 @@
  * never holds a reference into mutable simulation state.
  */
 
+import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
 import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, type CityGate } from './simulation';
 import {
@@ -391,7 +392,10 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     level: levelOf(b),
     maxLevel: maxLevelFor(world),
     // Why the cap is where it is, for the card to say when it is reached.
-    cap: { era: eraSpec(eraOf(world)).name, next: eraOf(world) < ERAS.length ? eraSpec(eraOf(world) + 1).name : null },
+    // The next age that actually lifts the cap, not simply the next age: with
+    // four from the township to the modern age, "the industrial opens one
+    // more" was a promise the industrial did not keep.
+    cap: { era: eraSpec(eraOf(world)).name, next: (() => { for (let e = eraOf(world) + 1; e <= ERAS.length; e++) if (formOf('House', e).cap > maxLevelFor(world)) return eraSpec(e).name; return null; })() },
     // `stocked` is what lets the button refuse out loud: Gold alone is not
     // enough to improve a building, and a button that looks live and then does
     // nothing is worse than one that says it cannot yet.

@@ -279,6 +279,9 @@ export default function EmergeClient() {
    * browsing session's chosen name and surveyed plots are carried across once
    * into an empty wallet record rather than being thrown away.
    */
+  // Which wallet's server copy this browser has read, if any.
+  const remoteReadRef = useRef<string | null>(null);
+  const [remoteRead, setRemoteRead] = useState<string | null>(null);
   useEffect(() => {
     const record = address ? adoptRecord(address) : loadPlayer();
     // Write the opening record straight back. `loadPlayer` invents a name for
@@ -292,25 +295,37 @@ export default function EmergeClient() {
     // wrote it last. Merged rather than adopted, so a plot bought here and a
     // name chosen there both survive.
     let live = true;
-    void (async () => {
+    remoteReadRef.current = null;
+    setRemoteRead(null);
+    // Until the server's copy has been read, nothing is pushed: a browser
+    // that has not read yet knows nothing, and what it would push is an
+    // empty record. Tried again every so often until it succeeds, since the
+    // first attempt usually runs before the wallet has signed in.
+    const read = async () => {
       const remote = await fetchPlayerRecord(address);
-      if (!live || !remote) return;
+      if (!live) return;
+      if (!remote) { window.setTimeout(() => { if (live) void read(); }, 15_000); return; }
+      remoteReadRef.current = address;
+      setRemoteRead(address);
+      if (!remote.record) return;
       setPlayer((prev) => {
-        const merged = mergeRecords(prev ?? record, remote);
+        const merged = mergeRecords(prev ?? record, remote.record!);
         savePlayer(merged, address);
         return merged;
       });
-    })();
+    };
+    void read();
     return () => { live = false; };
   }, [address]);
 
-  // Whatever the record becomes, the server gets it a moment later. Debounced,
-  // because the yield timer touches it several times a minute.
+  // Whatever the record becomes, the server gets it a moment later — once the
+  // server's own copy has been read and merged in. Debounced, because the
+  // yield timer touches it several times a minute.
   useEffect(() => {
-    if (!address || !player) return;
+    if (!address || !player || remoteRead !== address) return;
     const timer = window.setTimeout(() => { void pushPlayerRecord(address, player); }, 2500);
     return () => window.clearTimeout(timer);
-  }, [address, player]);
+  }, [address, player, remoteRead]);
 
   const addressRef = useRef<string | null>(address);
   addressRef.current = address;

@@ -162,6 +162,9 @@ function Minimap({ draw, onJump }: { draw: (c: HTMLCanvasElement) => void; onJum
 }
 
 /** Tooltip that follows the cursor without re-rendering React on every move. */
+/** An age's name in the middle of a sentence: lower-cased, unless it is an acronym. */
+const soft = (name: string) => (name === name.toUpperCase() ? name : name.toLowerCase());
+
 function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -286,7 +289,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             ) : (
               <span className="muted small">
                 {focus.cap.next
-                  ? t('Level {n} is the most a {era} can raise. The {next} opens one more.', { n: focus.maxLevel, era: tx(focus.cap.era).toLowerCase(), next: tx(focus.cap.next).toLowerCase() })
+                  ? t('Level {n} is the most a {era} can raise. The {next} opens one more.', { n: focus.maxLevel, era: soft(tx(focus.cap.era)), next: soft(tx(focus.cap.next)) })
                   : t('As good as it gets.')}
               </span>
             )}

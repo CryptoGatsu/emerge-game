@@ -10,7 +10,16 @@
 import type { PlayerRecord } from '../world/plots';
 import { ensureSession } from './session';
 
-export async function fetchPlayerRecord(address: string): Promise<PlayerRecord | null> {
+/**
+ * The server's copy of this wallet's record.
+ *
+ * `{ record: null }` is an answer — the server has nothing for this wallet;
+ * `null` is no answer — not signed in yet, or the store unreachable. The two
+ * used to look the same, and a fresh browser that could not read yet pushed
+ * its empty record over the one the server held: a player who moved from
+ * Edge to Chrome lost every $EMERGE they had earned.
+ */
+export async function fetchPlayerRecord(address: string): Promise<{ record: PlayerRecord | null } | null> {
   const read = async () => fetch('/api/player', { cache: 'no-store' });
   try {
     let response = await read();
@@ -19,8 +28,9 @@ export async function fetchPlayerRecord(address: string): Promise<PlayerRecord |
       response = await read();
     }
     if (!response.ok) return null;
-    const json = (await response.json()) as { record?: PlayerRecord | null };
-    return json.record ?? null;
+    const json = (await response.json()) as { record?: PlayerRecord | null; reason?: string };
+    if (json.reason) return null;
+    return { record: json.record ?? null };
   } catch {
     return null;
   }
