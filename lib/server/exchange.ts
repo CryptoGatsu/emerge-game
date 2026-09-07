@@ -33,7 +33,7 @@ import { serverKey } from '../limits';
 import { tokenLive } from '../chain/emerge';
 import { utcDay } from './accounts';
 import { spendBurn, verifyTransfer } from './burns';
-import { counter, hdel, hget, hgetall, hset, incrBy } from './kv';
+import { counter, hdel, hget, hgetall, hset, hsetWindow, incrBy, releaseLock, takeLock } from './kv';
 import { claimOf, readWorld } from './registry';
 
 /** The share of the Gold in every trade that is burned. */
@@ -60,7 +60,23 @@ export interface ExchangeOrder {
   /** Gold a unit for goods; $EMERGE a Gold for a Gold lot. Whole numbers. */
   unitPrice: number;
   at: number;
+  /** The UTC day a Gold lot was counted against the seller's daily cap. */
+  countedDay?: string;
+  /**
+   * Units held for a buyer who is about to pay, until a deadline. A Gold
+   * buyer reserves before sending $EMERGE to the seller, so a lot cannot be
+   * sold from under a payment already on its way.
+   */
+  holds?: { buyer: string; qty: number; until: number }[];
 }
+
+/** Units a buyer may take now: what is unsold, less what others hold. */
+export function available(order: ExchangeOrder, buyer: string | null, now = Date.now()): number {
+  const held = (order.holds ?? []).filter((h) => h.until > now && (!buyer || h.buyer !== buyer.toLowerCase())).reduce((s, h) => s + h.qty, 0);
+  return Math.max(0, order.remaining - held);
+}
+/** How long a reservation stands. */
+export const HOLD_MS = 15 * 60_000;
 
 export interface Delivery {
   id: string;
@@ -73,6 +89,12 @@ export interface Delivery {
 }
 
 const ORDERS = serverKey('exchange:orders');
+const lockKey = (id: string) => serverKey(`exchange:lock:${id}`);
+/** Hold one order while it is filled, held or taken down: two buyers must not both take the last units. */
+async function locked<T>(id: string, work: () => Promise<T>, busy: T): Promise<T> {
+  if (!(await takeLock(lockKey(id), 10))) return busy;
+  try { return await work(); } finally { await releaseLock(lockKey(id)).catch(() => {}); }
+}
 const owedKey = (owner: string, seed: number) => serverKey(`exchange:owed:${owner.toLowerCase()}:${seed}`);
 const soldKey = (owner: string) => serverKey(`exchange:gold:${owner.toLowerCase()}:${utcDay()}`);
 const BURNED = serverKey('exchange:burned');
@@ -111,14 +133,15 @@ export async function owed(owner: string, seed: number): Promise<Delivery[]> {
 
 /** The world took these in: forget them. */
 export async function collect(owner: string, seed: number, ids: string[]): Promise<void> {
-  for (const id of ids.slice(0, 200)) await hdel(owedKey(owner, seed), id);
+  await Promise.all(ids.slice(0, 200).map((id) => hdel(owedKey(owner, seed), id)));
 }
 
 /** Gold burned by the exchange over its life. */
 export const burnedGold = async () => counter(BURNED);
 const burn = async (gold: number) => { if (gold > 0) await incrBy(BURNED, gold).catch(() => {}); };
 
-type Result<T> = { ok: true } & T | { ok: false; reason: string };
+type Result<T> = { ok: true } & T | { ok: false; reason: string; retry?: boolean };
+const soonMsg = { ok: false as const, reason: 'Somebody else is trading on that order this second. Try again.', retry: true };
 
 const ownsPlot = async (owner: string, seed: number) => {
   const claim = await claimOf(seed);
@@ -154,34 +177,70 @@ export async function listOrder(input: {
     const published = await readWorld(seed);
     const treasury = Number((published?.snapshot as { world?: { treasury?: unknown } } | null)?.world?.treasury);
     if (!published) return { ok: false, reason: 'Open the plot once on this build so its treasury is on record, then list.' };
-    const escrowed = standing.filter((o) => o.kind === 'gold' && o.seed === seed).reduce((s, o) => s + o.remaining, 0);
+    // Lots listed since that copy was published were drawn from a treasury
+    // the copy still counts, so they are added; lots listed before it are
+    // already out of the figure and are not counted twice.
+    const escrowed = standing.filter((o) => o.kind === 'gold' && o.seed === seed && o.at > (published.at ?? 0)).reduce((s, o) => s + o.remaining, 0);
     if (!(treasury >= qty + escrowed)) return { ok: false, reason: `The plot's last published treasury was ${Math.floor(treasury || 0).toLocaleString()} Gold, which does not cover this lot and what is already up.` };
-    await hset(soldKey(seller), 'gold', String(sold + qty));
+    await hsetWindow(soldKey(seller), 'gold', String(sold + qty), 2 * 86_400);
   } else {
     return { ok: false, reason: 'An order is for goods or for Gold.' };
   }
   const order: ExchangeOrder = {
     id: `o${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     kind, seller: seller.toLowerCase(), sellerName: input.sellerName.slice(0, 32), seed, resource, qty, remaining: qty, unitPrice, at: Date.now(),
+    countedDay: kind === 'gold' ? utcDay() : undefined,
   };
   await hset(ORDERS, order.id, JSON.stringify(order));
   return { ok: true, order };
 }
 
 /** Take an order down: what is unsold goes back to the seller's world as a delivery. */
-export async function cancelOrder(id: string, seller: string): Promise<Result<{ delivery: Delivery | null }>> {
-  const order = await orderOf(id);
-  if (!order || order.remaining <= 0) return { ok: false, reason: 'That order is gone.' };
-  if (!same(order.seller, seller)) return { ok: false, reason: 'That is not your order.' };
-  await hdel(ORDERS, id);
-  if (order.kind === 'gold') {
-    const sold = Number(await hget(soldKey(seller), 'gold')) || 0;
-    await hset(soldKey(seller), 'gold', String(Math.max(0, sold - order.remaining)));
-  }
-  const delivery = await owe(order.seller, order.seed, order.kind === 'gold'
-    ? { kind: 'gold', amount: order.remaining, note: 'Gold back from an order you took down' }
-    : { kind: 'resource', resource: order.resource, amount: order.remaining, note: 'goods back from an order you took down' });
-  return { ok: true, delivery };
+export async function cancelOrder(id: string, seller: string): Promise<Result<{ delivery: Delivery | null; seed: number }>> {
+  return locked(id, async () => {
+    const order = await orderOf(id);
+    if (!order || order.remaining <= 0) return { ok: false as const, reason: 'That order is gone.' };
+    if (!same(order.seller, seller)) return { ok: false as const, reason: 'That is not your order.' };
+    // A lot somebody is paying for right now is not taken down from under them.
+    if (available(order, null) < order.remaining) return { ok: false as const, reason: 'Somebody is paying for part of that lot. Try again in a few minutes.' };
+    await hdel(ORDERS, id);
+    // The daily cap is a day's figure: only a lot counted today gives today's room back.
+    if (order.kind === 'gold' && order.countedDay === utcDay()) {
+      const sold = Number(await hget(soldKey(seller), 'gold')) || 0;
+      await hsetWindow(soldKey(seller), 'gold', String(Math.max(0, sold - order.remaining)), 2 * 86_400);
+    }
+    const delivery = await owe(order.seller, order.seed, order.kind === 'gold'
+      ? { kind: 'gold', amount: order.remaining, note: 'Gold back from an order you took down' }
+      : { kind: 'resource', resource: order.resource, amount: order.remaining, note: 'goods back from an order you took down' });
+    return { ok: true as const, delivery, seed: order.seed };
+  }, soonMsg);
+}
+
+/** Hold units of a Gold lot for a buyer about to pay, for HOLD_MS. Replaces any hold they already have on it. */
+export async function reserveGold(id: string, buyer: string, qty: number): Promise<Result<{ until: number }>> {
+  const want = Math.floor(Number(qty));
+  if (!(want > 0)) return { ok: false, reason: 'Say how much Gold.' };
+  return locked(id, async () => {
+    const order = await orderOf(id);
+    if (!order || order.remaining <= 0 || order.kind !== 'gold') return { ok: false as const, reason: 'That order is gone.' };
+    if (same(order.seller, buyer)) return { ok: false as const, reason: 'That is your own order.' };
+    if (want > available(order, buyer)) return { ok: false as const, reason: `Only ${available(order, buyer).toLocaleString()} Gold is free on that order right now.` };
+    const until = Date.now() + HOLD_MS;
+    const holds = (order.holds ?? []).filter((h) => h.until > Date.now() && h.buyer !== buyer.toLowerCase());
+    holds.push({ buyer: buyer.toLowerCase(), qty: want, until });
+    await hset(ORDERS, id, JSON.stringify({ ...order, holds }));
+    return { ok: true as const, until };
+  }, soonMsg);
+}
+
+/** Let a hold go, when the payment was not made. */
+export async function releaseGold(id: string, buyer: string): Promise<void> {
+  await locked(id, async () => {
+    const order = await orderOf(id);
+    if (!order) return;
+    const holds = (order.holds ?? []).filter((h) => h.until > Date.now() && h.buyer !== buyer.toLowerCase());
+    await hset(ORDERS, id, JSON.stringify({ ...order, holds }));
+  }, undefined);
 }
 
 /**
@@ -192,20 +251,22 @@ export async function buyGoods(input: { id: string; buyer: string; buyerName: st
   const { id, buyer, seed } = input;
   const qty = Math.floor(Number(input.qty));
   if (!(qty > 0)) return { ok: false, reason: 'Say how many.' };
-  const order = await orderOf(id);
-  if (!order || order.remaining <= 0 || order.kind !== 'resource' || !order.resource) return { ok: false, reason: 'That order is gone.' };
-  if (same(order.seller, buyer)) return { ok: false, reason: 'That is your own order.' };
-  if (qty > order.remaining) return { ok: false, reason: `Only ${order.remaining.toLocaleString()} left on that order.` };
   if (!(await ownsPlot(buyer, seed))) return { ok: false, reason: 'Goods are delivered to a plot you own.' };
-  const paid = qty * order.unitPrice;
-  const burned = fee(paid);
-  const remaining = order.remaining - qty;
-  if (remaining > 0) await hset(ORDERS, id, JSON.stringify({ ...order, remaining }));
-  else await hdel(ORDERS, id);
-  await owe(order.seller, order.seed, { kind: 'gold', amount: paid - burned, note: `${qty.toLocaleString()} ${order.resource} sold to ${input.buyerName.slice(0, 32) || 'a buyer'} for ${paid.toLocaleString()} Gold, ${burned.toLocaleString()} burned` });
-  const delivery = await owe(buyer, seed, { kind: 'resource', resource: order.resource, amount: qty, note: `${qty.toLocaleString()} ${order.resource} bought from ${order.sellerName || 'a seller'} for ${paid.toLocaleString()} Gold` });
-  await burn(burned);
-  return { ok: true, delivery, paid, burned, remaining };
+  return locked(id, async () => {
+    const order = await orderOf(id);
+    if (!order || order.remaining <= 0 || order.kind !== 'resource' || !order.resource) return { ok: false as const, reason: 'That order is gone.' };
+    if (same(order.seller, buyer)) return { ok: false as const, reason: 'That is your own order.' };
+    if (qty > order.remaining) return { ok: false as const, reason: `Only ${order.remaining.toLocaleString()} left on that order.` };
+    const paid = qty * order.unitPrice;
+    const burned = fee(paid);
+    const remaining = order.remaining - qty;
+    if (remaining > 0) await hset(ORDERS, id, JSON.stringify({ ...order, remaining }));
+    else await hdel(ORDERS, id);
+    await owe(order.seller, order.seed, { kind: 'gold', amount: paid - burned, note: `${qty.toLocaleString()} ${order.resource} sold to ${input.buyerName.slice(0, 32) || 'a buyer'} for ${paid.toLocaleString()} Gold, ${burned.toLocaleString()} burned` });
+    const delivery = await owe(buyer, seed, { kind: 'resource', resource: order.resource, amount: qty, note: `${qty.toLocaleString()} ${order.resource} bought from ${order.sellerName || 'a seller'} for ${paid.toLocaleString()} Gold` });
+    await burn(burned);
+    return { ok: true as const, delivery, paid, burned, remaining };
+  }, soonMsg);
 }
 
 /**
@@ -218,24 +279,30 @@ export async function buyGold(input: { id: string; buyer: string; buyerName: str
   const { id, buyer, seed } = input;
   const qty = Math.floor(Number(input.qty));
   if (!(qty > 0)) return { ok: false, reason: 'Say how much Gold.' };
-  const order = await orderOf(id);
-  if (!order || order.remaining <= 0 || order.kind !== 'gold') return { ok: false, reason: 'That order is gone.' };
-  if (same(order.seller, buyer)) return { ok: false, reason: 'That is your own order.' };
-  if (qty > order.remaining) return { ok: false, reason: `Only ${order.remaining.toLocaleString()} Gold left on that order.` };
   if (!(await ownsPlot(buyer, seed))) return { ok: false, reason: 'Gold is delivered to a plot you own.' };
-  const price = qty * order.unitPrice;
-  if (tokenLive()) {
-    const tx = String(input.txHash ?? '');
-    const paid = await verifyTransfer(tx, buyer, order.seller, price);
-    if (!paid.ok) return { ok: false, reason: paid.reason };
-    if (!(await spendBurn(tx, `exchange:${id}`))) return { ok: false, reason: 'That payment was already used.' };
-  }
-  const burned = fee(qty);
-  const remaining = order.remaining - qty;
-  if (remaining > 0) await hset(ORDERS, id, JSON.stringify({ ...order, remaining }));
-  else await hdel(ORDERS, id);
-  const delivery = await owe(buyer, seed, { kind: 'gold', amount: qty - burned, note: `${qty.toLocaleString()} Gold bought from ${order.sellerName || 'a seller'} for ${price.toLocaleString()} $EMERGE, ${burned.toLocaleString()} burned` });
-  await burn(burned);
-  return { ok: true, delivery, paid: price, burned, remaining };
+  return locked(id, async () => {
+    const order = await orderOf(id);
+    if (!order || order.remaining <= 0 || order.kind !== 'gold') return { ok: false as const, reason: 'That order is gone.' };
+    if (same(order.seller, buyer)) return { ok: false as const, reason: 'That is your own order.' };
+    // The buyer's own hold counts as free to them; only others' holds are set aside.
+    if (qty > available(order, buyer)) return { ok: false as const, reason: `Only ${available(order, buyer).toLocaleString()} Gold is free on that order right now.` };
+    const price = qty * order.unitPrice;
+    if (tokenLive()) {
+      const tx = String(input.txHash ?? '');
+      const paid = await verifyTransfer(tx, buyer, order.seller, price);
+      // A payment the chain has not settled yet is asked about again, with the
+      // same receipt; a payment that will never be right is refused for good.
+      if (!paid.ok) return { ok: false as const, reason: paid.reason, retry: paid.retry };
+      if (!(await spendBurn(tx, `exchange:${id}`))) return { ok: false as const, reason: 'That payment was already used.' };
+    }
+    const burned = fee(qty);
+    const remaining = order.remaining - qty;
+    const holds = (order.holds ?? []).filter((h) => h.until > Date.now() && h.buyer !== buyer.toLowerCase());
+    if (remaining > 0) await hset(ORDERS, id, JSON.stringify({ ...order, remaining, holds }));
+    else await hdel(ORDERS, id);
+    const delivery = await owe(buyer, seed, { kind: 'gold', amount: qty - burned, note: `${qty.toLocaleString()} Gold bought from ${order.sellerName || 'a seller'} for ${price.toLocaleString()} $EMERGE, ${burned.toLocaleString()} burned` });
+    await burn(burned);
+    return { ok: true as const, delivery, paid: price, burned, remaining };
+  }, soonMsg);
 }
 

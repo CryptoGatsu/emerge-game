@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RESOURCE_LABELS, type Resource } from '@/lib/world/goods';
 import { TOKEN } from '@/lib/chain/emerge';
 import { shortAddress } from '@/lib/chain/emerge';
-import { fetchExchange, type ExchangeOrder, type ExchangeView } from '@/lib/net/exchange';
+import { fetchExchange, pendingPurchases, type ExchangeOrder, type ExchangeView } from '@/lib/net/exchange';
 import type { Snapshot } from '@/lib/hud';
 import { t, tn, useLocale } from '@/lib/i18n';
 
@@ -22,6 +22,8 @@ export interface ExchangeActions {
   list: (kind: 'resource' | 'gold', qty: number, unitPrice: number, resource?: Resource) => Promise<string | null>;
   buy: (order: ExchangeOrder, qty: number) => Promise<string | null>;
   cancel: (id: string) => Promise<string | null>;
+  /** Hand kept receipts in again. */
+  finish: () => Promise<string | null>;
 }
 
 export function ExchangePanel({ view, seed, me, spectating, actions }: {
@@ -33,7 +35,8 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
-  const reload = useCallback(async () => { setBook(await fetchExchange(seed)); }, [seed]);
+  const reload = useCallback(async () => { setBook(await fetchExchange(seed, me)); setPending(pendingPurchases(me).length); }, [seed, me]);
+  const [pending, setPending] = useState(0);
   useEffect(() => { void reload(); }, [reload]);
   const mine = me?.toLowerCase() ?? '';
   const terms = book?.terms ?? { fee: 0.05, dailyGoldCap: 20_000, minGoldLot: 100, maxGoodsLot: 5_000 };
@@ -70,7 +73,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
       <div key={o.id} className={`people-row exchange-row ${yours ? 'mine' : ''}`}>
         <span className="exchange-what">
           <b>{o.kind === 'gold' ? t('{n} Gold', { n: o.remaining.toLocaleString() }) : `${o.remaining.toLocaleString()} ${tn(RESOURCE_LABELS[o.resource as Resource])}`}</b>
-          <small className="muted">{yours ? t('yours') : (o.sellerName || shortAddress(o.seller))}</small>
+          <small className="muted">{yours ? (o.seed === seed ? t('yours') : t('yours, from another plot')) : (o.sellerName || shortAddress(o.seller))}</small>
         </span>
         <span className="exchange-price">
           <b>{o.kind === 'gold' ? t('{n} {ticker} a Gold', { n: o.unitPrice.toLocaleString(), ticker: TOKEN.ticker }) : t('{n} Gold each', { n: o.unitPrice.toLocaleString() })}</b>
@@ -102,6 +105,12 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
         <button className="ghost small" onClick={() => void reload()} disabled={busy}>{t('Refresh')}</button>
       </div>
       {note && <p className="people-note">{note}</p>}
+      {pending > 0 && canAct && (
+        <p className="people-note">
+          {t('{n} Gold purchase(s) paid for and not yet settled.', { n: pending })}{' '}
+          <button className="ghost small" disabled={busy} onClick={() => act(() => actions.finish())}>{t('Finish a paid purchase')}</button>
+        </p>
+      )}
       {book === undefined && <p className="muted small">{t('Reading the exchange…')}</p>}
       {book === null && <p className="muted small">{t('The exchange could not be read just now.')}</p>}
       {tab === 'buy' && book && (

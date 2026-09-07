@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { buyGold, buyGoods, cancelOrder, collect, listOrder, orders, owed, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
+import { buyGold, buyGoods, cancelOrder, collect, listOrder, orders, owed, releaseGold, reserveGold, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
 import { registryShared } from '@/lib/server/registry';
 import { holdsAddress, sessionAddress, sessionsAvailable } from '@/lib/server/session';
 
@@ -16,7 +16,9 @@ const terms = { fee: TRADE_FEE, dailyGoldCap: DAILY_GOLD_SALE_CAP, minGoldLot: M
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const seed = Number(url.searchParams.get('seed'));
-  const me = sessionAddress(request);
+  // Where sessions cannot be proved, the query's address is the caller's word, as it is for every write there.
+  const asked = String(url.searchParams.get('address') ?? '').toLowerCase();
+  const me = sessionAddress(request) ?? (!sessionsAvailable() && /^0x[0-9a-f]{40}$/.test(asked) ? asked : null);
   try {
     const [rows, mine] = await Promise.all([orders(), me && Number.isFinite(seed) ? owed(me, seed) : Promise.resolve([])]);
     return NextResponse.json({ orders: rows, owed: mine, terms, shared: registryShared() });
@@ -47,15 +49,23 @@ export async function POST(request: Request) {
       }
       case 'cancel': {
         const r = await cancelOrder(String(body.id ?? ''), address);
-        return r.ok ? NextResponse.json({ delivery: r.delivery }) : NextResponse.json({ error: r.reason }, { status: 400 });
+        return r.ok ? NextResponse.json({ delivery: r.delivery, seed: r.seed }) : NextResponse.json({ error: r.reason, retry: r.retry === true }, { status: r.retry ? 202 : 400 });
       }
       case 'buy': {
         const r = await buyGoods({ id: String(body.id ?? ''), buyer: address, buyerName: name, seed, qty: Number(body.qty) });
-        return r.ok ? NextResponse.json({ delivery: r.delivery, paid: r.paid, burned: r.burned, remaining: r.remaining }) : NextResponse.json({ error: r.reason }, { status: 400 });
+        return r.ok ? NextResponse.json({ delivery: r.delivery, paid: r.paid, burned: r.burned, remaining: r.remaining }) : NextResponse.json({ error: r.reason, retry: r.retry === true }, { status: r.retry ? 202 : 400 });
+      }
+      case 'reserve': {
+        const r = await reserveGold(String(body.id ?? ''), address, Number(body.qty));
+        return r.ok ? NextResponse.json({ until: r.until }) : NextResponse.json({ error: r.reason, retry: r.retry === true }, { status: r.retry ? 202 : 400 });
+      }
+      case 'release': {
+        await releaseGold(String(body.id ?? ''), address);
+        return NextResponse.json({ ok: true });
       }
       case 'buyGold': {
         const r = await buyGold({ id: String(body.id ?? ''), buyer: address, buyerName: name, seed, qty: Number(body.qty), txHash: body.txHash });
-        return r.ok ? NextResponse.json({ delivery: r.delivery, paid: r.paid, burned: r.burned, remaining: r.remaining }) : NextResponse.json({ error: r.reason }, { status: 400 });
+        return r.ok ? NextResponse.json({ delivery: r.delivery, paid: r.paid, burned: r.burned, remaining: r.remaining }) : NextResponse.json({ error: r.reason, retry: r.retry === true }, { status: r.retry ? 202 : 400 });
       }
       case 'collect': {
         await collect(address, seed, Array.isArray(body.ids) ? body.ids.map(String) : []);

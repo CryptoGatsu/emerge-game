@@ -9613,7 +9613,6 @@ export function fundTreasury(world: World, gold: number, note: string) {
   pushFeed(world, 'market', note);
 }
 
-/** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
 /**
  * Goods out of the store for an exchange order, or refused when short.
  *
@@ -9645,6 +9644,7 @@ export function receiveDelivery(world: World, d: { id: string; kind: 'gold' | 'r
   return true;
 }
 
+/** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
 export function drawFromTreasury(world: World, gold: number, note: string) {
   useWorld(world);
   if (!(gold > 0) || world.treasury < gold) return false;

@@ -41,7 +41,7 @@ import {
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
   coverPlot, boonPlot, renamePlot,
 } from '@/lib/net/registry';
-import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, listOrder } from '@/lib/net/exchange';
+import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, finishPending, listOrder } from '@/lib/net/exchange';
 import type { ExchangeActions } from './Exchange';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -620,7 +620,7 @@ export default function EmergeClient() {
       )}
       {wantsLanding && <Landing onEnter={() => setEntered(true)} onSpectate={spectate} />}
       {claimed === null && !visit && !wantsLanding && (
-        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} focusSeed={mapFocus} />
+        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} focusSeed={mapFocus} onFocused={() => setMapFocus(null)} />
       )}
     </>
   );
@@ -2141,9 +2141,21 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       if (!world || !wallet.address) return t('Connect a wallet to trade.');
       const r = await cancelOrder(wallet.address, claimed.seed, id);
       if (!r.ok) return tx(r.reason);
+      // What comes back goes to the world it came out of. Another plot's
+      // refund waits there for that world to open; crediting it here would
+      // pay it twice.
+      if (r.seed !== claimed.seed) { refresh(); return t('Taken down. What was unsold goes back to the plot it came from, the next time that world is open.'); }
       if (r.delivery && receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
       refresh();
       return null;
+    },
+    finish: async () => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      const { settled, reason } = await finishPending(wallet.address, player.name);
+      for (const s of settled) if (receiveDelivery(world, s.delivery)) void collectDeliveries(wallet.address, claimed.seed, [s.delivery.id]);
+      if (settled.length) refresh();
+      return reason ? tx(reason) : settled.length ? null : t('Nothing was waiting to be finished.');
     },
   }), [wallet.address, player, claimed.seed, onPlayer, refresh]);
   useEffect(() => {
@@ -2151,7 +2163,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const address = wallet.address;
     let live = true;
     const tick = async () => {
-      const book = await fetchExchange(claimed.seed);
+      const book = await fetchExchange(claimed.seed, address);
       const world = worldRef.current;
       if (!live || !book || !world || book.owed.length === 0) return;
       const taken: string[] = [];

@@ -602,7 +602,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
   );
 }
 
-export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect, focusSeed = null }: {
+export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect, focusSeed = null, onFocused }: {
   player: PlayerRecord;
   onPlayer: (record: PlayerRecord) => void;
   onEnter: (world: ClaimedWorld) => void;
@@ -610,8 +610,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   onVisit: (seed: number) => Promise<string | null>;
   /** Back to the front page. */
   onHome: () => void;
-  /** A plot to open the map on, from the land list inside a world. */
+  /** A plot to open the map on, from the land list inside a world, and the call that says it has been shown. */
   focusSeed?: number | null;
+  onFocused?: () => void;
   /** Let go of the wallet, staying on the map as a spectator. */
   onDisconnect: () => void;
 }) {
@@ -646,7 +647,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     setSelectedSeed(seed);
     setSheetOpen(true);
   }, [player, discovered]);
-  useEffect(() => { if (focusSeed !== null) showPlot(focusSeed); }, [focusSeed, showPlot]);
+  // Shown once, then handed back: a focus that stayed set snapped the map
+  // back to the plot on every player update.
+  const showPlotRef = useRef(showPlot); showPlotRef.current = showPlot;
+  const onFocusedRef = useRef(onFocused); onFocusedRef.current = onFocused;
+  useEffect(() => { if (focusSeed !== null) { showPlotRef.current(focusSeed); onFocusedRef.current?.(); } }, [focusSeed]);
   const room = useMemo(() => chartRoom(player, chart, discovered), [player, chart, discovered]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
   const registry = useChainOwner(selected?.seed ?? null);
