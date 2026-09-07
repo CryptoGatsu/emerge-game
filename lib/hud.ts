@@ -9,7 +9,7 @@
 
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, type CityGate } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, idleAdults, upgradeEffect, type CityGate } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -272,7 +272,7 @@ function rosterOf(world: World): Roster {
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
   return {
     people, trades, buildings,
-    unemployed: people.filter((p) => p.job === 'unemployed').length,
+    unemployed: Math.max(people.filter((p) => p.job === 'unemployed').length, idleAdults(world)),
     openPosts: trades.reduce((s, t) => s + t.open, 0),
     trainCost: TRAIN_COST_GOLD,
     hasSchool: world.buildings.some((b) => b.type === 'School' && b.active && !b.ruined),

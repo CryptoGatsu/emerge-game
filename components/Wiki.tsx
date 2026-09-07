@@ -159,7 +159,7 @@ const CIVIC_BUILDINGS = [
 
 /** What a plot's status figures mean, and what actually moves them. */
 const STATUS = [
-  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and when word gets round: a well-run plot with a spare roof draws settlers on the road, and a cafe, a school, a clinic and improved houses draw more — up to three a day. It falls in a hard winter or a bad hazard.',
+  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and when word gets round: a well-run plot with a spare roof draws settlers on the road, and a cafe, a school, a clinic and improved houses draw more — up to three a day. It falls in a hard winter or a bad hazard. Since v2.7 it is bounded by beds and posts: a family has a child and a newcomer is taken only while there is a bed and a post to spare, children counted against both, and after five days of more adults than posts, or more people than beds, somebody takes the road every day or so until they match. A founding handful of eight never leaves.',
     'Build houses before you build anything else, and improve them: an improved house sleeps more. Nobody moves to a town with no spare roof, however good it is.'],
   ['Happiness', 'The average of six things each person carries: how fed, how rested, how sociable, how well clothed, how purposeful and how warm they are.',
     'The quickest lever is wages. After that: a tavern and benches for company, clothing in the stores, and firewood through the winter.'],

@@ -444,6 +444,10 @@ export interface World {
   /** Everyone who has ever died here, so a settlement has a history. */
   deaths: number;
   births: number;
+  /** Everyone who has taken the road out for want of a post or a bed. */
+  departures?: number;
+  /** Days in a row the town has held more adults than posts, or more people than beds. */
+  idleDays?: number;
   /** Benches, fires, wells and stalls, and who is using them. */
   amenities: Amenity[];
   /**
@@ -3952,6 +3956,13 @@ function adviseBuildAll(world: World): Advice[] {
       gain: 'Room for the next family to arrive. An improved house sleeps more, too.' });
   }
 
+  const idle = idleAdults(world);
+  if (idle > 0 && people > FOUNDING_HANDFUL) {
+    out.push({ kind: 'wages', title: 'Raise a workplace',
+      why: `${idle} ${idle === 1 ? 'adult has' : 'adults have'} no post: the workplaces employ ${postsOf(world)} and ${adults.length} are of age. People with no post take the road after ${LEAVE_PATIENCE} days of it.`,
+      gain: 'A post for each of them. The town has children and takes newcomers only while it has beds and posts to spare, so posts are what it grows on.' });
+  }
+
   const blocker = bridgeBlockers(world)[0];
   if (blocker) {
     out.unshift({ kind: 'wages', title: 'Clear the bridge',
@@ -5534,6 +5545,42 @@ export function openPostsOf(world: World): number {
   return open;
 }
 
+/** Every post on the plot, filled or not: what its workplaces can employ between them. */
+export function postsOf(world: World): number {
+  useWorld(world);
+  let posts = 0;
+  for (const job of Object.keys(jobs) as WorkingJob[]) posts += jobCapacity(world, job);
+  return posts;
+}
+
+/**
+ * Adults beyond what the workplaces can employ.
+ *
+ * Everybody of age is given a trade, so nobody is ever marked unemployed;
+ * but a trade only works as many people as its buildings have posts, and the
+ * rest are paid and fed for a day that counts for nothing. This is that
+ * number, the one the People panel calls without work.
+ */
+export function idleAdults(world: World): number {
+  useWorld(world);
+  return Math.max(0, world.citizens.filter((c) => c.age >= 16).length - postsOf(world));
+}
+
+/**
+ * How many more people the town has a bed and a post for.
+ *
+ * Children count against both: a child is a bed tonight and a post in
+ * thirty-two days, and a town that has children faster than it raises
+ * workplaces is a town whose grown children will have nothing to do.
+ */
+export function roomToGrow(world: World): { beds: number; posts: number } {
+  useWorld(world);
+  return {
+    beds: housingRoom(world) - world.citizens.length,
+    posts: postsOf(world) - world.citizens.length,
+  };
+}
+
 /* ------------------------------------------------------------------ *
  * Unrest: the rogue, and the people who stop them
  * ------------------------------------------------------------------ */
@@ -7108,10 +7155,34 @@ function births(world: World, rand: () => number) {
    * identical to the old ceiling in the settlement age, and it now grows with
    * the age instead of shrinking.
    */
-  const room = housingRoom(world);
-  // Ruins hold no one. A town with its roofs down stops having children until
-  // it puts them back up.
-  if (world.citizens.length >= Math.floor((room * 4) / HOUSE_ROOM) + 4) return;
+  /*
+   * And now, simply: a bed for the child and a post for the adult it becomes.
+   *
+   * The third again for sharing let a town outgrow its beds, and nothing
+   * asked whether there was work: arrivals have needed an open post since
+   * the road brought idle mouths, but a town with every post filled went on
+   * having children, raised its head count and its city level on them, and
+   * ended with a third of its adults paid for nothing. "If there are no
+   * available jobs, the existing population should not have children" —
+   * a player's words, and the rule now. A settlement down to its last few
+   * is let off, as it is at the gate, so a plot can always come back.
+   */
+  const room = roomToGrow(world);
+  // A founding handful is let off the posts: eight people came to raise a
+  // plot with four posts on it, and their children replace them until the
+  // owner builds. Past that, growth is on posts.
+  const founding = world.citizens.length <= FOUNDING_HANDFUL;
+  if (world.citizens.length > LAST_RESORT_POPULATION && (room.beds <= 0 || (!founding && room.posts <= 0))) {
+    const couples = world.families.filter((f) => f.members
+      .map((id) => world.citizens.find((c) => c.id === id))
+      .filter((c) => c && c.age >= 19 && c.age <= 46).length >= 2).length;
+    if (couples > 0 && world.day % 8 === 0) {
+      pushFeed(world, 'social', room.beds <= 0
+        ? `No child was born in ${world.name} this week: there is no bed for one.`
+        : `No child was born in ${world.name} this week: every post is filled, and there would be no work for one to grow into.`);
+    }
+    return;
+  }
   if (foodInStore(world) < world.citizens.length * 2) return;
 
   for (const family of world.families) {
@@ -7158,6 +7229,69 @@ function births(world: World, rand: () => number) {
     // for the whole settlement could never keep pace with them, and every world
     // ran slowly and silently extinct.
   }
+}
+
+/** A founding handful stays whatever the posts say: they came to raise the place, not to fill it. */
+export const FOUNDING_HANDFUL = 8;
+/** Days without a post or a bed somebody puts up with before the road looks better. */
+export const LEAVE_PATIENCE = 5;
+
+/**
+ * People moving out.
+ *
+ * The road ran one way. Arrivals needed an open post and a spare bed, but
+ * once somebody was in they stayed whatever became of the work: a town that
+ * pulled down a workshop, lost a house to a quake or simply had more
+ * children than it raised posts for kept every one of them, paid and fed,
+ * and the only way out was the owner sending them off at forty Gold a head.
+ * "If housing capacity or the number of available jobs decreases, the
+ * unemployed population should gradually leave" — so it does. After a few
+ * days of more adults than posts, or more people than beds, somebody takes
+ * the road: one a day at most, likelier the bigger the surplus, the person
+ * the town can best spare first. Nobody leaves a founding handful, and a
+ * trade the owner trained somebody for holds them.
+ */
+function departures(world: World, rand: () => number) {
+  const adults = world.citizens.filter((c) => c.age >= 16);
+  const idle = Math.max(0, adults.length - postsOf(world));
+  const crowded = Math.max(0, world.citizens.length - housingRoom(world));
+  const pressure = Math.max(idle, crowded);
+  if (pressure <= 0 || world.citizens.length <= FOUNDING_HANDFUL || adults.length <= 1) {
+    world.idleDays = undefined;
+    return;
+  }
+  world.idleDays = (world.idleDays ?? 0) + 1;
+  if (world.idleDays <= LEAVE_PATIENCE) return;
+  if (world.idleDays === LEAVE_PATIENCE + 1) {
+    pushFeed(world, 'social', idle >= crowded
+      ? `${idle} ${idle === 1 ? 'adult has' : 'adults have'} had no post for ${LEAVE_PATIENCE} days. People will start taking the road unless work is raised.`
+      : `${crowded} ${crowded === 1 ? 'person has' : 'people have'} had no bed for ${LEAVE_PATIENCE} days. People will start taking the road unless a house is raised.`);
+  }
+  if (rand() >= Math.min(0.6, 0.2 * pressure)) return;
+
+  const tally: Partial<Record<Job, number>> = {};
+  for (const c of adults) tally[c.job] = (tally[c.job] ?? 0) + 1;
+  const homeless = (c: Citizen) => !homeOf(world, c);
+  const spare = (c: Citizen) => c.job !== 'unemployed' && (tally[c.job] ?? 0) > jobCapacity(world, c.job as WorkingJob);
+  const dependants = (c: Citizen) => (world.families.find((f) => f.id === c.familyId)?.members ?? [])
+    .filter((id) => (world.citizens.find((x) => x.id === id)?.age ?? 99) < 16).length;
+  const learned = (c: Citizen) => Object.values(c.skills ?? {}).reduce((s, d) => s + (d ?? 0), 0);
+  const pool = adults
+    .filter((c) => !heldTrade(world, c) && !c.carried && !c.jailed && !c.rogue)
+    // Somebody with no roof goes first when it is beds that are short, then
+    // somebody in a trade with more hands than posts, then whoever has no
+    // children here and the least learned, so the town keeps its masters.
+    .sort((a, b) => (crowded > 0 ? Number(homeless(b)) - Number(homeless(a)) : 0)
+      || Number(spare(b)) - Number(spare(a))
+      || Number(dependants(a) > 0) - Number(dependants(b) > 0)
+      || learned(a) - learned(b));
+  const leaver = pool[0];
+  if (!leaver) return;
+  const why = crowded > 0 && homeless(leaver) ? 'no roof' : 'no post';
+  forget(world, leaver);
+  staffNow(world);
+  world.departures = (world.departures ?? 0) + 1;
+  pushFeed(world, 'social', `${leaver.name} left ${world.name}: there was ${why} here for them.`);
 }
 
 const SETTLER_NAMES = [
@@ -7259,7 +7393,12 @@ function migration(world: World, rand: () => number) {
   // people by the dozen with every post already filled, and the newcomers
   // sat idle, eating imported bread the treasury paid for. Past the last
   // few people, the road brings at most as many as there are posts open.
-  const posts = openPostsOf(world);
+  // Open posts in some trade, and posts to spare across the whole town: a
+  // town whose farms are short-handed while its quarry has hands to spare
+  // moves people between them in the morning, and does not take a newcomer
+  // for a post it already has somebody for. Children count against the
+  // posts, as they do for births, since they grow into them.
+  const posts = Math.min(openPostsOf(world), roomToGrow(world).posts);
   if (!desperate && posts <= 0) {
     if (world.day % 4 === 0) pushFeed(world, 'social', `Nobody new is moving to ${world.name}: every post is filled.`);
     return;
@@ -7840,6 +7979,7 @@ function daily(world: World) {
   consume(world);
   lifeAndDeath(world);
   migration(world, mulberry32(world.seed + world.day * 4111));
+  departures(world, mulberry32(world.seed + world.day * 6007));
   hazards(world);
   repairs(world);
   unrest(world);
