@@ -2,7 +2,7 @@
 import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
+import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -742,9 +742,11 @@ export default function Wiki() {
             more per era it was raised in: a modern block costs more to keep than a cabin.
           </p>
           <p>
-            <b>A house sleeps as many people as it has room for</b>: {HOUSE_ROOM} beds at
-            level one, {HOUSE_ROOM + HOUSE_ROOM_PER_LEVEL} at level two, {HOUSE_ROOM + 2 * HOUSE_ROOM_PER_LEVEL} at
-            level three, which is what improving a house is for; the house&rsquo;s card says
+            <b>A house sleeps as many people as it has room for, and its age decides how many</b>:
+            a settlement cabin has {formOf('House', 1).beds} beds, a township townhouse {formOf('House', 2).beds},
+            an industrial terrace {formOf('House', 3).beds}, a modern apartment block {formOf('House', 4).beds},
+            and an AI-age habitat tower {formOf('House', 5).beds}. Every improvement adds {HOUSE_ROOM_PER_LEVEL} more
+            on top of that, which is what improving a house is for; the house&rsquo;s card says
             who sleeps there against the beds. Families share a roof when there is room,
             the largest family first, so a newcomer who came alone does not take a whole house for
             one bed. The feed says who moved in where.

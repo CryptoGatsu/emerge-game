@@ -48,6 +48,25 @@ export const BASE_PRICES: Record<Resource, number> = {
   meals: 13, steel: 32,
 };
 
+/**
+ * The age a good belongs to.
+ *
+ * A settlement has no use for steel and no kitchen to put up meals, and its
+ * market should not be buying either. It was: both goods were added to the
+ * table for the later ages and the market, which imports anything the plot
+ * cannot make for itself, dutifully bought thirty meals and ten steel into
+ * every settlement in the game and charged the treasury for them.
+ */
+export const RESOURCE_ERA: Record<Resource, number> = {
+  wheat: 1, vegetables: 1, fish: 1, game: 1, berries: 1,
+  wood: 1, stone: 1, ironOre: 1, wool: 1, hides: 1, herbs: 1,
+  flour: 1, bread: 1, furniture: 1, tools: 1, clothing: 1,
+  meals: 3, steel: 3,
+};
+
+/** Whether a good is traded at all in this age. */
+export const tradedIn = (r: Resource, era: number) => RESOURCE_ERA[r] <= Math.max(1, era);
+
 /** How much of each a settlement wants in store. Shortage is measured against this. */
 export const MARKET_BUFFERS: Record<Resource, number> = {
   wheat: 60, vegetables: 40, fish: 30, game: 20, berries: 25,
