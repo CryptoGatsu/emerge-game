@@ -248,7 +248,10 @@ const LINEAGES: Record<string, Lineage> = {
 export const LINEAGE_TYPES = Object.keys(LINEAGES);
 
 /** The kinds that merge in pairs when the plot advances: homes, workplaces and stores. */
-export const MERGES_ON_ADVANCE = new Set(LINEAGE_TYPES.filter((t) => t !== 'Tavern'));
+/** Lineage kinds a plot keeps one of: renamed by the age, never merged, one building in any count. */
+const ONE_OF: ReadonlySet<string> = new Set(['Tavern']);
+
+export const MERGES_ON_ADVANCE = new Set(LINEAGE_TYPES.filter((t) => !ONE_OF.has(t)));
 
 const clampEra = (era: number): FormEra => Math.max(1, Math.min(5, Math.round(era))) as FormEra;
 
@@ -268,7 +271,7 @@ export function formOf(type: string, era: number, ownEra = 1): EraForm {
     blurb: line ? line.blurbs[i] : '',
     // A home or a workplace counts for the room it holds against a
     // settlement's; a chapel or a factory is one building in any age.
-    output: OUTPUT[step], cost: COST[step], upkeep: UPKEEP[step], worth: line ? WORTH[e - 1] : 1, cap: CAP[e - 1],
+    output: OUTPUT[step], cost: COST[step], upkeep: UPKEEP[step], worth: line && !ONE_OF.has(type) ? WORTH[e - 1] : 1, cap: CAP[e - 1],
   };
   if (type === 'House') form.beds = BASE_BEDS * ROOM[i];
   if (line?.makes) {
