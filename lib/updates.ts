@@ -17,8 +17,8 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
-    version: '3.0',
-    date: '2026-09-20',
+    version: '2.7',
+    date: '2026-09-07',
     title: 'Ages that replace',
     notes: [
       'A new age rebuilds the town. Advancing used to add a post to every workplace and a level to the cap, and players said what that felt like: a longer list, not a new age. Now every building has a form for each era, with its own name, look, room and output. Step into the township and the cabins become townhouses, the farms estate farms, the bakery a bakehouse, the mine a pit mine; the industrial age makes them terraces, mechanised farms, a cannery and a deep mine; the modern age apartment blocks and a food plant; the AI age habitat towers and an agri-tower. The rebuild also merges pairs of the same kind into one — two cabins into one townhouse with the beds of both, two farms into one estate farm with the posts of both — so a plot that was wall to wall to hold its people has open ground again. Every building raised after the step holds twice what the last age’s did on the same land.',
@@ -244,8 +244,8 @@ export const UPDATES: Update[] = [
 
 export const UPDATES_ZH: Update[] = [
   {
-    version: '3.0',
-    date: '2026-09-20',
+    version: '2.7',
+    date: '2026-09-07',
     title: '换代重建的时代',
     notes: [
       '新时代重建整座城。以前推进时代只是给每个工作场所加一个岗位、给上限加一级，玩家说那感觉像一张更长的清单，不像一个新时代。现在每栋建筑在每个时代都有自己的形态：自己的名字、样子、容量和产出。进入城镇，木屋变成联排石屋，农场变成庄园农场，面包坊变成烘焙坊，矿井变成露天矿；工业时代把它们变成排屋、机械化农场、罐头厂和深井矿；现代变成公寓楼和食品厂；人工智能时代变成居住塔和农业塔。重建还会把同类建筑两两合并为一栋——两间木屋合成一栋联排石屋，床位是两间之和；两座农场合成一座庄园农场，岗位是两座之和——所以原本挤得满满的地块又有了空地。推进之后每一栋新建的建筑，在同样的地上容纳上一个时代的两倍。',

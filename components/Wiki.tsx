@@ -981,7 +981,7 @@ export default function Wiki() {
           </p>
           <h3>What an age changes</h3>
           <p>
-            Since v3.0 an age is a new town, not a longer shelf. Every building has a <b>form</b> for
+            Since v2.7 an age is a new town, not a longer shelf. Every building has a <b>form</b> for
             each era &mdash; its own name, its own look, its own room, its own output and, for the
             trades whose goods change, its own recipe &mdash; and the moment the plot advances,
             <b>every building is rebuilt into the next form</b> and <b>pairs of the same kind
