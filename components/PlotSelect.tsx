@@ -618,6 +618,10 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   const { wallet } = useWallet();
   const [claiming, setClaiming] = useState(false);
   const [surveying, setSurveying] = useState(false);
+  // What the survey is doing, under its own button: the aside's notice sits
+  // in a sheet a phone keeps closed, and a player watching the button saw
+  // "Surveying…" and nothing else.
+  const [surveyNote, setSurveyNote] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // On a phone the map and the claim panel cannot both be on screen, so the
   // panel becomes a sheet that the map opens.
@@ -760,6 +764,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     }
     setSurveying(true);
     setNotice(null);
+    setSurveyNote(t('Asking the registry what a survey costs today. If your wallet asks you to sign in, sign it.'));
 
     /*
      * Ask the price, pay it, then ask for the land.
@@ -772,18 +777,21 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
      * costs the player nothing and gets them nothing.
      */
     const quoted = await quotePlot({ owner: wallet.address });
-    if (!quoted.ok) { setSurveying(false); setNotice(quoted.reason); return; }
+    if (!quoted.ok) { setSurveying(false); setSurveyNote(tx(quoted.reason)); return; }
     const toPay = Math.max(0, quoted.quote.survey - quoted.quote.credit);
     if (player.ledger.balance < toPay) {
       setSurveying(false);
-      setNotice(t('Prospecting costs {cost} {ticker}.', { cost: toPay.toLocaleString(), ticker: TOKEN.ticker }));
+      setSurveyNote(t('Prospecting costs {cost} {ticker}.', { cost: toPay.toLocaleString(), ticker: TOKEN.ticker }));
       return;
     }
+    setSurveyNote(toPay > 0
+      ? t('Paying {cost} {ticker}. Confirm it in your wallet.', { cost: toPay.toLocaleString(), ticker: TOKEN.ticker })
+      : t('Paid from your account: {credit} {ticker} on account covers the {cost}.', { credit: quoted.quote.credit.toLocaleString(), cost: quoted.quote.survey.toLocaleString(), ticker: TOKEN.ticker }));
     const paid = await spend(player.ledger, toPay, wallet.address);
-    if (!paid.ok) { setSurveying(false); setNotice(paid.refused); return; }
+    if (!paid.ok) { setSurveying(false); setSurveyNote(paid.refused); return; }
     onPlayer({ ...player, ledger: paid.ledger });
 
-    setNotice(t('Payment sent. Waiting for the chain to settle it…'));
+    setSurveyNote(toPay > 0 ? t('Payment sent. Waiting for the chain to settle it…') : t('Asking the registry for land…'));
     const result = await whileSettling(() => surveyPlot({
       chart,
       capacity: chartCapacity(chart),
@@ -796,9 +804,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     if (!result.ok) {
       // The registry says what became of the payment: banked against the
       // wallet when it fell short, and how much more settles it.
-      setNotice(paid.txHash && !/on account/.test(result.reason)
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain. If it bought nothing, redeem it below and it goes on account.', { tx: paid.txHash.slice(0, 10) })}`
-        : paid.txHash ? result.reason : `${result.reason} ${t('Sail to another chart to find new land.')}`);
+      setSurveyNote(paid.txHash && !/on account/.test(result.reason)
+        ? `${tx(result.reason)} ${t('Your payment {tx}… was accepted by the chain. If it bought nothing, redeem it below and it goes on account.', { tx: paid.txHash.slice(0, 10) })}`
+        : paid.txHash ? tx(result.reason) : `${tx(result.reason)} ${t('Sail to another chart to find new land.')}`);
       return;
     }
 
@@ -812,7 +820,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     });
     setSelectedSeed(find.seed);
     setSheetOpen(true);
-    setNotice(t('Surveyed {region} on {island} — {biome}. Everyone can see it now.', { region: found.region, island: found.island, biome: tn(found.biomeLabel).toLowerCase() }));
+    setSurveyNote(t('Surveyed {region} on {island} — {biome}. Everyone can see it now.', { region: found.region, island: found.island, biome: tn(found.biomeLabel).toLowerCase() }));
   }, [player, chart, onPlayer, wallet.address, setFinds, requote]);
 
   const sail = useCallback((delta: number) => {
@@ -1158,8 +1166,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                   ? t('This chart is fully surveyed')
                   : !wallet.address
                     ? t('Connect a wallet to survey')
-                    : t('Prospect new land · {cost} {ticker}', { cost: surveyOwed.toLocaleString(), ticker: TOKEN.ticker })}
+                    : surveyOwed === 0 && credit > 0
+                      ? t('Prospect new land · paid from your account')
+                      : t('Prospect new land · {cost} {ticker}', { cost: surveyOwed.toLocaleString(), ticker: TOKEN.ticker })}
             </button>
+            {surveyNote && <p className="warn survey-note">{surveyNote}</p>}
           </div>
         </header>
 

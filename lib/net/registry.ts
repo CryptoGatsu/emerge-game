@@ -9,6 +9,13 @@
 
 import { withSession } from './session';
 
+/** How long a registry request may take before it is given up as unreachable. A request that never returned used to leave a button on "Surveying…" for ever. */
+const REGISTRY_TIMEOUT_MS = 30_000;
+
+/** The sign-in was not completed: the wallet's prompt was dismissed, timed out, or never showed. */
+export const UNSIGNED = 'The sign-in request was not signed. Open your wallet, sign it, and try again.';
+const refused = (status: number, error: string | undefined, fallback: string) => (status === 401 ? UNSIGNED : error ?? fallback);
+
 export interface Claim {
   seed: number;
   region: string;
@@ -144,6 +151,7 @@ export async function quotePlot(input: { owner: string; seed?: number | null }):
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ owner: input.owner, seed: input.seed ?? undefined, quote: true }),
       }),
@@ -151,7 +159,7 @@ export async function quotePlot(input: { owner: string; seed?: number | null }):
     );
     const json = (await response.json()) as Partial<Quote> & { error?: string };
     if (!response.ok || typeof json.survey !== 'number') {
-      return { ok: false, reason: json.error ?? 'The registry could not quote a price.' };
+      return { ok: false, reason: refused(response.status, json.error, 'The registry could not quote a price.') };
     }
     return { ok: true, quote: { survey: json.survey, price: typeof json.price === 'number' ? json.price : null, credit: Number(json.credit) || 0, build: String(json.build ?? '') } };
   } catch {
@@ -166,6 +174,7 @@ export async function redeemPayment(input: { owner: string; burnTx: string }): P
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ owner: input.owner, burnTx: input.burnTx, redeem: true }),
       }),
@@ -173,7 +182,7 @@ export async function redeemPayment(input: { owner: string; burnTx: string }): P
     );
     const json = (await response.json()) as { banked?: number; credit?: number; error?: string; retry?: boolean };
     if (!response.ok || typeof json.banked !== 'number') {
-      return { ok: false, reason: json.error ?? 'The registry refused the receipt.', settling: json.retry === true };
+      return { ok: false, reason: refused(response.status, json.error, 'The registry refused the receipt.'), settling: json.retry === true };
     }
     return { ok: true, banked: json.banked, credit: Number(json.credit) || 0 };
   } catch {
@@ -193,6 +202,7 @@ export async function reservePlot(seed: number, owner: string): Promise<ReserveR
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, reserve: true }),
       }),
@@ -200,7 +210,7 @@ export async function reservePlot(seed: number, owner: string): Promise<ReserveR
     );
     const json = (await response.json()) as { reserved?: boolean; seconds?: number; price?: number; credit?: number; build?: string; error?: string };
     if (!response.ok || !json.reserved) {
-      return { ok: false, reason: json.error ?? 'That plot could not be held.' };
+      return { ok: false, reason: refused(response.status, json.error, 'That plot could not be held.') };
     }
     return { ok: true, seconds: json.seconds ?? 240, price: typeof json.price === 'number' ? json.price : undefined, credit: Number(json.credit) || 0, build: json.build };
   } catch {
@@ -227,6 +237,7 @@ export async function surveyPlot(input: {
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...input, survey: true }),
       }),
@@ -236,7 +247,7 @@ export async function surveyPlot(input: {
     if (!response.ok || !json.find) {
       return {
         ok: false,
-        reason: json.error ?? 'The registry refused the survey.',
+        reason: refused(response.status, json.error, 'The registry refused the survey.'),
         settling: json.retry === true,
       };
     }
@@ -270,6 +281,7 @@ export async function takePlot(input: {
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(input),
       }),
@@ -281,7 +293,7 @@ export async function takePlot(input: {
     if (!response.ok || !json.claim) {
       return {
         ok: false,
-        reason: json.error ?? 'The registry refused the claim.',
+        reason: refused(response.status, json.error, 'The registry refused the claim.'),
         taken: json.taken,
         settling: json.retry === true,
       };
@@ -299,6 +311,7 @@ export async function listPlot(seed: number, owner: string, price: number | null
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, list: true, price }),
       }),
@@ -319,6 +332,7 @@ async function offerCall(owner: string, body: Record<string, unknown>): Promise<
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...body, owner }),
       }),
@@ -354,6 +368,7 @@ export async function renamePlot(seed: number, owner: string, name: string): Pro
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, rename: name }),
       }),
@@ -371,6 +386,7 @@ export async function expandPlot(seed: number, owner: string, burnTx?: string): 
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, expand: true, burnTx }),
       }),
@@ -394,6 +410,7 @@ export async function boonPlot(seed: number, owner: string, kind: string, burnTx
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, boon: kind, burnTx, emblem }),
       }),
@@ -413,6 +430,7 @@ export async function coverPlot(seed: number, owner: string, kind: 'charter' | '
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, [kind === 'charter' ? 'charter' : kind === 'insurance' ? 'insure' : 'builders']: true, burnTx }),
       }),
@@ -441,6 +459,7 @@ export async function advancePlot(seed: number, owner: string, era: number, burn
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, advance: true, era, burnTx }),
       }),
@@ -499,6 +518,7 @@ export async function buyPlot(input: {
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...input, buy: true }),
       }),
@@ -521,6 +541,7 @@ export async function releasePlot(seed: number, owner: string): Promise<boolean>
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, release: true }),
       }),
