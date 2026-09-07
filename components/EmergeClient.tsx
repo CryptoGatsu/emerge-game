@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
+  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
@@ -990,6 +990,25 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         saveWorld(world);
         sceneRef.current?.reset(world);
         setView(snapshot(world, null));
+      }
+      // A town the first build of 2.7 folded in half while it was already in
+      // its age gets its buildings back. The registry's row says when the age
+      // was reached: one reached after the fold began advanced for real, and
+      // its merge stands.
+      if (world && row && (world.formed ?? 1) >= 2 && !world.restoredForms && (row.eraAt ?? 0) < FOLD_CUTOFF) {
+        const back = restoreFoldedForms(world);
+        saveWorld(world);
+        if (back > 0) {
+          sceneRef.current?.reset(world);
+          setView(snapshot(world, null));
+          announce({
+            id: `restored-${seed}`,
+            kind: 'sync',
+            title: t('Your buildings are back'),
+            body: t('{n} buildings the age rebuild had folded away were raised again at no cost.', { n: back }),
+            lifetime: 20_000,
+          });
+        }
       }
       // A charter or insurance bought on another device.
       if (world && row?.charterUntil && (world.charterUntil ?? 0) < row.charterUntil) { setCover(world, 'charter', row.charterUntil); saveWorld(world); }

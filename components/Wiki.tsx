@@ -987,7 +987,9 @@ export default function Wiki() {
             <b>every building is rebuilt into the next form</b> and <b>pairs of the same kind
             become one</b>, nearest first: two cabins are one townhouse with the beds of both, two
             farms one estate farm with the posts of both. Families and workers move with their
-            building, and the land the second of each pair stood on is open again.
+            building, and the land the second of each pair stood on is open again. The merge
+            happens on an advance only: a plot already in its age when a build arrives takes the
+            age&rsquo;s forms where it stands and keeps every building it has.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Kind</th><th>Settlement</th><th>Township</th><th>Industrial</th><th>Modern</th><th>AI</th></tr></thead>

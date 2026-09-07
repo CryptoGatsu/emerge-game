@@ -495,6 +495,12 @@ export interface World {
   /** The age every building was last rebuilt into (see `rebuildForEra`). Absent on a save from before forms. */
   formed?: number;
   /**
+   * Set by every rebuild this code performs. Absent on a town the first
+   * build of 2.7 folded in half while it was already in its age — the one
+   * case `restoreFoldedForms` gives the buildings back for.
+   */
+  restoredForms?: boolean;
+  /**
    * The public works the settlement has paid for: its city level.
    *
    * A city's level is the smaller of what it has paid for here and what its
@@ -8502,6 +8508,7 @@ export function rebuildForEra(world: World): string | null {
   // Everything left is the age's own now: its picture, its posts, its beds.
   for (const b of world.buildings) if ((b.era ?? 1) < era) b.era = era;
   world.formed = era;
+  world.restoredForms = true;
   world.amenities = buildAmenities(world.buildings, world.layout, water);
   // A merged house may hold more families than its beds; rehouse sorts it.
   rehouse(world);
@@ -8511,9 +8518,8 @@ export function rebuildForEra(world: World): string | null {
     const now = world.buildings.filter((b) => b.type === type).length;
     const was = formName(type, fromEra).toLowerCase();
     const is = formName(type, era).toLowerCase();
-    const plural = (name: string, k: number) => (k === 1 ? name : name.endsWith('y') && !/[aeiou]y$/.test(name) ? `${name.slice(0, -1)}ies` : name.endsWith('s') ? name : `${name}s`);
-    if (now < n) lines.push(`${n} ${plural(was, n)} became ${now} ${plural(is, now)}`);
-    else if (was !== is) lines.push(`the ${plural(was, n)} became ${plural(is, n)}`);
+    if (now < n) lines.push(`${n} ${pluralName(was, n)} became ${now} ${pluralName(is, now)}`);
+    else if (was !== is) lines.push(`the ${pluralName(was, n)} became ${pluralName(is, n)}`);
   }
   const said = lines.length ? `The plot was rebuilt for the ${eraSpec(era).name.toLowerCase()}: ${lines.join(', ')}.` : null;
   if (said) pushFeed(world, 'build', said);
@@ -8521,9 +8527,105 @@ export function rebuildForEra(world: World): string | null {
   return said;
 }
 
-/** Bring a loaded world's buildings up to its age, when a rebuild is owed. */
+/**
+ * Bring a loaded world's buildings up to its age, when a rebuild is owed.
+ *
+ * In place, never merged. The first build of 2.7 ran the advance's rebuild
+ * here, on towns that were already townships — and the merge is only fair
+ * on an advance, where two settlement cabins' six beds become one
+ * townhouse's six. A township built under the old rules had four beds a
+ * house and an extra post a workplace, so folding its pairs turned eight
+ * beds into six and six posts into four, and a player refreshed to find
+ * half their town gone. A town already in its age keeps every building it
+ * has and simply takes the age's forms, which hold more, not fewer.
+ */
 export function catchUpForms(world: World): void {
-  if ((world.formed ?? 1) < eraOf(world)) rebuildForEra(world);
+  const era = eraOf(world);
+  if ((world.formed ?? 1) >= era) return;
+  useWorld(world);
+  const fromEra = world.formed ?? 1;
+  for (const b of world.buildings) if ((b.era ?? 1) < era) b.era = era;
+  world.formed = era;
+  world.restoredForms = true;
+  world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  rehouse(world);
+  staffNow(world);
+  if (fromEra < era) {
+    const kinds = new Set(world.buildings.filter((b) => LINEAGE_TYPES.includes(b.type)).map((b) => b.type));
+    const lines = [...kinds].filter((t) => formName(t, fromEra) !== formName(t, era)).map((t) => `${pluralName(formName(t, fromEra).toLowerCase(), 2)} are ${pluralName(formName(t, era).toLowerCase(), 2)}`);
+    if (lines.length) pushFeed(world, 'build', `The plot's buildings took the ${eraSpec(era).name.toLowerCase()}'s forms: ${lines.join(', ')}. Every building stands where it was.`);
+  }
+}
+
+/** "cabin" -> "cabins", "bakery" -> "bakeries", "fish wharf" -> "fish wharfs": the feed's plurals. */
+const pluralName = (name: string, k: number) => (k === 1 ? name : name.endsWith('y') && !/[aeiou]y$/.test(name) ? `${name.slice(0, -1)}ies` : name.endsWith('s') ? name : `${name}s`);
+
+/** Open ground in rings out from the square, inside the plot's building bounds, for when the plan's own sites are all taken. */
+function groundRings(world: World): [number, number][] {
+  const out: [number, number][] = [];
+  const { x0, x1, y0, y1 } = buildBounds(world);
+  const plaza = world.layout.plaza;
+  for (let r = plaza.r + 8; r <= 48; r += 4) {
+    const n = Math.max(8, Math.round(r * 1.2));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r * 0.37;
+      const x = Math.round(plaza.x + Math.cos(a) * r), y = Math.round(plaza.y + Math.sin(a) * r);
+      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) out.push([x, y]);
+    }
+  }
+  return out;
+}
+
+/** Somewhere a building of this kind can stand: the plan's own sites first, then open ground. */
+function siteFor(world: World, type: string): [number, number] | null {
+  const planned = freeSite(world, type === 'House') ?? freeSite(world, type !== 'House');
+  if (planned && !placementProblem(world, type, planned[0], planned[1])) return planned;
+  for (const [x, y] of groundRings(world)) if (!placementProblem(world, type, x, y)) return [x, y];
+  return null;
+}
+
+/** When the age rebuild that folded towns in half first ran. A town whose age was reached after this advanced for real. */
+export const FOLD_CUTOFF = Date.UTC(2026, 8, 6);
+
+/**
+ * Give a folded town its buildings back.
+ *
+ * For a town the first build of 2.7 merged while it was already in its age
+ * (see `catchUpForms`): one building of each merged kind is raised again for
+ * every one standing, free, on open ground near where the town builds for
+ * itself, in the age's form. That is a building or so more than was folded
+ * for a kind that had an odd count, and every restored house sleeps six
+ * where the folded one slept four: the town ends up ahead, which is the
+ * right side to err on for a mistake that was ours. Runs once, stamped.
+ */
+export function restoreFoldedForms(world: World): number {
+  useWorld(world);
+  if (world.restoredForms) return 0;
+  world.restoredForms = true;
+  if ((world.formed ?? 1) < 2) return 0;
+  const era = eraOf(world);
+  let raised = 0;
+  const said: string[] = [];
+  for (const type of MERGES_ON_ADVANCE) {
+    const standing = world.buildings.filter((b) => b.type === type && !b.ruined && b.active).length;
+    let back = 0;
+    for (let i = 0; i < standing && raised < 80; i++) {
+      const site = siteFor(world, type);
+      if (!site) break;
+      const b: Building = { id: `b${world.counter++}`, type, x: site[0], y: site[1], workers: [], active: true, era };
+      world.buildings.push(b);
+      linkToRoads(world, b);
+      raised += 1; back += 1;
+    }
+    if (back) said.push(`${back} ${pluralName(formName(type, era).toLowerCase(), back)}`);
+  }
+  if (!raised) return 0;
+  world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  rehouse(world);
+  staffNow(world);
+  pushFeed(world, 'build', `The buildings the age rebuild folded away were raised again at no cost: ${said.join(', ')}. They stand on the open ground the fold left.`);
+  noteAttention(world);
+  return raised;
 }
 
 /**
