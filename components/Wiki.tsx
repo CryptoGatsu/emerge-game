@@ -244,7 +244,7 @@ export default function Wiki() {
           </figure>
           <ol className="wiki-steps">
             <li>
-              <b>Connect a wallet.</b> MetaMask or Trust Wallet, on {ACTIVE_CHAIN.label}
+              <b>Connect a wallet.</b> MetaMask, Trust Wallet or Binance Wallet, on {ACTIVE_CHAIN.label}
               {ACTIVE_CHAIN.chainId ? ` (chain ${ACTIVE_CHAIN.chainId})` : ''}. If you have more
               than one wallet installed, pick the one you mean — the game will ask rather than
               guess.

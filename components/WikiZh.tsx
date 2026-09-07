@@ -203,7 +203,7 @@ export function WikiZh() {
             <figcaption>第四十一天的聚落：广场、周围的行当，以及各自忙碌的居民。右侧栏读出这个地方的状况，并说下一步该建什么。</figcaption>
           </figure>
           <ol className="wiki-steps">
-            <li><b>连接钱包。</b>MetaMask 或 Trust Wallet，在 {ACTIVE_CHAIN.label}{ACTIVE_CHAIN.chainId ? `（链 ${ACTIVE_CHAIN.chainId}）` : ''} 上。如果你装了不止一个钱包，选你想用的那个——游戏会问，而不是猜。</li>
+            <li><b>连接钱包。</b>MetaMask、Trust Wallet 或 Binance Wallet，在 {ACTIVE_CHAIN.label}{ACTIVE_CHAIN.chainId ? `（链 ${ACTIVE_CHAIN.chainId}）` : ''} 上。如果你装了不止一个钱包，选你想用的那个——游戏会问，而不是猜。</li>
             <li><b>登录。</b>对一句普通的话做一次免费签名，一天有效。它不是交易，不移动任何东西；它证明钱包是你的，这样别人就不能以你的名义花钱、认领或发言。</li>
             <li><b>认领一块地。</b>在世界地图上挑一块。你用 {T} 支付，它被销毁，地就是你的。</li>
             <li><b>然后先看一会儿。</b>没有什么需要立刻做。不管你在不在，聚落都在运行。</li>

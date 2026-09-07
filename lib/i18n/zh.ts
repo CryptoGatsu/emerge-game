@@ -144,6 +144,7 @@ export const UI: Record<string, string> = {
   'Switch to {chain}': '切换到 {chain}',
   'No wallet detected. {wallets} works with {chain}': '未检测到钱包。{wallets} 支持 {chain}',
   '{wallets} both work with {chain}.': '{wallets} 都支持 {chain}。',
+  '{wallets} all work with {chain}.': '{wallets} 都支持 {chain}。',
 
   // ---- 世界地图 ----
   'Every plot is a world waiting to happen, and no two are the same land. Claim one with {ticker}, give it a name, and the beings who live there will call it that.':

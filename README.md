@@ -982,8 +982,12 @@ because browsers will not start audio unprompted; the choice is remembered.
 Wallets are discovered through EIP-6963, so a browser with both MetaMask and Trust
 Wallet installed offers a choice rather than silently using whichever extension won the
 injection race. `window.ethereum` is still read as a fallback for wallets that do not
-announce themselves. Both MetaMask and Trust Wallet work with Robinhood Chain; the
-Connect panel can also add or switch to the configured network.
+announce themselves, and the two Binance wallets that inject under their own names —
+the Web3 wallet inside the Binance app at `window.binancew3w.ethereum` and the older
+Binance Chain Wallet at `window.BinanceChain` — are looked for as well, so the game opened
+from the Binance app offers that wallet rather than "No wallet detected". MetaMask, Trust
+Wallet and Binance Wallet all work with Robinhood Chain; the Connect panel can also add
+or switch to the configured network.
 
 ## Blockchain
 
@@ -1002,7 +1006,7 @@ public facts about the network rather than deployment secrets:
 | Testnet | `https://rpc.testnet.chain.robinhood.com/rpc` | 46630 |
 
 So a fresh clone already knows how to reach the chain, and the Connect panel's "switch
-network" really does add Robinhood Chain to MetaMask or Trust Wallet. The environment
+network" really does add Robinhood Chain to MetaMask, Trust Wallet or Binance Wallet. The environment
 still wins where it is set, which is how you point a build at a fork or a local node:
 
 ```

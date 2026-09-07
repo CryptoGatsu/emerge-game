@@ -118,7 +118,13 @@ interface Eip6963ProviderInfo { uuid: string; name: string; icon: string; rdns: 
 interface Eip6963AnnounceEvent extends Event { detail: { info: Eip6963ProviderInfo; provider: Eip1193Provider } }
 
 declare global {
-  interface Window { ethereum?: Eip1193Provider & { providers?: Eip1193Provider[]; isMetaMask?: boolean; isTrust?: boolean; isTrustWallet?: boolean } }
+  interface Window {
+    ethereum?: Eip1193Provider & { providers?: Eip1193Provider[]; isMetaMask?: boolean; isTrust?: boolean; isTrustWallet?: boolean; isBinance?: boolean };
+    /** The Binance app's in-app Web3 wallet, which injects under its own name rather than `window.ethereum`. */
+    binancew3w?: { ethereum?: Eip1193Provider };
+    /** The older Binance Chain Wallet extension. */
+    BinanceChain?: Eip1193Provider;
+  }
 }
 
 export interface DiscoveredWallet {
@@ -130,13 +136,35 @@ export interface DiscoveredWallet {
 }
 
 /** Wallets we name explicitly, because they are the ones Robinhood Chain users have. */
-export const PREFERRED_WALLETS = ['MetaMask', 'Trust Wallet'] as const;
+export const PREFERRED_WALLETS = ['MetaMask', 'Trust Wallet', 'Binance Wallet'] as const;
 
 const nameFromLegacy = (provider: Window['ethereum']) => {
   if (!provider) return 'Browser wallet';
+  // Binance first: its extension also sets isMetaMask for sites that only
+  // look for that, and would otherwise be listed under the wrong name.
+  if (provider.isBinance) return 'Binance Wallet';
   if (provider.isMetaMask) return 'MetaMask';
   if (provider.isTrust || provider.isTrustWallet) return 'Trust Wallet';
   return 'Browser wallet';
+};
+
+/**
+ * Binance's wallets, where they inject.
+ *
+ * The Binance Wallet extension announces itself through EIP-6963 like the
+ * others and needs nothing from here. The Web3 wallet inside the Binance app
+ * puts its provider at `window.binancew3w.ethereum`, and the older Binance
+ * Chain Wallet at `window.BinanceChain`; neither announces, so a player
+ * opening the game from the Binance app saw "No wallet detected".
+ */
+const binanceProviders = (): Eip1193Provider[] => {
+  if (typeof window === 'undefined') return [];
+  const out: Eip1193Provider[] = [];
+  const inApp = window.binancew3w?.ethereum;
+  if (inApp && typeof inApp.request === 'function') out.push(inApp);
+  const legacy = window.BinanceChain;
+  if (legacy && typeof legacy.request === 'function' && legacy !== inApp) out.push(legacy);
+  return out;
 };
 
 /**
@@ -171,15 +199,22 @@ export function discoverWallets(onChange: (wallets: DiscoveredWallet[]) => void)
   window.addEventListener('eip6963:announceProvider', onAnnounce);
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 
-  // Fall back to the injected object for wallets that do not announce.
+  // Fall back to the injected objects for wallets that do not announce.
   const legacy = window.ethereum;
-  if (legacy) {
-    const list = legacy.providers?.length ? legacy.providers : [legacy];
+  const list: Eip1193Provider[] = legacy ? (legacy.providers?.length ? legacy.providers : [legacy]) : [];
+  const binance = binanceProviders();
+  if (list.length || binance.length) {
     list.forEach((provider, i) => {
       const named = nameFromLegacy(provider as Window['ethereum']);
       const id = `legacy:${named}:${i}`;
       if (![...found.values()].some((w) => w.name === named)) {
         found.set(id, { id, name: named, icon: null, rdns: null, provider });
+      }
+    });
+    binance.forEach((provider, i) => {
+      const id = `binance:${i}`;
+      if (![...found.values()].some((w) => w.name === 'Binance Wallet' || /binance/i.test(w.rdns ?? ''))) {
+        found.set(id, { id, name: 'Binance Wallet', icon: null, rdns: null, provider });
       }
     });
     publish();

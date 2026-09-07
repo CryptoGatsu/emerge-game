@@ -100,6 +100,9 @@ function resumeOnce(available: DiscoveredWallet[]) {
   }).catch(() => { /* nothing to resume */ });
 }
 
+/** "MetaMask, Trust Wallet and Binance Wallet": a list said the way a person says one. */
+const listOf = (words: readonly string[], conj: string) => words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')}${conj}${words[words.length - 1]}`;
+
 export function useWallet() {
   const [wallet, setLocal] = useState<WalletState>(current);
   const [available, setAvailable] = useState<DiscoveredWallet[]>([]);
@@ -166,7 +169,7 @@ export function WalletPicker({ compact = false }: { compact?: boolean }) {
     return (
       <div className="wallet-box">
         <small className="muted">
-          {t('No wallet detected. {wallets} works with {chain}', { wallets: PREFERRED_WALLETS.join(t(' or ')), chain: ACTIVE_CHAIN.label })}
+          {t('No wallet detected. {wallets} works with {chain}', { wallets: listOf(PREFERRED_WALLETS, t(' or ')), chain: ACTIVE_CHAIN.label })}
           {compact ? t(' — you can still claim and play.') : '.'}
         </small>
       </div>
@@ -175,7 +178,7 @@ export function WalletPicker({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className="wallet-box">
-      {!compact && <small className="muted">{t('{wallets} both work with {chain}.', { wallets: PREFERRED_WALLETS.join(t(' and ')), chain: ACTIVE_CHAIN.label })}</small>}
+      {!compact && <small className="muted">{t('{wallets} all work with {chain}.', { wallets: listOf(PREFERRED_WALLETS, t(' and ')), chain: ACTIVE_CHAIN.label })}</small>}
       <div className="wallet-options">
         {available.map((option) => (
           <button key={option.id} className="wallet-option" onClick={() => connect(option)} disabled={wallet.status === 'connecting'}>
