@@ -16,6 +16,7 @@ import { VAULT_ADDRESS } from '@/lib/chain/emerge';
 import { creditPrincipal, depositSeen, markDeposit, principalOf } from '@/lib/server/accounts';
 import { verifyDeposit } from '@/lib/server/deposits';
 import { registryShared } from '@/lib/server/registry';
+import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +45,19 @@ export async function POST(request: Request) {
   if (!ADDRESS.test(address)) {
     return NextResponse.json({ error: 'A deposit belongs to a wallet address.' }, { status: 400 });
   }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+    return NextResponse.json({ error: 'That is not a transaction hash.', retry: false }, { status: 400 });
+  }
+  /*
+   * The wallet asking has to be the wallet signed in, as it is for every
+   * other door that moves value. The chain check below already refuses a
+   * deposit sent from another wallet, so nobody could ever be credited for
+   * somebody else's transfer; but a player reported the worry, and a door
+   * that only the wallet's own session can knock on is the plain answer.
+   */
+  if (sessionsAvailable() && !holdsAddress(request, address)) {
+    return NextResponse.json({ error: 'Sign in with the wallet that made the deposit.' }, { status: 403 });
+  }
 
   /*
    * A ledger that cannot be shared between instances is not a ledger.
@@ -60,13 +74,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (await depositSeen(txHash)) {
-      return NextResponse.json({ error: 'That deposit has already been credited.', already: true }, { status: 409 });
-    }
-
+    /*
+     * Whose it is and what it was, before whether it was seen.
+     *
+     * The seen check used to come first, so a hash that belonged to somebody
+     * else answered "already credited" — true, and read by a player as the
+     * game accepting any hash it was given. A deposit that is not this
+     * wallet's is refused as not this wallet's, whatever its history.
+     */
     const check = await verifyDeposit(txHash, address, VAULT_ADDRESS);
     if (!check.ok) {
       return NextResponse.json({ error: check.reason, retry: check.retry }, { status: check.retry ? 202 : 400 });
+    }
+    if (await depositSeen(txHash)) {
+      return NextResponse.json({ error: 'That deposit was already credited to this wallet. Nothing more is owed on it.', already: true }, { status: 409 });
     }
 
     /*
@@ -78,7 +99,7 @@ export async function POST(request: Request) {
      * would mean a deposit credited twice, which is minting.
      */
     if (!(await markDeposit(txHash, address))) {
-      return NextResponse.json({ error: 'That deposit has already been credited.', already: true }, { status: 409 });
+      return NextResponse.json({ error: 'That deposit was already credited to this wallet. Nothing more is owed on it.', already: true }, { status: 409 });
     }
 
     let principal: number;

@@ -23,6 +23,7 @@ export const UPDATES: Update[] = [
     notes: [
       'Notables. From the township, the civic buildings want somebody to keep them: a teacher for the school, a physician for the clinic or hospital, a banker for the bank, a researcher for the laboratory or research campus, an administrator for the town hall. Without one the building runs at three quarters of its strength; with one it runs at full strength and more — a competent professional adds 15%, an accomplished one 30%, a renowned one 50% — on top of whatever its level gives. Professionals turn up in town on their own, most days one for a building the town has standing, a renowned one about one time in twelve, and stay three days. They are engaged for a fee and kept on a salary out of the treasury, and three days unpaid they leave. The People panel has a Notables tab for who is in town and who is engaged, and a building’s card says who keeps it. Nothing wants a professional before the township, so a settlement is untouched.',
       'Trades take the age’s title. A farmer in a settlement is a farm worker in a township, an agricultural mechanic in the industrial age, an agricultural technician in the modern one and an agriculture engineer in the AI age, and so for every trade. The post and the person are the same; the title on the People panel, on the card, in the feed and over their head is the age’s, and it changes with the age on its own, with nobody retrained.',
+      'The deposit door answers only the wallet that is signed in, as every other door that moves value does, and it says whose a deposit is before it says whether it was seen. A player pasted a hash that was not theirs and was told “already credited”, which was true of the hash and read as the game taking any hash it was given. Nobody was ever credited for another wallet’s transfer — a deposit has always had to be sent from the wallet claiming it, and the chain is read for what actually reached the vault — but the reply now says so plainly, in both languages: a deposit from another wallet is refused as another wallet’s, and “already credited to this wallet” is said only of your own.',
     ],
   },
   {
@@ -266,6 +267,7 @@ export const UPDATES_ZH: Update[] = [
     notes: [
       '名士。从城镇时代起，市政建筑需要有人主持：学校要教师，诊所或医院要医师，银行要银行家，实验室或研究园区要研究员，市政厅要行政官。没有人主持时建筑只以四分之三的效能运转；有人主持则满效甚至更高——称职的加 15%，干练的加 30%，有名望的加 50%——叠加在等级之上。专业人才会自己来到镇上，大多数日子会有一位为镇上已有的建筑而来，有名望者约十二次里才有一次，停留三天。聘用需付一笔费用，之后从金库按日支薪；三天没有发薪他们就会离开。人物面板新增“名士”页，显示谁在镇上、谁已聘用；建筑卡片会写明由谁主持。城镇之前没有建筑需要专业人才，所以聚落不受影响。',
       '行当采用时代的称呼。聚落里的农夫，到城镇是农场工人，工业时代是农业机械师，现代是农业技术员，人工智能时代是农业工程师，每个行当都如此。岗位和人都没变；人物面板、卡片、动态和头顶上的称呼是时代的，并随时代自动变化，无需重新培训。',
+      '存款入口现在只回应已登录的钱包，和其他所有涉及价值的入口一样；并且先判断这笔存款是谁的，再判断是否已记账。一位玩家粘贴了一个不属于自己的哈希，得到“已经记过账”的回复——对那个哈希来说是真的，却被理解为游戏接受任何哈希。从来没有人能凭别人的转账获得记账——存款一直必须来自认领它的钱包，并且按链上实际到达金库的数量读取——但现在回复会用两种语言把话说清楚：来自其他钱包的存款会被以“来自另一个钱包”拒绝，“已记入这个钱包”只会针对你自己的存款说。',
     ],
   },
   {
