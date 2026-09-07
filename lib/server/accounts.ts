@@ -185,13 +185,46 @@ export const dailyEmissionBudget = () => {
   return Number.isFinite(configured) && configured > 0 ? configured : DAILY_EARN_CEILING * 10;
 };
 
+/**
+ * How much of the day's budget has opened by now.
+ *
+ * The whole day's budget used to be there the moment UTC midnight passed, so
+ * the day belonged to whoever was awake for it: a player in one timezone
+ * collected at 00:05 and a player in another woke to "the vault has paid out
+ * everything it will today" with nothing they could do about it and no idea
+ * why. The budget now opens through the day — a share to start with so the
+ * first hour is not dead, the rest evenly — so somebody arriving at any hour
+ * finds their share of it waiting rather than somebody else's leavings.
+ *
+ * The total for the day is unchanged. Only when it becomes collectable is.
+ */
+const OPEN_AT_MIDNIGHT = 0.15;
+export function emissionUnlocked(now = Date.now()): number {
+  const budget = dailyEmissionBudget();
+  const through = ((now % 86_400_000) + 86_400_000) % 86_400_000 / 86_400_000;
+  return Math.floor(budget * (OPEN_AT_MIDNIGHT + (1 - OPEN_AT_MIDNIGHT) * through));
+}
+
+/** When the next whole $EMERGE of the day's budget opens, in ms from now. */
+export function nextUnlockMs(amount: number, now = Date.now()): number {
+  const budget = dailyEmissionBudget();
+  const perMs = (budget * (1 - OPEN_AT_MIDNIGHT)) / 86_400_000;
+  if (!(perMs > 0)) return 0;
+  return Math.max(0, Math.ceil(Math.max(1, amount) / perMs));
+}
+
 export interface EmissionRoom {
   /** What this address has already been paid today. */
   spent: number;
   /** What it may still be paid. */
   left: number;
-  /** What the vault as a whole has left today. */
+  /** What the vault as a whole has left of what has opened so far. */
   globalLeft: number;
+  /** The whole day's budget, and how much of it has opened by now. */
+  budget: number;
+  unlocked: number;
+  /** What the vault has paid out today, across everybody. */
+  emitted: number;
 }
 
 /** How much stewardship this address may still be paid today. */
@@ -204,7 +237,10 @@ export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING
   return {
     spent,
     left: Math.max(0, ceiling - spent),
-    globalLeft: Math.max(0, dailyEmissionBudget() - emitted),
+    globalLeft: Math.max(0, emissionUnlocked() - emitted),
+    budget: dailyEmissionBudget(),
+    unlocked: emissionUnlocked(),
+    emitted,
   };
 }
 
@@ -230,7 +266,7 @@ export async function reserveEmission(address: string, whole: number, ceiling = 
     return false;
   }
   const all = await incrWindow(globalKey(day), amount, 26 * 3600);
-  if (all > dailyEmissionBudget()) {
+  if (all > emissionUnlocked()) {
     await incrBy(globalKey(day), -amount);
     await incrBy(earnedKey(address, day), -amount);
     return false;

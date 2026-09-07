@@ -23,10 +23,13 @@ export const UPDATES: Update[] = [
     notes: [
       'A new age rebuilds the town. Advancing used to add a post to every workplace and a level to the cap, and players said what that felt like: a longer list, not a new age. Now every building has a form for each era, with its own name, look, room and output. Step into the township and the cabins become townhouses, the farms estate farms, the bakery a bakehouse, the mine a pit mine; the industrial age makes them terraces, mechanised farms, a cannery and a deep mine; the modern age apartment blocks and a food plant; the AI age habitat towers and an agri-tower. The rebuild also merges pairs of the same kind into one — two cabins into one townhouse with the beds of both, two farms into one estate farm with the posts of both — so a plot that was wall to wall to hold its people has open ground again. Every building raised after the step holds twice what the last age’s did on the same land.',
       'The market only trades what the age has a use for. Meals and steel belong to the industrial age, and a settlement was buying both from its first week — thirty meals and ten steel it could not eat, serve or forge, charged to a treasury of a few thousand Gold. Nothing from a later age is imported now, at any price.',
-      'New goods for the later ages. From the industrial age the bakery’s cannery puts up meals from flour and vegetables, and a meal feeds better than a loaf; the food plant and the synth kitchen make nothing else. The ironworks pours steel beside its tools, and the machine works and the fabricator pour more. Both trade on the market like everything else, and steel is what an army will be made of.',
+      'New goods for the later ages. From the industrial age the bakery’s cannery puts up meals from flour and vegetables, and a meal feeds better than a loaf; the food plant and the synth kitchen make nothing else. The ironworks pours steel beside its tools, and the machine works and the fabricator pour more. Both trade on the market like everything else.',
       'The city level and the era gates count homes and workplaces by age — a township one counts two settlement ones, an industrial four — so a rebuilt town is at least the size it was, and a smaller, better city is not a lower one.',
       'The improvement cap is the age’s: three in a settlement and a township, four in the industrial and modern ages, five in the AI age. That is a change from the old ladder of one more level per age up to seven, and it is deliberate: a level means more now, because the age it is reached in decides what the building is. A building keeps whatever level it had reached, so nothing already improved is taken away; one already above its age’s cap simply cannot be improved further until the plot advances.',
       'Every plot already past the settlement is rebuilt the first time it opens on this build, with a line in the feed saying what became what.',
+      'Towns grow again. Players reported that the population had stopped and the breeding looked as though it had been removed, and both were real. Two things were wrong. A town never rebuilt its own ruins — only the owner could, from the building card — so every quake and flood took a house for good, the ruin kept its plot so nothing new could be raised there, and a plot left to run had no beds at all inside a season: measured at nine ruined houses out of nine, thirty adults sleeping rough and a township of forty down to eighteen with thirty thousand Gold in the treasury. And the ceiling on births counted houses, four people to each, which the age advance halved by merging cabins into townhouses while it doubled the beds — a township of thirty-six people in thirty-six beds was judged full at twenty-eight and never had another child. The settlement now raises its ruins itself, homes first, one a morning, out of gold and materials it has; and room for children is counted in beds. A township left to itself for sixty days now goes from twenty-seven people to fifty-five instead of down to twenty-three, and its stewardship from 61% to 81%, which is also why a judged yield was falling day on day.',
+      'The vault’s day opens gradually. The whole day’s emission used to exist at midnight UTC, so a wallet that woke and claimed early took what it could and everybody after found the vault empty until the next day: “no withdrawal quota left” before they had claimed anything. Now 15% is open at midnight and the rest comes free evenly through the day, and the Bank says which it is — your own ceiling spent, or the vault’s next hour — and when more opens.',
+      'The land weight on the dividend card is this week’s, and says so. It counts the days you were present since Monday, so it starts again each week and grows with every day you play; a player who saw 3.4 on Sunday and 0.4 on Monday saw the week turn, not a loss.',
     ],
   },
   {
@@ -238,6 +241,22 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '3.0',
+    date: '2026-09-20',
+    title: '换代重建的时代',
+    notes: [
+      '新时代重建整座城。以前推进时代只是给每个工作场所加一个岗位、给上限加一级，玩家说那感觉像一张更长的清单，不像一个新时代。现在每栋建筑在每个时代都有自己的形态：自己的名字、样子、容量和产出。进入城镇，木屋变成联排石屋，农场变成庄园农场，面包坊变成烘焙坊，矿井变成露天矿；工业时代把它们变成排屋、机械化农场、罐头厂和深井矿；现代变成公寓楼和食品厂；人工智能时代变成居住塔和农业塔。重建还会把同类建筑两两合并为一栋——两间木屋合成一栋联排石屋，床位是两间之和；两座农场合成一座庄园农场，岗位是两座之和——所以原本挤得满满的地块又有了空地。推进之后每一栋新建的建筑，在同样的地上容纳上一个时代的两倍。',
+      '市场只交易这个时代用得上的东西。餐食和钢材属于工业时代，而一个聚落从第一周就在买这两样——三十份吃不了、端不出的餐食和十份炼不了的钢材，记在只有几千金币的金库上。现在后面时代的货物无论什么价都不会再进口。',
+      '后面时代的新货物。从工业时代起，烘焙坊的罐头厂用面粉和蔬菜做餐食，一份餐食比一条面包更顶饱；食品厂和合成厨房只做餐食。铁工坊在工具之外炼钢，机械厂和制造舱炼得更多。两样都和其他货物一样在市场上交易。',
+      '城市等级和时代门槛按时代计算住房和工作场所——一栋城镇的算两栋聚落的，工业的算四栋——所以重建后的城至少和原来一样大，更小更好的城不会更低级。',
+      '升级上限看时代：聚落和城镇三级，工业和现代四级，人工智能时代五级。这和以前每个时代多一级、最高七级的阶梯不同，而且是有意为之：一级现在更有分量，因为达到它的时代决定了建筑是什么。建筑保留已经达到的等级，已升级的不会被收回；已经超过本时代上限的，只是要等地块推进后才能再升。',
+      '每块已经越过聚落时代的地块，在这个版本第一次打开时会被重建，动态里有一行说明什么变成了什么。',
+      '城又开始生长了。玩家反映人口停止增长、繁衍系统像是消失了，两件都是真的，各有一个原因。聚落从不重建自己的废墟——只有地主能从建筑卡片重建——所以每次地震和洪水都会永久带走一栋房子，废墟占着地，新房子也没处盖，放着不管的地块一个季度内就一张床都不剩：实测九栋房子九栋废墟，三十个成年人露宿，一座四十人的城镇掉到十八人，而金库里躺着三万金币。另外，生育的上限按房子数算、每栋四人，而推进时代把木屋两两合并成联排石屋，房子数减半、床位翻倍——一座三十六人住三十六张床的城镇被判定为二十八人就满员，从此再没有孩子出生。现在聚落会自己重建废墟，先住房、每天早上一栋，用它手头的金币和材料；孩子的余地按床位算。一座放六十天不管的城镇，现在从二十七人长到五十五人，而不是掉到二十三人；经营从 61% 升到 81%——这也是裁定收益一天比一天低的原因。',
+      '金库的一天是逐步开放的。以前整天的排放额在 UTC 零点一次到位，早醒早领的钱包能领多少领多少，后面的人发现金库空了只能等第二天：什么都还没领就看到"今天没有提取额度了"。现在零点开放 15%，其余的在一天里匀速释放，银行会说明是哪一种情况——是你自己的上限用完了，还是要等金库的下一个小时——以及什么时候会再开放。',
+      '分红卡上的土地权重是本周的，并且写明了。它计算从周一起你在场的天数，所以每周重新开始，你每玩一天它就长一点；周日看到 3.4、周一看到 0.4 的玩家看到的是一周的翻篇，不是损失。',
+    ],
+  },
   {
     version: '2.6',
     date: '2026-09-11',

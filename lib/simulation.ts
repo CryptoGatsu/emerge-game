@@ -5937,7 +5937,10 @@ function lifeAndDeath(world: World) {
       : `${c.name} ${cause}. The settlement is smaller today.`);
   }
 
-  settlementBuilds(world);
+  // A ruin left standing is a bed and a workplace the town has lost, and it
+  // holds the ground its replacement would need. Raising it again comes before
+  // anything new.
+  if (!settlementRebuilds(world)) settlementBuilds(world);
   bridgeBuilding(world);
   formHouseholds(world, rand);
   births(world, rand);
@@ -6736,6 +6739,61 @@ function drawMaterials(world: World, type: string) {
 }
 
 /**
+ * The settlement puts its own ruins back up.
+ *
+ * A quake or a flood leaves a ruin standing where the building was, and a ruin
+ * is nobody's home and nobody's workplace. Only the player could raise one
+ * again, so a plot left to run lost a house to every hazard and never got one
+ * back — and because the ruin still stands on the plan's own house plot, no new
+ * house could be sited there either. A township measured at nine ruined houses
+ * out of nine, no beds at all, thirty adults sleeping rough and a population
+ * falling from forty to eighteen, with thirty thousand Gold in the treasury and
+ * timber in the yard the whole time.
+ *
+ * So the town rebuilds for itself: roofs first, then the buildings that feed
+ * it, one a day, out of gold and materials it actually has.
+ */
+const REBUILD_FIRST: string[] = ['House', 'Farm', 'Fishery', 'Forager', 'Hunter', 'Mill', 'Bakery', 'Woodcutter'];
+
+function settlementRebuilds(world: World): boolean {
+  const ruins = world.buildings.filter((b) => b.ruined);
+  if (!ruins.length) return false;
+  // Not while the ground is still shaking or the water still up: a roof raised
+  // under a live storm is a roof the storm takes twice.
+  if (world.hazards.length) return false;
+
+  const rank = (b: Building) => {
+    const at = REBUILD_FIRST.indexOf(b.type);
+    return at >= 0 ? at : REBUILD_FIRST.length;
+  };
+  ruins.sort((a, b) => rank(a) - rank(b));
+
+  for (const b of ruins) {
+    const cost = rebuildCost(b);
+    // Twice over in gold, and the timber and stone in the yard. A town that
+    // cannot afford the roof waits for a better week rather than going broke
+    // on it — the ruin is still there tomorrow.
+    if (world.treasury < cost.gold * 2) continue;
+    if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) continue;
+
+    spend(world, 'building', cost.gold);
+    world.resources.wood -= cost.wood;
+    world.resources.stone -= cost.stone;
+    note(world, 'consumed', 'wood', cost.wood);
+    note(world, 'consumed', 'stone', cost.stone);
+    b.ruined = false;
+    b.damage = 0;
+    b.active = true;
+    world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+    if (b.type === 'House') rehouse(world);
+    staffNow(world);
+    pushFeed(world, 'build', `The settlement raised the ${named(world, b.type).toLowerCase()} from its ruins.`);
+    return true;
+  }
+  return false;
+}
+
+/**
  * The settlement builds for itself.
  *
  * Housing is the ceiling on population — a household needs somewhere to live —
@@ -7027,9 +7085,25 @@ function formHouseholds(world: World, rand: () => number) {
  * extinction — the settlement would empty out and nothing would replace it.
  */
 function births(world: World, rand: () => number) {
-  const housed = world.buildings.filter((b) => b.type === 'House').length;
-  // Room to grow, food to do it on, and not a settlement already starving.
-  if (world.citizens.length >= housed * 4 + 4) return;
+  /*
+   * Room to grow, measured in beds rather than in front doors.
+   *
+   * This used to count houses and allow four people to each of them, which was
+   * a settlement cabin's three beds and a child sharing. Then an age advance
+   * merged pairs of cabins into townhouses: half as many houses, twice the
+   * beds. The ceiling halved while the room doubled, so a township of thirty-six
+   * people in thirty-six beds was judged full at twenty-eight and never had
+   * another child — which is exactly what players reported, a town whose
+   * population stopped and whose breeding looked as though it had been removed.
+   *
+   * Beds, plus the same third again for children sharing with their parents:
+   * identical to the old ceiling in the settlement age, and it now grows with
+   * the age instead of shrinking.
+   */
+  const room = housingRoom(world);
+  // Ruins hold no one. A town with its roofs down stops having children until
+  // it puts them back up.
+  if (world.citizens.length >= Math.floor((room * 4) / HOUSE_ROOM) + 4) return;
   if (foodInStore(world) < world.citizens.length * 2) return;
 
   for (const family of world.families) {

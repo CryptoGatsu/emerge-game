@@ -39,7 +39,7 @@
 import { NextResponse } from 'next/server';
 import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
-  MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
+  MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, nextUnlockMs, principalOf, releaseEmission, reserveEmission,
   settlementFor, takePayoutSlot, untilUtcMidnight, utcDay, casinoCreditOf, takeCasinoCredit,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
@@ -67,6 +67,18 @@ const MAX_NAME = 32;
  * out again, and the Bank puts it back in the in-game balance when it reads
  * the row. A hash the chain has never seen, an hour on, was dropped.
  */
+/**
+ * How long until enough of the day's budget has opened to be worth asking
+ * again, said the way a person would say it.
+ */
+function untilMore(amount: number): string {
+  const ms = nextUnlockMs(amount);
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  const hours = Math.round(minutes / 60);
+  return `about ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
 async function confirmPayouts(address: string, rows: Payout[]): Promise<Payout[]> {
   const out: Payout[] = [];
   for (const row of rows) {
@@ -306,7 +318,7 @@ export async function POST(request: Request) {
       if (most < MIN_PAYOUT_EMERGE) {
         return NextResponse.json({
           error: room.globalLeft <= 0
-            ? `The vault has paid out everything it will today. The day turns in ${untilUtcMidnight()}.`
+            ? `The vault's payouts open through the day and this hour's are taken. Enough for ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE opens in ${untilMore(MIN_PAYOUT_EMERGE)}, and the day turns in ${untilUtcMidnight()}.`
             : room.left <= 0
               ? `Today's ${ceiling.toLocaleString()} $EMERGE is collected. The day turns in ${untilUtcMidnight()}.`
               : `You can collect ${room.left.toLocaleString()} more $EMERGE today, which is under the ${MIN_PAYOUT_EMERGE.toLocaleString()} floor. The day turns in ${untilUtcMidnight()}.`,
@@ -319,7 +331,7 @@ export async function POST(request: Request) {
       const again = await emissionRoom(address, ceiling);
       return NextResponse.json({
         error: again.globalLeft <= 0
-          ? `The vault has paid out everything it will today. The day turns in ${untilUtcMidnight()}.`
+          ? `The vault's payouts open through the day and this hour's are taken. Enough for ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE opens in ${untilMore(MIN_PAYOUT_EMERGE)}, and the day turns in ${untilUtcMidnight()}.`
           : `You can collect ${again.left.toLocaleString()} more $EMERGE today.`,
       }, { status: 429 });
     }
@@ -333,13 +345,32 @@ export async function POST(request: Request) {
    * eighteen of those in a row — spent one of the day's slots, and a player
    * with six withdrawals on the ledger was told they had made twenty-four.
    */
-  const slot = await takePayoutSlot(address);
+  /*
+   * From here to the send, anything that throws has to give the reservation
+   * back. It is held against both the wallet's day and the vault's, and a
+   * reservation nobody releases is a day's room that stays spent until
+   * midnight — for everybody, since the vault's day is shared. A store that
+   * blinks for one request should not close the vault for the rest of the day.
+   */
+  let slot: { ok: boolean; reason?: string };
+  try {
+    slot = await takePayoutSlot(address);
+  } catch {
+    await give().catch(() => {});
+    return NextResponse.json({ error: 'The vault could not be reached. Nothing has been taken from your balance.' }, { status: 502 });
+  }
   if (!slot.ok) {
     await give().catch(() => {});
     return NextResponse.json({ error: slot.reason }, { status: 429 });
   }
 
-  const sent = await sendFromVault(address, money.net);
+  let sent: Awaited<ReturnType<typeof sendFromVault>>;
+  try {
+    sent = await sendFromVault(address, money.net);
+  } catch {
+    await give().catch(() => {});
+    return NextResponse.json({ error: 'The transfer could not be sent. Nothing has been taken from your balance.' }, { status: 502 });
+  }
   if (!sent.ok) {
     // Put it back. A refusal must cost nothing.
     await give().catch(() => {});

@@ -1124,10 +1124,12 @@ export default function Wiki() {
             burning the blighted rows, a night watch, sandbags along the bank, shoring up the
             walls, storm crews, a quarantine. The price scales with how bad it is and how much
             town there is to save, and each does exactly what the panel says. Buildings a disaster
-            wrecks are <b>ruins</b> &mdash; out of use, smoking, a heap of stone &mdash; until you
-            rebuild them from the building card for about six tenths of the Gold and materials
-            they cost new. Damage short of a ruin the carpenters patch on their own, two timber a
-            day.
+            wrecks are <b>ruins</b> &mdash; out of use, smoking, a heap of stone &mdash; until
+            they are rebuilt for about six tenths of the Gold and materials they cost new. The
+            settlement does that itself, one a morning, homes first and then the buildings that
+            feed it, whenever the treasury holds twice the cost and the yard has the timber and
+            stone; you can rebuild from the building card straight away instead of waiting.
+            Damage short of a ruin the carpenters patch on their own, two timber a day.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Trouble</th><th>What brings it</th><th>What answers it</th></tr></thead>

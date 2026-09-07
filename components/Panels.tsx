@@ -1673,12 +1673,18 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
         <span className="eyebrow">{t('DIVIDENDS')}</span>
         <h3>{t('Paid in GLD, every week')}</h3>
         <p className="muted small">
-          {t('{pct}% of every charge goes into a pool. Each Monday the vault sends {dev}% of it to development, swaps the rest into GLD, and books the GLD to holders: {land}% to land, weighted by the level each plot is judged at and the days you were present; {stake}% to soft stakes, weighted by the lowest {ticker} balance held through the week, from {min} up. Nothing is locked; selling mid-week forfeits the week. Claim it here whenever you like.', { pct: Math.round(CHARGE_DIVIDEND_SHARE * 100), dev: Math.round(DIVIDEND_DEV_SHARE * 100), land: Math.round(DIVIDEND_LAND_SHARE * 100), stake: Math.round(DIVIDEND_STAKE_SHARE * 100), ticker: TOKEN.ticker, min: STAKE_MIN_EMERGE.toLocaleString() })}
+          {t('{pct}% of every charge goes into a pool. Each Monday the vault sends {dev}% of it to development, swaps the rest into GLD, and books the GLD to holders: {land}% to land, weighted by the level each plot is judged at and the days you were present; {stake}% to soft stakes, weighted by the lowest {ticker} balance held through the week, from {min} up. Both weights are the week\u2019s own and start again each Monday, so they read low on a Monday and full by Sunday. Nothing is locked; selling mid-week forfeits the week. Claim it here whenever you like.', { pct: Math.round(CHARGE_DIVIDEND_SHARE * 100), dev: Math.round(DIVIDEND_DEV_SHARE * 100), land: Math.round(DIVIDEND_LAND_SHARE * 100), stake: Math.round(DIVIDEND_STAKE_SHARE * 100), ticker: TOKEN.ticker, min: STAKE_MIN_EMERGE.toLocaleString() })}
         </p>
         {dividend && (
           <div className="flywheel-grid">
             <div><span>{t('THIS WEEK’S POOL')}</span><b>{dividend.pool.toLocaleString()} {TOKEN.ticker}</b></div>
-            <div><span>{t('YOUR LAND WEIGHT')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present', { n: dividend.presentDays })}</em></div>
+            {/*
+              * Said as a figure that is still being earned. It is the week's,
+              * and every week starts again on Monday — so a player who saw 3.4
+              * on Sunday and 0.4 on Monday read it as something taken from
+              * them, when it is the same standing beginning again.
+              */}
+            <div><span>{t('YOUR LAND WEIGHT THIS WEEK')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present · it grows with every day you play, and starts again on Monday', { n: dividend.presentDays })}</em></div>
             <div><span>{t('YOUR SOFT STAKE')}</span><b>{dividend.registered ? (dividend.lowBalance === null ? t('registered') : dividend.lowBalance.toLocaleString()) : t('not registered')}</b></div>
             <div><span>{t('GLD TO CLAIM')}</span><b>{gld(dividend.claimable)}</b></div>
           </div>
@@ -1790,6 +1796,20 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
             <span>{t('Collectable today')}</span>
             <b>{collectable.toLocaleString()} {TOKEN.ticker}</b>
           </div>
+        )}
+        {/*
+          * Nought collectable is the question a player asks in the same
+          * breath, and the two reasons are nothing alike: their own day is
+          * collected, or the vault's payouts for this hour are taken. Said
+          * here rather than only in the refusal, so nobody has to press a
+          * button to find out why the number is nought.
+          */}
+        {history?.room && collectable === 0 && (
+          <p className="muted small">
+            {history.room.left <= 0
+              ? t('Today’s judgement is collected. What the plots earn from here goes to tomorrow.')
+              : t('The vault’s payouts open through the day and this hour’s are taken. More opens every few minutes.')}
+          </p>
         )}
         {history?.judged && (
           <div className="judged-card">
