@@ -424,6 +424,33 @@ export interface Building {
    */
   level?: number;
 }
+/**
+ * A professional: the teacher who keeps the school, the physician the clinic.
+ *
+ * From the township, a civic building runs at a base without one and at full
+ * strength with one, and the better the professional the more. They are
+ * engaged for a fee and kept on a salary, and they come to town on their own
+ * time — a few days to take them up, then they move on. "Starting from the
+ * Town Era, certain municipal buildings require professional talent to
+ * operate at full effectiveness; without it the building continues at a
+ * minimum efficiency." Not a citizen who walks the streets, yet: a name on
+ * the building and in the feed.
+ */
+export type NotableRole = 'teacher' | 'physician' | 'banker' | 'researcher' | 'administrator';
+export interface Notable {
+  id: string; name: string; role: NotableRole;
+  /** 1 competent, 2 accomplished, 3 renowned. */
+  tier: 1 | 2 | 3;
+  hash: number;
+  /** Gold to engage, and Gold a day to keep. */
+  fee: number; salary: number;
+  /** For an offer: the last day it stands. */
+  until?: number;
+  /** For somebody engaged: the day they took the post, and which building. */
+  since?: number; buildingId?: string;
+  /** Days in a row the salary was not met. */
+  unpaid?: number;
+}
 export interface MarketQuote {
   price: number; supply: number; demand: number; volume: number; trend: number;
   /** Recent prices, oldest first, sampled once per game day. */
@@ -448,6 +475,10 @@ export interface World {
   departures?: number;
   /** Days in a row the town has held more adults than posts, or more people than beds. */
   idleDays?: number;
+  /** The professionals engaged to keep the civic buildings, from the township on. */
+  notables?: Notable[];
+  /** Professionals in town offering their services, and until when. */
+  talent?: { offers: Notable[] };
   /** Benches, fires, wells and stalls, and who is using them. */
   amenities: Amenity[];
   /**
@@ -703,6 +734,39 @@ export function ledgerTotals(ledger: DayLedger) {
 }
 
 export const JOB_LABELS: Record<Job, string> = { farmer: 'Farmer', woodcutter: 'Woodcutter', fisher: 'Fisher', hunter: 'Hunter', forager: 'Forager', miner: 'Miner', quarry: 'Quarry worker', miller: 'Miller', baker: 'Baker', carpenter: 'Carpenter', blacksmith: 'Blacksmith', tailor: 'Tailor', unemployed: 'Unemployed' };
+/**
+ * What a trade is called in each age.
+ *
+ * A farmer in a settlement is a farm worker in a township, an agricultural
+ * mechanic in the industrial age, a technician in the modern one and an
+ * engineer in the AI age. The trade is the same trade and the post the same
+ * post; the title is what the age calls it, and it changes with the age on
+ * its own, without anybody being retrained. "Players do not need to manually
+ * change NPC professions; job titles change with the building and the era."
+ */
+export const TRADE_TITLES: Record<WorkingJob, [string, string, string, string, string]> = {
+  farmer: ['Farmer', 'Farm worker', 'Agricultural mechanic', 'Agricultural technician', 'Agriculture engineer'],
+  woodcutter: ['Woodcutter', 'Timber worker', 'Timber technician', 'Composites engineer', 'Carbon-materials engineer'],
+  fisher: ['Fisher', 'Fisheries worker', 'Seafood technician', 'Marine technician', 'Aquaculture engineer'],
+  hunter: ['Hunter', 'Meat worker', 'Food-processing technician', 'Food technologist', 'Protein engineer'],
+  forager: ['Forager', 'Resource worker', 'Raw-materials technician', 'Resource technician', 'Resource engineer'],
+  miner: ['Miner', 'Mine worker', 'Mining engineer', 'Mining technician', 'Deep-mining engineer'],
+  quarry: ['Quarry worker', 'Stone worker', 'Building-materials technician', 'Materials technician', 'Building-materials engineer'],
+  miller: ['Miller', 'Flour worker', 'Grain technician', 'Nutrition technician', 'Food engineer'],
+  baker: ['Baker', 'Baking worker', 'Food-production technician', 'Food technician', 'Smart-food engineer'],
+  carpenter: ['Carpenter', 'Furniture craftsman', 'Furniture technician', 'Home-manufacturing engineer', 'Adaptive-manufacturing engineer'],
+  blacksmith: ['Blacksmith', 'Metal craftsman', 'Steel engineer', 'Precision engineer', 'Alloy engineer'],
+  tailor: ['Tailor', 'Textile worker', 'Textile technician', 'Fibre engineer', 'Smart-fibre engineer'],
+};
+/** A trade's title in an age. */
+export function tradeTitle(job: Job, era = 1): string {
+  if (job === 'unemployed') return JOB_LABELS.unemployed;
+  const titles = TRADE_TITLES[job as WorkingJob];
+  return titles ? titles[Math.max(1, Math.min(titles.length, Math.round(era))) - 1] : JOB_LABELS[job];
+}
+/** The same, lowercase, for the middle of a sentence. */
+export const tradeWord = (world: { era?: number }, job: Job) => tradeTitle(job, eraOf(world)).toLowerCase();
+
 export const ACTIVITY_LABELS: Record<Activity, string> = { walking: 'Walking', working: 'Working', resting: 'At home', trading: 'Socialising', eating: 'Eating', idle: 'Idle' };
 export const PHASE_LABELS: Record<Phase, string> = { sleeping: 'Asleep', athome: 'At home', working: 'At work', eating: 'Getting food', socialising: 'Socialising', wandering: 'Wandering', rogue: 'Turned on the settlement', pursuit: 'Giving chase', jailed: 'In the jail', fleeing: 'Running for open ground' };
 
@@ -1975,7 +2039,7 @@ function boundFor(world: World, c: Citizen): string | null {
 function briefOf(world: World, c: Citizen, other: Citizen): Brief {
   return {
     name: c.name,
-    trade: c.job === 'unemployed' ? '' : JOB_LABELS[c.job].toLowerCase(),
+    trade: c.job === 'unemployed' ? '' : tradeWord(world, c.job),
     traits: traitsOf(c.hash),
     age: Math.floor(c.age),
     hungry: c.hunger < 32,
@@ -2181,7 +2245,7 @@ export function plannedDay(world: World, c: Citizen): { work: string; today: str
       ? 'I am running on nothing. An early night.'
       : c.job === 'unemployed'
         ? 'Looking for something useful to put my hands to.'
-        : `${JOB_LABELS[c.job]}'s day ahead of me.`;
+        : `${tradeTitle(c.job, eraOf(world))}'s day ahead of me.`;
 
   const evening = gathering
     ? `I will be at the ${gathering.name.toLowerCase()} later.`
@@ -3774,7 +3838,147 @@ export const LIBRARY_LEARNING = 0.15;
 export const LEVEL_BOOST = 0.25;
 export function civicStrength(world: World, type: string): number {
   const b = world.buildings.find((x) => x.type === type && x.active && !x.ruined);
-  return b ? 1 + LEVEL_BOOST * (levelOf(b) - 1) : 0;
+  return b ? (1 + LEVEL_BOOST * (levelOf(b) - 1)) * staffing(world, b) : 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Notables: the professionals who keep the civic buildings
+ * ------------------------------------------------------------------ */
+
+export const NOTABLE_ROLES: Record<NotableRole, { label: string; buildings: string[]; does: string }> = {
+  teacher: { label: 'Teacher', buildings: ['School'], does: 'how fast the town learns' },
+  physician: { label: 'Physician', buildings: ['Clinic', 'Hospital'], does: 'how well the sick are cared for' },
+  banker: { label: 'Banker', buildings: ['Bank'], does: "the bank's relief on upkeep" },
+  researcher: { label: 'Researcher', buildings: ['Lab', 'Research Campus'], does: "the town's methods" },
+  administrator: { label: 'Administrator', buildings: ['Town Hall'], does: 'the order the town hall keeps' },
+};
+/** What a professional of each tier is called. */
+export const NOTABLE_TIERS = ['', 'competent', 'accomplished', 'renowned'] as const;
+/** The age professionals first come to: the township. */
+export const NOTABLE_FROM_ERA = 2;
+/** What a civic building runs at without its professional, from the township. */
+export const NOTABLE_BASE = 0.75;
+/** What it runs at with one, by tier. */
+export const NOTABLE_BONUS = [0, 0.15, 0.3, 0.5] as const;
+/** Days an offer stands before they move on. */
+export const OFFER_DAYS = 3;
+const NOTABLE_FEE = [0, 300, 900, 2400] as const;
+const NOTABLE_SALARY = [0, 8, 16, 30] as const;
+/** Days of unpaid salary somebody puts up with before leaving. */
+export const NOTABLE_PATIENCE = 3;
+const NOTABLE_SURNAMES = ['Ashcombe', 'Bellweather', 'Corrin', 'Dunmore', 'Ellery', 'Fairweather', 'Greaves', 'Hollin', 'Ives', 'Kestrel', 'Lowry', 'Marchbank', 'Norrell', 'Oakes', 'Pellam', 'Quill', 'Rowntree', 'Sable', 'Thorne', 'Vance', 'Wyke'];
+
+/** Which professional a building kind wants, or null. */
+export function roleOf(type: string): NotableRole | null {
+  for (const role of Object.keys(NOTABLE_ROLES) as NotableRole[]) if (NOTABLE_ROLES[role].buildings.includes(type)) return role;
+  return null;
+}
+/** Whether professionals come to this plot yet. */
+export const notablesOpen = (world: { era?: number }) => eraOf(world) >= NOTABLE_FROM_ERA;
+/** The professional keeping this building, if one does. */
+export const notableAt = (world: World, b: Building) => world.notables?.find((n) => n.buildingId === b.id);
+/** What the professional makes of a civic building: full and more with one, the base without, unchanged before the township. */
+export function staffing(world: World, b: Building): number {
+  if (!notablesOpen(world) || !roleOf(b.type)) return 1;
+  const n = notableAt(world, b);
+  return n ? 1 + NOTABLE_BONUS[n.tier] : NOTABLE_BASE;
+}
+/** The staffing of the best-kept standing building of these kinds, for the effects read off a level rather than a building. */
+function staffingOf(world: World, types: string[]): number {
+  const b = world.buildings.filter((x) => types.includes(x.type) && x.active && !x.ruined).sort((a, c) => levelOf(c) - levelOf(a))[0];
+  return b ? staffing(world, b) : 1;
+}
+/** The building a professional of this role would take: the best standing one of the role's kinds that nobody keeps. */
+export function postFor(world: World, role: NotableRole): Building | undefined {
+  return world.buildings
+    .filter((b) => b.active && !b.ruined && NOTABLE_ROLES[role].buildings.includes(b.type) && !notableAt(world, b))
+    .sort((a, b) => levelOf(b) - levelOf(a))[0];
+}
+/** What a professional of this tier costs on this plot: dearer with the age. */
+export function notableTerms(world: { era?: number }, tier: 1 | 2 | 3): { fee: number; salary: number } {
+  const age = 1 + 0.5 * (eraOf(world) - NOTABLE_FROM_ERA);
+  return { fee: Math.round(NOTABLE_FEE[tier] * age), salary: Math.round(NOTABLE_SALARY[tier] * age) };
+}
+
+/**
+ * Who is in town today.
+ *
+ * Offers stand a few days and lapse. New ones come for the roles the town
+ * has a building for: most days one, some days two, never more than three
+ * standing. The better the professional the rarer — renowned one in twelve,
+ * accomplished one in four — "stronger talent means lower refresh
+ * probability", which is what keeps the market worth watching.
+ */
+function refreshTalent(world: World) {
+  if (!notablesOpen(world)) return;
+  const talent = world.talent ?? (world.talent = { offers: [] });
+  talent.offers = talent.offers.filter((o) => (o.until ?? 0) >= world.day);
+  const rand = mulberry32(world.seed * 31 + world.day * 977);
+  const roles = (Object.keys(NOTABLE_ROLES) as NotableRole[])
+    .filter((r) => world.buildings.some((b) => b.active && !b.ruined && NOTABLE_ROLES[r].buildings.includes(b.type)));
+  if (!roles.length) return;
+  let coming = (rand() < 0.5 ? 1 : 0) + (rand() < 0.15 ? 1 : 0);
+  while (coming-- > 0 && talent.offers.length < 3) {
+    const role = roles[Math.floor(rand() * roles.length)];
+    const roll = rand();
+    const tier: 1 | 2 | 3 = roll < 1 / 12 ? 3 : roll < 1 / 3 ? 2 : 1;
+    const hash = Math.floor(rand() * 0xffffff);
+    const name = `${SETTLER_NAMES[hash % SETTLER_NAMES.length]} ${NOTABLE_SURNAMES[Math.floor(hash / 64) % NOTABLE_SURNAMES.length]}`;
+    const terms = notableTerms(world, tier);
+    talent.offers.push({ id: `n${world.counter++}`, name, role, tier, hash, ...terms, until: world.day + OFFER_DAYS - 1 });
+    const post = postFor(world, role) ?? world.buildings.find((b) => NOTABLE_ROLES[role].buildings.includes(b.type));
+    pushFeed(world, 'social', `${name}, ${NOTABLE_TIERS[tier] === 'accomplished' ? 'an' : 'a'} ${NOTABLE_TIERS[tier]} ${NOTABLE_ROLES[role].label.toLowerCase()}, is in town and would keep the ${post ? formWord(post) : NOTABLE_ROLES[role].buildings[0].toLowerCase()}: ${terms.fee} Gold to engage, ${terms.salary} a day.`);
+  }
+}
+
+/** Engage a professional who is in town. */
+export function hireNotable(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
+  if (!notablesOpen(world)) return { ok: false, message: 'Professionals come to a township. Advance the plot first.' };
+  const offer = world.talent?.offers.find((o) => o.id === id);
+  if (!offer) return { ok: false, message: 'They have moved on.' };
+  const spec = NOTABLE_ROLES[offer.role];
+  const post = postFor(world, offer.role);
+  if (!post) {
+    const standing = world.buildings.some((b) => b.active && !b.ruined && spec.buildings.includes(b.type));
+    return { ok: false, message: standing ? `Every ${spec.label.toLowerCase()}'s post here is kept already.` : `There is no ${named(world, spec.buildings[0])} for them to keep.` };
+  }
+  if (world.treasury < offer.fee) return { ok: false, message: `Engaging ${offer.name} costs ${offer.fee} Gold, and the treasury holds ${Math.floor(world.treasury)}.` };
+  spend(world, 'wages', offer.fee);
+  world.talent!.offers = world.talent!.offers.filter((o) => o.id !== id);
+  const hired: Notable = { ...offer, until: undefined, since: world.day, buildingId: post.id, unpaid: 0 };
+  (world.notables ??= []).push(hired);
+  noteAttention(world);
+  pushFeed(world, 'social', `${offer.name} took up the ${formWord(post)} as its ${spec.label.toLowerCase()}.`);
+  return { ok: true, message: `${offer.name} keeps the ${formWord(post)} now.` };
+}
+
+/** Let a professional go. No refund of the fee: it paid for their coming. */
+export function dismissNotable(world: World, id: string): { ok: boolean; message: string } {
+  useWorld(world);
+  const n = world.notables?.find((x) => x.id === id);
+  if (!n) return { ok: false, message: 'They are not here.' };
+  world.notables = world.notables!.filter((x) => x.id !== id);
+  const post = world.buildings.find((b) => b.id === n.buildingId);
+  noteAttention(world);
+  pushFeed(world, 'social', `${n.name} was let go from the ${post ? formWord(post) : NOTABLE_ROLES[n.role].buildings[0].toLowerCase()}.`);
+  return { ok: true, message: `${n.name} has left.` };
+}
+
+/** The day's salaries: paid from the treasury, and a professional unpaid for long leaves. */
+function paySalaries(world: World) {
+  if (!world.notables?.length) return;
+  const gone: Notable[] = [];
+  for (const n of world.notables) {
+    if (world.treasury >= n.salary) { spend(world, 'wages', n.salary); n.unpaid = 0; continue; }
+    n.unpaid = (n.unpaid ?? 0) + 1;
+    if (n.unpaid >= NOTABLE_PATIENCE) gone.push(n);
+  }
+  for (const n of gone) {
+    world.notables = world.notables.filter((x) => x.id !== n.id);
+    const post = world.buildings.find((b) => b.id === n.buildingId);
+    pushFeed(world, 'social', `${n.name} left the ${post ? formWord(post) : NOTABLE_ROLES[n.role].buildings[0].toLowerCase()}: ${NOTABLE_PATIENCE} days without a salary.`);
+  }
 }
 /** The highest level among buildings of these types that stand, or 0. */
 const bestLevelOf = (world: World, types: string[]) =>
@@ -3784,10 +3988,10 @@ export const MARKET_EDGE = 0.05;
 export const marketEdge = (world: World) => 1 + MARKET_EDGE * Math.max(0, bestLevelOf(world, ['Market']) - 1);
 /** The bank keeps the books: every building's upkeep BANK_RELIEF cheaper per level. */
 export const BANK_RELIEF = 0.05;
-export const bankRelief = (world: World) => 1 - BANK_RELIEF * Math.max(0, bestLevelOf(world, ['Bank']) - 1);
+export const bankRelief = (world: World) => 1 - BANK_RELIEF * Math.max(0, bestLevelOf(world, ['Bank']) - 1) * staffingOf(world, ['Bank']);
 /** The town hall keeps order: stewardship quality TOWN_HALL_ORDER better per level. */
 export const TOWN_HALL_ORDER = 0.02;
-export const townHallOrder = (world: World) => TOWN_HALL_ORDER * Math.max(0, bestLevelOf(world, ['Town Hall']) - 1);
+export const townHallOrder = (world: World) => TOWN_HALL_ORDER * Math.max(0, bestLevelOf(world, ['Town Hall']) - 1) * staffingOf(world, ['Town Hall']);
 /** Transport: whatever people ride goes TRANSPORT_PACE faster per level of the building that provides it. */
 export const TRANSPORT_PACE = 0.1;
 export const TRANSPORT_TYPES = ['Stables', 'Railway Station', 'Bus Depot', 'Pod Hub'];
@@ -4312,7 +4516,7 @@ export function trainCitizen(world: World, id: string, job: WorkingJob): { ok: b
   if (!c) return { ok: false, message: 'Nobody by that name.' };
   if (!jobs[job]) return { ok: false, message: 'That is not a trade.' };
   if (c.age < 16) return { ok: false, message: `${c.name} is too young to work.` };
-  if (c.job === job) return { ok: false, message: `${c.name} is already a ${JOB_LABELS[job].toLowerCase()}.` };
+  if (c.job === job) return { ok: false, message: `${c.name} is already a ${tradeWord(world, job)}.` };
   if (jobCapacity(world, job) <= 0) return { ok: false, message: `There is no ${named(world, jobs[job].building)} for a ${JOB_LABELS[job].toLowerCase()} to work at.` };
   if (world.treasury < TRAIN_COST_GOLD) return { ok: false, message: `Training costs ${TRAIN_COST_GOLD} Gold, and the treasury holds ${Math.floor(world.treasury)}.` };
   spend(world, 'training', TRAIN_COST_GOLD);
@@ -4326,8 +4530,8 @@ export function trainCitizen(world: World, id: string, job: WorkingJob): { ok: b
   // New trade, new day: drop what they were walking toward.
   c.path = []; c.detour = undefined; c.dwell = 0;
   pushFeed(world, 'work', was === 'unemployed'
-    ? `${c.name} was trained as a ${JOB_LABELS[job].toLowerCase()}.`
-    : `${c.name} was retrained from ${JOB_LABELS[was].toLowerCase()} to ${JOB_LABELS[job].toLowerCase()}.`);
+    ? `${c.name} was trained as a ${tradeWord(world, job)}.`
+    : `${c.name} was retrained from ${tradeWord(world, was)} to ${tradeWord(world, job)}.`);
   noteAttention(world);
   return { ok: true, message: '' };
 }
@@ -4343,7 +4547,7 @@ export function trainTrade(world: World, job: WorkingJob, count: number): { ok: 
   if (!jobs[job]) return { ok: false, message: 'That is not a trade.', trained: 0 };
   const open = openPosts(world, job);
   const want = Math.min(Math.max(0, Math.floor(count)), open);
-  if (want <= 0) return { ok: false, message: `Every ${JOB_LABELS[job].toLowerCase()} post is filled.`, trained: 0 };
+  if (want <= 0) return { ok: false, message: `Every ${tradeWord(world, job)} post is filled.`, trained: 0 };
   if (world.treasury < TRAIN_COST_GOLD) return { ok: false, message: `Training costs ${TRAIN_COST_GOLD} Gold a head, and the treasury holds ${Math.floor(world.treasury)}.`, trained: 0 };
   const tally: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) tally[c.job] = (tally[c.job] ?? 0) + 1;
@@ -4367,7 +4571,7 @@ export function trainTrade(world: World, job: WorkingJob, count: number): { ok: 
     trained++;
   }
   if (trained === 0) return { ok: false, message: 'Nobody could be spared for it.', trained: 0 };
-  return { ok: true, message: `${trained} trained as ${JOB_LABELS[job].toLowerCase()}${trained === 1 ? '' : 's'}.`, trained };
+  return { ok: true, message: `${trained} trained as ${tradeWord(world, job)}${trained === 1 ? '' : 's'}.`, trained };
 }
 
 /**
@@ -4450,7 +4654,7 @@ function produce(world: World) {
     }
     if (recipe.input && hands < workers) world.shortages[wj] = { short: short!, hands, workers };
     if (recipe.input && hands < workers && world.day % 2 === 0) {
-      const label = JOB_LABELS[wj].toLowerCase();
+      const label = tradeWord(world, wj);
       pushFeed(world, 'work', hands === 0
         ? `The ${label}s stood idle: no ${RESOURCE_LABELS[short!].toLowerCase()} in store for them.`
         : `${hands} of ${workers} ${label}s worked: the store was short of ${RESOURCE_LABELS[short!].toLowerCase()} for the rest.`);
@@ -7041,7 +7245,7 @@ function fillEmptyTrades(world: World, tally: Partial<Record<Job, number>>) {
     tally[mover.job] = (tally[mover.job] ?? 1) - 1;
     mover.job = job;
     tally[job] = (tally[job] ?? 0) + 1;
-    pushFeed(world, 'work', `${mover.name} took up ${JOB_LABELS[job].toLowerCase()} at the new ${named(world, jobs[job].building)}.`);
+    pushFeed(world, 'work', `${mover.name} took up ${tradeWord(world, job)} at the new ${named(world, jobs[job].building)}.`);
   }
 }
 
@@ -7912,7 +8116,7 @@ function daily(world: World) {
       else c.trained = undefined;
     }
     if (c.job === 'unemployed') {
-      pushFeed(world, 'work', `${c.name} is old enough to work, and took up ${JOB_LABELS[jobKey].toLowerCase()}.`);
+      pushFeed(world, 'work', `${c.name} is old enough to work, and took up ${tradeWord(world, jobKey)}.`);
     }
     c.job = jobKey;
     tally[jobKey] = (tally[jobKey] ?? 0) + 1;
@@ -7949,8 +8153,8 @@ function daily(world: World) {
       const before = skillLevel((c.skills[job] ?? 0) - gain);
       const after = skillLevel(c.skills[job] ?? 0);
       if (after > before && after >= 3) {
-        pushFeed(world, 'work', `${c.name} is now a ${SKILL_TITLES[after].toLowerCase()} ${JOB_LABELS[job].toLowerCase()}.`);
-        noteEpisode(world, c, 'mastered', `${SKILL_TITLES[after].toLowerCase()} ${JOB_LABELS[job].toLowerCase()}`);
+        pushFeed(world, 'work', `${c.name} is now a ${SKILL_TITLES[after].toLowerCase()} ${tradeWord(world, job)}.`);
+        noteEpisode(world, c, 'mastered', `${SKILL_TITLES[after].toLowerCase()} ${tradeWord(world, job)}`);
       }
     }
     c.hunger = Math.max(0, c.hunger - 7); c.rest = Math.max(0, c.rest - 5);
@@ -7990,6 +8194,7 @@ function daily(world: World) {
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep * bankRelief(world));
+  paySalaries(world);
   // Paid in the morning, spent through the day: what people do not need to
   // keep by them goes back into the settlement rather than sitting in a purse.
   householdSpending(world);
@@ -8019,6 +8224,7 @@ function daily(world: World) {
   repairs(world);
   unrest(world);
   discoveries(world);
+  refreshTalent(world);
   projects(world);
   decayBonds(world);
   for (const f of world.families) f.wealth = world.citizens.filter((c) => c.familyId === f.id).reduce((s, c) => s + c.wallet, 0);
@@ -9131,6 +9337,11 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   note(world, 'produced', 'stone', stone);
 
   world.buildings = world.buildings.filter((b) => b.id !== id);
+  // Whoever kept it has nothing to keep.
+  for (const n of world.notables?.filter((x) => x.buildingId === id) ?? []) {
+    world.notables = world.notables!.filter((x) => x.id !== n.id);
+    pushFeed(world, 'social', `${n.name} left: the ${formName(building.type, building.era ?? 1).toLowerCase()} they kept is gone.`);
+  }
   if (home) {
     home.homeId = '';
     const moved = rehouse(world);

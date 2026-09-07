@@ -25,7 +25,7 @@ import {
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
-  type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
+  type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -1440,6 +1440,26 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return null;
   }, []);
 
+  /** Engage a professional who is in town. */
+  const hireFor = useCallback((id: string): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = hireNotable(world, id);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+  /** Let a professional go. */
+  const dismissNotableFor = useCallback((id: string): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = dismissNotable(world, id);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+
   /** Pay the public works and raise the city a level. */
   const raiseCityFor = useCallback((): string | null => {
     const world = worldRef.current;
@@ -2235,6 +2255,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onBuild={beginBuild}
             onTrain={trainFor}
             onTrainTrade={trainTradeFor}
+            onHire={hireFor}
+            onDismissNotable={dismissNotableFor}
             onGates={gatesFor}
             onKeep={keepFor}
             onClearTrees={beginClear}

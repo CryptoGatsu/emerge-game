@@ -226,6 +226,9 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                   : t('{n} of {posts} posts filled', { n: focus.crew.posted, posts: focus.crew.posts })}
               </p>
             )}
+            {focus.keeper && ('name' in focus.keeper
+              ? <p className="muted small keeper-line">{t('Kept by {name}, {tier} {role}.', { name: focus.keeper.name, tier: tx(focus.keeper.tier), role: tx(focus.keeper.role).toLowerCase() })}</p>
+              : <p className="muted small keeper-line">{t('No {role} keeps it: it runs at {base}%. Engage one on the People panel.', { role: tx(focus.keeper.wants).toLowerCase(), base: focus.keeper.base })}</p>)}
             {focus.idle && <p className="muted small idle-line">{tx(focus.idle)}</p>}
             {/* What it has been improved to, and what that is costing every
                 day — the second half matters, because upkeep is what makes

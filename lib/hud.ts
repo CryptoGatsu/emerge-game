@@ -9,9 +9,9 @@
 
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, idleAdults, upgradeEffect, type CityGate, type Building } from './simulation';
+import { cityGate, dailyCeiling, festivalCost, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, idleAdults, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
 import {
-  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOB_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
+  ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
   skillLevel, skillOutput, upgradeCost, upgradeAllQuote, upkeepOf,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
@@ -57,6 +57,8 @@ export interface FocusBuilding {
   idle: string | null;
   /** The people posted here against its posts, for a workplace. */
   crew: { posted: number; posts: number } | null;
+  /** The professional who keeps a civic building, or what it lacks: null for a building that wants none, or before the township. */
+  keeper: { name: string; role: string; tier: string; id: string } | { wants: string; base: number } | null;
   x: number; y: number; upkeep: number; active: boolean;
   people: { id: string; name: string; doing: string }[];
   /** Whether it can be pulled down, and what comes back if it is. */
@@ -142,6 +144,8 @@ export interface Snapshot {
   resolution: { text: string; voters: number; day: number } | null;
   /** What to build next, and why, in order. */
   advice: Advice[];
+  /** The professionals: who is in town offering, who is engaged, and whether the plot's age takes them yet. */
+  talent: Talent;
   /** What the settlement's showcases have produced, newest first. */
   artworks: { id: string; title: string; maker: string; day: number }[];
   /**
@@ -211,6 +215,39 @@ function postedAt(world: World, b: Building, trade: WorkingJob): number {
   return world.citizens.filter((c) => c.age >= 16 && c.job === trade && (c.workplaceId === b.id || (!c.workplaceId && first))).length;
 }
 
+export interface TalentOffer {
+  id: string; name: string; role: NotableRole; roleLabel: string; tier: number; tierWord: string;
+  fee: number; salary: number; daysLeft: number;
+  /** The building they would keep, in the age's name, or null when every post of the role is kept or none stands. */
+  post: string | null;
+  /** What that building runs at without them, and with them, in per cent. */
+  base: number; full: number;
+}
+export interface Talent {
+  open: boolean;
+  /** The age they first come to. */
+  fromEra: string;
+  offers: TalentOffer[];
+  hired: { id: string; name: string; roleLabel: string; tierWord: string; building: string; salary: number; days: number; full: number }[];
+}
+function talentOf(world: World): Talent {
+  const open = notablesOpen(world);
+  const offers: TalentOffer[] = open ? (world.talent?.offers ?? []).map((o) => {
+    const post = postFor(world, o.role);
+    return {
+      id: o.id, name: o.name, role: o.role, roleLabel: NOTABLE_ROLES[o.role].label, tier: o.tier, tierWord: NOTABLE_TIERS[o.tier],
+      fee: o.fee, salary: o.salary, daysLeft: Math.max(0, (o.until ?? world.day) - world.day + 1),
+      post: post ? formName(post.type, post.era ?? 1) : null,
+      base: Math.round(NOTABLE_BASE * 100), full: Math.round((1 + NOTABLE_BONUS[o.tier]) * 100),
+    };
+  }) : [];
+  const hired = (world.notables ?? []).map((n) => {
+    const b = world.buildings.find((x) => x.id === n.buildingId);
+    return { id: n.id, name: n.name, roleLabel: NOTABLE_ROLES[n.role].label, tierWord: NOTABLE_TIERS[n.tier], building: b ? formName(b.type, b.era ?? 1) : NOTABLE_ROLES[n.role].buildings[0], salary: n.salary, days: world.day - (n.since ?? world.day), full: Math.round((1 + NOTABLE_BONUS[n.tier]) * 100) };
+  });
+  return { open, fromEra: eraSpec(NOTABLE_FROM_ERA).name, offers, hired };
+}
+
 export interface RosterPerson {
   id: string; name: string; age: number; job: Job; jobLabel: string;
   /** The kind of building their trade works at, or null for the unemployed. */
@@ -251,7 +288,7 @@ function rosterOf(world: World): Roster {
   const trades: RosterTrade[] = working.map((job) => {
     const capacity = tradeCapacity(world, job);
     const workers = counts[job] ?? 0;
-    return { job, label: JOB_LABELS[job], building: formName(JOBS[job].building, eraOf(world)), workers, capacity, open: Math.max(0, capacity - workers) };
+    return { job, label: tradeTitle(job, eraOf(world)), building: formName(JOBS[job].building, eraOf(world)), workers, capacity, open: Math.max(0, capacity - workers) };
   }).filter((t) => t.capacity > 0 || t.workers > 0);
   const byType = (type: string) => JOBS[working.find((j) => JOBS[j].building === type) as WorkingJob] ? working.find((j) => JOBS[j].building === type) ?? null : null;
   const people: RosterPerson[] = world.citizens.filter((c) => c.age >= 16).map((c) => {
@@ -260,7 +297,7 @@ function rosterOf(world: World): Roster {
     const days = job === 'unemployed' ? 0 : skillDays(c, job as WorkingJob);
     const level = skillLevel(days);
     return {
-      id: c.id, name: c.name, age: Math.floor(c.age), job, jobLabel: JOB_LABELS[job],
+      id: c.id, name: c.name, age: Math.floor(c.age), job, jobLabel: tradeTitle(job, eraOf(world)),
       workplace: job === 'unemployed' ? null : JOBS[job as WorkingJob].building,
       at: at ? at.type : null,
       skill: job === 'unemployed' ? null : { level, title: SKILL_TITLES[level] },
@@ -276,7 +313,7 @@ function rosterOf(world: World): Roster {
       // Who is posted here, not who happens to be inside this minute: at
       // night every farm read "0 of 4 at their posts", and a player with
       // fourteen farms took that for a town that would not work them.
-      crew: trade ? postedAt(world, b, trade) : b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? JOB_LABELS[trade] : null,
+      crew: trade ? postedAt(world, b, trade) : b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? tradeTitle(trade, eraOf(world)) : null,
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
   return {
@@ -329,7 +366,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     return {
       kind: 'citizen',
       id: c.id, name: c.name, handle: c.handle, age: Math.floor(c.age),
-      job: JOB_LABELS[c.job], activity: ACTIVITY_LABELS[c.activity], phase: PHASE_LABELS[c.phase],
+      job: tradeTitle(c.job, eraOf(world)), activity: ACTIVITY_LABELS[c.activity], phase: PHASE_LABELS[c.phase],
       // What they are worth at their trade, and how far off the next step is.
       skill: c.job === 'unemployed' ? null : (() => {
         const days = skillDays(c, c.job as WorkingJob);
@@ -381,7 +418,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     buildingType: b.type,
     kindName: formName(b.type, b.era ?? 1),
     occupants: b.workers.length,
-    production: b.production ? JOB_LABELS[b.production as keyof typeof JOB_LABELS] ?? b.production : null,
+    production: b.production ? tradeTitle(b.production as Job, eraOf(world)) : null,
     idle: (() => {
       const trade = tradeOf(b.type);
       const s = trade ? world.shortages?.[trade] : undefined;
@@ -395,6 +432,14 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       const trade = tradeOf(b.type);
       if (!trade) return null;
       return { posted: postedAt(world, b, trade), posts: buildingPosts(b, world) };
+    })(),
+    keeper: (() => {
+      const role = roleOf(b.type);
+      if (!role || !notablesOpen(world)) return null;
+      const n = notableAt(world, b);
+      return n
+        ? { id: n.id, name: n.name, role: NOTABLE_ROLES[n.role].label, tier: NOTABLE_TIERS[n.tier] }
+        : { wants: NOTABLE_ROLES[role].label, base: Math.round(NOTABLE_BASE * 100) };
     })(),
     x: b.x, y: b.y,
     upkeep: Math.round(upkeepOf(b)),
@@ -503,6 +548,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     incomeLines: ledgerLines(world.ledgerYesterday.in),
     outgoingLines: ledgerLines(world.ledgerYesterday.out),
     advice: adviseBuild(world),
+    talent: talentOf(world),
     resolution: world.resolution
       ? { text: world.resolution.text, voters: world.resolution.voters, day: world.resolution.day }
       : null,

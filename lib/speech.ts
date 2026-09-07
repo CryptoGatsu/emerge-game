@@ -9,7 +9,7 @@
 
 import { formName } from './world/forms';
 import {
-  JOB_LABELS, SKILL_TITLES, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
+  SKILL_TITLES, tradeTitle, eraOf, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
   type Citizen, type WorkingJob, type World,
 } from './simulation';
 import { tx } from './i18n';
@@ -258,8 +258,8 @@ function statusText(c: Citizen, world?: World): string {
       const level = skillLevel(days);
       // A master at their bench is not the same sight as an apprentice at it.
       return level >= 5
-        ? `${SKILL_TITLES[level]} ${JOB_LABELS[c.job].toLowerCase()} at work`
-        : `${JOB_LABELS[c.job]} at work`;
+        ? `${SKILL_TITLES[level]} ${tradeTitle(c.job, world ? eraOf(world) : 1).toLowerCase()} at work`
+        : `${tradeTitle(c.job, world ? eraOf(world) : 1)} at work`;
     }
     case 'walking': return 'On the way somewhere';
     case 'trading': return 'Socialising';
