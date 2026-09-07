@@ -2074,11 +2074,16 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
   // not shown; a building from a later era is shown greyed with the era's
   // name, so the player can see what advancing would open.
   const [shelf, setShelf] = useState<BuildingCategory | 'All'>('All');
-  // The age comes first: the panel opens on what this age brought, with the
-  // earlier ages a tab away and the later ones there to look at. A township
-  // that opened on houses and farms read as a settlement with a longer list.
+  // The panel opens on everything the plot can raise now, in the age's own
+  // forms, with the age's new buildings first. It used to open on only what
+  // this age introduced, with the houses and farms a township builds every
+  // day filed under the settlement tab — so a player in the township went
+  // back to the settlement for almost every build. Later ages stay as tabs
+  // to look at; earlier ages need none, since everything of theirs is here.
   const [age, setAge] = useState<number | 'all'>(view.era.id);
-  const ofAge = BUILDABLE.filter((o) => age === 'all' || (BUILDING_ERA[o.type] ?? 1) === age);
+  const ofAge = BUILDABLE
+    .filter((o) => age === 'all' || (age === view.era.id ? (BUILDING_ERA[o.type] ?? 1) <= age : (BUILDING_ERA[o.type] ?? 1) === age))
+    .sort((a, b) => (age === view.era.id ? (BUILDING_ERA[b.type] ?? 1) - (BUILDING_ERA[a.type] ?? 1) : 0));
   const shelves = BUILDING_CATEGORIES.filter((c) => ofAge.some((o) => BUILDING_CATEGORY[o.type] === c));
   const onShelf = shelf !== 'All' && shelves.includes(shelf) ? shelf : 'All';
   const shown = ofAge.filter((o) => onShelf === 'All' || BUILDING_CATEGORY[o.type] === onShelf);
@@ -2158,7 +2163,7 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
         </div>
       </div>
       <div className="build-shelves build-ages">
-        {ERAS.map((e) => (
+        {ERAS.filter((e) => e.id >= view.era.id).map((e) => (
           <button key={e.id} className={`${age === e.id ? 'on' : ''} ${e.id > view.era.id ? 'later' : ''}`} onClick={() => setAge(e.id)}>
             {tn(e.name)}{e.id === view.era.id ? ` · ${t('now')}` : ''}
           </button>
@@ -2168,7 +2173,7 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
       <p className="muted small build-age-note">
         {age === view.era.id
           ? (view.era.id > 1
-            ? t('What the {era} brought. Every building here is the age’s own form of itself: a {house} holds {beds} beds, a workplace {posts} posts, and each pair of hands makes {pct}% more than in a settlement. Earlier ages are a tab away, raised in this age’s form.', { era: tn(eraName(view.era.id)).toLowerCase(), house: tn(formName('House', view.era.id)).toLowerCase(), beds: formOf('House', view.era.id).beds ?? 0, posts: formPosts('Farm', view.era.id), pct: Math.round((formOf('Farm', view.era.id).output - 1) * 100) })
+            ? t('Everything you can raise in the {era}, in the age’s own forms, the age’s new buildings first: a {house} holds {beds} beds, a workplace {posts} posts, and each pair of hands makes {pct}% more than in a settlement. Later ages are a tab away to look at.', { era: tn(eraName(view.era.id)).toLowerCase(), house: tn(formName('House', view.era.id)).toLowerCase(), beds: formOf('House', view.era.id).beds ?? 0, posts: formPosts('Farm', view.era.id), pct: Math.round((formOf('Farm', view.era.id).output - 1) * 100) })
             : t('Where every plot begins. Each age the plot advances rebuilds every building into that age’s form — new name, new look, twice the room — and merges pairs of the same kind into one, so the land opens up again. The age’s own buildings are on the tabs above.'))
           : age === 'all'
             ? t('Every building in the game, by shelf.')
