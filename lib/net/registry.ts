@@ -557,12 +557,18 @@ export async function publishWorld(input: {
   }
 }
 
-/** Somebody's settlement, or a sentence saying why there is nothing to show. */
-export async function fetchWorld(seed: number): Promise<{ world: PublishedWorld | null; reason?: string }> {
+/** The plot's claim, handed back when its owner has published nothing: enough to grow the world from its seed. */
+export interface UnpublishedClaim {
+  seed: number; owner: string; ownerName: string; worldName: string; region: string; at: number;
+  era: number; expanded: boolean;
+}
+
+/** Somebody's settlement — or, when they have never published it, their claim — or a sentence saying why there is nothing to show. */
+export async function fetchWorld(seed: number): Promise<{ world: PublishedWorld | null; claim?: UnpublishedClaim; reason?: string }> {
   try {
     const response = await fetch(`/api/worlds?seed=${seed}`, { cache: 'no-store' });
     if (!response.ok) return { world: null, reason: 'Could not reach that world.' };
-    return (await response.json()) as { world: PublishedWorld | null; reason?: string };
+    return (await response.json()) as { world: PublishedWorld | null; claim?: UnpublishedClaim; reason?: string };
   } catch {
     return { world: null, reason: 'Could not reach that world.' };
   }

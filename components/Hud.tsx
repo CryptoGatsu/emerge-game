@@ -74,7 +74,7 @@ interface HudProps {
   /** People playing Emerge anywhere, or null when the relay has not said. */
   online: number | null;
   /** Set when this is somebody else's settlement, being looked at. */
-  visiting: { worldName: string; ownerName: string; owner: string; at: number; hand?: boolean } | null;
+  visiting: { worldName: string; ownerName: string; owner: string; at: number; hand?: boolean; unpublished?: boolean } | null;
   /** Stop visiting and go back to the world map. */
   onEndVisit: () => void;
   /** The first-day card, while there is one to show. */
@@ -945,7 +945,9 @@ export function Hud(props: HudProps) {
             {props.visiting.ownerName?.trim() ? props.visiting.ownerName : shortAddress(props.visiting.owner)}
             {' · '}{props.visiting.hand
               ? t('hired hand · about {n} {ticker}/day', { n: Math.round(view.stewardship.dailyYield * HAND_SHARE).toLocaleString(), ticker: TOKEN.ticker })
-              : sinceWhen(props.visiting.at)}
+              : props.visiting.unpublished
+                ? t('never published · grown from its seed, running on its own')
+                : sinceWhen(props.visiting.at)}
           </em>
           <button className="ghost" onClick={props.onEndVisit}>{t('Leave')}</button>
         </div>

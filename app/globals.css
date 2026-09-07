@@ -1863,6 +1863,7 @@ button.fold:hover { color: var(--emerald); }
   transform: translateX(-50%);
   z-index: 26;
   display: flex; align-items: baseline; gap: 10px;
+  max-width: min(760px, calc(100vw - 40px));
   padding: 9px 15px;
   border-radius: 999px;
   border: 1px solid rgba(225, 210, 78, 0.5);
@@ -1874,7 +1875,7 @@ button.fold:hover { color: var(--emerald); }
 .visiting-bar > * { min-width: 0; }
 .visiting-bar .eyebrow { color: var(--gold); flex: none; }
 .visiting-bar b { font-size: 13px; color: var(--cream); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.visiting-bar em { font-style: normal; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.visiting-bar em { font-style: normal; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visiting-bar button { flex: none; padding: 4px 12px; border-radius: 999px; font-size: 11px; }
 
 .notices {

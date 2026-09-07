@@ -89,6 +89,7 @@ export const UI: Record<string, string> = {
   'Claiming…': '认领中…',
   'Surveying…': '勘测中…',
   'Travelling…': '前往中…',
+  'never published · grown from its seed, running on its own': '从未发布 · 由种子生成，自行运转中',
   'SENDING…': '派出中…',
 
   // ---- 首页 ----

@@ -52,9 +52,26 @@ export async function GET(request: Request) {
   try {
     const world = await readWorld(seed);
     if (!world) {
+      /*
+       * Nothing published, but the plot may still be somebody's. A visitor used
+       * to be turned away with "nobody has opened this world lately", which
+       * read as though a settlement went dark when its owner did — and a
+       * spectator could not look at a claimed plot at all until its owner
+       * came back and published. The claim row is enough for the client to
+       * grow the plot from its seed at the age the registry has it, so the
+       * visit goes ahead and says plainly that the owner has not published.
+       */
+      const claim = await claimOf(seed);
+      if (!claim) {
+        return NextResponse.json({ world: null, reason: 'Nobody has claimed this plot yet, so there is nothing to show.' });
+      }
       return NextResponse.json({
         world: null,
-        reason: 'Nobody has opened this world lately, so there is nothing to show yet.',
+        claim: {
+          seed: claim.seed, owner: claim.owner, ownerName: claim.ownerName, worldName: claim.worldName,
+          region: claim.region, at: claim.at, era: claim.era ?? 1, expanded: !!claim.expandedAt,
+        },
+        reason: 'Its owner has not published this settlement yet.',
       });
     }
     return NextResponse.json({ world });

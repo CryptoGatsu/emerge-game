@@ -192,6 +192,11 @@ export interface Visit {
   at: number;
   save: SavedWorld;
   /**
+   * The owner has never published, so this is the plot grown from its seed at
+   * the age the registry has it, not a place they built. Said on the banner.
+   */
+  unpublished?: boolean;
+  /**
    * This player is the plot's hired hand. The visit then pays: a share of what
    * the settlement's stewardship comes to while they have it open.
    */
@@ -432,7 +437,25 @@ export default function EmergeClient() {
    * successful visit and be a different place entirely.
    */
   const goVisit = useCallback(async (seed: number): Promise<string | null> => {
-    const { world, reason } = await fetchWorld(seed);
+    const { world: published, claim: unpublished, reason } = await fetchWorld(seed);
+    /*
+     * A claimed plot whose owner has never published is still somebody's
+     * place, and anybody may look at it: the land is grown from its seed at
+     * the age and size the registry records, and it runs while it is watched.
+     * The banner says it is unpublished, so nobody mistakes it for what the
+     * owner built. Before this a visitor was simply turned away, with a
+     * sentence that suggested a settlement went dark when its owner did.
+     */
+    let world = published;
+    if (!world && unpublished) {
+      const grown = createWorld(seed, unpublished.worldName);
+      if (unpublished.era > 1) { grown.day += 1; grown.eraSince = 1; setEra(grown, unpublished.era); }
+      if (unpublished.expanded) expandPlot(grown);
+      world = {
+        seed, owner: unpublished.owner, ownerName: unpublished.ownerName, worldName: unpublished.worldName,
+        day: grown.day, population: grown.citizens.length, at: unpublished.at, snapshot: snapshotOf(grown),
+      };
+    }
     if (!world) return reason ?? 'That world is not published yet.';
     const save = world.snapshot as SavedWorld;
     if (!worldFromSave(save, seed, world.worldName)) {
@@ -447,12 +470,13 @@ export default function EmergeClient() {
     setVisit({
       seed,
       worldName: world.worldName,
-      region: world.worldName,
+      region: unpublished?.region ?? world.worldName,
       owner: world.owner,
       ownerName: world.ownerName,
       at: world.at,
       save,
       hand,
+      unpublished: !published,
     });
     return null;
   }, []);
