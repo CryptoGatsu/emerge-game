@@ -244,7 +244,7 @@ function rosterOf(world: World): Roster {
   const trades: RosterTrade[] = working.map((job) => {
     const capacity = tradeCapacity(world, job);
     const workers = counts[job] ?? 0;
-    return { job, label: JOB_LABELS[job], building: JOBS[job].building, workers, capacity, open: Math.max(0, capacity - workers) };
+    return { job, label: JOB_LABELS[job], building: formName(JOBS[job].building, eraOf(world)), workers, capacity, open: Math.max(0, capacity - workers) };
   }).filter((t) => t.capacity > 0 || t.workers > 0);
   const byType = (type: string) => JOBS[working.find((j) => JOBS[j].building === type) as WorkingJob] ? working.find((j) => JOBS[j].building === type) ?? null : null;
   const people: RosterPerson[] = world.citizens.filter((c) => c.age >= 16).map((c) => {

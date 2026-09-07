@@ -1561,6 +1561,7 @@ export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
   [/^([A-Z][a-z]+) and ([A-Z][a-z]+)$/, '$1和$2'],
   // ---- 地块助手 ----
   [/^Raise a house$/, '盖一栋房子'],
+  [/^Raise a (.+)$/, (m) => `盖一栋${name(m[1])}`],
   [/^Break more ground$/, '开垦更多土地'],
   [/^Put hands to the timber$/, '派人去砍柴'],
   [/^Cast from the shore$/, '去岸边垂钓'],

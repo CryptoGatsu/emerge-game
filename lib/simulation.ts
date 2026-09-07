@@ -3943,11 +3943,11 @@ function adviseBuildAll(world: World): Advice[] {
   }
   const homeless = adults.filter((c) => !homeOf(world, c)).length;
   if (homeless > 0) {
-    out.push({ kind: 'build', type: 'House', title: 'Raise a house',
+    out.push({ kind: 'build', type: 'House', title: `Raise a ${named(world, 'House')}`,
       why: `${homeless} ${homeless === 1 ? 'adult has' : 'adults have'} nowhere to live and are sleeping rough.`,
       gain: 'Housing is a quarter of stewardship, and people with a bed rest twice as fast.' });
   } else if (people >= housingRoom(world)) {
-    out.push({ kind: 'build', type: 'House', title: 'Raise a house',
+    out.push({ kind: 'build', type: 'House', title: `Raise a ${named(world, 'House')}`,
       why: `${people} people in ${count('House')} houses is full, and nobody moves to a town with no spare roof.`,
       gain: 'Room for the next family to arrive. An improved house sleeps more, too.' });
   }
@@ -3992,7 +3992,7 @@ function adviseBuildAll(world: World): Advice[] {
   }
   const herd = world.wildlife.filter((a) => a.state !== 'down').length;
   if (herd >= 5 && supported.has('Lodge') && !has('Lodge') && people >= 8) {
-    out.push({ kind: 'build', type: 'Lodge', title: 'Open a hunting lodge',
+    out.push({ kind: 'build', type: 'Lodge', title: `Open a ${named(world, 'Lodge')}`,
       why: `${herd} animals on the land and nobody hunting them.`,
       gain: 'Game is a meal and hides sell dear. Hunters also keep the wolves further off.' });
   }
@@ -4018,7 +4018,7 @@ function adviseBuildAll(world: World): Advice[] {
   ];
   for (const [res, at, type, gain] of chain) {
     if ((r[res] ?? 0) >= at && !has(type) && supported.has(type)) {
-      out.push({ kind: 'build', type, title: `Open a ${type.toLowerCase()}`,
+      out.push({ kind: 'build', type, title: `Open a ${named(world, type)}`,
         why: `${Math.round(r[res])} ${RESOURCE_LABELS[res].toLowerCase()} is sitting in store with nothing to turn it into.`,
         gain });
     }

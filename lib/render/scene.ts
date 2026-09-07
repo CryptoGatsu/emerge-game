@@ -14,6 +14,7 @@
  *   hudRoot     screen-space speech bubbles and building activity badges
  */
 
+import { formName } from '../world/forms';
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
 import { GradeFilter } from './grade';
 import {
@@ -2758,7 +2759,9 @@ export class EmergeScene {
     }
     const b = this.world.buildings.find((x) => x.id === target.id);
     if (!b) return null;
-    return { title: b.type, lines: [b.workers.length ? `${b.workers.length} inside` : 'Quiet right now'] };
+    // The age's form, as the card names it: a township's smithy is not a
+    // blacksmith on the tip and a smithy on the card.
+    return { title: formName(b.type, b.era ?? 1), lines: [b.workers.length ? `${b.workers.length} inside` : 'Quiet right now'] };
   }
 
   destroy() {
