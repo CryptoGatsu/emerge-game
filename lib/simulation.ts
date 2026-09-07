@@ -1963,7 +1963,7 @@ function boundFor(world: World, c: Citizen): string | null {
     const venue = ['Tavern', 'Cafe', 'Brewery', 'Chapel'].find((t) => hasWorking(world, t));
     return venue ? `the ${venue.toLowerCase()}` : 'the square';
   }
-  if (c.phase === 'working' && c.job !== 'unemployed') return `the ${jobs[c.job as WorkingJob].building.toLowerCase()}`;
+  if (c.phase === 'working' && c.job !== 'unemployed') return `the ${named(world, jobs[c.job as WorkingJob].building)}`;
   if (c.phase === 'eating') return 'the market';
   return null;
 }
@@ -3937,7 +3937,7 @@ function adviseBuildAll(world: World): Advice[] {
   // settlement already paid for lying in a heap.
   for (const b of world.buildings.filter((x) => x.ruined)) {
     const cost = rebuildCost(b);
-    out.push({ kind: 'rebuild', type: b.type, buildingId: b.id, title: `Rebuild the ${b.type.toLowerCase()}`,
+    out.push({ kind: 'rebuild', type: b.type, buildingId: b.id, title: `Rebuild the ${formWord(b)}`,
       why: b.type === 'House' ? 'It is a ruin, and the family that lived there has no roof.' : 'It is a ruin: out of use until it is raised again.',
       gain: `${cost.gold} Gold, ${cost.wood} timber and ${cost.stone} stone, about six tenths of new.` });
   }
@@ -3955,7 +3955,7 @@ function adviseBuildAll(world: World): Advice[] {
   const blocker = bridgeBlockers(world)[0];
   if (blocker) {
     out.unshift({ kind: 'wages', title: 'Clear the bridge',
-      why: `The ${blocker.type.toLowerCase()} stands on a bridge ramp. People bound for the far bank walk to it and stop.`,
+      why: `The ${formWord(blocker)} stands on a bridge ramp. People bound for the far bank walk to it and stop.`,
       gain: 'Tap it and move it off the ramp. Nothing can be placed on a deck or its ramps any more.' });
   }
   const food = foodInStore(world);
@@ -3973,11 +3973,11 @@ function adviseBuildAll(world: World): Advice[] {
       // Six farms and still short: the fields are there, the hands are not.
       // Telling the player to build a seventh was the wrong advice.
       out.push({ kind: 'wages', title: 'Staff the fields',
-        why: `${farms.length} farms already, and ${farmPosts} farm ${farmPosts === 1 ? 'post stands' : 'posts stand'} empty. ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
+        why: `${farms.length} ${pluralName(named(world, 'Farm'), farms.length)} already, and ${farmPosts} ${farmPosts === 1 ? 'post stands' : 'posts stand'} empty. ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
         gain: 'Retrain people into farming on the People panel, or raise wages so the empty posts fill. More farms will not help until these are worked.' });
     } else if (improvable) {
-      out.push({ kind: 'improve', type: 'Farm', title: 'Improve the farms',
-        why: `${farms.length} farms, all worked, and ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
+      out.push({ kind: 'improve', type: 'Farm', title: `Improve the ${pluralName(named(world, 'Farm'), 2)}`,
+        why: `${farms.length} ${pluralName(named(world, 'Farm'), farms.length)}, all worked, and ${Math.round(food)} food in store is about ${days} days for ${people} people.`,
         gain: 'Each level is 22% more from the same fields. The keep on the Market panel stops the surplus being sold before winter, too.' });
     } else {
       out.push({ kind: 'build', type: 'Farm', title: 'Break more ground',
@@ -4069,7 +4069,7 @@ function adviseBuildAll(world: World): Advice[] {
       .sort((a, b) => b.workers.length - a.workers.length)[0];
     if (busiest) {
       const cost = upgradeCost(busiest, world);
-      out.push({ kind: 'improve', type: busiest.type, buildingId: busiest.id, title: `Improve the ${busiest.type.toLowerCase()}`,
+      out.push({ kind: 'improve', type: busiest.type, buildingId: busiest.id, title: `Improve the ${formWord(busiest)}`,
         why: `It is the busiest workshop in town and still at level ${levelOf(busiest)}.`,
         gain: `${Math.round(OUTPUT_PER_LEVEL * 100)}% more from it for ${cost?.gold ?? 0} Gold, against ${Math.round(UPKEEP_PER_LEVEL * 100)}% more upkeep.` });
     }
@@ -4269,7 +4269,7 @@ export function trainCitizen(world: World, id: string, job: WorkingJob): { ok: b
   if (!jobs[job]) return { ok: false, message: 'That is not a trade.' };
   if (c.age < 16) return { ok: false, message: `${c.name} is too young to work.` };
   if (c.job === job) return { ok: false, message: `${c.name} is already a ${JOB_LABELS[job].toLowerCase()}.` };
-  if (jobCapacity(world, job) <= 0) return { ok: false, message: `There is no ${jobs[job].building.toLowerCase()} for a ${JOB_LABELS[job].toLowerCase()} to work at.` };
+  if (jobCapacity(world, job) <= 0) return { ok: false, message: `There is no ${named(world, jobs[job].building)} for a ${JOB_LABELS[job].toLowerCase()} to work at.` };
   if (world.treasury < TRAIN_COST_GOLD) return { ok: false, message: `Training costs ${TRAIN_COST_GOLD} Gold, and the treasury holds ${Math.floor(world.treasury)}.` };
   spend(world, 'training', TRAIN_COST_GOLD);
   const was = c.job;
@@ -4951,7 +4951,7 @@ function damageBuilding(world: World, b: Building, amount: number, cause: string
     if (c.destId === b.id) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; c.inside = false; }
   }
   h?.wrecked.push(b.id);
-  pushFeed(world, 'world', `${cause} left the ${b.type.toLowerCase()} in ruins.`);
+  pushFeed(world, 'world', `${cause} left the ${formWord(b)} in ruins.`);
   return true;
 }
 
@@ -4986,10 +4986,10 @@ export function rebuildBuilding(world: World, id: string): { ok: boolean; messag
   b.damage = 0;
   b.active = true;
   noteAttention(world);
-  pushFeed(world, 'build', `The ${b.type.toLowerCase()} was rebuilt for ${cost.gold} Gold, ${cost.wood} timber and ${cost.stone} stone.`);
+  pushFeed(world, 'build', `The ${formWord(b)} was rebuilt for ${cost.gold} Gold, ${cost.wood} timber and ${cost.stone} stone.`);
   staffNow(world);
   if (b.type === 'House') rehouse(world);
-  return { ok: true, message: `The ${b.type.toLowerCase()} stands again.` };
+  return { ok: true, message: `The ${formWord(b)} stands again.` };
 }
 
 /**
@@ -5004,7 +5004,7 @@ function repairs(world: World) {
     world.resources.wood -= 2;
     note(world, 'consumed', 'wood', 2);
     b.damage = Math.max(0, b.damage - 0.2);
-    if (!said) { said = true; pushFeed(world, 'build', `The carpenters patched up the ${b.type.toLowerCase()}.`); }
+    if (!said) { said = true; pushFeed(world, 'build', `The carpenters patched up the ${formWord(b)}.`); }
   }
 }
 
@@ -5130,7 +5130,7 @@ function hazards(world: World) {
       const b = world.buildings.find((x) => x.id === h.buildingId);
       if (b && !b.ruined) {
         b.active = true;
-        pushFeed(world, 'build', `The ${b.type.toLowerCase()} is back in use.`);
+        pushFeed(world, 'build', `The ${formWord(b)} is back in use.`);
       }
     }
     if (h.kind === 'plague') {
@@ -5237,7 +5237,7 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     const hit = candidates[Math.floor(rand() * candidates.length)];
     if (!hit) return;
     if (ready > 0.75) {
-      pushFeed(world, 'world', `A fire started at the ${hit.type.toLowerCase()} and was put out before it spread. The wells did their job.`);
+      pushFeed(world, 'world', `A fire started at the ${formWord(hit)} and was put out before it spread. The wells did their job.`);
       const h = add('Put out the same day. No lasting damage.');
       h.days = 1;
       h.severity = 0;
@@ -5248,8 +5248,8 @@ function startHazard(world: World, kind: HazardKind, ready: number, rand: () => 
     const wood = Math.min(world.resources.wood, Math.round(12 * severity));
     world.resources.wood -= wood;
     note(world, 'consumed', 'wood', wood);
-    pushFeed(world, 'world', `Fire took hold at the ${hit.type.toLowerCase()}. It is out of use, and ${wood} timber went with it.`);
-    add(`The ${hit.type.toLowerCase()} is out of use.`, hit.id);
+    pushFeed(world, 'world', `Fire took hold at the ${formWord(hit)}. It is out of use, and ${wood} timber went with it.`);
+    add(`The ${formWord(hit)} is out of use.`, hit.id);
     return;
   }
 
@@ -5325,7 +5325,7 @@ function hazardStep(world: World, hours: number) {
         const hit = standing[Math.floor(rand() * standing.length)];
         if (hit) {
           damageBuilding(world, hit, (0.1 + rand() * 0.15) * severity, 'An aftershock', h);
-          hazardSays(world, h, `An aftershock rattled the ${hit.type.toLowerCase()}.`, 3);
+          hazardSays(world, h, `An aftershock rattled the ${formWord(hit)}.`, 3);
         }
       }
       if (h.hours <= 0) h.effect = h.fought ? 'Braced and still. It is over.' : 'The ground is still. It may move again before it settles.';
@@ -5719,7 +5719,7 @@ function unrestStep(world: World, hours: number) {
       if (d <= CATCH_REACH) {
         r.scuffle = SCUFFLE_HOURS;
         for (const o of chasers) if (Math.hypot(o.x - r.x, o.y - r.y) <= 3.5) o.scuffle = SCUFFLE_HOURS;
-        pushFeed(world, 'social', `${c.name} has caught up with ${r.name}. There is a scuffle at the ${mark.type.toLowerCase()}.`);
+        pushFeed(world, 'social', `${c.name} has caught up with ${r.name}. There is a scuffle at the ${formWord(mark)}.`);
         break;
       }
       // Keep the chase pointed at where the rogue is now, not where they were.
@@ -6029,7 +6029,7 @@ export function removeBridge(world: World, x: number, y: number): { ok: boolean;
   }
   const cutOff = world.buildings.filter((b) => stranded.includes(water.landAt(b.x, b.y)));
   if (cutOff.length) {
-    return { ok: false, message: `That is the only way to ${cutOff.length === 1 ? `the ${cutOff[0].type.toLowerCase()}` : `${cutOff.length} buildings`} on the far bank. Pull ${cutOff.length === 1 ? 'it' : 'them'} down first, or build another crossing.` };
+    return { ok: false, message: `That is the only way to ${cutOff.length === 1 ? `the ${formWord(cutOff[0])}` : `${cutOff.length} buildings`} on the far bank. Pull ${cutOff.length === 1 ? 'it' : 'them'} down first, or build another crossing.` };
   }
 
   // Anybody on the deck steps off at the nearer end.
@@ -6080,7 +6080,7 @@ export function digProblem(world: World, x: number, y: number): string | null {
   const water = waterOf(world);
   if (water.isWater(x, y)) return 'That is water already.';
   const near = world.buildings.find((bl) => Math.hypot(x - bl.x, y - bl.y) < DIG_RADIUS + 3.2);
-  if (near) return `Too close to the ${near.type.toLowerCase()}.`;
+  if (near) return `Too close to the ${formWord(near)}.`;
   const plaza = world.layout.plaza;
   if (Math.hypot(x - plaza.x, y - plaza.y) < plaza.r + DIG_RADIUS + 1) return 'Not in the square.';
   if (world.layout.bridges.some((br) => Math.hypot(x - br.x, y - br.y) < br.span + DIG_RADIUS + 1)) return 'Not beside a bridge.';
@@ -6659,6 +6659,8 @@ export function materialsFor(world: { era?: number }, type: string): { wood: num
 }
 /** The name over the door of this kind of building in the plot's age, for a feed line. */
 const named = (world: { era?: number }, type: string) => formName(type, eraOf(world)).toLowerCase();
+/** A standing building by its own age's form, lower-cased for a sentence: what its card calls it. */
+const formWord = (b: { type: string; era?: number }) => formName(b.type, b.era ?? 1).toLowerCase();
 
 /**
  * What a building is made of, on top of what it costs.
@@ -6903,12 +6905,12 @@ function settlementBuilds(world: World) {
   linkToRoads(world, raised);
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
   pushFeed(world, 'build', bySay
-    ? `The settlement built a ${want.toLowerCase()}, as the meeting resolved.`
+    ? `The settlement built a ${named(world, want)}, as the meeting resolved.`
     : want === 'House'
       ? 'The settlement raised another house.'
       : needSaid && want === ownChoice
-        ? `The settlement built a ${want.toLowerCase()} for itself, seeing the need.`
-        : `The settlement built a ${want.toLowerCase()}.`);
+        ? `The settlement built a ${named(world, want)} for itself, seeing the need.`
+        : `The settlement built a ${named(world, want)}.`);
   if (needSaid && want === ownChoice && !bySay) pushFeed(world, 'build', needSaid);
 }
 
@@ -6957,7 +6959,7 @@ function fillEmptyTrades(world: World, tally: Partial<Record<Job, number>>) {
     tally[mover.job] = (tally[mover.job] ?? 1) - 1;
     mover.job = job;
     tally[job] = (tally[job] ?? 0) + 1;
-    pushFeed(world, 'work', `${mover.name} took up ${JOB_LABELS[job].toLowerCase()} at the new ${jobs[job].building.toLowerCase()}.`);
+    pushFeed(world, 'work', `${mover.name} took up ${JOB_LABELS[job].toLowerCase()} at the new ${named(world, jobs[job].building)}.`);
   }
 }
 
@@ -7828,7 +7830,7 @@ function daily(world: World) {
   if (homeless.length) {
     const shelter = gatheringPlace(world);
     pushFeed(world, 'social', shelter
-      ? `${homeless.length} ${homeless.length === 1 ? 'person has' : 'people have'} no home and slept at the ${shelter.type.toLowerCase()}.`
+      ? `${homeless.length} ${homeless.length === 1 ? 'person has' : 'people have'} no home and slept at the ${formWord(shelter)}.`
       : `${homeless.length} ${homeless.length === 1 ? 'person' : 'people'} slept outside. The settlement needs houses.`);
   }
 
@@ -8774,9 +8776,9 @@ function walkWater(world: World): WaterField {
 
 export function placementProblem(world: World, type: string, x: number, y: number, ignoreId?: string): string | null {
   useWorld(world);
-  if (!allowedInEra(world, type)) return `A ${type.toLowerCase()} belongs to the ${eraSpec(BUILDING_ERA[type] ?? 1).name.toLowerCase()} era. Advance the plot first.`;
+  if (!allowedInEra(world, type)) return `A ${named(world, type)} belongs to the ${eraSpec(BUILDING_ERA[type] ?? 1).name.toLowerCase()} era. Advance the plot first.`;
   const one = uniqueStanding(world, type, ignoreId);
-  if (one) return one.ruined ? `The ${type.toLowerCase()} lies in ruins. Rebuild it rather than raising another.` : `A ${type.toLowerCase()} already stands here. A settlement keeps one; improve it instead.`;
+  if (one) return one.ruined ? `The ${named(world, type)} lies in ruins. Rebuild it rather than raising another.` : `A ${named(world, type)} already stands here. A settlement keeps one; improve it instead.`;
   const bb = buildBounds(world);
   const px = clamp(x, bb.x0, bb.x1), py = clamp(y, bb.y0, bb.y1);
   if (waterOf(world).blocks(px, py)) return 'Nothing can stand on the water.';
@@ -8784,7 +8786,7 @@ export function placementProblem(world: World, type: string, x: number, y: numbe
   for (const b of world.buildings) {
     if (b.id === ignoreId) continue;
     const gap = Math.hypot(b.x - px, b.y - py) - r - footprintRadius(b);
-    if (gap < WALK_GAP) return `Too close to the ${b.type.toLowerCase()}. Leave room to walk between.`;
+    if (gap < WALK_GAP) return `Too close to the ${formWord(b)}. Leave room to walk between.`;
   }
   // A bridge is a road: nothing stands on its deck or on the ramps at either
   // end. A house on a ramp left everybody who needed the crossing walking
@@ -8827,7 +8829,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   if (world.treasury < cost) return null;
   const problem = placementProblem(world, type, x, y);
   if (problem) {
-    pushFeed(world, 'build', `The ${type.toLowerCase()} was not built: ${problem.toLowerCase()}`);
+    pushFeed(world, 'build', `The ${named(world, type)} was not built: ${problem.toLowerCase()}`);
     return null;
   }
   // A building is Gold and materials both. The panel already greys out what the
@@ -8937,7 +8939,7 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   // Gold lives; pulling either down strands everybody at once, and no amount of
   // salvage is worth that.
   if (UNDEMOLISHABLE.includes(building.type)) {
-    return { ok: false, message: `The ${building.type.toLowerCase()} holds the settlement together. It cannot be pulled down.` };
+    return { ok: false, message: `The ${formWord(building)} holds the settlement together. It cannot be pulled down.` };
   }
   // A lived-in house comes down with its family moved out first: into
   // another house with room if there is one, and onto the tavern benches
@@ -9063,7 +9065,7 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
   if (!building) return { ok: false, message: 'That building is not there.' };
   const cost = moveCost(building.type);
   if (world.treasury < cost) {
-    return { ok: false, message: `Moving the ${building.type.toLowerCase()} costs ${cost} Gold.` };
+    return { ok: false, message: `Moving the ${formWord(building)} costs ${cost} Gold.` };
   }
   const problem = placementProblem(world, building.type, x, y, id);
   if (problem) return { ok: false, message: problem };
@@ -9169,7 +9171,7 @@ export function upgradeAllOfType(world: World, type: string): { ok: boolean; mes
   const candidates = world.buildings
     .filter((b) => b.type === type && !b.ruined && upgradeCost(b, world))
     .sort((a, b) => (upgradeCost(a, world)?.gold ?? 0) - (upgradeCost(b, world)?.gold ?? 0));
-  if (candidates.length === 0) return { ok: false, message: `No ${type.toLowerCase()} here can be improved.`, improved: 0, gold: 0 };
+  if (candidates.length === 0) return { ok: false, message: `No ${named(world, type)} here can be improved.`, improved: 0, gold: 0 };
   let improved = 0, gold = 0;
   let stopped: string | null = null;
   for (const b of candidates) {
@@ -9189,7 +9191,7 @@ export function upgradeAllOfType(world: World, type: string): { ok: boolean; mes
   if (improved === 0) return { ok: false, message: stopped ?? 'Nothing was improved.', improved: 0, gold: 0 };
   staffNow(world);
   noteAttention(world);
-  const plural = candidates.length === 1 ? type.toLowerCase() : `${type.toLowerCase()}s`;
+  const plural = pluralName(named(world, type), candidates.length);
   pushFeed(world, 'build', `${improved} of ${candidates.length} ${plural} were improved for ${gold.toLocaleString()} Gold.`);
   return { ok: true, message: stopped ? `Improved ${improved} of ${candidates.length}. ${stopped}` : `All ${improved} improved.`, improved, gold };
 }

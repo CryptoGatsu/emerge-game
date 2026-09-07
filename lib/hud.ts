@@ -428,7 +428,7 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       return { ...cost, stocked: world.resources.wood >= cost.wood && world.resources.stone >= cost.stone };
     })(),
     demolishable: !b.ruined && !UNDEMOLISHABLE.includes(b.type),
-    keeps: UNDEMOLISHABLE.includes(b.type) ? `The ${b.type.toLowerCase()} holds the settlement together. It cannot be pulled down.` : null,
+    keeps: UNDEMOLISHABLE.includes(b.type) ? `The ${formName(b.type, b.era ?? 1).toLowerCase()} holds the settlement together. It cannot be pulled down.` : null,
     household: family && family.members.length > 0 ? family.name : null,
     salvage: (() => {
       const need = buildMaterials(b.type);
@@ -507,7 +507,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       if (!r) return null;
       const mark = world.buildings.find((b) => b.id === r.rogue?.targetId);
       const after = world.citizens.filter((c) => c.chasing === r.id).map((c) => c.name);
-      return `${r.name} is wrecking ${mark ? `the ${mark.type.toLowerCase()}` : 'what they can'}${after.length ? `. ${after.join(' and ')} ${after.length === 1 ? 'is' : 'are'} after them` : ''}.`;
+      return `${r.name} is wrecking ${mark ? `the ${formName(mark.type, mark.era ?? 1).toLowerCase()}` : 'what they can'}${after.length ? `. ${after.join(' and ')} ${after.length === 1 ? 'is' : 'are'} after them` : ''}.`;
     })(),
     hazards: world.hazards.map((h) => ({
       id: h.id, kind: h.kind, label: h.label, effect: h.effect, days: h.days,

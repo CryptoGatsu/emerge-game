@@ -7,6 +7,7 @@
  * frame. Nothing here feeds back into the simulation.
  */
 
+import { formName } from './world/forms';
 import {
   JOB_LABELS, SKILL_TITLES, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
   type Citizen, type WorkingJob, type World,
@@ -191,7 +192,7 @@ function plannedLine(world: World, c: Citizen): string | null {
   if (c.activity === 'walking' && heading) {
     const place = heading.type === 'House'
       ? (world.families.find((f) => f.homeId === heading.id)?.name ?? '') + ' house'
-      : `the ${heading.type.toLowerCase()}`;
+      : `the ${formName(heading.type, heading.era ?? 1).toLowerCase()}`;
     switch (c.phase) {
       case 'working': return `Off to ${place}. ${plan.work}`;
       case 'eating': return `Going to ${place} for something to eat.`;
