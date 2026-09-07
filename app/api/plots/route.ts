@@ -46,8 +46,9 @@ import {
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
   type Claim, type CoverKind, markCover, renameClaim } from '@/lib/server/registry';
-import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
-import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
+import { bankCredit, creditOf, settleCharge, spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
+import { buildId } from '@/lib/server/build';
+import { TOKEN, tokenBalance, tokenLive } from '@/lib/chain/emerge';
 import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
 import { readWorld } from '@/lib/server/registry';
 import { worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -91,6 +92,21 @@ const clean = (value: string, limit: number) =>
     .trim()
     .slice(0, limit);
 
+/**
+ * Settle a charge against a payment and the wallet's account.
+ *
+ * The response to send when it could not be settled, else what was paid.
+ * `202` is "real but not settled yet, ask again"; `409` a payment already
+ * spent; `402` anything else, including a payment that fell short — which is
+ * banked, and the message says so.
+ */
+async function charge(owner: string, burnTx: string, due: number, purpose: string): Promise<NextResponse | { whole: number }> {
+  const paid = await settleCharge(owner, burnTx, due, purpose);
+  if (paid.ok) return { whole: paid.whole };
+  const status = paid.retry ? 202 : paid.used ? 409 : 402;
+  return NextResponse.json({ error: paid.reason, retry: paid.retry, banked: paid.banked, credit: paid.credit, short: paid.short }, { status });
+}
+
 export async function GET() {
   try {
     const [claims, finds] = await Promise.all([allClaims(), allFinds()]);
@@ -109,6 +125,10 @@ export async function POST(request: Request) {
     survey?: boolean; chart?: number; capacity?: number;
     /** Hold a plot while its buyer pays, before any money moves. */
     reserve?: boolean;
+    /** Today's prices, from this build, and what the wallet has on account. Asked before anything is paid. */
+    quote?: boolean;
+    /** Put a payment the game refused on account: `burnTx` is the receipt. */
+    redeem?: boolean;
     /** The transaction that burned the price. Checked against the chain. */
     burnTx?: string;
     /** Put the plot up for sale at `price`, or with null take it down. */
@@ -167,6 +187,45 @@ export async function POST(request: Request) {
   }
 
   /*
+   * Today's prices, from the build that will check the payment.
+   *
+   * A page pays what its own bundle says a thing costs, and a page left open
+   * across a deployment said an older number: 120,000 for a survey that had
+   * become 240,000, 224,000 for a plot that had become 672,000. The vault took
+   * the payment and the registry refused it as short, five times on one
+   * wallet. So the client asks here first and pays what it is told, and the
+   * build stamp comes with the answer so a page can tell it is behind.
+   */
+  if (body.quote) {
+    const seed = Number(body.seed);
+    const price = Number.isInteger(seed) && seed > 0 && seed <= 1e12 ? priceOfSeed(seed) : null;
+    const credit = tokenLive() ? await creditOf(owner).catch(() => 0) : 0;
+    return NextResponse.json({ survey: PROSPECT_COST_EMERGE, price, credit, build: buildId() });
+  }
+
+  /*
+   * A receipt for a payment that bought nothing.
+   *
+   * Real, from this wallet, settled, and not yet spent on anything: it goes
+   * on account, and the account pays for the next survey or claim.
+   */
+  if (body.redeem) {
+    if (!tokenLive()) {
+      return NextResponse.json({ error: `There is no ${TOKEN.ticker} contract here, so there are no payments to redeem.` }, { status: 409 });
+    }
+    const burnTx = String(body.burnTx ?? '');
+    const paid = await verifyBurn(burnTx, owner, 1);
+    if (!paid.ok) {
+      return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+    }
+    const banked = await bankCredit(owner, burnTx, paid.whole);
+    if (!banked.banked) {
+      return NextResponse.json({ error: 'That payment has already been used.', credit: banked.credit }, { status: 409 });
+    }
+    return NextResponse.json({ banked: paid.whole, credit: banked.credit });
+  }
+
+  /*
    * Holding a plot while its buyer pays.
    *
    * Answered before any money moves. A player who is refused here has burned
@@ -180,7 +239,10 @@ export async function POST(request: Request) {
     try {
       const held = await reservePlot(seed, owner);
       if (!held.ok) return NextResponse.json({ error: held.reason }, { status: 409 });
-      return NextResponse.json({ reserved: true, seconds: held.seconds });
+      // The price the payment will be checked against, and what is already
+      // on account toward it: the client pays the difference, not its own idea.
+      const credit = tokenLive() ? await creditOf(owner).catch(() => 0) : 0;
+      return NextResponse.json({ reserved: true, seconds: held.seconds, price: priceOfSeed(seed), credit, build: buildId() });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
@@ -214,14 +276,8 @@ export async function POST(request: Request) {
      * to exhaustion for nothing, and land is finite.
      */
     if (tokenLive()) {
-      const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, PROSPECT_COST_EMERGE);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `survey:${chart}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, String(body.burnTx ?? ''), PROSPECT_COST_EMERGE, `survey:${chart}`);
+      if (paid instanceof NextResponse) return paid;
     }
 
     try {
@@ -299,14 +355,8 @@ export async function POST(request: Request) {
     }
     if (claim.expandedAt) return NextResponse.json({ claim, already: true });
     if (tokenLive()) {
-      const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, EXPAND_COST_EMERGE);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `expand:${seed}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, String(body.burnTx ?? ''), EXPAND_COST_EMERGE, `expand:${seed}`);
+      if (paid instanceof NextResponse) return paid;
     }
     try {
       const result = await markExpanded(seed, owner);
@@ -339,13 +389,8 @@ export async function POST(request: Request) {
     }
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, cost);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `boon:${kind}:${seed}:${burnTx}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, burnTx, cost, `boon:${kind}:${seed}:${burnTx}`);
+      if (paid instanceof NextResponse) return paid;
     }
     await bookDev(cost);
     // A banner is recorded on the row, so the world map flies it.
@@ -395,13 +440,8 @@ export async function POST(request: Request) {
     }
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, price);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `${kind}:${seed}:${burnTx}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, burnTx, price, `${kind}:${seed}:${burnTx}`);
+      if (paid instanceof NextResponse) return paid;
     }
     await bookDev(price);
     try {
@@ -454,14 +494,8 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
     if (tokenLive()) {
-      const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, advanceCost(era));
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `era:${seed}:${era}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, String(body.burnTx ?? ''), advanceCost(era), `era:${seed}:${era}`);
+      if (paid instanceof NextResponse) return paid;
     }
     try {
       const result = await markEra(seed, owner, era);
@@ -484,13 +518,8 @@ export async function POST(request: Request) {
     // Opening a job costs a hiring fee, paid like any charge.
     if (body.hire === true && tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, HIRE_FEE_EMERGE);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `hire:${seed}:${burnTx}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, burnTx, HIRE_FEE_EMERGE, `hire:${seed}:${burnTx}`);
+      if (paid instanceof NextResponse) return paid;
     }
     try {
       const row = await setHiring(seed, owner, body.hire === true);
@@ -608,14 +637,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
       }
       // The registry's fee, into the vault, from the buyer.
-      const feeTx = String(body.feeTx ?? '');
-      const fee = await verifyBurn(feeTx, owner, resaleFee(due));
-      if (!fee.ok) {
-        return NextResponse.json({ error: `The registry fee: ${fee.reason}`, retry: fee.retry }, { status: fee.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(feeTx, `resale-fee:${seed}`, fee.whole))) {
-        return NextResponse.json({ error: 'That fee has already been used.' }, { status: 409 });
-      }
+      const fee = await charge(owner, String(body.feeTx ?? ''), resaleFee(due), `resale-fee:${seed}`);
+      if (fee instanceof NextResponse) return fee;
     }
     try {
       const moved = await transferClaim(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME));
@@ -679,16 +702,9 @@ export async function POST(request: Request) {
         error: 'That plot is not held for you. Open it again to start over.',
       }, { status: 409 });
     }
-    const burnTx = String(body.burnTx ?? '');
-    const due = priceOfSeed(seed);
-    const paid = await verifyBurn(burnTx, owner, due);
-    if (!paid.ok) {
-      return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-    }
-    // Claim the payment before the plot, so one burn cannot buy two.
-    if (!(await spendBurn(burnTx, `plot:${seed}`, paid.whole))) {
-      return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-    }
+    // Settled before the plot is written, so one payment cannot buy two.
+    const paid = await charge(owner, String(body.burnTx ?? ''), priceOfSeed(seed), `plot:${seed}`);
+    if (paid instanceof NextResponse) return paid;
   }
 
   const claim: Claim = {

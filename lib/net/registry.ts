@@ -124,8 +124,62 @@ export async function fetchClaims(): Promise<ClaimsResult> {
 }
 
 export type ReserveResult =
-  | { ok: true; seconds: number }
+  | { ok: true; seconds: number; price?: number; credit?: number; build?: string }
   | { ok: false; reason: string };
+
+/** Today's prices from the registry's own build, and what the wallet has on account toward them. */
+export type Quote = { survey: number; price: number | null; credit: number; build: string };
+
+/**
+ * Ask what things cost before paying for them.
+ *
+ * The number in this bundle is the number this bundle was built with; the
+ * registry's is the one the payment will be checked against, and after a
+ * deployment the two can differ. Paying the bundle's number was how five
+ * payments on one wallet bought nothing.
+ */
+export async function quotePlot(input: { owner: string; seed?: number | null }): Promise<{ ok: true; quote: Quote } | { ok: false; reason: string }> {
+  try {
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ owner: input.owner, seed: input.seed ?? undefined, quote: true }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as Partial<Quote> & { error?: string };
+    if (!response.ok || typeof json.survey !== 'number') {
+      return { ok: false, reason: json.error ?? 'The registry could not quote a price.' };
+    }
+    return { ok: true, quote: { survey: json.survey, price: typeof json.price === 'number' ? json.price : null, credit: Number(json.credit) || 0, build: String(json.build ?? '') } };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+/** Put a refused payment on account, by its transaction hash. */
+export async function redeemPayment(input: { owner: string; burnTx: string }): Promise<{ ok: true; banked: number; credit: number } | { ok: false; reason: string; settling?: boolean }> {
+  try {
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ owner: input.owner, burnTx: input.burnTx, redeem: true }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { banked?: number; credit?: number; error?: string; retry?: boolean };
+    if (!response.ok || typeof json.banked !== 'number') {
+      return { ok: false, reason: json.error ?? 'The registry refused the receipt.', settling: json.retry === true };
+    }
+    return { ok: true, banked: json.banked, credit: Number(json.credit) || 0 };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
 
 /**
  * Hold a plot before paying for it.
@@ -144,11 +198,11 @@ export async function reservePlot(seed: number, owner: string): Promise<ReserveR
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { reserved?: boolean; seconds?: number; error?: string };
+    const json = (await response.json()) as { reserved?: boolean; seconds?: number; price?: number; credit?: number; build?: string; error?: string };
     if (!response.ok || !json.reserved) {
       return { ok: false, reason: json.error ?? 'That plot could not be held.' };
     }
-    return { ok: true, seconds: json.seconds ?? 240 };
+    return { ok: true, seconds: json.seconds ?? 240, price: typeof json.price === 'number' ? json.price : undefined, credit: Number(json.credit) || 0, build: json.build };
   } catch {
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }

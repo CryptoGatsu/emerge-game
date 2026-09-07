@@ -31,6 +31,7 @@ export const UPDATES: Update[] = [
       'The vault’s day opens gradually. The whole day’s emission used to exist at midnight UTC, so a wallet that woke and claimed early took what it could and everybody after found the vault empty until the next day: “no withdrawal quota left” before they had claimed anything. Now 15% is open at midnight and the rest comes free evenly through the day, and the Bank says which it is — your own ceiling spent, or the vault’s next hour — and when more opens.',
       'The land weight on the dividend card is this week’s, and says so. It counts the days you were present since Monday, so it starts again each week and grows with every day you play; a player who saw 3.4 on Sunday and 0.4 on Monday saw the week turn, not a loss.',
       'Any claimed plot can be visited, however long its owner has been away. A plot whose owner had never published was turned away with “nobody has opened this world lately”, which read as though a settlement went dark when its owner did. Spectators and players can now walk any claimed plot: where the owner has published, it is their settlement as they left it, with how long ago on the banner; where they never have, it is the land grown from its seed at the age the registry records, running on its own, and the banner says so.',
+      'Nothing paid into the vault is lost any more. Two players paid for surveys and claims — five payments on one wallet — and got no land: their pages had been open since before the repricing, so they paid the old prices, and the registry refused each payment as short and kept nothing of it. Three things changed. The page now asks the registry what a survey or a plot costs today and pays that, never the number in its own bundle. A page on an older build than the game does not pay at all: it is told to reload first, and the update notice can no longer be put off past a payment. And a real payment that falls short is banked against the wallet instead of refused — the message says how much is on account and how much more settles it — and whatever is on account pays for the next survey or claim. For payments already refused, the world map has “Paid and got nothing? Redeem the payment”: paste the transaction hash from your wallet and it goes on account.',
     ],
   },
   {
@@ -257,6 +258,7 @@ export const UPDATES_ZH: Update[] = [
       '金库的一天是逐步开放的。以前整天的排放额在 UTC 零点一次到位，早醒早领的钱包能领多少领多少，后面的人发现金库空了只能等第二天：什么都还没领就看到"今天没有提取额度了"。现在零点开放 15%，其余的在一天里匀速释放，银行会说明是哪一种情况——是你自己的上限用完了，还是要等金库的下一个小时——以及什么时候会再开放。',
       '分红卡上的土地权重是本周的，并且写明了。它计算从周一起你在场的天数，所以每周重新开始，你每玩一天它就长一点；周日看到 3.4、周一看到 0.4 的玩家看到的是一周的翻篇，不是损失。',
       '任何已认领的地块都可以参观，不论地主离开了多久。以前地主从未发布过的地块会被拒之门外，提示“最近没有人打开过这个世界”，读起来像是地主一走聚落就熄灯了。现在观众和玩家都能走进任何已认领的地块：地主发布过的，看到的是他们离开时的聚落，横幅上写着多久以前；从未发布过的，看到的是按登记处记录的时代从种子生成的土地，自行运转，横幅会写明。',
+      '付进金库的钱不会再丢了。两位玩家为勘测和认领付了款——一个钱包五笔——却没有拿到土地：他们的页面在调价之前就一直开着，付的是旧价格，登记处把每一笔都判为不足而拒绝，而且一分都没有留下。改了三件事。页面现在先向登记处询问今天勘测或地块的价格，然后付这个数，绝不再用自己代码里写死的数字。比游戏版本旧的页面完全不会付款：它会先被要求刷新，更新提示也不能再拖到付款之后。真实但不足的付款会记入钱包账户而不是被拒绝——提示会说明账户上有多少、还差多少——账户上的余额用于支付下一次勘测或认领。已经被拒绝的付款，世界地图上有“付了款却什么都没得到？兑现这笔付款”：粘贴钱包里的交易哈希，它就会记入你的账户。',
     ],
   },
   {

@@ -380,6 +380,12 @@ button {
 .claim-button:hover:not(:disabled) { background: rgba(184, 231, 86, 0.28); }
 .claim-button:disabled { opacity: 0.6; cursor: progress; }
 .land-claim .muted.small { display: block; margin-top: 12px; line-height: 1.55; }
+.land-claim .on-account { margin-top: 6px; color: var(--gold); }
+.land-claim .redeem { margin-top: 14px; }
+.land-claim .redeem summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.land-claim .redeem-row { display: flex; gap: 8px; margin-top: 8px; }
+.land-claim .redeem-row input { flex: 1; min-width: 0; font-size: 12px; padding: 7px 10px; }
+.land-claim .redeem-row button { flex: none; }
 
 @media (max-width: 1080px) {
   .land-head { grid-template-columns: 1fr; grid-template-areas: 'brand' 'intro' 'side'; }

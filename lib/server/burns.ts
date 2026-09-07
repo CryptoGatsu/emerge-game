@@ -26,7 +26,7 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN, VAULT_ADDRESS } from '../chain/emerge';
 import { serverKey } from '../limits';
-import { hsetnx } from './kv';
+import { hdel, hgetall, hset, hsetnx } from './kv';
 import { noteCharge } from './treasury';
 
 const chain = () => defineChain({
@@ -240,4 +240,122 @@ export async function spendBurn(txHash: string, forWhat: string, whole?: number)
   // received, and what it owes the burn address for it.
   if (first && whole && whole > 0) await noteCharge(whole).catch(() => {});
   return first;
+}
+
+/* ------------------------------------------------------------------ *
+ * Payments on account
+ * ------------------------------------------------------------------ */
+
+/**
+ * What a wallet has paid the vault and not yet had anything for.
+ *
+ * A payment the registry refused used to be simply gone. The commonest
+ * refusal was a page on an older build paying an older price — 120,000 for a
+ * survey that had become 240,000, 224,000 for a plot that had become 672,000
+ * — and the answer was "keep the receipt and tell us". Players did: three
+ * surveys and two claims paid for on one wallet and nothing to show for any
+ * of them. So a real payment that falls short is now banked against the
+ * wallet that made it, and whatever is on account goes toward the next thing
+ * that wallet pays for. Nothing paid into the vault is lost any more.
+ *
+ * Kept as a hash of transaction hash -> whole tokens, so what was paid is
+ * still attributable, with a `rest:` field for the remainder of a payment
+ * partly drawn.
+ */
+const creditKey = (owner: string) => serverKey(`credit:${owner.toLowerCase()}`);
+
+/** Whole tokens this wallet has on account. */
+export async function creditOf(owner: string): Promise<number> {
+  const rows = await hgetall(creditKey(owner));
+  let total = 0;
+  for (const raw of Object.values(rows)) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) total += n;
+  }
+  return total;
+}
+
+/**
+ * Put a payment on account. False when the payment was already used for
+ * something, which is the one case a receipt buys nothing.
+ */
+export async function bankCredit(owner: string, txHash: string, whole: number): Promise<{ banked: boolean; credit: number }> {
+  const first = whole > 0 && (await spendBurn(txHash, `credit:${owner.toLowerCase()}`, whole));
+  if (first) await hset(creditKey(owner), txHash.toLowerCase(), String(whole));
+  return { banked: first, credit: await creditOf(owner) };
+}
+
+/** Draw this much from what is on account, largest payments first. Returns what was actually drawn. */
+async function drawCredit(owner: string, amount: number): Promise<number> {
+  if (amount <= 0) return 0;
+  const key = creditKey(owner);
+  const rows = Object.entries(await hgetall(key))
+    .map(([field, raw]) => [field, Number(raw)] as const)
+    .filter(([, n]) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => b[1] - a[1]);
+  let drawn = 0;
+  for (const [field, n] of rows) {
+    if (drawn >= amount) break;
+    await hdel(key, field);
+    const take = Math.min(n, amount - drawn);
+    drawn += take;
+    const rest = n - take;
+    if (rest > 0) await hset(key, `rest:${field}:${Date.now()}`, String(rest));
+  }
+  return drawn;
+}
+
+export type Settlement =
+  | { ok: true; whole: number; fromCredit: number }
+  | { ok: false; reason: string; retry: boolean; used?: boolean; banked?: number; credit?: number; short?: number };
+
+/**
+ * Settle a charge from a payment, what is on account, or both.
+ *
+ * The payment has to be real, from this wallet and settled, as before. Then:
+ * enough on its own or with the account, and the charge is paid, the payment
+ * spent and any surplus banked; short, and the payment is banked rather than
+ * refused, with the shortfall said plainly. No payment, and the account
+ * alone can pay.
+ */
+export async function settleCharge(
+  owner: string,
+  burnTx: string,
+  due: number,
+  purpose: string,
+  verify: (txHash: string, payer: string, atLeastWhole: number) => Promise<BurnCheck> = verifyBurn,
+): Promise<Settlement> {
+  const credit = await creditOf(owner);
+  const tx = burnTx.trim();
+  if (!tx) {
+    if (credit >= due) {
+      const fromCredit = await drawCredit(owner, due);
+      return { ok: true, whole: 0, fromCredit };
+    }
+    return {
+      ok: false, retry: false, credit, short: due - credit,
+      reason: `This costs ${due.toLocaleString()} ${TOKEN.ticker}; ${credit.toLocaleString()} is on account and nothing was paid.`,
+    };
+  }
+  const paid = await verify(tx, owner, 1);
+  if (!paid.ok) return paid;
+  if (paid.whole + credit >= due) {
+    if (!(await spendBurn(tx, purpose, paid.whole))) {
+      return { ok: false, reason: 'That payment has already been used.', retry: false, used: true };
+    }
+    const fromCredit = paid.whole >= due ? 0 : await drawCredit(owner, due - paid.whole);
+    // Paid over the odds — a page quoting a higher price than today's, say.
+    // The difference is theirs, on account.
+    if (paid.whole > due) await hset(creditKey(owner), `rest:${tx.toLowerCase()}`, String(paid.whole - due));
+    return { ok: true, whole: paid.whole, fromCredit };
+  }
+  const banked = await bankCredit(owner, tx, paid.whole);
+  if (!banked.banked) {
+    return { ok: false, reason: 'That payment has already been used.', retry: false, used: true };
+  }
+  const short = due - banked.credit;
+  return {
+    ok: false, retry: false, banked: paid.whole, credit: banked.credit, short,
+    reason: `That payment was ${paid.whole.toLocaleString()} ${TOKEN.ticker}; this costs ${due.toLocaleString()}. It is banked against your wallet — ${banked.credit.toLocaleString()} on account — and ${short.toLocaleString()} more settles it.`,
+  };
 }

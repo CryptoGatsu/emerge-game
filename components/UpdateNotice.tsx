@@ -22,6 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t, useLocale } from '@/lib/i18n';
+import { rememberBuild } from '@/lib/chain/spend';
 
 /**
  * How often a running client asks whether it is still current.
@@ -57,17 +58,23 @@ export function UpdateNotice({ build }: { build: string }) {
   }, []);
 
   useEffect(() => {
+    // So a payment can refuse to go out from a page that is behind.
+    rememberBuild(build);
     void check();
     const timer = window.setInterval(() => { void check(); }, CHECK_INTERVAL);
     // Coming back to a tab is the moment a person is most willing to be told,
     // and the moment they are most likely to have missed a deployment.
     const onVisible = () => { if (document.visibilityState === 'visible') void check(); };
     document.addEventListener('visibilitychange', onVisible);
+    // A refused payment found out first: show the notice now, not in five minutes.
+    const onAsked = () => { setDismissed(null); void check(); };
+    window.addEventListener('emerge:check-build', onAsked);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('emerge:check-build', onAsked);
     };
-  }, [check]);
+  }, [check, build]);
 
   if (!waiting || dismissed === waiting) return null;
 
