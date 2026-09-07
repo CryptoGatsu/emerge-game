@@ -479,6 +479,8 @@ export interface World {
   notables?: Notable[];
   /** Professionals in town offering their services, and until when. */
   talent?: { offers: Notable[] };
+  /** Exchange deliveries this world has already taken in, so none is taken twice. Recent ids only. */
+  exchangeSeen?: string[];
   /** Benches, fires, wells and stalls, and who is using them. */
   amenities: Amenity[];
   /**
@@ -9612,6 +9614,37 @@ export function fundTreasury(world: World, gold: number, note: string) {
 }
 
 /** Take Gold out of the treasury. Returns false when it cannot cover the draw. */
+/**
+ * Goods out of the store for an exchange order, or refused when short.
+ *
+ * Taken before the order is asked for, so a listing can never sell what the
+ * store does not hold; put back by `receiveDelivery` if the exchange says no.
+ */
+export function escrowGoods(world: World, resource: Resource, qty: number): boolean {
+  useWorld(world);
+  const n = Math.floor(qty);
+  if (!(n > 0) || (world.resources[resource] ?? 0) < n) return false;
+  world.resources[resource] -= n;
+  noteAttention(world);
+  return true;
+}
+
+/** Take in what the exchange owes this world: once per delivery, by id. Returns false when it was already taken. */
+export function receiveDelivery(world: World, d: { id: string; kind: 'gold' | 'resource'; resource?: Resource; amount: number; note: string }): boolean {
+  useWorld(world);
+  const seen = world.exchangeSeen ?? [];
+  if (seen.includes(d.id)) return false;
+  world.exchangeSeen = [...seen.slice(-199), d.id];
+  if (d.kind === 'gold') {
+    fundTreasury(world, d.amount, `From the exchange: ${d.note}.`);
+  } else if (d.resource && d.resource in world.resources) {
+    world.resources[d.resource] += Math.max(0, Math.floor(d.amount));
+    pushFeed(world, 'market', `From the exchange: ${d.note}.`);
+  }
+  noteAttention(world);
+  return true;
+}
+
 export function drawFromTreasury(world: World, gold: number, note: string) {
   useWorld(world);
   if (!(gold > 0) || world.treasury < gold) return false;

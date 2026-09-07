@@ -818,6 +818,7 @@ const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; shor
   { key: 'people', icon: '☺', label: 'PEOPLE', short: 'PEOPLE', blurb: 'Trades, posts and training' },
   { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
   { key: 'land', icon: '⌂', label: 'LAND', short: 'LAND', blurb: 'Plots for sale' },
+  { key: 'exchange', icon: '⇄', label: 'TRADE', short: 'TRADE', blurb: 'Buy and sell with other players' },
   { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
   { key: 'arena', icon: '⚔', label: 'ARENA', short: 'ARENA', blurb: 'Duels and betting' },
   { key: 'casino', icon: '⚄', label: 'CASINO', short: 'CASINO', blurb: 'Coin, cups, Gold or $EMERGE' },

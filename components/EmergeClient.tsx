@@ -25,7 +25,7 @@ import {
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
-  type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, type WorkingJob,
+  type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, escrowGoods, receiveDelivery, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
@@ -41,6 +41,8 @@ import {
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
   coverPlot, boonPlot, renamePlot,
 } from '@/lib/net/registry';
+import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, listOrder } from '@/lib/net/exchange';
+import type { ExchangeActions } from './Exchange';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
 import Casino from './Casino';
@@ -2088,6 +2090,81 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, [refresh, spectating]);
 
   /** Move Gold in or out of the treasury and persist the vault ledger. */
+  /*
+   * The exchange.
+   *
+   * The world in front of you pays first and is refunded on a refusal, so the
+   * server is never asked to sell what the store does not hold. Deliveries
+   * owed to this world are collected on entry and every minute after, once
+   * each by id.
+   */
+  const exchangeActions = useMemo<ExchangeActions>(() => ({
+    list: async (kind, qty, unitPrice, resource) => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      if (kind === 'resource') {
+        if (!resource || !escrowGoods(world, resource, qty)) return t('The store does not hold that many.');
+      } else if (!drawFromTreasury(world, qty, `${qty.toLocaleString()} Gold put up on the exchange.`)) {
+        return t('The treasury cannot cover that lot.');
+      }
+      const r = await listOrder(wallet.address, player.name, claimed.seed, kind, qty, unitPrice, resource);
+      if (!r.ok) {
+        if (kind === 'resource' && resource) world.resources[resource] += qty;
+        else fundTreasury(world, qty, 'Gold back: the exchange refused the order.');
+        refresh();
+        return tx(r.reason);
+      }
+      refresh();
+      return null;
+    },
+    buy: async (order, qty) => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      if (order.kind === 'resource') {
+        const total = qty * order.unitPrice;
+        if (!drawFromTreasury(world, total, `${total.toLocaleString()} Gold paid on the exchange for ${qty.toLocaleString()} ${order.resource}.`)) return t('The treasury cannot cover that.');
+        const r = await buyGoods(wallet.address, player.name, claimed.seed, order.id, qty);
+        if (!r.ok) { fundTreasury(world, total, 'Gold back: the trade was refused.'); refresh(); return tx(r.reason); }
+        if (receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
+        refresh();
+        return null;
+      }
+      const r = await buyGold(player.ledger, wallet.address, player.name, claimed.seed, order, qty);
+      if (!r.ok) return tx(r.reason);
+      onPlayer({ ...player, ledger: r.ledger });
+      if (receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
+      refresh();
+      return null;
+    },
+    cancel: async (id) => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      const r = await cancelOrder(wallet.address, claimed.seed, id);
+      if (!r.ok) return tx(r.reason);
+      if (r.delivery && receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
+      refresh();
+      return null;
+    },
+  }), [wallet.address, player, claimed.seed, onPlayer, refresh]);
+  useEffect(() => {
+    if (!wallet.address || visit) return;
+    const address = wallet.address;
+    let live = true;
+    const tick = async () => {
+      const book = await fetchExchange(claimed.seed);
+      const world = worldRef.current;
+      if (!live || !book || !world || book.owed.length === 0) return;
+      const taken: string[] = [];
+      let changed = false;
+      for (const d of book.owed) { if (receiveDelivery(world, d)) changed = true; taken.push(d.id); }
+      void collectDeliveries(address, claimed.seed, taken);
+      if (changed) refresh();
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 60_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [wallet.address, claimed.seed, visit, refresh]);
+
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
     const world = worldRef.current;
     if (!world) return;
@@ -2272,6 +2349,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onDismissNotable={dismissNotableFor}
             onGates={gatesFor}
             onOpenMap={onOpenMap}
+            onExchange={exchangeActions}
             onKeep={keepFor}
             onClearTrees={beginClear}
             onBridge={beginBridge}
