@@ -766,9 +766,11 @@ function Purse({ view, player, visiting, onPanel }: {
           <b>—</b>
         </span>
       ) : (
-        <span className="purse-cell gold">
+        <span className={`purse-cell gold${view.treasury >= view.goldCap ? ' full' : ''}`}>
           <em>{t('GOLD')}</em>
-          <b>{Math.floor(view.treasury).toLocaleString()}</b>
+          {/* What it holds of what it may hold: the answer to "how much can I
+              keep?" belongs next to the Gold, not in a guide. */}
+          <b>{Math.floor(view.treasury).toLocaleString()}<i> / {view.goldCap.toLocaleString()}</i></b>
         </span>
       )}
       <span className="purse-cell emerge">

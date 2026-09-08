@@ -375,7 +375,6 @@ export const UI: Record<string, string> = {
   'The buyer pays {n} {ticker} straight to your wallet and receives the Gold less the {pct}% burn. Lots are {min} Gold or more, and never more than the treasury in your last published copy. The Gold leaves the treasury now.': '买家把 {n} {ticker} 直接付到你的钱包，收到扣除 {pct}% 销毁后的金币。每批至少 {min} 金币，且不超过你最近发布副本中的金库。金币现在就离开金库。',
   'Put it up': '挂出', 'You have nothing on the exchange.': '你在交易所没有挂单。',
   'History': '成交记录', 'Bought': '买入', 'Sold': '卖出',
-  'Idle Gold': '闲置金币',
   'Available, this wallet across all its plots': '可用（这个钱包名下所有地块合计）',
   'Of that, earned by this plot': '其中本地块赚得',
   'Your payment is on the exchange\u2019s books; it finishes by itself.': '你的付款已记入交易所账目，会自动完成。',
@@ -1699,6 +1698,8 @@ export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
   [/^([A-Z][a-z]+) and ([A-Z][a-z]+)$/, '$1和$2'],
   // ---- 地块助手 ----
   [/^Raise a house$/, '盖一栋房子'],
+  [/^The treasury is full at ([\d,]+) Gold and turned away ([\d,]+)\. Spend it, or raise the city a level to hold more\.$/,
+    '金库已满，上限 $1 金币，因此有 $2 金币没有收下。把它花掉，或者把城市升一级以容纳更多。'],
   [/^Raise a workplace$/, '新建工作场所'],
   [/^From the exchange: (.+)\.$/, '来自交易所：$1。'],
   [/^(\d[\d,]*) Gold put up on the exchange\.$/, '$1 金币挂到了交易所。'],

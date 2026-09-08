@@ -25,7 +25,7 @@ import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
 import {
   ERAS, OPEN_ERA, eraSpec, nextEra, type EraSpec,
-  MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, charterMultiplier, ERA_CITY_LEVEL, BUILDERS_DISCOUNT,
+  MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, treasuryCap, charterMultiplier, ERA_CITY_LEVEL, BUILDERS_DISCOUNT,
 } from './world/eras';
 import { formOf, formName, formPosts, MERGES_ON_ADVANCE, LINEAGE_TYPES } from './world/forms';
 import {
@@ -678,13 +678,12 @@ export interface Stewardship {
 
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
-  | 'wages' | 'upkeep' | 'idle' | 'imports' | 'building' | 'works' | 'gear'
+  | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
   | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
   upkeep: 'Upkeep',
-  idle: 'Idle Gold',
   imports: 'Imports',
   building: 'Building',
   works: 'Public works',
@@ -701,9 +700,35 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
 export interface DayLedger {
   in: Partial<Record<LedgerLine, number>>;
   out: Partial<Record<LedgerLine, number>>;
+  /**
+   * Gold the town could not take in because its treasury was already full.
+   *
+   * Deliberately not a heading: the headings add up to the day's change in the
+   * treasury, and this never entered the treasury to be part of that. It is
+   * what the town turned away, kept so the Bank can say so rather than leaving
+   * a player to notice their Gold has stopped moving.
+   */
+  unbanked?: number;
 }
 
 const emptyLedger = (): DayLedger => ({ in: {}, out: {} });
+
+/**
+ * The most Gold this settlement may hold, from its level and its age.
+ *
+ * Read on every piece of income, so it is worked out once a day per world and
+ * remembered: the level behind it counts the citizens and weighs the
+ * buildings, which is not something to do a hundred times an hour. Held beside
+ * the world rather than on it, so nothing here is saved or published.
+ */
+const capCache = new WeakMap<World, { day: number; cap: number }>();
+export function goldCap(world: World): number {
+  const seen = capCache.get(world);
+  if (seen && seen.day === world.day) return seen.cap;
+  const cap = treasuryCap(cityLevel(world), eraOf(world));
+  capCache.set(world, { day: world.day, cap });
+  return cap;
+}
 
 /**
  * Gold into the treasury, booked under a heading.
@@ -715,9 +740,16 @@ const emptyLedger = (): DayLedger => ({ in: {}, out: {} });
  */
 function earn(world: World, line: LedgerLine, amount: number) {
   if (!(amount > 0)) return 0;
-  world.treasury += amount;
-  world.ledger.in[line] = (world.ledger.in[line] ?? 0) + amount;
-  return amount;
+  // A full treasury turns income away rather than having Gold taken off it.
+  // Nothing a town has earned is ever removed; what it cannot hold it simply
+  // does not take, and the Bank says how much that was.
+  const room = Math.max(0, goldCap(world) - world.treasury);
+  const taken = Math.min(amount, room);
+  if (taken < amount) world.ledger.unbanked = (world.ledger.unbanked ?? 0) + (amount - taken);
+  if (!(taken > 0)) return 0;
+  world.treasury += taken;
+  world.ledger.in[line] = (world.ledger.in[line] ?? 0) + taken;
+  return taken;
 }
 
 /** Gold out, booked under a heading. Never spends past empty; returns what moved. */
@@ -7932,14 +7964,6 @@ export function standardOfLiving(world: World): number {
  * town spent down to its needs pays none of this at all. There is no way for
  * it to bankrupt anybody: the charge falls as the pile does.
  */
-export const IDLE_FREE_DAYS = 30;
-export const IDLE_DAILY = 0.005;
-/** Gold held beyond a month of running costs. */
-export function idleGold(world: World, runningCost: number): number {
-  if (!(runningCost > 0)) return 0;
-  return Math.max(0, world.treasury - runningCost * IDLE_FREE_DAYS);
-}
-
 /** What a well-off town adds to its own upkeep. */
 export const WEALTH_UPKEEP = 0.5;
 
@@ -7962,13 +7986,6 @@ export function payrollOf(world: World): number {
   return world.citizens
     .filter((c) => c.age >= 16 && c.job !== 'unemployed')
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage * rate, 0);
-}
-
-/** What a day of holding the treasury costs, and the figures behind it. */
-export function idleCost(world: World): { running: number; idle: number; charge: number } {
-  const running = upkeepBill(world) + payrollOf(world);
-  const idle = idleGold(world, running);
-  return { running, idle, charge: Math.round(idle * IDLE_DAILY) };
 }
 
 
@@ -8351,14 +8368,15 @@ function daily(world: World) {
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep * bankRelief(world));
-  // And what it costs to sit on more than the town needs. Charged after the
-  // day's real bills, against what those bills actually came to.
-  const idle = idleCost(world);
-  if (idle.charge > 0 && world.treasury > idle.charge) {
-    spend(world, 'idle', idle.charge);
-    if (world.day % 7 === 0) {
-      pushFeed(world, 'market', `${idle.charge.toLocaleString()} Gold went on guarding a reserve of ${Math.round(world.treasury).toLocaleString()}. Gold put to work costs nothing to keep.`);
-    }
+  // What a town may hold is a ceiling now, not a daily charge on the pile —
+  // see `goldCap`. Income above the ceiling is turned away in `earn`, and the
+  // town is told when that has been happening.
+  // Income is lumpy — a town can be full all week and take nothing in on the
+  // one day a weekly line would have looked. Every third day it is turning
+  // Gold away, it says so; the moment the treasury has room again it stops.
+  const turned = world.ledgerYesterday?.unbanked ?? 0;
+  if (turned > 0 && world.day % 3 === 0) {
+    pushFeed(world, 'market', `The treasury is full at ${Math.round(goldCap(world)).toLocaleString()} Gold and turned away ${Math.round(turned).toLocaleString()}. Spend it, or raise the city a level to hold more.`);
   }
   paySalaries(world);
   // Paid in the morning, spent through the day: what people do not need to

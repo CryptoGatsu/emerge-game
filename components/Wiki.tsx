@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { cityLevels, cityLevelSpec, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
@@ -30,7 +30,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, IDLE_DAILY, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -114,7 +114,6 @@ const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', 'Everyone who works is paid, every day. It is the largest line in most settlements.'],
   ['imports', 'Buying what the town cannot make for itself, at the world market\u2019s price.'],
   ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market — more in each later age, more for each improvement, and more again in a town whose people are well off and expect a well-kept place.`],
-  ['idle', `Gold that is only ever counted. A month of the town\u2019s running costs is a free reserve; beyond that, ${(IDLE_DAILY * 100).toFixed(1)}% of the excess goes every day on guarding it. Spend it down to what the town needs and this line is nothing.`],
   ['building', 'What you raise, in Gold and in materials out of the yard.'],
   ['works', 'Bridges to land nobody can walk to, and the roads that follow.'],
   ['vault', 'The other half of the vault door: Gold leaving the treasury when you take a deposit back out.'],
@@ -529,6 +528,39 @@ export default function Wiki() {
                       <td className="num">{n(plotCeiling(row.level, e.id))}</td>
                     </React.Fragment>
                   ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <h3>What a town may hold</h3>
+          <p>
+            A treasury has a top, and it climbs with every level and every age. It is printed
+            beside the Gold itself &mdash; <b>{n(240_000)} / {n(treasuryCap(8, 1))}</b> &mdash; so
+            the answer to &ldquo;how much can I keep?&rdquo; is on the screen rather than
+            something to work out. A fresh claim holds {n(treasuryCap(1, 1))}; a level-ten city in
+            the AI era holds {n(treasuryCap(10, 5))}.
+          </p>
+          <p>
+            A full treasury turns income away; it never has Gold taken off it. Nothing you have
+            earned is removed, and the settlement says so in the feed when it has been happening.
+            Spend it, or raise the city a level and it holds more. Every era&rsquo;s smallest
+            treasury is several times its dearest public works, so the ceiling can never stand
+            between you and the next level.
+          </p>
+          <p className="wiki-note">
+            This replaced the carrying cost on idle Gold. Both were there to stop a hoard so large
+            that Gold stops being a decision, and the charge did work &mdash; but it worked out of
+            sight, as a daily subtraction you had to go looking for. A ceiling you can read at a
+            glance does the same job, and only one of the two should exist.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Age</th><th>Holds at level 1</th><th>At level 10</th></tr></thead>
+            <tbody>
+              {ERAS.map((e) => (
+                <tr key={e.id}>
+                  <td>{e.name}</td>
+                  <td className="num">{n(treasuryCap(1, e.id))}</td>
+                  <td className="num">{n(treasuryCap(10, e.id))}</td>
                 </tr>
               ))}
             </tbody>

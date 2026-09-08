@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { cityLevels, cityLevelSpec, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
@@ -23,7 +23,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, IDLE_DAILY, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
+  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -84,7 +84,6 @@ const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', '每个工作的人每天都领工资。这是大多数聚落最大的一笔支出。'],
   ['imports', '按世界市场的价格买进镇子自己造不出的东西。'],
   ['upkeep', `每栋建筑立着就要花钱，从房屋每天 ${maintenanceCost('House')} 金币到市场每天 ${maintenanceCost('Market')} 金币——时代越晚越贵，每升一级更贵，居民富足、期待一个体面市镇的城镇也更贵。`],
-  ['idle', `只是被数着的金币。一个月的运转开销是免费储备；超出部分每天要花 ${(IDLE_DAILY * 100).toFixed(1)}% 用于看管。把它花在城镇上，这一项就是零。`],
   ['building', '你建造的东西，花金币，也从堆场花材料。'],
   ['works', '通往无人能到之地的桥，以及随之而来的路。'],
   ['vault', '金库门的另一半：你取回存款时离开金库的金币。'],
@@ -283,6 +282,22 @@ export function WikiZh() {
                       <td className="num">{n(plotCeiling(row.level, e.id))}</td>
                     </React.Fragment>
                   ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <h3>城镇能持有多少金币</h3>
+          <p>金库有上限，并且随每一级、每一个时代上升。它就印在金币旁边——<b>{n(240_000)} / {n(treasuryCap(8, 1))}</b>——所以“我能存多少”是屏幕上的一个数字，而不是需要推算的东西。新认领的地块能存 {n(treasuryCap(1, 1))}；人工智能时代的十级城市能存 {n(treasuryCap(10, 5))}。</p>
+          <p>金库满了会把收入挡在门外，而不会从里面拿走金币。你挣到的任何东西都不会被扣除，而且聚落会在动态里告诉你这件事正在发生。把它花掉，或者把城市升一级以容纳更多。每个时代最小的金库都是该时代最贵公共工程的好几倍，所以上限永远不会挡在你和下一级之间。</p>
+          <p className="wiki-note">这取代了对闲置金币的持有费。两者都是为了防止囤积到让金币不再构成选择的地步，而那笔费用确实起了作用——只是它在看不见的地方起作用，是一笔你得专门去找才能明白的每日扣款。一眼能读懂的上限做的是同一件事，而两者只该留一个。</p>
+          <table className="wiki-table">
+            <thead><tr><th>时代</th><th>一级可持有</th><th>十级可持有</th></tr></thead>
+            <tbody>
+              {ERAS.map((e) => (
+                <tr key={e.id}>
+                  <td>{['聚落', '城镇', '工业', '现代', '人工智能'][e.id - 1]}</td>
+                  <td className="num">{n(treasuryCap(1, e.id))}</td>
+                  <td className="num">{n(treasuryCap(10, e.id))}</td>
                 </tr>
               ))}
             </tbody>

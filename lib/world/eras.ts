@@ -201,6 +201,45 @@ export function plotCeiling(level: number, era: number): number {
 }
 
 /**
+ * How much Gold a settlement may hold, by where it stands on the ladder.
+ *
+ * A town's treasury has a top. It is shown beside the Gold itself — 512,400 of
+ * 1,200,000 — and it climbs with every level and every age, so the answer to
+ * "how much can I keep?" is a number on the screen rather than something to be
+ * inferred.
+ *
+ * This replaces the carrying cost on idle Gold that 2.9 introduced. Both exist
+ * to stop a player sitting on a hoard so large that Gold stops being a
+ * decision, and the carrying cost did work — but it worked invisibly, as a
+ * daily subtraction a player had to go looking for in the Bank to understand.
+ * A ceiling you can see does the same job and can be read at a glance, which
+ * was the whole of the complaint. Only one of the two should exist, so the
+ * carrying cost is gone.
+ *
+ * What it costs to hit the ceiling is the income the town turns away, not Gold
+ * taken off it: nothing a player has earned is ever removed. A full treasury
+ * is a town telling you to spend, and spending is what the ladder's public
+ * works are for.
+ *
+ * The floor of every era is comfortably above what that era's public works
+ * cost — the AI era's tenth level is 450,000 Gold and the smallest AI-era
+ * treasury holds several times that — so the cap can never stand between a
+ * player and the next rung.
+ */
+const TREASURY: Record<number, [number, number]> = {
+  1: [60_000, 300_000],
+  2: [320_000, 700_000],
+  3: [740_000, 1_400_000],
+  4: [1_460_000, 2_600_000],
+  5: [2_700_000, 5_000_000],
+};
+
+export function treasuryCap(level: number, era: number): number {
+  const [lo, hi] = TREASURY[eraOfLevel(era)];
+  return Math.round(between([lo, hi], levelIn(level)) / 10_000) * 10_000;
+}
+
+/**
  * What a plot claimed before the fifty-rung ladder is guaranteed.
  *
  * The ladder redrew the middle of the curve. The top and the bottom are where

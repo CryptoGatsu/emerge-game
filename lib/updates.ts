@@ -17,6 +17,17 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.11',
+    date: '2026-09-08',
+    title: 'What a town may hold, on the label',
+    notes: [
+      'Your treasury has a top now, and it is printed next to the Gold: 512,400 / 1,200,000. It climbs with every level and every age \u2014 60,000 for a fresh claim, five million for a level-ten city in the AI era \u2014 so the answer to \u201chow much can I keep?\u201d is a number on the screen rather than something to work out. This came from a player, and their reasoning was the right one: a limit you can see is a limit you can play around.',
+      'It replaces the carrying cost on idle Gold from 2.9. Both were there to stop a hoard so large that Gold stops being a decision, and the charge did work \u2014 but it worked out of sight, as a daily subtraction you had to go looking for in the Bank to understand. Only one of the two should exist, so the charge is gone. Gold sitting in your treasury now costs you nothing at all.',
+      'A full treasury turns income away; it never has Gold taken off it. Nothing you have earned is ever removed \u2014 what the town cannot hold, it simply does not take, and it tells you in the feed when that has been happening. The Gold in the purse turns amber when you are at the ceiling. Spend it, or raise the city a level and it holds more.',
+      'Every age\u2019s smallest treasury is several times its dearest public works \u2014 the AI era\u2019s tenth level costs 450,000 Gold and the smallest AI-era treasury holds 2,700,000 \u2014 so the ceiling can never stand between a player and the next rung.',
+    ],
+  },
+  {
     version: '2.10',
     date: '2026-09-08',
     title: 'Ten levels to every age',
@@ -357,6 +368,17 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.11',
+    date: '2026-09-08',
+    title: '城镇能持有多少，写在标签上',
+    notes: [
+      '你的金库现在有上限，而且就印在金币旁边：512,400 / 1,200,000。它随每一级、每一个时代上升——新认领的地块 60,000，人工智能时代的十级城市五百万——所以“我能存多少”是屏幕上的一个数字，而不是需要推算的东西。这个想法来自一位玩家，而他的理由是对的：看得见的限制才是可以围绕它来玩的限制。',
+      '它取代了 2.9 引入的闲置金币持有费。两者都是为了防止囤积到让金币不再构成选择的地步，而那笔费用确实起了作用——只是它在看不见的地方起作用，是一笔你得到银行里专门去找才能明白的每日扣款。两者只该留一个，所以那笔费用取消了。放在金库里的金币现在完全不花你一分钱。',
+      '金库满了会把收入挡在门外，而不会从里面拿走金币。你挣到的任何东西都不会被扣除——城镇装不下的，它就干脆不收，并且会在动态里告诉你这件事正在发生。到达上限时，钱包里的金币数字会变成琥珀色。把它花掉，或者把城市升一级以容纳更多。',
+      '每个时代最小的金库都是该时代最贵公共工程的好几倍——人工智能时代的第十级要 450,000 金币，而该时代最小的金库能装 2,700,000——所以上限永远不会挡在玩家和下一级之间。',
+    ],
+  },
   {
     version: '2.10',
     date: '2026-09-08',

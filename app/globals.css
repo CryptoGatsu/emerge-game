@@ -1063,6 +1063,10 @@ button {
 .purse-cell em { font-style: normal; font-size: 8px; letter-spacing: 1.6px; color: var(--muted); }
 .purse-cell b { font-size: 15px; line-height: 1.1; }
 .purse-cell i { font-style: normal; font-size: 8.5px; color: var(--muted); }
+/* A full treasury is turning income away, which is worth noticing without
+   being an alarm: the town is fine, it just has nothing to do with the Gold. */
+.purse-cell.gold.full b { color: var(--warn, #d08a3a); }
+.purse-cell.gold.full i { color: var(--warn, #d08a3a); opacity: .85; }
 .purse-cell.gold b { color: var(--gold); }
 .purse-cell.emerge b { color: var(--emerald); }
 .purse-cell.wallet b { color: var(--cream); font-size: 13px; }
