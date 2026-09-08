@@ -3455,3 +3455,22 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 
 /* One payment the exchange is still settling, under the notice. */
 .exchange-waiting { display: block; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
+
+/* --- The markets page ------------------------------------------------ */
+/* The rate cards: three figures that answer three different questions, so
+   they read as one row on a desktop and stack honestly on a phone. */
+.markets-rate {
+  display: grid; gap: 12px; margin: 14px 0 6px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.markets-figure {
+  border: 1px solid var(--line, #2a3330); border-radius: 10px; padding: 12px 14px;
+  background: var(--card, rgba(255, 255, 255, .02));
+}
+.markets-figure em { font-style: normal; font-size: 9px; letter-spacing: 1.8px; color: var(--muted); display: block; }
+.markets-figure b { display: block; font-size: 26px; line-height: 1.25; margin: 2px 0 4px; }
+.markets-figure span { font-size: 11.5px; color: var(--muted); line-height: 1.45; display: block; }
+/* Every table here can outgrow a phone; each scrolls in its own right rather
+   than pushing the page sideways. */
+.markets .wiki-table { display: block; overflow-x: auto; max-width: 100%; }
+.markets h3 { margin-top: 22px; }

@@ -41,6 +41,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { forgetLandMarket } from '@/lib/server/landMarket';
 import {
   allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
@@ -589,6 +590,10 @@ export async function POST(request: Request) {
     try {
       const row = await listClaim(seed, owner, price === null ? null : Math.round(price));
       if (!row) return NextResponse.json({ error: 'That plot is not yours to list.' }, { status: 409 });
+      // The public board is built from every claim and cached for a minute.
+      // Listing or delisting changes what it should say, so drop it rather
+      // than advertise a stale price for the next sixty seconds.
+      await forgetLandMarket();
       return NextResponse.json({ claim: row });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -643,6 +648,8 @@ export async function POST(request: Request) {
     try {
       const moved = await transferClaim(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME));
       if (!moved.ok) return NextResponse.json({ error: moved.reason }, { status: 409 });
+      // A plot that has just sold must not go on being advertised.
+      await forgetLandMarket();
       return NextResponse.json({ claim: moved.claim, price: moved.price, seller: moved.seller });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });

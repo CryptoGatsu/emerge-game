@@ -1494,6 +1494,7 @@ export default function Wiki() {
 
         <footer className="wiki-foot">
           <Link href="/" className="wiki-back">Back to the game</Link>
+          <Link href="/markets" className="wiki-back">Every price, live</Link>
           <p className="muted small">
             Every figure on this page is read from the code that enforces it, so it cannot drift
             from what the game actually does.

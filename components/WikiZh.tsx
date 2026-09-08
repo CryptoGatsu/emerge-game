@@ -700,6 +700,7 @@ export function WikiZh() {
 
         <footer className="wiki-foot">
           <Link href="/" className="wiki-back">返回游戏</Link>
+          <Link href="/markets" className="wiki-back">实时价格一览</Link>
           <p className="muted small">这一页上的每个数字都从执行它的代码里读出，所以不会与游戏的实际行为脱节。</p>
         </footer>
       </div>

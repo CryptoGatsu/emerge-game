@@ -56,6 +56,20 @@ export interface LandMarket {
 const KEY = serverKey('land-market');
 const KEEP_SECONDS = 60;
 
+/**
+ * Forget the board, so the next read rebuilds it.
+ *
+ * The cache exists because the board is assembled from every claim and every
+ * headline, which is not a thing to do on every page view. A minute of lag is
+ * fine for a board nobody is watching — and wrong the moment the page exists
+ * to tell people what land costs, because a plot that has just sold would go
+ * on being advertised at its asking price. Anything that lists, delists or
+ * moves a plot drops the board rather than waiting the minute out.
+ */
+export async function forgetLandMarket(): Promise<void> {
+  await setValue(KEY, '', 1).catch(() => { /* the board rebuilds on its own clock anyway */ });
+}
+
 export async function landMarket(fresh = false): Promise<LandMarket> {
   if (!fresh) {
     const held = await getValue(KEY);

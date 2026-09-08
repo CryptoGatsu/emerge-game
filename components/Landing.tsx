@@ -229,6 +229,8 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
           <div className="foot-links">
             <a href="/wiki">{t('Guide')}</a>
             <span aria-hidden>·</span>
+            <a href="/markets">{t('Markets')}</a>
+            <span aria-hidden>·</span>
             <span className="foot-version">v{VERSION}</span>
             <span aria-hidden>·</span>
             <a href={X_URL} target="_blank" rel="noreferrer noopener">@emergerh</a>

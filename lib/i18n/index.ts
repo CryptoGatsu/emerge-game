@@ -14,7 +14,7 @@
  * disappearing.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { JOBS_ZH, NAMES, PATTERNS, UI } from './zh';
 
 export type Locale = 'en' | 'zh';
@@ -78,7 +78,11 @@ function fill(text: string, vars?: Record<string, string | number>): string {
  * filled after the lookup so the translation can put them in its own order.
  */
 export function t(text: string, vars?: Record<string, string | number>): string {
-  if (getLocale() !== 'zh') return fill(text, vars);
+  return tAt(getLocale(), text, vars);
+}
+
+function tAt(locale: Locale, text: string, vars?: Record<string, string | number>): string {
+  if (locale !== 'zh') return fill(text, vars);
   return fill(UI[text] ?? text, vars);
 }
 
@@ -88,8 +92,12 @@ export function tn(name: string): string {
   // undefined unchanged and rendered an empty cell; a Chinese one reached the
   // lookups below and took the whole panel down with it. A missing name is a
   // blank, in either language.
+  return tnAt(getLocale(), name);
+}
+
+function tnAt(locale: Locale, name: string): string {
   if (!name) return '';
-  if (getLocale() !== 'zh') return name;
+  if (locale !== 'zh') return name;
   // The trade table last, because a building and the trade in it can share a
   // word and the building's is the one this asks for. It is consulted at all
   // because an age renames every trade — a farmer becomes an agricultural
@@ -102,8 +110,12 @@ export function tn(name: string): string {
 /** A trade, by its label or its key. The building of the same name is a different word. */
 export function tj(job: string): string {
   // The same guard as `tn`: a name that is not there is a blank, not a crash.
+  return tjAt(getLocale(), job);
+}
+
+function tjAt(locale: Locale, job: string): string {
   if (!job) return '';
-  if (getLocale() !== 'zh') return job;
+  if (locale !== 'zh') return job;
   return JOBS_ZH[job] ?? JOBS_ZH[job.toLowerCase()] ?? NAMES[job] ?? UI[job] ?? job;
 }
 
@@ -144,3 +156,35 @@ export const LOCALES: { code: Locale; label: string }[] = [
   { code: 'en', label: 'English' },
   { code: 'zh', label: '中文' },
 ];
+
+/**
+ * The translators, bound to the language React is rendering in.
+ *
+ * `t` and the rest read the choice this browser has stored, which is right
+ * everywhere the game draws itself on the client alone. A page the server
+ * renders is the one place it is not. The server has no browser, so it writes
+ * English; a component calling `t` straight would then hydrate Chinese over
+ * that English markup, and React, finding the two disagree, throws the page
+ * away and the visitor gets an error instead of a market.
+ *
+ * `useLocale` already answers English for the first client render and the real
+ * choice immediately after, so a component that translates through this agrees
+ * with the server's markup and switches a moment later. The wiki does the same
+ * thing by hand, by keeping its two languages in two components.
+ */
+export interface Text {
+  locale: Locale;
+  t: (text: string, vars?: Record<string, string | number>) => string;
+  tn: (name: string) => string;
+  tj: (job: string) => string;
+}
+
+export function useText(): Text {
+  const locale = useLocale();
+  return useMemo(() => ({
+    locale,
+    t: (text: string, vars?: Record<string, string | number>) => tAt(locale, text, vars),
+    tn: (name: string) => tnAt(locale, name),
+    tj: (job: string) => tjAt(locale, job),
+  }), [locale]);
+}

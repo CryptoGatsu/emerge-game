@@ -35,6 +35,7 @@ import { utcDay } from './accounts';
 import { spendBurn, verifyTransfer } from './burns';
 import { counter, hdel, hget, hgetall, hset, hsetWindow, incrBy, releaseLock, takeLock } from './kv';
 import { claimOf, readWorld } from './registry';
+import { noteTrade } from './tape';
 
 /** The share of the Gold in every trade that is burned. */
 export const TRADE_FEE = 0.05;
@@ -214,6 +215,13 @@ async function recordBoth(buyer: string, seller: string, entry: Omit<TradeRecord
   await Promise.all([
     record(buyer, { ...entry, side: 'bought', got: buyerSide.got, seed: buyerSide.seed, other: seller.toLowerCase(), otherName: sellerSide.name }),
     record(seller, { ...entry, side: 'sold', got: sellerSide.got, seed: sellerSide.seed, other: buyer.toLowerCase(), otherName: buyerSide.name }),
+    // And once onto the public tape, which is where the price of a thing comes
+    // from. Names only: both are already on the order this filled.
+    noteTrade({
+      at: entry.at, kind: entry.kind, resource: entry.resource, qty: entry.qty,
+      unitPrice: entry.unitPrice, burned: entry.burned,
+      sellerName: sellerSide.name, buyerName: buyerSide.name,
+    }),
   ]).catch(() => {});
 }
 

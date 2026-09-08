@@ -33,6 +33,7 @@
  * at; a gift applied there would vanish with the visit.
  */
 
+import { noteLandSale } from './tape';
 import { MAX_GIFT_GOLD, serverKey } from '../limits';
 import { HOME_CHART_INDEX, HOME_CHART_RESERVED, chartCapacity } from '../world/charts';
 import {
@@ -490,6 +491,15 @@ export async function transferClaim(seed: number, buyer: string, buyerName: stri
   if (world) {
     await publishWorld({ ...world, owner: row.owner, ownerName: buyerName }).catch(() => {});
   }
+
+  // What the plot actually went for, onto the public tape. Nothing recorded a
+  // completed sale before this, so asking prices were the only figures anybody
+  // had — which say what sellers hope for and nothing about what land is worth.
+  await noteLandSale({
+    at: Date.now(), seed, region: row.region, worldName: row.worldName, price: due,
+    sellerName: existing.ownerName ?? '', buyerName: buyerName.slice(0, 32),
+    era: row.era ?? 1, level: world?.level ?? null,
+  });
 
   // The seller's record stops carrying it.
   try {
