@@ -120,6 +120,8 @@ const HUD_INTERVAL = 180;
  * kilobytes rather than a field update.
  */
 const PUBLISH_INTERVAL = 45_000;
+/** How often an open world asks whether a later copy of it has been published elsewhere. */
+const RECONCILE_INTERVAL = 60_000;
 
 /**
  * How often the wallet's real token balance is re-read, in milliseconds.
@@ -1177,7 +1179,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     void reconcile();
     const back = () => { if (document.visibilityState === 'visible') void reconcileRef.current(); };
     document.addEventListener('visibilitychange', back);
-    return () => { document.removeEventListener('visibilitychange', back); };
+    /*
+     * And on a timer, because a window that never goes away never asked again.
+     *
+     * The read used to happen on opening the world and on the tab coming back
+     * into view, which covers a phone — it is hidden the moment you put it
+     * down — and misses a desktop entirely: a browser left open on a monitor
+     * is never hidden, so it sat on the copy it opened with while the same
+     * player built on their phone, and never showed a minute of it. A player
+     * reported exactly that. Asking once a minute costs one small read and
+     * means two devices converge on their own.
+     */
+    const timer = window.setInterval(() => { void reconcileRef.current(); }, RECONCILE_INTERVAL);
+    return () => {
+      document.removeEventListener('visibilitychange', back);
+      window.clearInterval(timer);
+    };
   }, [reconcile, spectating]);
 
   /*

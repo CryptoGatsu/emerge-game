@@ -8952,17 +8952,29 @@ export function eraGate(world: World): EraGate {
       { label: 'The plot expanded', done: !!world.expanded },
     ];
   } else if (next.id === 4) {
+    /*
+     * The works of the age you are leaving, not the one you are going to.
+     *
+     * This gate used to ask for a Hospital and a Stadium, and both belong to
+     * the modern age — so the only way to satisfy it was to already be there.
+     * Every plot in the industrial age was walled in: a player reported
+     * standing at 438 days against a 120-day requirement with every other box
+     * ticked and no way through. The same mistake sat on the gate above,
+     * which asked a modern city for an AI-age research campus. A gate asks
+     * for what the plot can actually raise where it stands; `eraGateSound`
+     * holds that to be true for all of them.
+     */
     checks = [
       { label: `${world.population} of 110 people`, done: world.population >= 110 },
       { label: `${count} of 75 in buildings, weighed by age`, done: count >= 75 },
-      { label: 'A Hospital and a Stadium', done: has('Hospital') && has('Stadium') },
+      { label: 'A Factory and a Railway Station', done: has('Factory') && has('Railway Station') },
       { label: 'The plot expanded', done: !!world.expanded },
     ];
   } else {
     checks = [
       { label: `${world.population} of 160 people`, done: world.population >= 160 },
       { label: `${count} of 100 in buildings, weighed by age`, done: count >= 100 },
-      { label: 'A Research Campus and a Power Plant', done: has('Research Campus') && has('Power Plant') },
+      { label: 'A Hospital and a Power Plant', done: has('Hospital') && has('Power Plant') },
       { label: 'The plot expanded', done: !!world.expanded },
       { label: 'Stewardship above 0.7', done: world.stewardship.score >= 0.7 },
     ];
@@ -8973,6 +8985,34 @@ export function eraGate(world: World): EraGate {
   const daysDone = have >= next.days;
   const ready = open && daysDone && checks.every((c) => c.done);
   return { era, next, open, days: { have, need: next.days }, checks, ready };
+}
+
+/** What each gate asks a plot to have standing, by the era it leads to. */
+export const ERA_GATE_BUILDINGS: Record<number, string[]> = {
+  2: ['Town Hall', 'Bank', 'School', 'Jail'],
+  3: ['Lab', 'Library'],
+  4: ['Factory', 'Railway Station'],
+  5: ['Hospital', 'Power Plant'],
+};
+
+/**
+ * Every gate asks only for what the plot can raise where it stands.
+ *
+ * A gate that names a building from the age beyond it cannot be passed at all,
+ * and that is not a hard requirement, it is a wall — two of the four gates were
+ * walls, and the top half of the game was unreachable. Checked rather than
+ * remembered, so adding a building to a gate cannot quietly close it again.
+ */
+export function eraGateSound(): { era: number; building: string; needs: number }[] {
+  const wrong: { era: number; building: string; needs: number }[] = [];
+  for (const [to, buildings] of Object.entries(ERA_GATE_BUILDINGS)) {
+    const from = Number(to) - 1;
+    for (const building of buildings) {
+      const needs = BUILDING_ERA[building] ?? 1;
+      if (needs > from) wrong.push({ era: from, building, needs });
+    }
+  }
+  return wrong;
 }
 
 /**

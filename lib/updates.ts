@@ -17,6 +17,15 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.9.2',
+    date: '2026-09-08',
+    title: 'The way out of the industrial age',
+    notes: [
+      'Two of the four era gates could not be passed at all. The step into the modern age asked for a Hospital and a Stadium, and both are modern-age buildings \u2014 so the only way to meet it was to already be there. The step into the AI age asked a modern city for an AI-age research campus, the same mistake one floor up. Every plot in the industrial age was walled in: a player reported standing at 438 days against a 120-day requirement with every other line ticked and no way through. A gate asks for what the plot can raise where it stands now. Into the modern age: a Factory and a Railway Station. Into the AI age: a Hospital and a Power Plant. Nothing else about either gate changed, and a check that runs with the tests makes sure no gate can quietly close again.',
+      'A settlement open on a computer keeps up with one played on a phone. The published copy was read when a world opened and whenever the tab came back into view \u2014 which covers a phone, hidden the moment you put it down, and misses a desktop entirely, because a window on a monitor is never hidden. It sat on the copy it opened with while the same player built somewhere else. It asks again every minute now, and picks up the later copy with a card saying so.',
+    ],
+  },
+  {
     version: '2.9.1',
     date: '2026-09-08',
     title: 'Whose earnings those are',
@@ -316,6 +325,15 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.9.2',
+    date: '2026-09-08',
+    title: '走出工业时代的路',
+    notes: [
+      '四道时代门槛里有两道根本无法通过。进入现代时代要求有医院和体育场，而这两者都是现代时代的建筑——也就是说，唯一满足它的办法是已经身处现代。进入人工智能时代则要求一座现代城市建起人工智能时代的研究园区，同样的错误在上一层重演。所有处于工业时代的地块都被堵死了：一位玩家报告说，120 天的要求他已经过了 438 天，其他每一条都打了勾，却依然无路可走。门槛现在只要求地块在当前所处的时代就能建造的东西。进入现代：工厂和火车站。进入人工智能时代：医院和发电厂。两道门槛的其他条件都没有改变，并且新增了一项随测试运行的检查，确保不会再有门槛被悄悄关上。',
+      '电脑上开着的聚落会跟上手机上的进度。过去只在打开世界时、以及标签页重新回到前台时读取已发布的副本——这适用于手机（放下就隐藏了），却完全漏掉了电脑：显示器上的窗口从不会被隐藏，于是它一直停留在打开时的那份副本上，而同一位玩家正在别处建设。现在每分钟会再问一次，并在发现更新的副本时接续下去，同时给出提示卡片。',
+    ],
+  },
   {
     version: '2.9.1',
     date: '2026-09-08',
