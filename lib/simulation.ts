@@ -8688,15 +8688,22 @@ export function buildingWorth(world: { buildings: Building[] }): number {
 export function ensureWorks(world: World) {
   if (world.works) return world.works;
   const { people, buildings } = citySize(world);
-  world.works = { level: levelForSize(people, buildings) };
+  world.works = { level: levelForSize(people, buildings, eraOf(world)) };
   return world.works;
 }
 
-/** The plot's city level, one to ten. */
+/**
+ * The plot's city level, one to ten, within the era it is in.
+ *
+ * A level is bought, but only up to one rung above what the settlement has
+ * actually grown into, so Gold alone cannot carry a hamlet to level ten. The
+ * era is passed through because the ten levels of the township are a bigger
+ * town than the ten of the settlement.
+ */
 export function cityLevel(world: World): number {
   const works = ensureWorks(world);
   const { people, buildings } = citySize(world);
-  return Math.max(1, Math.min(MAX_CITY_LEVEL, works.level, levelForSize(people, buildings) + 1));
+  return Math.max(1, Math.min(MAX_CITY_LEVEL, works.level, levelForSize(people, buildings, eraOf(world), true) + 1));
 }
 
 export interface CityGate {
@@ -8722,7 +8729,7 @@ export function cityGate(world: World): CityGate {
   if (level >= MAX_CITY_LEVEL) {
     return { level, next: null, people: { have: people, need: 0 }, buildings: { have: buildings, need: 0 }, cost: 0, grown: true, affordable: true, ready: false };
   }
-  const spec = cityLevelSpec(level + 1);
+  const spec = cityLevelSpec(level + 1, eraOf(world));
   const grown = people >= spec.people && buildings >= spec.buildings;
   const affordable = world.treasury >= spec.works;
   return {
@@ -9035,6 +9042,12 @@ export function setEra(world: World, era: number): boolean {
   if (target <= eraOf(world)) return false;
   world.era = target;
   world.eraSince = world.day;
+  // A new era is a new ladder. The level number goes back to one and the ten
+  // rungs ahead are a bigger city than the ten behind; because the reward runs
+  // on the rung of the whole fifty and not on this number, going back to one
+  // here is not a step down in what the plot earns. `ensureWorks` cannot do
+  // this for us — it only fills in a level that was never set.
+  world.works = { level: 1 };
   noteAttention(world);
   const spec = eraSpec(target);
   if (!world.unlockedAreas.includes(spec.name)) world.unlockedAreas.push(spec.name);

@@ -1,5 +1,6 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import React from 'react';
+import { cityLevels, cityLevelSpec, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
@@ -487,29 +488,57 @@ export default function Wiki() {
 
           <h3>City levels</h3>
           <p>
-            Since v2.0 the ceiling runs on what the plot has become, not only on its era. Every
-            plot has a <b>city level</b>, one to ten, read from the people living there and the
-            buildings standing. Size earns the next level; Gold pays for the public works that
-            confirm it. The CITY card in the Bank shows the level, what the next asks, and the
-            button. A plot&rsquo;s daily ceiling runs from <b>{n(PLOT_CEILING_MIN)}</b> at level
-            one to <b>{n(PLOT_CEILING_MAX)}</b> at level ten, times the era, so a level-ten city in
-            the AI era can earn up to {n(plotCeiling(10, 5))} a day and a fresh claim earns a
-            fraction of it. Growing what you have is worth more than claiming another plot.
+            The ceiling runs on what the plot has become, not only on its era. Every plot has a
+            <b> city level</b>, one to ten, read from the people living there and the buildings
+            standing. Size earns the next level; Gold pays for the public works that confirm it.
+            The CITY card in the Bank shows the level, what the next asks, and the button.
+          </p>
+          <p>
+            Each era has its own ten levels. Advancing puts the city back to level one <i>of the
+            new era</i>, where the ten rungs ahead are a bigger city than the ten behind — but the
+            two are one ladder of {LADDER_RUNGS}, and the reward runs up that ladder rather than
+            up the level number. So level one of the township pays a little <i>more</i> than level
+            ten of the settlement: the level resets and the earning never does. A plot&rsquo;s
+            daily ceiling runs from <b>{n(PLOT_CEILING_MIN)}</b> on the first rung to
+            <b> {n(PLOT_CEILING_MAX)}</b> on the last, and a fresh claim earns a fraction of it.
+            Growing what you have is worth more than claiming another plot.
+          </p>
+          <p>
+            Each era&rsquo;s tenth level asks for the size that the gate out of that era asks for,
+            and its first level is the size that got the plot in — so being ready for level ten and
+            being ready to advance are the same thing.
           </p>
           <table className="wiki-table">
-            <thead><tr><th>Level</th><th>People</th><th>Buildings</th><th>Public works</th><th>Ceiling (era 1)</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Level</th>
+                {ERAS.map((e) => <th key={e.id} colSpan={2}>{e.name}</th>)}
+              </tr>
+              <tr>
+                <th />
+                {ERAS.map((e) => <React.Fragment key={e.id}><th>People</th><th>Ceiling</th></React.Fragment>)}
+              </tr>
+            </thead>
             <tbody>
-              {CITY_LEVELS.map((row) => (
+              {cityLevels(1).map((row) => (
                 <tr key={row.level}>
                   <td>{row.level}</td>
-                  <td className="num">{row.people}</td>
-                  <td className="num">{row.buildings}</td>
-                  <td className="num">{row.works ? `${n(row.works)} Gold` : '—'}</td>
-                  <td className="num">{n(plotCeiling(row.level, 1))}</td>
+                  {ERAS.map((e) => (
+                    <React.Fragment key={e.id}>
+                      <td className="num">{cityLevelSpec(row.level, e.id).people}</td>
+                      <td className="num">{n(plotCeiling(row.level, e.id))}</td>
+                    </React.Fragment>
+                  ))}
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="wiki-note">
+            Buildings and the Gold each level&rsquo;s public works cost rise with the era too: the
+            settlement&rsquo;s tenth level asks {cityLevelSpec(10, 1).buildings} buildings and
+            {' '}{n(cityLevelSpec(10, 1).works)} Gold, the AI era&rsquo;s asks
+            {' '}{cityLevelSpec(10, 5).buildings} and {n(cityLevelSpec(10, 5).works)}.
+          </p>
           <p className="wiki-note">
             The payout route reads the level from the copy of your world the registry holds, the
             same way it reads the era, so the ceiling cannot be reached by editing a save. A city
@@ -1024,7 +1053,7 @@ export default function Wiki() {
             <li><b>Bigger buildings cost more</b>: a township form costs {formOf('Farm', 2).cost}&times; the settlement&rsquo;s in Gold and materials, an industrial one {formOf('Farm', 3).cost}&times;, a modern one {formOf('Farm', 4).cost}&times;, an AI one {formOf('Farm', 5).cost}&times;, with upkeep rising more slowly ({formOf('Farm', 2).upkeep}&times; to {formOf('Farm', 5).upkeep}&times;), so a merged town is a little cheaper to keep than the crowded one it was.</li>
             <li><b>The improvement cap is the age&rsquo;s</b>: {formOf('House', 1).cap} in a settlement, {formOf('House', 2).cap} from the township through the modern age, {formOf('House', 5).cap} in the AI age. A building keeps its level through a rebuild.</li>
             <li><b>The city level and the era gates count homes and workplaces by age.</b> A township home or workplace counts two settlement ones, an industrial four, a modern eight, an AI sixteen; a chapel or a factory is one building in any age. So a rebuilt town is at least the size it was, and a smaller, better city is not a lower one.</li>
-            <li><b>The daily stewardship ceiling rises {Math.round(ERA_YIELD_STEP * 100)}%</b> of the base, per age.</li>
+            <li><b>Ten fresh levels, and a higher ceiling on every one of them.</b> The city goes back to level one of the new age, and that first level already earns more than the last level of the age before it. The ten ahead reach higher than the ten behind could.</li>
             <li>The age&rsquo;s own buildings open, and the Build panel opens on them; earlier ages are a tab away, raised in the current age&rsquo;s form.</li>
           </ul>
           <h3>What a township changes</h3>

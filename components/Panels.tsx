@@ -1736,9 +1736,12 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
 
       <div className="connect-card city-card">
         <span className="eyebrow">{t('CITY LEVEL')}</span>
-        <h3>{t('Level {n} of {max}', { n: city.level, max: MAX_CITY_LEVEL })}</h3>
+        <h3>{t('{era} · level {n} of {max}', { era: tn(eraName(view.era.id)), n: city.level, max: MAX_CITY_LEVEL })}</h3>
         <p className="muted small">
-          {t('What the plot can earn runs on its level: a fresh claim earns a fraction of a city, and a level {max} city in the last era earns up to {top} {ticker} a day. Size earns the next level; Gold pays for it. This is where the treasury goes.', { max: MAX_CITY_LEVEL, top: plotCeiling(MAX_CITY_LEVEL, 5).toLocaleString(), ticker: TOKEN.ticker })}
+          {t('Every age has its own ten levels, and what the plot earns climbs through all fifty of them. Entering a new age puts the level back to one and the earning a little higher, never lower, so nothing you built is lost. Size earns the next level; Gold pays for it. This is where the treasury goes.')}
+        </p>
+        <p className="muted small">
+          {t('This level earns up to {here} {ticker} a day; the last level of the last age earns {top}.', { here: plotCeiling(city.level, view.era.id).toLocaleString(), top: plotCeiling(MAX_CITY_LEVEL, 5).toLocaleString(), ticker: TOKEN.ticker })}
         </p>
         {city.next ? (
           <>
@@ -1754,7 +1757,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
             </button>
           </>
         ) : (
-          <p className="muted small">{t('The city is at the top level.')}</p>
+          <p className="muted small">{t('The city is at the top level of its age. The next ten levels are on the other side of the era gate.')}</p>
         )}
         {cityNote && <p className="muted small">{cityNote}</p>}
         <div className="city-festival">

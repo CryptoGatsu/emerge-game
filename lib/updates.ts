@@ -17,6 +17,18 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.10',
+    date: '2026-09-08',
+    title: 'Ten levels to every age',
+    notes: [
+      'Every age now has its own ten levels. The settlement has ten, the township has ten above those, and so on to the AI era \u2014 fifty in all. Entering a new age puts the city back to level one of that age, where the ten levels ahead are a bigger city than the ten behind. This came from a player, and it is the right shape: each age is a complete climb of its own, and the whole game is a ladder you can see the top of.',
+      'Going back to level one is not a step down in what you earn. The reward runs up the fifty rungs, not up the level number, so level one of the township pays a little \u2014 about five per cent \u2014 *more* than level ten of the settlement. Every rung pays more than the one below it, all fifty of them, with no cliff anywhere and no cliff at an age boundary. Nothing you built stops counting when you advance; the buildings, the trades and the improvements all come with you, in the new age\u2019s own forms.',
+      'Each age\u2019s tenth level asks for exactly what the gate out of that age asks for, and its first level is the size that got you in. So \u201cready for level ten\u201d and \u201cready to advance\u201d became the same sentence, and leaving an age now means finishing it. The gate used to want level 3, 5, 7 or 9 of a single ladder that ran across every age, which meant an age could be left half-built and the level number told you nothing about the age you were in.',
+      'A level you have paid for is no longer lost to a bad winter. The level is held while the city that earned it is still there, and one death used to be enough to cross a rung and take it back \u2014 played out over a few hundred days, the level flickered up and down. Rungs are further apart now, and holding a level asks for a little less than reaching it did. A real decline still costs you the level; a wobble does not.',
+      'What a plot can earn at the very top is unchanged at 250,000 a day, and a fresh claim still starts at 40,000. The public works that pay for each level are cheap in the settlement era \u2014 55,500 Gold for all ten, about what the old gate asked to have in the treasury \u2014 and steep at the top, where a single AI-era level costs 450,000. Gold has somewhere to go at every stage of the game.',
+    ],
+  },
+  {
     version: '2.9.4',
     date: '2026-09-08',
     title: 'No daily ceiling on selling Gold',
@@ -344,6 +356,18 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.10',
+    date: '2026-09-08',
+    title: '每个时代各有十级',
+    notes: [
+      '现在每个时代都有属于自己的十级。聚落有十级，城镇在其之上另有十级，一直到人工智能时代——总共五十级。进入新时代会把城市放回该时代的第一级，而前方的十级是一座比身后十级更大的城市。这个想法来自一位玩家，而且形状是对的：每个时代都是一段完整的攀登，整个游戏则是一条你能望见顶端的阶梯。',
+      '退回一级并不意味着收益下降。奖励沿着这五十级上升，而不是沿着等级数字，所以城镇时代的一级比聚落时代的十级还要高出大约百分之五。五十级中的每一级都比下面那一级给得多，任何地方都没有断崖，时代交界处也没有。推进时代不会让你建起来的任何东西作废：建筑、行业和升级都会随你一同进入新时代，并以新时代自己的形态呈现。',
+      '每个时代的第十级所要求的，恰好就是离开该时代的门槛所要求的；而它的第一级就是当初让你进来的规模。于是“够格升到十级”和“够格推进时代”成了同一句话，离开一个时代意味着把它走完。过去门槛要求的是一条横跨所有时代的单一阶梯上的第 3、5、7、9 级，这意味着一个时代可以只建到一半就离开，而等级数字完全说明不了你身处哪个时代。',
+      '你花钱买下的等级不会再被一个严冬夺走。只要挣得它的那座城市还在，等级就保留，而过去一次死亡就足以跨过一个刻度把它收回——连续跑上几百天，等级会来回跳动。现在刻度之间的间距更大了，而且保住一个等级所需要的比达到它时略低一些。真正的衰退依然会让你失去等级；小幅波动不会。',
+      '地块在最顶端能赚到的数字没有变，仍是每天 250,000，新认领的地块仍从 40,000 起步。支付每一级的公共工程在聚落时代很便宜——十级合计 55,500 金币，大致相当于旧门槛要求金库里有的数目——而在顶端非常昂贵：人工智能时代的单独一级就要 450,000。金币在游戏的每个阶段都有去处。',
+    ],
+  },
   {
     version: '2.9.4',
     date: '2026-09-08',

@@ -53,59 +53,151 @@ export const ERAS: EraSpec[] = [
 ];
 
 /**
- * Rewards grow with the era. Each era a plot advances to lifts its daily
- * stewardship ceiling by this share of the base: a township earns up to 15%
- * more than a settlement, an AI-era city up to 60% more.
+ * The old per-era step on a plot's ceiling.
+ *
+ * A plot's ceiling no longer works this way: the era is a position on the
+ * fifty-rung ladder below rather than a multiplier over a ten-level one, which
+ * is what lets a city go back to level one of a new age without losing income.
+ * This is kept for the wallet-wide ceiling, which is still read per era.
  */
 export const ERA_YIELD_STEP = 0.15;
 export const eraYield = (era: number) => 1 + Math.max(0, Math.min(ERAS.length - 1, Math.round(era) - 1)) * ERA_YIELD_STEP;
 
 /**
- * City levels.
+ * City levels, ten to an era.
  *
- * A plot's level is what it has become: the people living there and the
- * buildings standing, and the public works paid for in Gold to carry the
- * place to the next level. Rewards run on the level, so a developed city
- * earns more than a fresh claim, and the Gold a city makes has somewhere to
- * go. Ten levels, each asking for more of both.
+ * A plot's level is what it has become inside the age it is in: the people
+ * living there, the buildings standing, and the public works paid for in Gold
+ * to carry the place to the next level. Advancing an era puts the city back to
+ * level one *of that era*, and the ten levels ahead of it are a bigger city
+ * than the ten behind.
+ *
+ * The two together are one ladder, not two. A plot's rung is
+ * `(era - 1) * 10 + level`, one to fifty, and the reward ceiling runs up that
+ * rung — so the level number resets and the earning never does. Level one of
+ * the township pays a little *more* than level ten of the settlement, which is
+ * the whole point: a player who advances is never worse off for it, and the
+ * work behind them stays in the ladder they are standing on.
+ *
+ * Each era's tenth level is the size the next era's gate asks for, and its
+ * first is the size that got the plot in. So "ready for level ten" and "ready
+ * to advance" are the same sentence, and the ladder has no dead rungs.
  */
 export interface CityLevel { level: number; people: number; buildings: number; works: number }
-export const CITY_LEVELS: CityLevel[] = [
-  { level: 1, people: 0, buildings: 0, works: 0 },
-  { level: 2, people: 12, buildings: 8, works: 1_500 },
-  { level: 3, people: 20, buildings: 14, works: 4_000 },
-  { level: 4, people: 30, buildings: 20, works: 8_000 },
-  { level: 5, people: 45, buildings: 28, works: 15_000 },
-  { level: 6, people: 60, buildings: 38, works: 25_000 },
-  { level: 7, people: 80, buildings: 50, works: 40_000 },
-  { level: 8, people: 105, buildings: 65, works: 60_000 },
-  { level: 9, people: 130, buildings: 80, works: 90_000 },
-  { level: 10, people: 160, buildings: 100, works: 130_000 },
-];
-export const MAX_CITY_LEVEL = CITY_LEVELS.length;
-/** The highest level a settlement of this size has earned by size alone. */
-export function levelForSize(people: number, buildings: number): number {
-  let level = 1;
-  for (const row of CITY_LEVELS) if (people >= row.people && buildings >= row.buildings) level = row.level;
-  return level;
-}
-export const cityLevelSpec = (level: number): CityLevel => CITY_LEVELS[Math.max(1, Math.min(MAX_CITY_LEVEL, Math.round(level))) - 1];
+
+/** Levels to an era, and rungs on the whole ladder. */
+export const LEVELS_PER_ERA = 10;
+export const MAX_CITY_LEVEL = LEVELS_PER_ERA;
+export const LADDER_RUNGS = 5 * LEVELS_PER_ERA;
 
 /**
- * What a plot can earn in a real day, from its level and its era.
+ * Where each era's ladder starts and ends, in people and in buildings.
  *
- * A fresh claim earns a fraction of a city: the ceiling runs from
- * PLOT_CEILING_MIN at level one to PLOT_CEILING_MAX at level ten, and the era
- * multiplies that. This is what makes developing a city worth more than
- * claiming another.
+ * The low end is what the plot had when it arrived in the era; the high end is
+ * what the gate out of it asks for. Era one starts at the size a claim is
+ * founded with, so a fresh plot is level one rather than level four.
+ */
+const SIZE: Record<number, { people: [number, number]; buildings: [number, number] }> = {
+  1: { people: [8, 40], buildings: [6, 30] },
+  2: { people: [40, 70], buildings: [30, 50] },
+  3: { people: [70, 110], buildings: [50, 75] },
+  4: { people: [110, 160], buildings: [75, 100] },
+  5: { people: [160, 240], buildings: [100, 140] },
+};
+
+/**
+ * Sizes are spread evenly across an era's ten levels.
+ *
+ * Not a curve. A back-loaded one bunched the first rungs of the settlement era
+ * a single person apart — level two at nine people, level three at ten — and a
+ * level is held only while the size that earned it is still there, so one death
+ * in a hard winter took back a level the player had paid Gold for. Played out,
+ * the level flickered up and down for hundreds of days. Even spacing puts three
+ * or four people between rungs, which together with the one level of slack
+ * below means a level is lost only to a real decline and never to a wobble.
+ *
+ * The climb still gets harder as the game goes on; that is carried by the
+ * anchors themselves, since an era's ten levels sit above the whole of the era
+ * before it.
+ */
+const between = ([lo, hi]: [number, number], level: number) =>
+  Math.round(lo + (hi - lo) * ((level - 1) / (LEVELS_PER_ERA - 1)));
+
+/**
+ * What the public works of each level cost, before the era's multiplier.
+ *
+ * Deliberately modest in the settlement era and steep at the top. Reaching the
+ * tenth level is now what opens the next era, so the first era's whole climb
+ * has to cost about what the old gate out of it asked for — a few tens of
+ * thousands — or the age nobody could leave would be the first one instead of
+ * the third. The multiplier is where the growth lives: the same rung costs a
+ * settlement 1x and an AI-era city 25x, against a city many times the size.
+ */
+const WORKS: number[] = [0, 400, 900, 1_600, 2_600, 4_000, 6_000, 9_000, 13_000, 18_000];
+const WORKS_ERA: Record<number, number> = { 1: 1, 2: 3, 3: 7, 4: 14, 5: 25 };
+
+const eraOfLevel = (era: number) => Math.max(1, Math.min(5, Math.round(era)));
+const levelIn = (level: number) => Math.max(1, Math.min(LEVELS_PER_ERA, Math.round(level)));
+
+/** What one level of one era asks for. */
+export function cityLevelSpec(level: number, era = 1): CityLevel {
+  const e = eraOfLevel(era), l = levelIn(level);
+  return {
+    level: l,
+    people: between(SIZE[e].people, l),
+    buildings: between(SIZE[e].buildings, l),
+    works: Math.round(WORKS[l - 1] * WORKS_ERA[e] / 500) * 500,
+  };
+}
+
+/** An era's whole table, for the wiki and the guide. */
+export const cityLevels = (era = 1): CityLevel[] =>
+  Array.from({ length: LEVELS_PER_ERA }, (_, i) => cityLevelSpec(i + 1, era));
+
+/**
+ * How far below a level's size the city may fall and still be counted at it.
+ *
+ * A level is earned by size and paid for in Gold, and it is not kept once the
+ * city that earned it is gone — otherwise a player could buy the top level and
+ * walk away from the town. But "gone" has to mean a decline, not a bad winter:
+ * with rungs three or four people apart, an exact reading took a paid-for
+ * level away over a single death and handed it back a week later, over and
+ * over. Gaining a level asks for the whole size; holding one asks for most of
+ * it.
+ */
+export const LEVEL_HOLD = 0.85;
+
+/**
+ * The highest level of this era a settlement of this size has earned by size
+ * alone. `hold` relaxes the bar to what it takes to keep a level rather than
+ * to reach it.
+ */
+export function levelForSize(people: number, buildings: number, era = 1, hold = false): number {
+  const bar = hold ? LEVEL_HOLD : 1;
+  let level = 1;
+  for (const row of cityLevels(era)) {
+    if (people >= row.people * bar && buildings >= row.buildings * bar) level = row.level;
+  }
+  return level;
+}
+
+/** Where a plot stands on the whole fifty-rung ladder. */
+export const ladderRung = (level: number, era: number) => (eraOfLevel(era) - 1) * LEVELS_PER_ERA + levelIn(level);
+
+/**
+ * What a plot can earn in a real day, from where it stands on the ladder.
+ *
+ * One straight line from the bottom rung to the top, so every level is worth
+ * the same step up and no era boundary is a cliff in either direction. The era
+ * is in the rung rather than a multiplier on top of it, which is what stops a
+ * reset to level one from being a pay cut.
  */
 export const PLOT_CEILING_MIN = 40_000;
-/** Level ten, before the era: times the AI era's yield this is exactly 250,000 a day. */
-export const PLOT_CEILING_MAX = 156_250;
+/** The last rung: a level-ten city in the AI era, and the most any plot can earn. */
+export const PLOT_CEILING_MAX = 250_000;
 export function plotCeiling(level: number, era: number): number {
-  const l = Math.max(1, Math.min(MAX_CITY_LEVEL, Math.round(level)));
-  const base = PLOT_CEILING_MIN + (PLOT_CEILING_MAX - PLOT_CEILING_MIN) * ((l - 1) / (MAX_CITY_LEVEL - 1));
-  return Math.round(base * eraYield(era));
+  const rung = ladderRung(level, era);
+  return Math.round(PLOT_CEILING_MIN + (PLOT_CEILING_MAX - PLOT_CEILING_MIN) * ((rung - 1) / (LADDER_RUNGS - 1)));
 }
 
 /** A charter: $EMERGE for a share more on the plot's ceiling, for a while. */
@@ -129,7 +221,13 @@ export const BUILDERS_DISCOUNT = 0.25;
 export const charterMultiplier = (charterUntil: number | undefined, now = Date.now()) => (charterUntil && charterUntil > now ? 1 + CHARTER_BONUS : 1);
 
 /** The city level each era asks for, on top of its own checklist. */
-export const ERA_CITY_LEVEL: Record<number, number> = { 2: 3, 3: 5, 4: 7, 5: 9 };
+/**
+ * The level a plot must reach to leave its era: the top of that era's ladder,
+ * every time. It used to be 3, 5, 7 and 9 of one ten-level table spanning the
+ * whole game, which meant an era could be left half-climbed and the level
+ * number said nothing about the age it was in.
+ */
+export const ERA_CITY_LEVEL: Record<number, number> = { 2: 10, 3: 10, 4: 10, 5: 10 };
 
 /** How far the game has been built. Eras past this are described, not reachable. */
 export const OPEN_ERA: EraId = 5;

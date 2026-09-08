@@ -1,5 +1,6 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, ERA_YIELD_STEP, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import React from 'react';
+import { cityLevels, cityLevelSpec, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
@@ -257,19 +258,36 @@ export function WikiZh() {
           <p className="wiki-note">建造、拆除、搬动人，以及聚落内部的其他一切花的是金币，不是 {T}。金币是聚落自己的钱，永远不会离开它。</p>
           <h3>扩建地块</h3>
           <p>扩建会让地块本身变大。你现有土地的四周会出现一圈新地——约多出一半的土地——河流延伸进去，上面有野生动物，树木任你清除或直接建在上面。你建的东西一样不动：聚落留在原地，边界向外推。费用 {n(EXPAND_COST_EMERGE)} {T}，和其他收费一样销毁，<b>每块地只能买一次</b>，在世界里的"链上"面板购买。登记处会把它记在地块上，所以它跟着土地走到任何设备，地块出售时也跟着新主人。</p>
-          <h3>时代给得更多</h3>
-          <p>地块每推进一个时代，每日上限提高基础值的 15%：城镇比聚落最多多 15%，工业城市多 30%，现代多 45%，人工智能时代的城市多 60%。管理评分和关注规则不变，变的是它们相乘的上限。支付接口从地块记录读取时代，而该记录只有经过门槛与销毁验证的推进才能提高，改存档得不到更高的上限。</p>
-          <h3>城市等级</h3>
-          <p>从 v2.0 起，上限取决于地块已经成为什么，而不只是它的时代。每块地都有一个<b>城市等级</b>，一到十级，由居住人口和完好建筑数决定。规模让你有资格升级，金币支付确认升级的公共工程。银行里的"城市"卡片显示等级、下一级的要求和按钮。地块的每日上限从一级的 <b>{n(PLOT_CEILING_MIN)}</b> 到十级的 <b>{n(PLOT_CEILING_MAX)}</b>，再乘以时代，所以人工智能时代的十级城市每天最多可赚 {n(plotCeiling(10, 5))}，而新认领的地块只能赚到它的零头。把手里的地块发展好比再认领一块更值。</p>
+          <h3>城市等级：每个时代各十级</h3>
+          <p>上限取决于地块已经成为什么，而不只是它的时代。每块地都有一个<b>城市等级</b>，一到十级，由居住人口和完好建筑数决定。规模让你有资格升级，金币支付确认升级的公共工程。银行里的“城市”卡片显示等级、下一级的要求和按钮。</p>
+          <p>每个时代都有属于自己的十级。推进时代会把城市放回<i>新时代的</i>一级，而前方的十级是一座比身后十级更大的城市——但两者是同一条 {LADDER_RUNGS} 级的阶梯，奖励沿着这条阶梯上升，而不是沿着等级数字。因此城镇时代的一级比聚落时代的十级<i>还要略高一点</i>：等级重置了，收益从不重置。地块的每日上限从第一级的 <b>{n(PLOT_CEILING_MIN)}</b> 到最后一级的 <b>{n(PLOT_CEILING_MAX)}</b>，新认领的地块只能赚到它的零头。把手里的地块发展好比再认领一块更值。</p>
+          <p>每个时代的第十级所要求的规模，正是离开该时代的门槛所要求的规模；而它的第一级就是当初进入这个时代时的规模——所以“够格升到十级”和“够格推进时代”是同一件事。</p>
           <table className="wiki-table">
-            <thead><tr><th>等级</th><th>人口</th><th>建筑</th><th>公共工程</th><th>上限（第一时代）</th></tr></thead>
+            <thead>
+              <tr>
+                <th>等级</th>
+                {ERAS.map((e) => <th key={e.id} colSpan={2}>{['聚落', '城镇', '工业', '现代', '人工智能'][e.id - 1]}</th>)}
+              </tr>
+              <tr>
+                <th />
+                {ERAS.map((e) => <React.Fragment key={e.id}><th>人口</th><th>上限</th></React.Fragment>)}
+              </tr>
+            </thead>
             <tbody>
-              {CITY_LEVELS.map((row) => (
-                <tr key={row.level}><td>{row.level}</td><td className="num">{row.people}</td><td className="num">{row.buildings}</td><td className="num">{row.works ? `${n(row.works)} 金币` : '—'}</td><td className="num">{n(plotCeiling(row.level, 1))}</td></tr>
+              {cityLevels(1).map((row) => (
+                <tr key={row.level}>
+                  <td>{row.level}</td>
+                  {ERAS.map((e) => (
+                    <React.Fragment key={e.id}>
+                      <td className="num">{cityLevelSpec(row.level, e.id).people}</td>
+                      <td className="num">{n(plotCeiling(row.level, e.id))}</td>
+                    </React.Fragment>
+                  ))}
+                </tr>
               ))}
             </tbody>
           </table>
-          <p className="wiki-note">支付接口从登记处保存的世界副本读取等级，和读取时代一样，所以改存档得不到更高的上限。v2.0 到来时已经有四级规模的城市就是四级城市，已经长到的等级不用付钱。时代门槛也要求等级：城镇三级、工业五级、现代七级、人工智能九级。</p>
+          <p className="wiki-note">建筑数和每级公共工程所需的金币也随时代上升：聚落时代的十级需要 {cityLevelSpec(10, 1).buildings} 座建筑和 {n(cityLevelSpec(10, 1).works)} 金币，人工智能时代的十级需要 {cityLevelSpec(10, 5).buildings} 座和 {n(cityLevelSpec(10, 5).works)} 金币。支付接口从登记处保存的世界副本读取等级，和读取时代一样，所以改存档得不到更高的上限。要离开当前时代，必须先达到本时代的第十级。</p>
           <p><b>特许状</b>让上限提高 {Math.round(CHARTER_BONUS * 100)}%，为期 {CHARTER_DAYS} 天，价格是地块自身上限的四天：新地块 {n(charterCost(1, 1))} {T}，顶级城市 {n(charterCost(10, 5))}，各等级同样划算。有效期内再买会累加天数。它记录在地块记录上，跟着地块走到任何设备，支付接口也会计入。</p>
           <h3>GLD 分红</h3>
           <p>每笔收费的 {pct(CHARGE_DIVIDEND_SHARE)} 进入分红池。每周一金库把其中 {pct(DIVIDEND_DEV_SHARE)} 送往开发，其余在 Robinhood Chain 上兑换成 GLD，并记到持有者名下：{pct(DIVIDEND_LAND_SHARE)} 归土地，按每块地被裁定的等级和主人当周在场天数加权；{pct(DIVIDEND_STAKE_SHARE)} 归<b>软质押</b>——那是登记而不是锁仓：在银行的"分红"卡片登记一次，你整周的最低 {T} 余额即计入，{n(STAKE_MIN_EMERGE)} 起。周中卖出即放弃本周。GLD 记在你的钱包名下直到你领取，由金库发送。结算记录在公开账本 <code>/api/dividend</code>。</p>
@@ -510,7 +528,7 @@ export function WikiZh() {
             <li><b>更大的建筑更贵</b>：城镇形态的金币和材料是聚落的 {formOf('Farm', 2).cost} 倍，工业 {formOf('Farm', 3).cost} 倍，现代 {formOf('Farm', 4).cost} 倍，人工智能 {formOf('Farm', 5).cost} 倍；维护费涨得慢一些（{formOf('Farm', 2).upkeep} 倍到 {formOf('Farm', 5).upkeep} 倍），所以合并后的城比原来拥挤的那座略便宜。</li>
             <li><b>升级上限看时代</b>：聚落 {formOf('House', 1).cap} 级，城镇到现代 {formOf('House', 2).cap} 级，人工智能时代 {formOf('House', 5).cap} 级。重建时建筑保留等级。</li>
             <li><b>城市等级和时代门槛按时代计算住房和工作场所</b>：一栋城镇的住房或作坊算两栋聚落的，工业算四栋，现代八栋，人工智能十六栋；礼拜堂或工厂在任何时代都算一栋。所以重建后的城至少和原来一样大，更小更好的城不会更低级。</li>
-            <li><b>每日管理收益上限提高基数的 {Math.round(ERA_YIELD_STEP * 100)}%</b>。</li>
+            <li><b>十个全新的等级，而且每一级的上限都更高。</b>城市回到新时代的一级，而这第一级已经比上一个时代的最后一级赚得更多。前方的十级能够到的高度，是身后那十级到不了的。</li>
             <li>本时代的建筑开放，建造面板默认打开它们；早期时代在旁边的标签里。</li>
           </ul>
           <h3>城镇改变了什么</h3>
