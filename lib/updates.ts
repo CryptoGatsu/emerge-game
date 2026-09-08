@@ -17,6 +17,15 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.9.1',
+    date: '2026-09-08',
+    title: 'Whose earnings those are',
+    notes: [
+      'The Bank says which wallet\u2019s earnings it is showing. The balance under COLLECT EARNINGS has always been the wallet\u2019s, added up across every plot it holds \u2014 but the Bank is read from inside one town, and the line said only \u201cAvailable\u201d. A player who claimed a second plot yesterday opened its Bank, saw their whole wallet\u2019s earnings sitting there, and reported it as land inheriting the earnings of other land. Nothing was inherited and nothing was ever payable twice; the label was not saying what it counted. It now reads \u201cAvailable, this wallet across all its plots\u201d, with a second line for what this plot itself has earned.',
+      'What the vault actually pays has never come from that figure, and does not now. It is judged on the server from the copy of the world you last published \u2014 its level, its era, its stewardship, your presence and your attention \u2014 and then against each plot\u2019s own day. A plot claimed today is judged at the bottom level whatever any browser shows. A plot\u2019s day of earning is spent once and cannot be spent again by anybody, including a wallet the land is handed to afterwards.',
+    ],
+  },
+  {
     version: '2.9',
     date: '2026-09-08',
     title: 'Gold to be managed',
@@ -307,6 +316,15 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.9.1',
+    date: '2026-09-08',
+    title: '那是谁的收益',
+    notes: [
+      '银行会说明显示的是哪个钱包的收益。“收取收益”下的余额一直是钱包的，把名下所有地块合计在一起——但银行是在某一座城镇里打开的，而那一行只写了“可用”。一位玩家昨天认领了第二块地，打开它的银行，看到整个钱包的收益摆在那里，于是报告说土地继承了其他土地的收益。没有任何东西被继承，也从来不会被重复支付；只是标签没有说清它统计的是什么。现在它写作“可用（这个钱包名下所有地块合计）”，并另起一行显示本地块自己赚得的部分。',
+      '金库实际支付的金额从来不取决于那个数字，现在也不。它由服务器依据你最近发布的世界副本裁定——等级、时代、经营状况、你的在场与关注——再按每块地自己当天的额度结算。今天认领的地块，无论浏览器显示什么，都按最低等级裁定。一块地当天的收益额度只能被领取一次，任何人都不能再领第二次，包括之后接手这块地的钱包。',
+    ],
+  },
   {
     version: '2.9',
     date: '2026-09-08',

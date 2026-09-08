@@ -376,6 +376,8 @@ export const UI: Record<string, string> = {
   'Put it up': '挂出', 'You have nothing on the exchange.': '你在交易所没有挂单。',
   'History': '成交记录', 'Bought': '买入', 'Sold': '卖出',
   'Idle Gold': '闲置金币',
+  'Available, this wallet across all its plots': '可用（这个钱包名下所有地块合计）',
+  'Of that, earned by this plot': '其中本地块赚得',
   'Your payment is on the exchange\u2019s books; it finishes by itself.': '你的付款已记入交易所账目，会自动完成。',
   '{n} Gold, paid {tx}': '{n} 金币，付款 {tx}',
   'Nothing bought or sold yet. What you trade here is written down, both sides of it.': '还没有买卖记录。在这里成交的每一笔，买卖双方都会记录下来。',

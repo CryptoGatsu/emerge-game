@@ -1822,7 +1822,19 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
             onChange={(e) => setClaimAmount(e.target.value.replace(/[^0-9]/g, ''))}
           />
         </label>
-        <div className="vault-line"><span>{t('Available')}</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
+        {/*
+          * Whose figure this is, said on the line itself.
+          *
+          * The balance is the wallet's, earned across every plot it holds,
+          * and the Bank is read inside one plot — so a player who claimed a
+          * second plot yesterday saw their whole wallet's earnings sitting in
+          * the new town's Bank and reported it as land inheriting earnings
+          * from other land. Nothing was inherited and nothing was payable
+          * twice; the label was simply not saying what it counted. It says it
+          * now, with this plot's own share beside it.
+          */}
+        <div className="vault-line"><span>{t('Available, this wallet across all its plots')}</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
+        <div className="vault-line"><span>{t('Of that, earned by this plot')}</span><b>{Math.floor(steward.lifetime).toLocaleString()} {TOKEN.ticker}</b></div>
         <div className="vault-line burn"><span>{t('Burn')}</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
         {history?.room && collectable !== null && (
           <div className="vault-line">
