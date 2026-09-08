@@ -21,7 +21,9 @@ export interface TradeRecord {
   id: string; at: number; side: 'bought' | 'sold'; kind: 'resource' | 'gold';
   resource?: Resource; qty: number; unitPrice: number; burned: number; got: number; seed: number; other: string; otherName: string;
 }
-export interface ExchangeView { orders: ExchangeOrder[]; owed: Delivery[]; history: TradeRecord[]; terms: ExchangeTerms; shared: boolean; degraded?: boolean }
+/** A payment made and not yet settled, as the server holds it. */
+export interface PaidIntent { txHash: string; id: string; buyer: string; seed: number; qty: number; at: number; problem?: string; tries?: number }
+export interface ExchangeView { orders: ExchangeOrder[]; owed: Delivery[]; history: TradeRecord[]; paid: PaidIntent[]; terms: ExchangeTerms; shared: boolean; degraded?: boolean }
 
 const DEFAULT_TERMS: ExchangeTerms = { fee: 0.05, dailyGoldCap: 20_000, minGoldLot: 100, maxGoodsLot: 5_000 };
 
@@ -31,7 +33,7 @@ export async function fetchExchange(seed: number | null, address: string | null 
     const response = await fetch(`/api/exchange${query ? `?${query}` : ''}`, { cache: 'no-store' });
     if (!response.ok) return null;
     const json = (await response.json()) as Partial<ExchangeView>;
-    return { orders: json.orders ?? [], owed: json.owed ?? [], history: json.history ?? [], terms: json.terms ?? DEFAULT_TERMS, shared: !!json.shared, degraded: json.degraded };
+    return { orders: json.orders ?? [], owed: json.owed ?? [], history: json.history ?? [], paid: json.paid ?? [], terms: json.terms ?? DEFAULT_TERMS, shared: !!json.shared, degraded: json.degraded };
   } catch {
     return null;
   }
@@ -123,10 +125,42 @@ export async function buyGold(ledger: VaultLedger, address: string, name: string
   }
   const pending: PendingPurchase = { id: order.id, seed, qty, txHash: paid.txHash, at: Date.now(), address: address.toLowerCase() };
   rememberPending(pending);
+  /*
+   * Tell the server the money has moved, before asking it for anything.
+   *
+   * This browser used to be the only thing that knew: it paid the seller and
+   * then asked for the Gold, and a refusal it could not retry — a lapsed
+   * session, a store that blinked, a five-hundred — dropped the receipt and
+   * the money was gone with no record of it anywhere. A player lost $EMERGE
+   * that way. The hash goes on the server's books first now; settling is
+   * something either side can retry afterwards, for as long as it takes.
+   */
+  if (paid.txHash) {
+    const noted = await post<{ recorded: true; delivered: Delivery[] }>({ action: 'paid', address, name, seed, id: order.id, qty, txHash: paid.txHash });
+    if (noted.ok && noted.delivered?.length) {
+      rememberPending(null, pending.id);
+      const d = noted.delivered[0];
+      return { ok: true, delivery: d, paid: price, burned: 0, remaining: 0, ledger: paid.ledger };
+    }
+  }
   const r = await settle(address, name, pending);
   if (r.ok) { rememberPending(null, pending.id); return { ...r, ledger: paid.ledger }; }
-  if (!r.retry) rememberPending(null, pending.id);
-  return { ok: false, reason: r.retry ? `${r.reason} Your payment is safe and the Gold is still coming: the purchase finishes by itself, and “Finish a paid purchase” hands it in now.` : r.reason };
+  /*
+   * The receipt is kept unless the chain says this payment was never valid.
+   * It used to be dropped on any refusal that was not marked retryable, which
+   * threw away the only record of money that had already moved.
+   */
+  if (spent(r.reason)) rememberPending(null, pending.id);
+  return { ok: false, reason: `${r.reason} Your payment is on the exchange's books and the Gold is still coming: the purchase finishes by itself.` };
+}
+
+/**
+ * Whether a refusal means this receipt is finished with — either the trade
+ * went through already, or the payment can never be right. Anything else is
+ * kept and tried again.
+ */
+function spent(reason: string): boolean {
+  return /already used|failed on chain|different wallet|not a transaction hash/i.test(reason);
 }
 
 /**
@@ -137,24 +171,31 @@ export async function buyGold(ledger: VaultLedger, address: string, name: string
  * settled is left alone for the next round; one the chain has refused for
  * good is dropped.
  */
-export async function resumePending(address: string, name: string): Promise<Settled[]> {
-  const settled: Settled[] = [];
+export async function resumePending(address: string, name: string): Promise<{ delivery: Delivery }[]> {
+  const out: { delivery: Delivery }[] = [];
+  // The server's own record first: it settles payments this browser may never
+  // have known about, including ones made on another device.
+  const mine = await post<{ delivered: Delivery[] }>({ action: 'settleMine', address, name });
+  if (mine.ok) for (const d of mine.delivered ?? []) out.push({ delivery: d });
   for (const p of pendingPurchases(address)) {
     const r = await settle(address, name, p, 1);
-    if (r.ok) { settled.push(r); rememberPending(null, p.id); }
-    else if (!r.retry) rememberPending(null, p.id);
+    if (r.ok) { out.push(r); rememberPending(null, p.id); }
+    else if (spent(r.reason)) rememberPending(null, p.id);
   }
-  return settled;
+  return out;
 }
 
 /** Hand every kept receipt in again. Returns what was settled, and the first refusal. */
 export async function finishPending(address: string, name: string): Promise<{ settled: Settled[]; reason: string | null }> {
   const settled: Settled[] = [];
   let reason: string | null = null;
+  const mine = await post<{ delivered: Delivery[]; problems: string[] }>({ action: 'settleMine', address, name });
+  if (mine.ok) for (const d of mine.delivered ?? []) settled.push({ delivery: d, paid: 0, burned: 0, remaining: 0 });
   for (const p of pendingPurchases(address)) {
     const r = await settle(address, name, p, 3);
     if (r.ok) { settled.push(r); rememberPending(null, p.id); }
-    else { if (!r.retry) rememberPending(null, p.id); reason ??= r.reason; }
+    else { if (spent(r.reason)) rememberPending(null, p.id); reason ??= r.reason; }
   }
+  if (!settled.length && !reason && mine.ok && mine.problems?.length) reason = mine.problems[0];
   return { settled, reason };
 }

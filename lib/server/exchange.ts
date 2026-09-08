@@ -329,6 +329,124 @@ export async function reserveGold(id: string, buyer: string, qty: number): Promi
   }, soonMsg);
 }
 
+/*
+ * How long a hold stands once the buyer says they have paid.
+ *
+ * A reservation is fifteen minutes because that is a generous time to press a
+ * button in a wallet. But a payment that has left the wallet and is waiting on
+ * the chain must not lose its place in the lot because the confirmations were
+ * slow, so recording the payment firms the hold for a day. Nothing can be sold
+ * or taken down from under money that has actually moved.
+ */
+export const PAID_HOLD_MS = 24 * 3_600_000;
+
+/**
+ * A payment made and not yet settled.
+ *
+ * The bug this exists for: the browser was the only thing that knew a payment
+ * had been made. It paid the seller, then asked the server to settle, and if
+ * that ask was refused for any reason the server could not retry — a session
+ * that had lapsed, a store that blinked, a five-hundred — the receipt was
+ * dropped and the money was simply gone, with no record of it anywhere. A
+ * player lost $EMERGE that way and the order they had paid for was still
+ * standing, untouched, with nothing in their history.
+ *
+ * So the hash is written down here the moment it exists, before any check that
+ * could refuse it, and settlement is retried against that record for as long
+ * as it takes. After this row is written the money cannot vanish quietly: it
+ * either settles, or it shows as unsettled with its transaction on it.
+ */
+export interface PaidIntent {
+  txHash: string;
+  id: string;
+  buyer: string;
+  seed: number;
+  qty: number;
+  at: number;
+  /** Why it has not settled, when something is standing in the way. */
+  problem?: string;
+  tries?: number;
+}
+
+const paidKey = (buyer: string) => serverKey(`exchange:paid:${buyer.toLowerCase()}`);
+
+/** Payments this wallet has made and the exchange has not yet settled. */
+export async function unsettled(buyer: string): Promise<PaidIntent[]> {
+  if (!ADDRESS.test(buyer)) return [];
+  const rows = await hgetall(paidKey(buyer));
+  const out: PaidIntent[] = [];
+  for (const raw of Object.values(rows)) { try { out.push(JSON.parse(raw) as PaidIntent); } catch { /* skip */ } }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * Write a payment down, and firm the hold that goes with it.
+ *
+ * Deliberately refuses almost nothing: the money has already moved, so the
+ * only useful answer is "recorded". Anything wrong with the order is found
+ * later, by settling, where it can be retried and seen.
+ */
+export async function recordPaid(input: { id: string; buyer: string; seed: number; qty: number; txHash: string }): Promise<Result<{ recorded: true }>> {
+  const { buyer, txHash } = input;
+  if (!ADDRESS.test(buyer)) return { ok: false, reason: 'A payment belongs to a wallet.' };
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { ok: false, reason: 'That is not a transaction hash.' };
+  const qty = Math.floor(Number(input.qty));
+  if (!(qty > 0)) return { ok: false, reason: 'Say how much Gold.' };
+  const intent: PaidIntent = {
+    txHash: txHash.toLowerCase(), id: String(input.id ?? ''), buyer: buyer.toLowerCase(),
+    seed: Number(input.seed), qty, at: Date.now(),
+  };
+  await hset(paidKey(buyer), intent.txHash, JSON.stringify(intent));
+  // The lot is now standing against money that has left a wallet: hold it.
+  await locked(intent.id, async () => {
+    const order = await orderOf(intent.id);
+    if (!order) return;
+    const holds = (order.holds ?? []).filter((h) => h.until > Date.now() && h.buyer !== intent.buyer);
+    holds.push({ buyer: intent.buyer, qty, until: Date.now() + PAID_HOLD_MS });
+    await hset(ORDERS, intent.id, JSON.stringify({ ...order, holds }));
+  }, undefined).catch(() => {});
+  return { ok: true, recorded: true };
+}
+
+/** Forget a payment: it settled, or it was never valid. */
+export async function clearPaid(buyer: string, txHash: string): Promise<void> {
+  await hdel(paidKey(buyer), txHash.toLowerCase()).catch(() => {});
+}
+
+/** Note why a payment has not settled, so it is visible rather than silent. */
+async function notePaidProblem(buyer: string, txHash: string, problem: string): Promise<void> {
+  try {
+    const raw = await hget(paidKey(buyer), txHash.toLowerCase());
+    if (!raw) return;
+    const intent = JSON.parse(raw) as PaidIntent;
+    await hset(paidKey(buyer), intent.txHash, JSON.stringify({ ...intent, problem, tries: (intent.tries ?? 0) + 1 }));
+  } catch { /* advisory */ }
+}
+
+/**
+ * Settle every payment this wallet has made and not yet had settled.
+ *
+ * Run whenever the wallet touches the exchange, so a purchase finishes without
+ * the browser that made it having to still be open, or even to be the same
+ * browser.
+ */
+export async function settleMine(buyer: string, buyerName: string): Promise<{ delivered: Delivery[]; problems: string[] }> {
+  const delivered: Delivery[] = [];
+  const problems: string[] = [];
+  for (const intent of (await unsettled(buyer)).slice(0, 8)) {
+    const r = await buyGold({ id: intent.id, buyer, buyerName, seed: intent.seed, qty: intent.qty, txHash: intent.txHash });
+    if (r.ok) { delivered.push(r.delivery); await clearPaid(buyer, intent.txHash); continue; }
+    // A payment the chain says was never this buyer's, or failed outright, is
+    // not going to become valid: forget it. Everything else waits and is shown.
+    if (/failed on chain|different wallet|not a transaction hash/i.test(r.reason)) { await clearPaid(buyer, intent.txHash); continue; }
+    // Already spent on this very order means it did settle, once.
+    if (/already used/i.test(r.reason)) { await clearPaid(buyer, intent.txHash); continue; }
+    await notePaidProblem(buyer, intent.txHash, r.reason);
+    problems.push(r.reason);
+  }
+  return { delivered, problems };
+}
+
 /** Let a hold go, when the payment was not made. */
 export async function releaseGold(id: string, buyer: string): Promise<void> {
   await locked(id, async () => {

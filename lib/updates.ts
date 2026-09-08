@@ -17,6 +17,16 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.8.3',
+    date: '2026-09-08',
+    title: 'A payment the exchange remembers',
+    notes: [
+      'The exchange writes a Gold payment down before it asks anything else of it. The browser used to be the only thing that knew a payment had been made: it paid the seller, then asked the server to hand the Gold over, and if that ask was refused in a way it could not retry \u2014 a session that had lapsed while the chain confirmed, a store that blinked, a five-hundred \u2014 it threw the receipt away. The $EMERGE was gone, the order was still standing untouched, and there was no record of any of it anywhere. That is what happened to the players who reported buying Gold and receiving none, and it was worse than the slow-confirmation problem fixed in 2.8.2. Now the transaction goes onto the exchange\u2019s own books the moment it exists, before any check that could refuse it, and settling is retried against that record \u2014 by any device, on every visit to the exchange \u2014 for as long as it takes.',
+      'A lot with money against it is held for a day, not a quarter of an hour. A reservation was fifteen minutes, which is a fair time to press a button in a wallet but not a fair time for a payment to clear. Once you have paid, the Gold you paid for is yours: it cannot be sold to somebody else or taken down by the seller while the chain settles.',
+      'A payment that cannot settle is shown, not swallowed. If something is genuinely in the way \u2014 the order was taken down, the lot was already sold \u2014 the exchange says so, with the transaction on it, and it stays on the books until it is put right. Nothing about money that has left a wallet is silent any more.',
+    ],
+  },
+  {
     version: '2.8.2',
     date: '2026-09-08',
     title: 'Gold that was paid for arrives',
@@ -286,6 +296,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.8.3',
+    date: '2026-09-08',
+    title: '交易所会记住你的付款',
+    notes: [
+      '交易所会先把金币付款记下来，再去做其他任何判断。过去只有浏览器知道这笔款付过了：它把 $EMERGE 付给卖家，然后请服务器交付金币，如果这个请求被以无法重试的方式拒绝——等待确认期间登录状态过期、存储抖动、一个 500——它就把凭据丢掉了。$EMERGE 没了，挂单原封不动地还在，而任何地方都没有这笔交易的记录。这正是那些报告“买了金币却没收到”的玩家遇到的情况，而且比 2.8.2 修复的确认过慢问题更严重。现在交易哈希在产生的那一刻就写进交易所自己的账目，先于任何可能拒绝它的检查；此后结算会针对这条记录反复重试——任何设备、每次打开交易所都会试——直到完成为止。',
+      '有钱压着的挂单会锁定一天，而不是一刻钟。预留原本是十五分钟，这对在钱包里点一下确认是够的，对等待链上确认则不够。你付了款之后，你买的那部分金币就是你的：在链上结算期间，它不会被卖给别人，卖家也无法撤单。',
+      '结算不了的付款会被显示出来，而不是被吞掉。如果确实有什么挡着——挂单被撤了、这批已经卖掉了——交易所会说明原因并附上交易哈希，而且这笔记录会一直留在账上，直到处理妥当为止。关于已经离开钱包的钱，不会再有任何无声的情况。',
+    ],
+  },
   {
     version: '2.8.2',
     date: '2026-09-08',

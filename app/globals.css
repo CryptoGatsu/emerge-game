@@ -3432,3 +3432,6 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 /* One settled trade, in the exchange's History tab. */
 .exchange-past { grid-template-columns: 4.5rem minmax(0, 1fr) auto auto; row-gap: 0.15rem; }
 .exchange-past small { grid-column: 1 / -1; opacity: 0.7; }
+
+/* One payment the exchange is still settling, under the notice. */
+.exchange-waiting { display: block; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }

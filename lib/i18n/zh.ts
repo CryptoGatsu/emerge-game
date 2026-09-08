@@ -375,6 +375,8 @@ export const UI: Record<string, string> = {
   'The buyer pays {n} {ticker} straight to your wallet and receives the Gold less the {pct}% burn. Lots are {min} Gold or more, at most {cap} Gold a day per wallet, and never more than the treasury in your last published copy. The Gold leaves the treasury now.': '买家把 {n} {ticker} 直接付到你的钱包，收到扣除 {pct}% 销毁后的金币。每批至少 {min} 金币，每个钱包每天最多 {cap} 金币，且不超过你最近发布副本中的金库。金币现在就离开金库。',
   'Put it up': '挂出', 'You have nothing on the exchange.': '你在交易所没有挂单。',
   'History': '成交记录', 'Bought': '买入', 'Sold': '卖出',
+  'Your payment is on the exchange\u2019s books; it finishes by itself.': '你的付款已记入交易所账目，会自动完成。',
+  '{n} Gold, paid {tx}': '{n} 金币，付款 {tx}',
   'Nothing bought or sold yet. What you trade here is written down, both sides of it.': '还没有买卖记录。在这里成交的每一笔，买卖双方都会记录下来。',
   '{n} {ticker} each': '每个 {n} {ticker}',
   'you received {n} Gold': '你收到 {n} 金币', 'you received {n}': '你收到 {n}',

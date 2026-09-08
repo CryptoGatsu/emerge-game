@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { buyGold, buyGoods, cancelOrder, collect, history, listOrder, makeGood, orders, owed, releaseGold, reserveGold, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
+import { buyGold, buyGoods, cancelOrder, collect, history, listOrder, makeGood, orders, owed, recordPaid, releaseGold, reserveGold, settleMine, unsettled, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
 import { registryShared } from '@/lib/server/registry';
 import { holdsAddress, sessionAddress, sessionsAvailable } from '@/lib/server/session';
 
@@ -20,14 +20,18 @@ export async function GET(request: Request) {
   const asked = String(url.searchParams.get('address') ?? '').toLowerCase();
   const me = sessionAddress(request) ?? (!sessionsAvailable() && /^0x[0-9a-f]{40}$/.test(asked) ? asked : null);
   try {
-    const [rows, mine, mineDone] = await Promise.all([
+    // A payment waiting to settle is settled here, so simply looking at the
+    // exchange finishes a purchase the browser that made it gave up on.
+    if (me) await settleMine(me, '').catch(() => {});
+    const [rows, mine, mineDone, waiting] = await Promise.all([
       orders(),
       me && Number.isFinite(seed) ? owed(me, seed) : Promise.resolve([]),
       me ? history(me).catch(() => []) : Promise.resolve([]),
+      me ? unsettled(me).catch(() => []) : Promise.resolve([]),
     ]);
-    return NextResponse.json({ orders: rows, owed: mine, history: mineDone, terms, shared: registryShared() });
+    return NextResponse.json({ orders: rows, owed: mine, history: mineDone, paid: waiting, terms, shared: registryShared() });
   } catch {
-    return NextResponse.json({ orders: [], owed: [], history: [], terms, shared: false, degraded: true });
+    return NextResponse.json({ orders: [], owed: [], history: [], paid: [], terms, shared: false, degraded: true });
   }
 }
 
@@ -59,6 +63,23 @@ export async function POST(request: Request) {
     const r = await makeGood(address, Number(body.seed), Number(body.gold), String(body.note ?? '').slice(0, 120));
     return r.ok ? NextResponse.json({ delivery: r.delivery }) : NextResponse.json({ error: r.reason }, { status: 400 });
   }
+  /*
+   * A payment made before the exchange kept its own record, handed in on the
+   * player's behalf.
+   *
+   * Safe to allow without their session because nothing here is taken on
+   * trust: the transfer is read off the chain and has to be a real one, from
+   * this buyer to this seller, for this price, not already spent. An operator
+   * can recover a payment; they cannot invent one.
+   */
+  if (body.action === 'recoverPaid') {
+    if (!operator(request)) return NextResponse.json({ error: 'Not for this door.' }, { status: 403 });
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return NextResponse.json({ error: 'A payment belongs to a wallet.' }, { status: 400 });
+    const noted = await recordPaid({ id: String(body.id ?? ''), buyer: address, seed: Number(body.seed), qty: Number(body.qty), txHash: String(body.txHash ?? '') });
+    if (!noted.ok) return NextResponse.json({ error: noted.reason }, { status: 400 });
+    const done = await settleMine(address, String(body.name ?? '').slice(0, 32));
+    return NextResponse.json({ recorded: true, delivered: done.delivered, problems: done.problems });
+  }
   if (!/^0x[0-9a-f]{40}$/.test(address)) return NextResponse.json({ error: 'A trade belongs to a wallet.' }, { status: 400 });
   if (sessionsAvailable() && !holdsAddress(request, address)) return NextResponse.json({ error: 'Sign in with this wallet first.' }, { status: 403 });
   if (!registryShared() && process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_TRIALS) {
@@ -68,6 +89,25 @@ export async function POST(request: Request) {
   const name = String(body.name ?? '').slice(0, 32);
   try {
     switch (body.action) {
+      case 'paid': {
+        /*
+         * "I have paid; here is the transaction."
+         *
+         * Written down before anything that could refuse it, because by the
+         * time this is called the $EMERGE has left the buyer's wallet and the
+         * seller has it. Refusing here would be refusing to remember money
+         * that has already moved, which is how a player lost theirs.
+         */
+        const r = await recordPaid({ id: String(body.id ?? ''), buyer: address, seed, qty: Number(body.qty), txHash: String(body.txHash ?? '') });
+        if (!r.ok) return NextResponse.json({ error: r.reason }, { status: 400 });
+        // Try it at once; if it cannot settle yet it is safe on the record.
+        const done = await settleMine(address, name).catch(() => ({ delivered: [], problems: [] as string[] }));
+        return NextResponse.json({ recorded: true, delivered: done.delivered, problems: done.problems });
+      }
+      case 'settleMine': {
+        const done = await settleMine(address, name);
+        return NextResponse.json({ delivered: done.delivered, problems: done.problems });
+      }
       case 'list': {
         const r = await listOrder({ seller: address, sellerName: name, seed, kind: body.kind as 'resource' | 'gold', resource: body.resource, qty: Number(body.qty), unitPrice: Number(body.unitPrice) });
         return r.ok ? NextResponse.json({ order: r.order }) : NextResponse.json({ error: r.reason }, { status: 400 });

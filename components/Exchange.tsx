@@ -46,6 +46,8 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   const gold = useMemo(() => orders.filter((o) => o.kind === 'gold'), [orders]);
   const own = useMemo(() => orders.filter((o) => o.seller === mine), [orders, mine]);
   const past = book?.history ?? [];
+  // Payments the server holds and has not settled: shown, never silent.
+  const waiting = book?.paid ?? [];
   const canAct = !spectating && !!me;
   const act = async (fn: () => Promise<string | null>) => {
     setBusy(true); setNote(null);
@@ -137,10 +139,17 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
         <button className="ghost small" onClick={() => void reload()} disabled={busy}>{t('Refresh')}</button>
       </div>
       {note && <p className="people-note">{note}</p>}
-      {pending > 0 && canAct && (
+      {(pending > 0 || waiting.length > 0) && canAct && (
         <p className="people-note">
-          {t('{n} Gold purchase(s) paid for and not yet settled.', { n: pending })}{' '}
+          {t('{n} Gold purchase(s) paid for and not yet settled.', { n: Math.max(pending, waiting.length) })}{' '}
+          {t('Your payment is on the exchange\u2019s books; it finishes by itself.')}{' '}
           <button className="ghost small" disabled={busy} onClick={() => act(() => actions.finish())}>{t('Finish a paid purchase')}</button>
+          {waiting.map((w) => (
+            <small key={w.txHash} className="muted exchange-waiting">
+              {t('{n} Gold, paid {tx}', { n: w.qty.toLocaleString(), tx: `${w.txHash.slice(0, 10)}…` })}
+              {w.problem ? ` · ${w.problem}` : ''}
+            </small>
+          ))}
         </p>
       )}
       {book === undefined && <p className="muted small">{t('Reading the exchange…')}</p>}
