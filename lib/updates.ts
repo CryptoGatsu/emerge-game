@@ -21,7 +21,7 @@ export const UPDATES: Update[] = [
     date: '2026-09-08',
     title: 'A reload that cannot be ignored',
     notes: [
-      'A wallet\u2019s built-in browser can no longer serve you an old build forever. The page itself was sent with nothing said about caching, so every in-app browser was free to decide for itself \u2014 and the wallet browsers decide to keep it. A player on OKX cleared the cache, disconnected, came back, and was handed the same old build again; on a computer the new version simply never arrived. The page now says outright that it must be checked against the server every time, so a reload gets what is actually deployed. The game\u2019s code and pictures are untouched by this: those carry their build in their name and are still cached forever, which is why the site is fast.',
+      'A wallet\u2019s built-in browser can no longer serve you an old build forever. The page itself was sent with nothing said about caching, so every in-app browser was free to decide for itself \u2014 and the wallet browsers decide to keep it. A player on OKX cleared the cache, disconnected, came back, and was handed the same old build again; on a computer the new version simply never arrived. The page now says outright that a browser must check with the server before reusing it, so a reload gets what is actually deployed. Usually the answer is \u201cnothing has changed\u201d and costs nothing. The network of servers that keeps the site close to you still holds the page, and still hands out the new one the moment a version ships \u2014 so none of this makes anything slower. The game\u2019s code and pictures are untouched: those carry their build in their name and are still kept forever, which is why the site is fast.',
       'The Reload button on the update card asks for an address the browser has never seen \u2014 it carries the build it is going to. Even a browser that ignores everything else has nothing of its own to serve for a page it has never fetched. The extra piece of the address is taken back out as soon as the new build is running, so nothing odd ends up in a bookmark or a shared link.',
       'Worth knowing, since it caused the report: clearing a browser\u2019s storage clears the copy of your settlement that browser was holding. Nothing is lost \u2014 your world comes back from the copy the server has \u2014 but that copy is the last one you published, which may be the state you left on another device. Publishing before you switch devices is what keeps the two the same.',
     ],
@@ -340,7 +340,7 @@ export const UPDATES_ZH: Update[] = [
     date: '2026-09-08',
     title: '无法被忽略的刷新',
     notes: [
-      '钱包内置的浏览器不能再一直给你旧版本了。页面本身在发送时对缓存只字未提，于是每个内置浏览器都可以自行决定——而钱包浏览器决定把它留着。一位使用 OKX 的玩家清了缓存、断开连接、再回来，拿到的仍然是同一个旧版本；在电脑上，新版本干脆从来没有出现过。现在页面会明确要求每次都向服务器核对，因此刷新拿到的就是真正部署的版本。游戏的代码和图片不受影响：它们的文件名里带着版本号，仍然被永久缓存，这正是站点快的原因。',
+      '钱包内置的浏览器不能再一直给你旧版本了。页面本身在发送时对缓存只字未提，于是每个内置浏览器都可以自行决定——而钱包浏览器决定把它留着。一位使用 OKX 的玩家清了缓存、断开连接、再回来，拿到的仍然是同一个旧版本；在电脑上，新版本干脆从来没有出现过。现在页面会明确要求浏览器在复用之前先向服务器核对，因此刷新拿到的就是真正部署的版本。多数时候答复是“没有变化”，不花什么代价。让站点离你更近的那层服务器仍然保存着页面，并且在新版本发布的那一刻就开始分发新的——所以这一切不会让任何东西变慢。游戏的代码和图片不受影响：它们的文件名里带着版本号，仍然被永久保留，这正是站点快的原因。',
       '更新卡片上的“刷新”按钮请求的是浏览器从未见过的地址——它带上了要前往的版本号。即便是一个对其他一切都置之不理的浏览器，对于从未取过的页面也拿不出自己的副本。新版本一跑起来，地址里多出来的那一截就会被取走，不会有奇怪的东西留在书签或分享的链接里。',
       '值得一提，因为它正是这次报告的起因：清除浏览器存储会清掉该浏览器保存的那份聚落副本。什么都不会丢——你的世界会从服务器的副本恢复——但那份副本是你最后一次发布的版本，也可能就是你在另一台设备上留下的状态。换设备之前先发布，才能让两边保持一致。',
     ],
