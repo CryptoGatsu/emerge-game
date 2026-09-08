@@ -37,6 +37,7 @@ import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
 import { HAND_MIN_EMERGE } from '../chain/vault';
 import { allClaims, jobOf, readWorld, worldHeadlines, type Claim, presenceDays, lastSeenAt, lastSeenAnywhere } from './registry';
+import { plotsSpentToday } from './accounts';
 import { getValue, setValue } from './kv';
 import { serverKey } from '../limits';
 
@@ -142,6 +143,11 @@ export async function judgedFor(address: string): Promise<Judged> {
   let anywhere = 0;
   try { anywhere = await lastSeenAnywhere(me); } catch { anywhere = 0; }
   const plots: Judged['plots'] = [];
+  // What each of these plots has already been paid today, by this wallet or by
+  // whoever held it earlier: a plot's day is the plot's, so handing it on does
+  // not hand on a fresh day's room with it.
+  let already = new Map<number, number>();
+  try { already = await plotsSpentToday(mine.map((c) => c.seed)); } catch { already = new Map(); }
   let ceiling = 0, yieldSum = 0;
   for (const row of mine) {
     let world: World | null = null;
@@ -153,7 +159,9 @@ export async function judgedFor(address: string): Promise<Judged> {
     let reported = 1;
     try { reported = world ? cityLevel(world) : 1; } catch { reported = level; }
     const era = row.era ?? 1;
-    const cap = Math.round(plotCeiling(level, era) * charterMultiplier(row.charterUntil, now));
+    const full = Math.round(plotCeiling(level, era) * charterMultiplier(row.charterUntil, now));
+    // The plot's ceiling less what it has already paid out today.
+    const cap = Math.max(0, full - (already.get(row.seed) ?? 0));
     let score = 0;
     try { score = world ? stewardshipScore(world) : 0; } catch { score = 0; }
     let attention = ATTENTION_FLOOR;

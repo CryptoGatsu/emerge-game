@@ -48,13 +48,22 @@ export interface EraForm {
  * The multipliers by age. Room doubles each age while the rebuild halves the
  * count, so a plot keeps its posts and its beds through an advance and every
  * building raised afterwards holds twice what the last age's did on the
- * same ground. Upkeep rises more slowly than room, so a merged town is a
- * little cheaper to keep than the crowded one it was.
+ * same ground.
+ *
+ * Upkeep rises faster than room, and that is the point of it. It used to rise
+ * more slowly, which meant every age was cheaper to hold per head than the one
+ * before: a town's income roughly quadrupled from the settlement to the AI age
+ * while its upkeep barely kept pace, so a city that did nothing at all still
+ * made money every day and players ended up sitting on hundreds of thousands
+ * of Gold with nothing pressing to spend it on. A data centre is not a
+ * woodcutter's hut with better lighting. The later the age, the more of the
+ * day's takings it costs to keep the lights on, so a great city has to be
+ * worked rather than parked.
  */
 const ROOM = [1, 2, 4, 8, 16];
 const OUTPUT = [1, 1.15, 1.35, 1.6, 1.9];
 const COST = [1, 1.9, 3.6, 6.8, 13];
-const UPKEEP = [1, 1.7, 2.9, 5, 8.5];
+const UPKEEP = [1, 2.2, 4.6, 9.5, 19];
 const WORTH = [1, 2, 4, 8, 16];
 /** The improvement cap by age: three, then a level more every second age. */
 const CAP = [3, 4, 4, 4, 5];

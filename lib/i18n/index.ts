@@ -85,13 +85,19 @@ export function t(text: string, vars?: Record<string, string | number>): string 
 /** The name of a thing the simulation names in English — a trade, a building, a resource. */
 export function tn(name: string): string {
   if (getLocale() !== 'zh') return name;
-  return NAMES[name] ?? NAMES[name.toLowerCase()] ?? UI[name] ?? name;
+  // The trade table last, because a building and the trade in it can share a
+  // word and the building's is the one this asks for. It is consulted at all
+  // because an age renames every trade — a farmer becomes an agricultural
+  // mechanic — and those titles live only in the trade table; without this
+  // the People panel showed them in English inside a Chinese page, which is
+  // what players reported.
+  return NAMES[name] ?? NAMES[name.toLowerCase()] ?? UI[name] ?? JOBS_ZH[name] ?? JOBS_ZH[name.toLowerCase()] ?? name;
 }
 
 /** A trade, by its label or its key. The building of the same name is a different word. */
 export function tj(job: string): string {
   if (getLocale() !== 'zh') return job;
-  return JOBS_ZH[job] ?? JOBS_ZH[job.toLowerCase()] ?? job;
+  return JOBS_ZH[job] ?? JOBS_ZH[job.toLowerCase()] ?? NAMES[job] ?? UI[job] ?? job;
 }
 
 /**

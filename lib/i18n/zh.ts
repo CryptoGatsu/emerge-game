@@ -2287,6 +2287,7 @@ export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
   [/^Today the vault pays ([\d,]+) \$EMERGE across everybody, and ([\d,]+) is judged in all, so your share is ([\d,]+) and it is collected\. The day turns in (\d+)h (\d+)m\.$/, '今天金库向所有人共支付 $1 $EMERGE，而所有人合计裁定 $2，所以你的份额是 $3，并且已经领完。$4 小时 $5 分钟后进入新的一天。'],
   [/^The vault has paid today's ([\d,]+) \$EMERGE across everybody\. The day turns in (\d+)h (\d+)m\.$/, '金库今天已向所有人付完 $1 $EMERGE。$2 小时 $3 分钟后进入新的一天。'],
   [/^Today's ([\d,]+) \$EMERGE is collected\. The day turns in (\d+)h (\d+)m\.$/, '今天的 $1 $EMERGE 已全部收取。$2 小时 $3 分钟后进入新的一天。'],
+  [/^Today's earning is collected on the land this would be paid from\. The day turns in (\d+)h (\d+)m\.$/, '这笔收益所依据的土地，今天的额度已经领完。$1 小时 $2 分钟后进入新的一天。'],
   [/^You can collect ([\d,]+) more \$EMERGE today, which is under the ([\d,]+) floor\. The day turns in (\d+)h (\d+)m\.$/, '今天还能收取 $1 $EMERGE，低于 $2 的最低限额。$3 小时 $4 分钟后进入新的一天。'],
   [/^You can collect ([\d,]+) more \$EMERGE today\.$/, '今天还能收取 $1 $EMERGE。'],
   [/^The Bank's figure had moved on: ([\d,]+) \$EMERGE was collectable, and that is what was sent\.$/, '银行显示的数字已经变动：可收取的是 $1 $EMERGE，已按此发出。'],

@@ -17,6 +17,19 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.8.1',
+    date: '2026-09-08',
+    title: 'What players reported, and what a city costs',
+    notes: [
+      'A workshop is no longer starved by a shelf filled later the same day. The day’s trades were worked in whatever order the townspeople happened to be listed in, so a forge evaluated before the woodcutters had put the day’s timber in the yard stood idle beside a store the player could see held a hundred and fifty wood. The trades are ordered by what they need now: the gatherers first, then the mill, then the bakery, so every workshop draws on a shelf that already holds the day’s work.',
+      'A building’s card counts the people who actually report to it. Everybody without a workplace of their own was counted at the first building of their kind, so a town with three forges and six smiths showed the first one “3 of 2 posts filled” and the other two empty. They are spread across the sites of their trade instead, so each card says what stands at that door.',
+      'The ages’ trade titles read in Chinese. The titles an age gives every trade — agricultural mechanic, timber technician, mining engineer — were shown in English inside an otherwise Chinese People panel. All sixty of them have their Chinese back.',
+      'A plot’s day of earning belongs to the plot. The day’s stewardship allowance was counted against the wallet alone, so land handed to a fresh wallet met an empty counter and could be paid again, and again, for as many wallets as somebody cared to make. A player found that and reported it. The allowance now follows the land: a transfer moves who is paid and never how much that land has already been paid today.',
+      'A great city costs what a great city costs. Upkeep used to rise more slowly than a town’s room, so every age was cheaper to hold per head than the one before: income roughly quadrupled from the settlement to the AI age while the bill barely kept pace, and a city that did nothing at all still made money every day. Players were sitting on hundreds of thousands of Gold with nothing pressing to spend it on. Upkeep now rises faster than room — a building costs a little over twice as much to keep in each age above the one before — so the later the age, the more of the day’s takings go on keeping the lights on. A settlement pays a fifth more than it did and no more than that: a young plot is squeezed by its wages, not its upkeep, and did not need squeezing further. Measured on a town that is not being worked, the day’s profit falls by about two thirds by the AI age; a city that is actually worked stays comfortably ahead.',
+      'Building and improving cost more, and the later ages cost most. The three a settlement raises for itself are unchanged; the trades and civic buildings cost a third more, and the works of the industrial age onward half again. Improvements are steeper still, and the fourth and fifth levels are meant to be what a rich city saves for rather than something it buys on a whim. Keeping a building improved has not changed: the age is what costs more, and what you have built on top of it should still pay for itself.',
+    ],
+  },
+  {
     version: '2.8',
     date: '2026-09-08',
     title: 'Notables',
@@ -263,6 +276,19 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.8.1',
+    date: '2026-09-08',
+    title: '玩家反馈修复与城市开销',
+    notes: [
+      '作坊不会再因为货物当天稍后才上架而停工。过去一天里各行当的处理顺序，取决于居民碰巧的排列顺序，所以在伐木工把当天的木材送进院子之前就轮到的铁匠铺会闲置，而玩家看到仓库里明明有一百五十件木料。现在按需求排序：先是采集，再是磨坊，然后是面包坊，每一间作坊取用的都是已经装好当天产出的货架。',
+      '建筑卡片只统计真正在这里当值的人。过去没有固定工作地点的人，全部算在同类建筑中的第一间，所以有三间铁匠铺、六名铁匠的城镇会显示第一间“3 人 / 2 个岗位”，另外两间空着。现在他们会分散到本行当的各处，每张卡片说的都是这扇门后的实况。',
+      '时代行当称呼恢复中文显示。时代给每个行当的称呼——农业机械师、木材技术员、采矿工程师——曾在整体为中文的人物面板里以英文显示。六十个称呼的中文都回来了。',
+      '一块地每天的收益额度属于这块地。过去当天的管理收益额度只按钱包计算，所以把地转给一个新钱包就遇到一个空计数器，同一块地可以一再被支付，有多少钱包就能领多少次。一位玩家发现并报告了这一点。现在额度跟着土地走：转让改变的是谁收款，绝不会改变这块地今天已经付出了多少。',
+      '大城市就该有大城市的开销。过去维护费的增长比城镇容量还慢，于是每个时代按人均算都比上一个时代更便宜：从聚落到人工智能时代收入大约翻了两番，账单却几乎没跟上，一座什么都不做的城市每天照样赚钱。玩家因此囤着几十万金币，却没有非花不可的地方。现在维护费的增长快于容量——每高一个时代，同一栋建筑的维护费是低一级的两倍多——时代越晚，当天收入中用于维持运转的比例就越高。聚落时代只比过去多两成，仅此而已：新地块被压住的是工资，不是维护费，不需要再加码。以一座疏于经营的城镇实测，到人工智能时代每天的利润下降约三分之二；而认真经营的城市依然从容有余。',
+      '建造和升级更贵了，越晚的时代越贵。聚落自建的三种建筑价格不变；行当与市政建筑贵三分之一，工业时代及以后的大型工程贵一半。升级涨得更多，第四、第五级应当是富庶城市攒钱去做的事，而不是随手买下的东西。保有已升级建筑的费用没有变：变贵的是时代本身，你在其上建起来的东西仍然应该收回成本。',
+    ],
+  },
   {
     version: '2.8',
     date: '2026-09-08',

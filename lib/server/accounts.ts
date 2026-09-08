@@ -264,6 +264,72 @@ export async function reserveEmission(address: string, whole: number, ceiling = 
   return true;
 }
 
+/* ------------------------------------------------------------------ *
+ * A plot's own day
+ * ------------------------------------------------------------------ */
+
+/*
+ * The day's room belongs to the plot as well as to the wallet.
+ *
+ * The wallet counter alone could be walked around: hand the plot to a fresh
+ * wallet and its counter is empty, so the same land paid out again, and
+ * again, for as many wallets as somebody cared to make. A player found that
+ * and reported it. Stewardship is what a plot earns for being well kept, so
+ * the plot is what the day is counted against — a transfer moves who is paid,
+ * never how much the land has already paid today.
+ */
+const plotEarnedKey = (seed: number, day: string) => serverKey(`plot-earned:${day}:${seed}`);
+
+/** What each of these plots has already been paid today, whoever held it. */
+export async function plotsSpentToday(seeds: number[]): Promise<Map<number, number>> {
+  const day = utcDay();
+  const spent = await Promise.all(seeds.map((seed) => counter(plotEarnedKey(seed, day)).catch(() => 0)));
+  return new Map(seeds.map((seed, i) => [seed, spent[i]]));
+}
+
+/** One plot's charge against its day, for a rollback. */
+export interface PlotCharge { seed: number; amount: number }
+
+/**
+ * Charge a payout against the plots that earned it.
+ *
+ * Walked in the order given, each plot taking what it still has room for,
+ * until the whole amount is placed. A plot that would go over its own
+ * ceiling takes only what is left of it. If the plots between them cannot
+ * cover the amount, every charge is given back and the answer is null: the
+ * caller refuses rather than paying land that has already been paid.
+ */
+export async function chargePlots(plots: { seed: number; cap: number }[], whole: number): Promise<PlotCharge[] | null> {
+  const day = utcDay();
+  let owing = Math.floor(whole);
+  const made: PlotCharge[] = [];
+  for (const { seed, cap } of plots) {
+    if (owing <= 0) break;
+    const before = await counter(plotEarnedKey(seed, day)).catch(() => 0);
+    const room = Math.max(0, Math.floor(cap) - before);
+    const take = Math.min(owing, room);
+    if (take <= 0) continue;
+    // Expiring, so a day's tally does not become a key that lives for ever.
+    const after = await incrWindow(plotEarnedKey(seed, day), take, 26 * 3600);
+    if (after > Math.floor(cap)) {
+      // Somebody else was charging the same plot between the read and the
+      // write. Give this one back and carry on to the next plot.
+      await incrBy(plotEarnedKey(seed, day), -take).catch(() => {});
+      continue;
+    }
+    made.push({ seed, amount: take });
+    owing -= take;
+  }
+  if (owing > 0) { await refundPlots(made); return null; }
+  return made;
+}
+
+/** Give plot charges back when the transfer did not happen. */
+export async function refundPlots(charges: PlotCharge[]): Promise<void> {
+  const day = utcDay();
+  await Promise.all(charges.map((c) => incrBy(plotEarnedKey(c.seed, day), -c.amount).catch(() => {})));
+}
+
 /** Give a reservation back when the transfer did not happen. */
 export async function releaseEmission(address: string, whole: number): Promise<void> {
   const day = utcDay();

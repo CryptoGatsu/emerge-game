@@ -4617,12 +4617,47 @@ function note(world: World, side: 'produced' | 'consumed', key: Resource, amount
   world.flow[side][key] = (world.flow[side][key] ?? 0) + amount;
 }
 
+/**
+ * The order the day's trades are worked, so a workshop is not starved by a
+ * shelf that is filled later the same day.
+ *
+ * Everything happens in one pass over `world.resources`, so whichever trade
+ * runs first eats first — and the order used to be whatever order the
+ * citizens happened to be listed in. A blacksmith evaluated before the
+ * woodcutters had put the day's timber in the yard was short of wood while
+ * the player, looking at the store afterwards, could see a hundred and fifty
+ * of it. Players reported exactly that.
+ *
+ * So the trades are sorted by what they need: a trade whose input another
+ * trade makes is worked after it. The gatherers go first, then the mill,
+ * then the bakery — and every workshop draws on a shelf that already holds
+ * the day's work. Cycles, if a future age ever writes one, keep their
+ * original order rather than hanging.
+ */
+export function tradeOrder(world: World, trades: WorkingJob[]): WorkingJob[] {
+  const left = [...trades];
+  const out: WorkingJob[] = [];
+  while (left.length) {
+    // Whatever is still to be worked can still fill a shelf, so a trade waits
+    // only on inputs that something left in the queue actually makes.
+    const pending = new Set<Resource>();
+    for (const j of left) for (const r of Object.keys(tradeRecipe(world, j).output)) pending.add(r as Resource);
+    const ready = left.filter((j) => !Object.keys(tradeRecipe(world, j).input ?? {}).some((r) => pending.has(r as Resource)));
+    // A cycle: nothing is ready, so take the queue as it stands and stop.
+    if (!ready.length) { out.push(...left); break; }
+    for (const j of ready) { out.push(j); left.splice(left.indexOf(j), 1); }
+  }
+  return out;
+}
+
 function produce(world: World) {
   world.shortages = {};
   const counts: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) counts[c.job] = (counts[c.job] || 0) + 1;
-  for (const [job, count] of Object.entries(counts)) {
-    if (!job || job === 'unemployed' || !count) continue;
+  const worked = tradeOrder(world, Object.keys(counts).filter((j) => j && j !== 'unemployed' && counts[j as Job]) as WorkingJob[]);
+  for (const job of worked) {
+    const count = counts[job as Job];
+    if (!count) continue;
     const wj = job as WorkingJob, workers = Math.min(count, jobCapacity(world, wj));
     // What the trade makes in this age: the age's own recipe when it has
     // one (a cannery puts up meals, an ironworks pours steel), the
@@ -6918,25 +6953,35 @@ function completeBridge(world: World, works: BridgeWorks) {
 }
 
 /** What a settlement pays to raise a building for itself. Mirrors the build menu. */
+/*
+ * What a building costs to raise, before the age multiplies it.
+ *
+ * Dearer than it was, and deliberately weighted to the later ages: the three
+ * a settlement raises for itself are untouched, the trades and civic
+ * buildings cost a third more, and the works of the industrial age onward
+ * cost half again. A young plot is squeezed by its wage bill and does not
+ * need squeezing by its build panel; a city with a hundred thousand Gold and
+ * nothing to spend it on does.
+ */
 const SELF_BUILD_COST: Record<string, number> = { House: 100, Woodcutter: 125, Farm: 150 };
 const TRADE_BUILD_COST: Record<string, number> = {
-  Fishery: 140, Lodge: 180, Forager: 90,
-  Quarry: 175, Mine: 250, Mill: 250, Bakery: 300, Carpenter: 275, Blacksmith: 400, Tailor: 325,
-  Storage: 120, Tavern: 350, Bank: 450,
+  Fishery: 185, Lodge: 240, Forager: 120,
+  Quarry: 230, Mine: 330, Mill: 330, Bakery: 400, Carpenter: 365, Blacksmith: 530, Tailor: 430,
+  Storage: 160, Tavern: 465, Bank: 600,
   // The civic buildings. None employs anybody; each changes how the town lives.
-  Cafe: 300, School: 380, Library: 360, Studio: 340, Clinic: 420, Lab: 520,
-  Jail: 220, 'Town Hall': 480,
+  Cafe: 400, School: 505, Library: 480, Studio: 450, Clinic: 560, Lab: 690,
+  Jail: 290, 'Town Hall': 640,
   // The township. Stone and tile, and each one changes how the town moves
   // or thinks: the stables put carts on the roads, the harbour a ferry on
   // the water, the chapel and the brewery give people somewhere to be, the
   // guildhall and the printer make them better at what they do.
-  Chapel: 380, Guildhall: 460, Brewery: 340, Printer: 360, Stables: 280, Harbour: 420, Monument: 0,
+  Chapel: 505, Guildhall: 610, Brewery: 450, Printer: 480, Stables: 370, Harbour: 560, Monument: 0,
   // The industrial era: brick and iron, and the first machines.
-  Factory: 640, Foundry: 600, 'Railway Station': 720, Telegraph: 380, Gasworks: 560,
+  Factory: 960, Foundry: 900, 'Railway Station': 1080, Telegraph: 570, Gasworks: 840,
   // The modern era: concrete and glass, and the roads fill up.
-  Hospital: 900, Stadium: 1100, Supermarket: 700, Office: 760, 'Bus Depot': 680, 'Power Plant': 1000,
+  Hospital: 1350, Stadium: 1650, Supermarket: 1050, Office: 1140, 'Bus Depot': 1020, 'Power Plant': 1500,
   // The AI era: light and quiet.
-  'Data Centre': 1400, 'Research Campus': 1600, 'Vertical Farm': 1200, 'Pod Hub': 1300, 'Drone Port': 1100,
+  'Data Centre': 2100, 'Research Campus': 2400, 'Vertical Farm': 1800, 'Pod Hub': 1950, 'Drone Port': 1650,
 };
 
 /** What a building costs to raise, by type, in the settlement age. Everything the panel shows starts from here. */
@@ -7849,15 +7894,26 @@ export function upkeepOf(b: Building) {
 export const UPKEEP_PER_ERA = 0.25;
 
 export function maintenanceCost(type: string) {
+  /*
+   * A fifth dearer than it was, and no more.
+   *
+   * The bill a plot is really struggling under in its first weeks is its
+   * wages, not its upkeep: measured across eight new settlements, the poorest
+   * spent sixty days between eleven and a few hundred Gold. Putting the whole
+   * increase here would have closed those towns — one of the eight ran dry at
+   * half again. So the settlement age pays a fifth more and the ages above it
+   * pay the multipliers in `forms.ts`, which is where a city that has stopped
+   * needing to think about money actually lives.
+   */
   return ({
-    Bank: 0, Market: 15, Storage: 3, House: 1, Farm: 3, Woodcutter: 2, Fishery: 2, Lodge: 3, Forager: 1, Quarry: 4, Mine: 6, Mill: 5, Bakery: 6,
-    Carpenter: 5, Blacksmith: 8, Tailor: 6, Tavern: 7, 'Town Hall': 10,
-    Cafe: 5, School: 6, Library: 5, Studio: 5, Clinic: 7, Lab: 9, Jail: 3,
-    Chapel: 4, Guildhall: 7, Brewery: 6, Printer: 6, Stables: 5, Harbour: 8, Monument: 2,
-    Factory: 12, Foundry: 11, 'Railway Station': 12, Telegraph: 5, Gasworks: 10,
-    Hospital: 14, Stadium: 16, Supermarket: 10, Office: 9, 'Bus Depot': 10, 'Power Plant': 15,
-    'Data Centre': 18, 'Research Campus': 20, 'Vertical Farm': 14, 'Pod Hub': 14, 'Drone Port': 12,
-  } as Record<string, number>)[type] ?? 2;
+    Bank: 0, Market: 18, Storage: 4, House: 1.2, Farm: 3.6, Woodcutter: 2.4, Fishery: 2.4, Lodge: 3.6, Forager: 1.2, Quarry: 5, Mine: 7, Mill: 6, Bakery: 7,
+    Carpenter: 6, Blacksmith: 10, Tailor: 7, Tavern: 8, 'Town Hall': 12,
+    Cafe: 6, School: 7, Library: 6, Studio: 6, Clinic: 8, Lab: 11, Jail: 4,
+    Chapel: 5, Guildhall: 8, Brewery: 7, Printer: 7, Stables: 6, Harbour: 10, Monument: 2,
+    Factory: 14, Foundry: 13, 'Railway Station': 14, Telegraph: 6, Gasworks: 12,
+    Hospital: 17, Stadium: 19, Supermarket: 12, Office: 11, 'Bus Depot': 12, 'Power Plant': 18,
+    'Data Centre': 22, 'Research Campus': 24, 'Vertical Farm': 17, 'Pod Hub': 17, 'Drone Port': 14,
+  } as Record<string, number>)[type] ?? 2.4;
 }
 
 /**
@@ -9408,6 +9464,14 @@ export const levelOf = (b: Building) => Math.max(1, Math.min(MAX_BUILDING_LEVEL_
  */
 /** What one level of improvement adds to a building's output, and to its bill. */
 export const OUTPUT_PER_LEVEL = 0.22;
+/*
+ * Kept at half, deliberately, while the age multipliers rose.
+ *
+ * Raising it alongside them made improving a building a losing move in the
+ * later ages — a well-worked city ran a bigger deficit than a neglected one,
+ * which is the opposite of the point. The age is what costs more; what you
+ * have built on top of it should still pay for itself.
+ */
 export const UPKEEP_PER_LEVEL = 0.5;
 
 export const buildingOutput = (b: Building) => 1 + (levelOf(b) - 1) * OUTPUT_PER_LEVEL;
@@ -9441,7 +9505,15 @@ export function moveCost(type: string): number {
  * in materials alike. The second step is nearly twice the first, so the top
  * level is something a settlement grows into rather than buys on day one.
  */
-export const UPGRADE_STEPS = [0.8, 1.4, 2.0, 2.6, 3.2, 3.8];
+/*
+ * What each improvement costs, against the building's own price.
+ *
+ * Steeper than it was. A city's Gold has to go somewhere, and the thing worth
+ * spending it on is the town itself: at the old prices a full set of level
+ * threes cost a fortnight's takings, which is not a decision. The fourth and
+ * fifth levels are meant to be the projects a rich city saves for.
+ */
+export const UPGRADE_STEPS = [1.0, 1.9, 3.0, 4.4, 6.0, 7.8];
 
 /** What the next improvement costs, in Gold and in the yard, or null at the plot's cap. */
 export function upgradeCost(b: Building, world: { era?: number }): { gold: number; wood: number; stone: number } | null {

@@ -40,6 +40,7 @@ import { NextResponse } from 'next/server';
 import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
   MIN_PAYOUT_EMERGE, dailyEmissionBudget, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
+  chargePlots, refundPlots,
   settlementFor, takePayoutSlot, untilUtcMidnight, utcDay, casinoCreditOf, takeCasinoCredit,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
@@ -248,6 +249,8 @@ export async function POST(request: Request) {
    */
   let ceiling = DAILY_EARN_CEILING;
   let share: number | null = null, demand: number | null = null;
+  /** The plots this payout is earned from, and what each may still be paid today. */
+  let judgedPlots: { seed: number; ceiling: number }[] = [];
   const casino = kind === 'earnings' ? await casinoCreditOf(address) : 0;
   if (kind === 'earnings') {
     const land = await landCheck(address);
@@ -262,6 +265,7 @@ export async function POST(request: Request) {
       // world, times the attention the heartbeats show. The client's figure
       // is paid only up to this.
       const judged = await judgedFor(address);
+      judgedPlots = judged.plots.map((p) => ({ seed: p.seed, ceiling: p.ceiling }));
       ceiling = judged.yield + casino;
       ({ share, demand } = await shareFor(judged.yield));
       if (share !== null) share += casino;
@@ -348,7 +352,26 @@ export async function POST(request: Request) {
             : `You can collect ${again.left.toLocaleString()} more $EMERGE today.`,
       }, { status: 429 });
     }
-    give = () => releaseEmission(address, money.gross);
+    /*
+     * And against the land that earned it.
+     *
+     * The wallet's day alone was walkable: a plot handed to a fresh wallet
+     * met an empty counter, so the same land could be paid over and over for
+     * as many wallets as somebody made. A player found that and reported it.
+     * The plot's day is the plot's, so a transfer moves who is paid and never
+     * how much this land has already paid today.
+     */
+    const fromLand = Math.max(0, money.gross - casino);
+    const charged = judgedPlots.length && fromLand > 0
+      ? await chargePlots(judgedPlots.map((p) => ({ seed: p.seed, cap: p.ceiling })), fromLand).catch(() => null)
+      : [];
+    if (!charged) {
+      await releaseEmission(address, money.gross).catch(() => {});
+      return NextResponse.json({
+        error: `Today's earning is collected on the land this would be paid from. The day turns in ${untilUtcMidnight()}.`,
+      }, { status: 429 });
+    }
+    give = async () => { await releaseEmission(address, money.gross); await refundPlots(charged); };
   }
 
   /*

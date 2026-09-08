@@ -18,7 +18,7 @@ import {
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith, WEALTH_WORDS, wealthOf,
   type FeedEntry, type Gathering, type HazardKind, type LedgerLine, type MarketQuote, type Resource,
-  type WorkingJob, type Job, type World, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD, formName } from './simulation';
+  type WorkingJob, type Job, type World, type Citizen, adviseBuild, latelyOf, traitWords, foodInStore, type Advice, eraGate, eraOf, type EraGate, tradeCapacity, buildingPosts, TRAIN_COST_GOLD, formName } from './simulation';
 import { statusLine } from './speech';
 
 export interface FocusCitizen {
@@ -216,13 +216,38 @@ export interface Snapshot {
  * every workplace on every snapshot and a city has a hundred of them.
  */
 function postedCounts(world: World): Map<string, number> {
-  const first = new Map<string, string>();
-  for (const b of world.buildings) if (b.active && !b.ruined && !first.has(b.type)) first.set(b.type, b.id);
+  /*
+   * Everybody without a workplace of their own used to be counted at the
+   * first building of their kind, so a town with three forges and six smiths
+   * showed the first one "6 of 2 posts filled" and the other two empty.
+   * Players reported the card as a bug, and it was one: the count, not the
+   * staffing.
+   *
+   * They are spread instead, each going to whichever site of their trade has
+   * the most room left — which fills the sites evenly and, when a trade is
+   * genuinely over its posts, spreads the overflow rather than piling it on
+   * one door.
+   */
+  const sites = new Map<string, Building[]>();
+  for (const b of world.buildings) {
+    if (!b.active || b.ruined) continue;
+    const list = sites.get(b.type);
+    if (list) list.push(b); else sites.set(b.type, [b]);
+  }
   const counts = new Map<string, number>();
+  const spare: Citizen[] = [];
   for (const c of world.citizens) {
     if (c.age < 16 || c.job === 'unemployed') continue;
-    const id = c.workplaceId ?? first.get(JOBS[c.job as WorkingJob].building);
-    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    if (c.workplaceId) counts.set(c.workplaceId, (counts.get(c.workplaceId) ?? 0) + 1);
+    else spare.push(c);
+  }
+  for (const c of spare) {
+    const list = sites.get(JOBS[c.job as WorkingJob].building);
+    if (!list?.length) continue;
+    const roomiest = list.reduce((best, b) => (
+      buildingPosts(b, world) - (counts.get(b.id) ?? 0) > buildingPosts(best, world) - (counts.get(best.id) ?? 0) ? b : best
+    ), list[0]);
+    counts.set(roomiest.id, (counts.get(roomiest.id) ?? 0) + 1);
   }
   return counts;
 }
