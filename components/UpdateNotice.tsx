@@ -60,6 +60,16 @@ export function UpdateNotice({ build }: { build: string }) {
   useEffect(() => {
     // So a payment can refuse to go out from a page that is behind.
     rememberBuild(build);
+    // The cache-busting parameter has done its work by the time this runs:
+    // this page is the new build. Take it back out so it is not carried into
+    // a bookmark or a shared link.
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('build')) {
+        url.searchParams.delete('build');
+        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      }
+    } catch { /* an address bar that cannot be tidied is not worth an error */ }
     void check();
     const timer = window.setInterval(() => { void check(); }, CHECK_INTERVAL);
     // Coming back to a tab is the moment a person is most willing to be told,
@@ -76,6 +86,26 @@ export function UpdateNotice({ build }: { build: string }) {
     };
   }, [check, build]);
 
+  /*
+   * Reload in a way an in-app browser cannot ignore.
+   *
+   * `location.reload()` is a request a WebView is free to answer from its own
+   * store, and the wallet browsers do: a player on OKX cleared the cache,
+   * disconnected, came back, and was served the same old build again. Asking
+   * for a URL it has never seen is the one thing none of them can serve from
+   * a copy, so the reload carries the build it is going to. The parameter is
+   * taken back out of the address bar on arrival, below.
+   */
+  const reload = (to: string) => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('build', to);
+      window.location.replace(url.toString());
+    } catch {
+      window.location.reload();
+    }
+  };
+
   if (!waiting || dismissed === waiting) return null;
 
   return (
@@ -85,7 +115,7 @@ export function UpdateNotice({ build }: { build: string }) {
         <span>{t('Reload when you are ready — your world and your land are safe.')}</span>
       </div>
       <div className="update-actions">
-        <button className="update-reload" onClick={() => window.location.reload()}>{t('Reload')}</button>
+        <button className="update-reload" onClick={() => reload(waiting)}>{t('Reload')}</button>
         {/* No aria-label: the word on the button is already the label, and an
             override that says something else is a button that reads one way to
             a sighted player and another to a screen reader. */}
