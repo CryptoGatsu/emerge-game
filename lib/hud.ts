@@ -554,10 +554,19 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
 }
 
 /** Build the snapshot the interface renders from. */
-/** One side of a day's books, biggest heading first and the empty ones dropped. */
+/**
+ * One side of a day's books, biggest heading first and the empty ones dropped.
+ *
+ * A saved world is written by whichever build the player last had open, so it
+ * can hold a heading this build has retired — 'idle' outlived the carrying
+ * cost that wrote it. The label lookup then came back undefined and the Bank
+ * threw on it, which is a whole panel lost to a line worth 250 Gold. Headings
+ * this build has no name for are dropped: the money is still in the treasury
+ * and still in the day's totals, it simply has nothing to be called.
+ */
 function ledgerLines(side: Partial<Record<LedgerLine, number>>) {
   return (Object.keys(side) as LedgerLine[])
-    .filter((key) => (side[key] ?? 0) >= 0.5)
+    .filter((key) => (side[key] ?? 0) >= 0.5 && LEDGER_LABELS[key])
     .map((key) => ({ key, label: LEDGER_LABELS[key], amount: side[key] ?? 0 }))
     .sort((a, b) => b.amount - a.amount);
 }

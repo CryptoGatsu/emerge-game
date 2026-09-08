@@ -84,6 +84,11 @@ export function t(text: string, vars?: Record<string, string | number>): string 
 
 /** The name of a thing the simulation names in English — a trade, a building, a resource. */
 export function tn(name: string): string {
+  // Never throw on a name that is not there. An English page returned the
+  // undefined unchanged and rendered an empty cell; a Chinese one reached the
+  // lookups below and took the whole panel down with it. A missing name is a
+  // blank, in either language.
+  if (!name) return '';
   if (getLocale() !== 'zh') return name;
   // The trade table last, because a building and the trade in it can share a
   // word and the building's is the one this asks for. It is consulted at all
@@ -96,6 +101,8 @@ export function tn(name: string): string {
 
 /** A trade, by its label or its key. The building of the same name is a different word. */
 export function tj(job: string): string {
+  // The same guard as `tn`: a name that is not there is a blank, not a crash.
+  if (!job) return '';
   if (getLocale() !== 'zh') return job;
   return JOBS_ZH[job] ?? JOBS_ZH[job.toLowerCase()] ?? NAMES[job] ?? UI[job] ?? job;
 }
