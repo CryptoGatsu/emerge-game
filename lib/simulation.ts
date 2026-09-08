@@ -678,12 +678,13 @@ export interface Stewardship {
 
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
-  | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
+  | 'wages' | 'upkeep' | 'idle' | 'imports' | 'building' | 'works' | 'gear'
   | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
   upkeep: 'Upkeep',
+  idle: 'Idle Gold',
   imports: 'Imports',
   building: 'Building',
   works: 'Public works',
@@ -3728,10 +3729,7 @@ function importReserve(world: World): number {
   const payroll = world.citizens
     .filter((c) => c.age >= 16 && c.job !== 'unemployed')
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage * rate, 0);
-  const upkeep = world.buildings
-    .filter((b) => b.active)
-    .reduce((sum, b) => sum + upkeepOf(b), 0);
-  return (payroll + upkeep) * IMPORT_RESERVE_DAYS;
+  return (payroll + upkeepBill(world)) * IMPORT_RESERVE_DAYS;
 }
 
 /**
@@ -7216,7 +7214,7 @@ function settlementBuilds(world: World) {
   const payroll = world.citizens
     .filter((c) => c.age >= 16 && c.job !== 'unemployed')
     .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage, 0);
-  const upkeep = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + upkeepOf(b), 0);
+  const upkeep = upkeepBill(world);
   // Three times over, and a fortnight of running costs left standing — unless
   // the town resolved on this in front of everybody, in which case it will
   // accept a thinner cushion for it. That is what a vote is worth: the same
@@ -7893,6 +7891,87 @@ export function upkeepOf(b: Building) {
 }
 export const UPKEEP_PER_ERA = 0.25;
 
+/* ------------------------------------------------------------------ *
+ * What the town is worth keeping, and to whom
+ * ------------------------------------------------------------------ */
+
+/**
+ * The standard of living the town's people actually keep, nothing to one.
+ *
+ * Deliberately absolute, not a ranking. `rankWealth` sorts everybody against
+ * each other so a fixed share always comes out wealthy, which is what the
+ * carts and the boats want and useless here: it says the same thing about a
+ * town of paupers as about a town of merchants. This reads the purses.
+ *
+ * What moves it is the wage the owner sets. Households spend what they hold
+ * above `COMFORTABLE_SAVINGS`, so a purse settles at about a week of whatever
+ * the town pays — a well-paid town keeps well-off people, and well-off people
+ * expect a well-kept town.
+ */
+const LIVING_FLOOR = 60;
+const LIVING_CEILING = 220;
+export function standardOfLiving(world: World): number {
+  const adults = world.citizens.filter((c) => c.age >= 16);
+  if (!adults.length) return 0;
+  const mean = adults.reduce((sum, c) => sum + Math.max(0, c.wallet), 0) / adults.length;
+  return Math.max(0, Math.min(1, (mean - LIVING_FLOOR) / (LIVING_CEILING - LIVING_FLOOR)));
+}
+
+/**
+ * What it costs to sit on Gold that is doing nothing.
+ *
+ * A share of every coin held beyond a month of the town's own running costs,
+ * every day. Not a multiplier on the upkeep bill — that was tried and it
+ * cannot work: a percentage of the buildings is bounded by the buildings, so
+ * a hoard ten times too big cost exactly what a hoard twice too big did, and
+ * neither ever came down. This is charged on the pile itself, so the bigger
+ * it is the faster it shrinks, and it stops of its own accord at the line
+ * where the Gold is a working reserve again.
+ *
+ * A month of costs is free, so saving up for a project costs nothing, and a
+ * town spent down to its needs pays none of this at all. There is no way for
+ * it to bankrupt anybody: the charge falls as the pile does.
+ */
+export const IDLE_FREE_DAYS = 30;
+export const IDLE_DAILY = 0.005;
+/** Gold held beyond a month of running costs. */
+export function idleGold(world: World, runningCost: number): number {
+  if (!(runningCost > 0)) return 0;
+  return Math.max(0, world.treasury - runningCost * IDLE_FREE_DAYS);
+}
+
+/** What a well-off town adds to its own upkeep. */
+export const WEALTH_UPKEEP = 0.5;
+
+/**
+ * The day's upkeep for the whole settlement.
+ *
+ * Every building it keeps standing, then what its own people expect of it,
+ * then what it is sitting on. Kept in one place because three callers used to
+ * sum the buildings themselves and would otherwise disagree about the bill.
+ */
+export function upkeepBill(world: World): number {
+  useWorld(world);
+  const plain = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + upkeepOf(b), 0);
+  return plain * (1 + WEALTH_UPKEEP * standardOfLiving(world));
+}
+
+/** The town's daily payroll at the wage it has chosen. */
+export function payrollOf(world: World): number {
+  const rate = cleanWageRate(world.wageRate);
+  return world.citizens
+    .filter((c) => c.age >= 16 && c.job !== 'unemployed')
+    .reduce((sum, c) => sum + jobs[c.job as WorkingJob].wage * rate, 0);
+}
+
+/** What a day of holding the treasury costs, and the figures behind it. */
+export function idleCost(world: World): { running: number; idle: number; charge: number } {
+  const running = upkeepBill(world) + payrollOf(world);
+  const idle = idleGold(world, running);
+  return { running, idle, charge: Math.round(idle * IDLE_DAILY) };
+}
+
+
 export function maintenanceCost(type: string) {
   /*
    * A fifth dearer than it was, and no more.
@@ -8162,7 +8241,7 @@ function daily(world: World) {
   world.ledgerYesterday = world.ledger;
   world.ledger = emptyLedger();
   const workers = world.citizens.filter((c) => c.age >= 16);
-  const upkeep = world.buildings.filter((b) => b.active).reduce((s, b) => s + upkeepOf(b), 0);
+  const upkeep = upkeepBill(world);
 
   // Assign jobs first, tracking the running tally so each choice sees the
   // settlement as it is being staffed rather than as it was yesterday.
@@ -8272,6 +8351,15 @@ function daily(world: World) {
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep * bankRelief(world));
+  // And what it costs to sit on more than the town needs. Charged after the
+  // day's real bills, against what those bills actually came to.
+  const idle = idleCost(world);
+  if (idle.charge > 0 && world.treasury > idle.charge) {
+    spend(world, 'idle', idle.charge);
+    if (world.day % 7 === 0) {
+      pushFeed(world, 'market', `${idle.charge.toLocaleString()} Gold went on guarding a reserve of ${Math.round(world.treasury).toLocaleString()}. Gold put to work costs nothing to keep.`);
+    }
+  }
   paySalaries(world);
   // Paid in the morning, spent through the day: what people do not need to
   // keep by them goes back into the settlement rather than sitting in a purse.
@@ -9463,16 +9551,18 @@ export const levelOf = (b: Building) => Math.max(1, Math.min(MAX_BUILDING_LEVEL_
  * everything it owns and cannot feed the bill will find out.
  */
 /** What one level of improvement adds to a building's output, and to its bill. */
-export const OUTPUT_PER_LEVEL = 0.22;
+export const OUTPUT_PER_LEVEL = 0.26;
 /*
- * Kept at half, deliberately, while the age multipliers rose.
+ * What an improvement adds to the daily bill.
  *
- * Raising it alongside them made improving a building a losing move in the
- * later ages — a well-worked city ran a bigger deficit than a neglected one,
- * which is the opposite of the point. The age is what costs more; what you
- * have built on top of it should still pay for itself.
+ * Raised alongside the output a level gives, not instead of it: an improved
+ * building is meant to be a commitment, dearer to keep than the plain one and
+ * worth more while it is worked. A level-four workshop costs three and a half
+ * times a level-one to stand and makes nearly twice as much, which is a
+ * decision rather than a formality — and a city of level-four buildings that
+ * nobody staffs is a city losing money every day, which is the point.
  */
-export const UPKEEP_PER_LEVEL = 0.5;
+export const UPKEEP_PER_LEVEL = 0.8;
 
 export const buildingOutput = (b: Building) => 1 + (levelOf(b) - 1) * OUTPUT_PER_LEVEL;
 

@@ -89,10 +89,10 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
     return (
       <div key={h.id} className="people-row exchange-past">
         <b>{h.side === 'bought' ? t('Bought') : t('Sold')}</b>
-        <span className="people-trade">{what}</span>
-        <span className="muted">{price}</span>
-        <span className="muted">{got}{h.burned > 0 ? ` · ${t('{n} Gold burned', { n: h.burned.toLocaleString() })}` : ''}</span>
-        <small className="muted">{h.otherName || (h.other ? shortAddress(h.other) : '')} · {new Date(h.at).toLocaleDateString()}</small>
+        <span className="exchange-past-what">{what}</span>
+        <span className="exchange-past-price muted">{price}</span>
+        <span className="exchange-past-got muted">{got}{h.burned > 0 ? ` · ${t('{n} Gold burned', { n: h.burned.toLocaleString() })}` : ''}</span>
+        <small className="exchange-past-who muted">{h.otherName || (h.other ? shortAddress(h.other) : '')} · {new Date(h.at).toLocaleDateString()}</small>
       </div>
     );
   };

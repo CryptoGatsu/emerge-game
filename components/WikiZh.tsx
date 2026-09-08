@@ -22,7 +22,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
+  BUILD_COSTS, BUILD_MATERIALS, IDLE_DAILY, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   ARROW_WOOD, BAIT_GOLD, MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, ROD_WOOD, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -82,7 +82,8 @@ const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
 const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', '每个工作的人每天都领工资。这是大多数聚落最大的一笔支出。'],
   ['imports', '按世界市场的价格买进镇子自己造不出的东西。'],
-  ['upkeep', `每栋建筑立着就要花钱，从房屋每天 ${maintenanceCost('House')} 金币到市场每天 ${maintenanceCost('Market')} 金币。`],
+  ['upkeep', `每栋建筑立着就要花钱，从房屋每天 ${maintenanceCost('House')} 金币到市场每天 ${maintenanceCost('Market')} 金币——时代越晚越贵，每升一级更贵，居民富足、期待一个体面市镇的城镇也更贵。`],
+  ['idle', `只是被数着的金币。一个月的运转开销是免费储备；超出部分每天要花 ${(IDLE_DAILY * 100).toFixed(1)}% 用于看管。把它花在城镇上，这一项就是零。`],
   ['building', '你建造的东西，花金币，也从堆场花材料。'],
   ['works', '通往无人能到之地的桥，以及随之而来的路。'],
   ['vault', '金库门的另一半：你取回存款时离开金库的金币。'],

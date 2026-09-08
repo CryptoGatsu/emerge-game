@@ -29,7 +29,7 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, IDLE_DAILY, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
@@ -112,7 +112,8 @@ const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
 const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', 'Everyone who works is paid, every day. It is the largest line in most settlements.'],
   ['imports', 'Buying what the town cannot make for itself, at the world market\u2019s price.'],
-  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market.`],
+  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market — more in each later age, more for each improvement, and more again in a town whose people are well off and expect a well-kept place.`],
+  ['idle', `Gold that is only ever counted. A month of the town\u2019s running costs is a free reserve; beyond that, ${(IDLE_DAILY * 100).toFixed(1)}% of the excess goes every day on guarding it. Spend it down to what the town needs and this line is nothing.`],
   ['building', 'What you raise, in Gold and in materials out of the yard.'],
   ['works', 'Bridges to land nobody can walk to, and the roads that follow.'],
   ['vault', 'The other half of the vault door: Gold leaving the treasury when you take a deposit back out.'],

@@ -3430,8 +3430,24 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 .casino-passes button.sel { border-color: var(--gold); color: var(--gold); background: rgba(240, 208, 94, 0.1); }
 
 /* One settled trade, in the exchange's History tab. */
-.exchange-past { grid-template-columns: 4.5rem minmax(0, 1fr) auto auto; row-gap: 0.15rem; }
-.exchange-past small { grid-column: 1 / -1; opacity: 0.7; }
+/*
+ * One settled trade.
+ *
+ * Laid out as a wrapping row rather than a grid: the panel is narrow, the
+ * figures are long ("1,000 Gold", "5 $EMERGE each"), and fixed columns pushed
+ * them into each other so a value broke across two lines and overlapped its
+ * neighbour. Each figure now keeps to one line and takes the width it needs,
+ * and what you came away with drops to its own line when there is no room.
+ */
+.people-row.exchange-past { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; }
+.exchange-past > b { flex: 0 0 auto; min-width: 3.4rem; }
+.exchange-past-what { color: var(--cream); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.exchange-past-price { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.exchange-past-got { flex: 1 1 12rem; min-width: 0; font-variant-numeric: tabular-nums; }
+.exchange-past-who { flex: 1 1 100%; opacity: 0.7; }
+@media (max-width: 480px) {
+  .exchange-past-got { flex: 1 1 100%; }
+}
 
 /* One payment the exchange is still settling, under the notice. */
 .exchange-waiting { display: block; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }

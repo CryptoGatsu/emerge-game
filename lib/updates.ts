@@ -17,6 +17,17 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.9',
+    date: '2026-09-08',
+    title: 'Gold to be managed',
+    notes: [
+      'Gold that only sits there now costs something to sit there. A month of the town\u2019s own running costs is a free reserve and always will be \u2014 saving up for a project costs nothing. Beyond that, half a per cent of the excess goes every day on guarding it, and because the charge is a share of the pile rather than of the buildings, a pile ten times too big shrinks ten times as fast. Measured on a settlement doing nothing else, half a million Gold comes down to a hundred and forty thousand and then stops, at the point where the Gold is a working reserve again. It has a line of its own in the Bank, and it is nothing at all for a town that spends what it makes. Players were sitting on hundreds of thousands with nothing pressing to do with it, which made Gold worth nothing to them; this is the answer.',
+      'Improving a building is a commitment. A level-four workshop costs three and a half times a level-one to keep standing, against nearly twice the output \u2014 so improvements are worth making and worth staffing, and a city full of level-four buildings that nobody works is a city losing money every day.',
+      'A well-off town costs more to keep. The people\u2019s own purses decide it: a settlement of people scraping along pays the plain bill, and a town whose people all have savings pays half again, because it expects a place kept to that standard. It moves with the wage you set, and it falls on its own if the town\u2019s fortunes do \u2014 a poorer town is a cheaper one, so this can tighten but never spiral.',
+      'The exchange\u2019s History no longer runs its figures into each other. On a narrow panel \u201c1,000 Gold\u201d broke across two lines and overlapped the price beside it. Each figure keeps to one line now and what you came away with drops below when there is no room.',
+    ],
+  },
+  {
     version: '2.8.3',
     date: '2026-09-08',
     title: 'A payment the exchange remembers',
@@ -296,6 +307,17 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.9',
+    date: '2026-09-08',
+    title: '需要经营的金币',
+    notes: [
+      '只是放着不动的金币，现在放着也要花钱。一个月的城镇运转开销是免费储备，而且永远都是——为某个工程攒钱不花一分。超出的部分，每天要花掉其中的百分之零点五用于看管；由于这笔费用按金堆本身计算而不是按建筑计算，多出十倍的金堆缩减速度也快十倍。以一座别的什么都不做的聚落实测，五十万金币会降到十四万然后停住，正是金币重新成为可用储备的那个点。银行里有单独一行显示它；对于把收入花出去的城镇，这一行就是零。玩家们囤着几十万却没有非做不可的用途，这让金币对他们失去了意义；这就是答案。',
+      '升级建筑是一项承诺。四级作坊的维护费是一级的三点五倍，产出接近两倍——所以升级值得做，也值得配人；而一座满是四级建筑却没人上工的城市，每天都在亏钱。',
+      '富足的城镇更费钱。由居民自己的钱包决定：勉强度日的聚落付基础账单，人人都有积蓄的城镇要多付一半，因为它期待与之相称的市容。它会随你设定的工资变动，也会随城镇境况自行回落——更穷的城镇更便宜，所以这项机制会收紧，但不会失控。',
+      '交易所的成交记录不再把数字挤在一起。在窄面板上“1,000 金币”会断成两行并盖住旁边的单价。现在每个数字都保持在一行，放不下时“你收到”会另起一行。',
+    ],
+  },
   {
     version: '2.8.3',
     date: '2026-09-08',
