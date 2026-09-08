@@ -17,7 +17,11 @@ export interface ExchangeOrder {
 }
 export interface Delivery { id: string; kind: 'gold' | 'resource'; resource?: Resource; amount: number; note: string; at: number }
 export interface ExchangeTerms { fee: number; dailyGoldCap: number; minGoldLot: number; maxGoodsLot: number }
-export interface ExchangeView { orders: ExchangeOrder[]; owed: Delivery[]; terms: ExchangeTerms; shared: boolean; degraded?: boolean }
+export interface TradeRecord {
+  id: string; at: number; side: 'bought' | 'sold'; kind: 'resource' | 'gold';
+  resource?: Resource; qty: number; unitPrice: number; burned: number; got: number; seed: number; other: string; otherName: string;
+}
+export interface ExchangeView { orders: ExchangeOrder[]; owed: Delivery[]; history: TradeRecord[]; terms: ExchangeTerms; shared: boolean; degraded?: boolean }
 
 const DEFAULT_TERMS: ExchangeTerms = { fee: 0.05, dailyGoldCap: 20_000, minGoldLot: 100, maxGoodsLot: 5_000 };
 
@@ -27,7 +31,7 @@ export async function fetchExchange(seed: number | null, address: string | null 
     const response = await fetch(`/api/exchange${query ? `?${query}` : ''}`, { cache: 'no-store' });
     if (!response.ok) return null;
     const json = (await response.json()) as Partial<ExchangeView>;
-    return { orders: json.orders ?? [], owed: json.owed ?? [], terms: json.terms ?? DEFAULT_TERMS, shared: !!json.shared, degraded: json.degraded };
+    return { orders: json.orders ?? [], owed: json.owed ?? [], history: json.history ?? [], terms: json.terms ?? DEFAULT_TERMS, shared: !!json.shared, degraded: json.degraded };
   } catch {
     return null;
   }
@@ -77,8 +81,18 @@ function rememberPending(p: PendingPurchase | null, dropId?: string) {
 
 type Settled = { delivery: Delivery; paid: number; burned: number; remaining: number };
 
-/** Hand a receipt in, asking again while the chain has not settled it. */
-async function settle(address: string, name: string, p: PendingPurchase, tries = 12): Promise<Reply<Settled>> {
+/**
+ * Hand a receipt in, asking again while the chain has not settled it.
+ *
+ * The wait used to be a minute, and the chain wants three confirmations: on a
+ * slow block a buyer paid the seller, waited out twelve tries, and was told to
+ * come back and press a button they had no reason to expect. Players reported
+ * buying Gold and receiving none, which is exactly what that looks like from
+ * the outside. So the first attempt waits long enough for three blocks to be
+ * unlikely to miss, and whatever is still unsettled is handed in again on its
+ * own — see `resumePending` — rather than waiting on the player.
+ */
+async function settle(address: string, name: string, p: PendingPurchase, tries = 40): Promise<Reply<Settled>> {
   let last: Reply<Settled> = { ok: false, reason: 'The exchange did not answer.', retry: true };
   for (let i = 0; i < tries; i++) {
     last = await post<Settled>({ action: 'buyGold', address, name, seed: p.seed, id: p.id, qty: p.qty, txHash: p.txHash ?? undefined });
@@ -112,7 +126,25 @@ export async function buyGold(ledger: VaultLedger, address: string, name: string
   const r = await settle(address, name, pending);
   if (r.ok) { rememberPending(null, pending.id); return { ...r, ledger: paid.ledger }; }
   if (!r.retry) rememberPending(null, pending.id);
-  return { ok: false, reason: r.retry ? `${r.reason} Your payment is kept: use “Finish a paid purchase” on the exchange to hand it in again.` : r.reason };
+  return { ok: false, reason: r.retry ? `${r.reason} Your payment is safe and the Gold is still coming: the purchase finishes by itself, and “Finish a paid purchase” hands it in now.` : r.reason };
+}
+
+/**
+ * Quietly hand in whatever is still owed, once each.
+ *
+ * Called on entering a world and on a timer, so a purchase that outlasted its
+ * first settling window finishes on its own. A receipt that is still not
+ * settled is left alone for the next round; one the chain has refused for
+ * good is dropped.
+ */
+export async function resumePending(address: string, name: string): Promise<Settled[]> {
+  const settled: Settled[] = [];
+  for (const p of pendingPurchases(address)) {
+    const r = await settle(address, name, p, 1);
+    if (r.ok) { settled.push(r); rememberPending(null, p.id); }
+    else if (!r.retry) rememberPending(null, p.id);
+  }
+  return settled;
 }
 
 /** Hand every kept receipt in again. Returns what was settled, and the first refusal. */

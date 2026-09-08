@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RESOURCE_LABELS, type Resource } from '@/lib/world/goods';
 import { TOKEN } from '@/lib/chain/emerge';
 import { shortAddress } from '@/lib/chain/emerge';
-import { fetchExchange, pendingPurchases, type ExchangeOrder, type ExchangeView } from '@/lib/net/exchange';
+import { fetchExchange, pendingPurchases, type ExchangeOrder, type ExchangeView, type TradeRecord } from '@/lib/net/exchange';
 import type { Snapshot } from '@/lib/hud';
 import { t, tn, useLocale } from '@/lib/i18n';
 
@@ -30,7 +30,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   view: Snapshot; seed: number; me: string | null; spectating: boolean; actions: ExchangeActions;
 }) {
   useLocale();
-  const [tab, setTab] = useState<'buy' | 'sell' | 'mine'>('buy');
+  const [tab, setTab] = useState<'buy' | 'sell' | 'mine' | 'past'>('buy');
   const [book, setBook] = useState<ExchangeView | null | undefined>(undefined);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,6 +45,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   const goods = useMemo(() => orders.filter((o) => o.kind === 'resource'), [orders]);
   const gold = useMemo(() => orders.filter((o) => o.kind === 'gold'), [orders]);
   const own = useMemo(() => orders.filter((o) => o.seller === mine), [orders, mine]);
+  const past = book?.history ?? [];
   const canAct = !spectating && !!me;
   const act = async (fn: () => Promise<string | null>) => {
     setBusy(true); setNote(null);
@@ -63,6 +64,36 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   const [price, setPrice] = useState('');
   const q = Math.floor(Number(qty) || 0), p = Math.floor(Number(price) || 0);
   const sellOk = q > 0 && p > 0 && (kind === 'gold' ? q >= terms.minGoldLot && q <= view.treasury : q <= stock(resource) && q <= terms.maxGoodsLot);
+
+  /*
+   * One line of what actually happened.
+   *
+   * Deliveries arrive the next time a world is open and the Gold goes into a
+   * treasury that upkeep draws on, so "did my purchase go through" was a
+   * question the panel could not answer. It answers it here.
+   */
+  const done = (h: TradeRecord) => {
+    const what = h.kind === 'gold'
+      ? t('{n} Gold', { n: h.qty.toLocaleString() })
+      : `${h.qty.toLocaleString()} ${tn(RESOURCE_LABELS[h.resource as Resource] ?? h.resource ?? '')}`;
+    const price = h.kind === 'gold'
+      ? t('{n} {ticker} each', { n: h.unitPrice.toLocaleString(), ticker: TOKEN.ticker })
+      : t('{n} Gold each', { n: h.unitPrice.toLocaleString() });
+    // What this wallet came away with: Gold or goods for a buyer, Gold or
+    // $EMERGE for a seller.
+    const got = h.side === 'bought'
+      ? (h.kind === 'gold' ? t('you received {n} Gold', { n: h.got.toLocaleString() }) : t('you received {n}', { n: what }))
+      : (h.kind === 'gold' ? t('you were paid {n} {ticker}', { n: h.got.toLocaleString(), ticker: TOKEN.ticker }) : t('you were paid {n} Gold', { n: h.got.toLocaleString() }));
+    return (
+      <div key={h.id} className="people-row exchange-past">
+        <b>{h.side === 'bought' ? t('Bought') : t('Sold')}</b>
+        <span className="people-trade">{what}</span>
+        <span className="muted">{price}</span>
+        <span className="muted">{got}{h.burned > 0 ? ` · ${t('{n} Gold burned', { n: h.burned.toLocaleString() })}` : ''}</span>
+        <small className="muted">{h.otherName || (h.other ? shortAddress(h.other) : '')} · {new Date(h.at).toLocaleDateString()}</small>
+      </div>
+    );
+  };
 
   const row = (o: ExchangeOrder) => {
     const yours = o.seller === mine;
@@ -102,6 +133,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
         <button className={tab === 'buy' ? 'on' : ''} onClick={() => setTab('buy')}>{t('Buy')}{orders.length > 0 && <span className="people-open"> · {orders.length}</span>}</button>
         <button className={tab === 'sell' ? 'on' : ''} onClick={() => setTab('sell')} disabled={!canAct}>{t('Sell')}</button>
         <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')} disabled={!canAct}>{t('Your orders')}{own.length > 0 && <span className="people-open"> · {own.length}</span>}</button>
+        <button className={tab === 'past' ? 'on' : ''} onClick={() => setTab('past')} disabled={!canAct}>{t('History')}{past.length > 0 && <span className="people-open"> · {past.length}</span>}</button>
         <button className="ghost small" onClick={() => void reload()} disabled={busy}>{t('Refresh')}</button>
       </div>
       {note && <p className="people-note">{note}</p>}
@@ -120,6 +152,12 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
           {goods.map(row)}
           {gold.length > 0 && <h4>{t('Gold, for {ticker}', { ticker: TOKEN.ticker })}</h4>}
           {gold.map(row)}
+        </div>
+      )}
+      {tab === 'past' && canAct && (
+        <div className="people-rows">
+          {past.length === 0 && <p className="muted small">{t('Nothing bought or sold yet. What you trade here is written down, both sides of it.')}</p>}
+          {past.map(done)}
         </div>
       )}
       {tab === 'sell' && canAct && (

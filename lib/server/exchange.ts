@@ -136,6 +136,102 @@ export async function collect(owner: string, seed: number, ids: string[]): Promi
   await Promise.all(ids.slice(0, 200).map((id) => hdel(owedKey(owner, seed), id)));
 }
 
+/* ------------------------------------------------------------------ *
+ * What each wallet has bought and sold
+ * ------------------------------------------------------------------ */
+
+/*
+ * A record of the trades, kept per wallet.
+ *
+ * Deliveries arrive the next time a world is open, and Gold that arrives goes
+ * straight into a treasury that upkeep is drawing on, so a player who bought
+ * Gold and looked at the number an hour later could not tell a trade that
+ * never went through from one that went through and was spent. Players
+ * reported exactly that doubt. This is the answer to it: every fill is
+ * written down for both sides, and the exchange shows it back.
+ *
+ * Advisory rather than authoritative — the orders and the deliveries are what
+ * the money moves on — so a write that fails must never fail a trade.
+ */
+export interface TradeRecord {
+  id: string;
+  at: number;
+  /** Which side of it this wallet was on. */
+  side: 'bought' | 'sold';
+  kind: 'resource' | 'gold';
+  resource?: Resource;
+  /** Units of the good, or Gold in a Gold lot. */
+  qty: number;
+  /** Gold each for goods; $EMERGE each for Gold. */
+  unitPrice: number;
+  /** Gold burned on the trade. */
+  burned: number;
+  /** What this wallet actually received: Gold, goods, or $EMERGE for a seller of Gold. */
+  got: number;
+  /** The plot the delivery was made to, for this wallet's side. */
+  seed: number;
+  other: string;
+  otherName: string;
+}
+
+const HISTORY_KEPT = 60;
+const historyKey = (owner: string) => serverKey(`exchange:history:${owner.toLowerCase()}`);
+
+/** What this wallet has bought and sold, newest first. */
+export async function history(owner: string): Promise<TradeRecord[]> {
+  if (!ADDRESS.test(owner)) return [];
+  const rows = await hgetall(historyKey(owner));
+  const out: TradeRecord[] = [];
+  for (const raw of Object.values(rows)) { try { out.push(JSON.parse(raw) as TradeRecord); } catch { /* skip */ } }
+  return out.sort((a, b) => b.at - a.at).slice(0, HISTORY_KEPT);
+}
+
+/** Write one side of a trade down, and drop the oldest when the book is full. */
+async function record(owner: string, r: Omit<TradeRecord, 'id'>): Promise<void> {
+  const key = historyKey(owner);
+  const id = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  await hset(key, id, JSON.stringify({ ...r, id }));
+  // Trimmed here rather than on read, so the hash cannot grow without bound.
+  const rows = await hgetall(key);
+  const ids = Object.entries(rows)
+    .map(([k, raw]) => { try { return [k, (JSON.parse(raw) as TradeRecord).at ?? 0] as const; } catch { return [k, 0] as const; } })
+    .sort((a, b) => b[1] - a[1])
+    .slice(HISTORY_KEPT)
+    .map(([k]) => k);
+  if (ids.length) await Promise.all(ids.map((k) => hdel(key, k)));
+}
+
+/** Both sides of a fill, written down. Never allowed to fail the trade itself. */
+async function recordBoth(buyer: string, seller: string, entry: Omit<TradeRecord, 'id' | 'side' | 'other' | 'otherName' | 'got' | 'seed'>,
+  buyerSide: { got: number; seed: number; name: string }, sellerSide: { got: number; seed: number; name: string }): Promise<void> {
+  await Promise.all([
+    record(buyer, { ...entry, side: 'bought', got: buyerSide.got, seed: buyerSide.seed, other: seller.toLowerCase(), otherName: sellerSide.name }),
+    record(seller, { ...entry, side: 'sold', got: sellerSide.got, seed: sellerSide.seed, other: buyer.toLowerCase(), otherName: buyerSide.name }),
+  ]).catch(() => {});
+}
+
+/**
+ * Gold put right by hand.
+ *
+ * For the one case the machinery cannot fix itself: a player paid a seller on
+ * chain and the settlement never completed, so the seller holds the $EMERGE
+ * and the buyer holds nothing. The Gold is owed to their plot like any other
+ * delivery, so it arrives the next time they open the world and cannot be
+ * taken twice. Authorised by the deployment's own secret, never by a session.
+ */
+export async function makeGood(owner: string, seed: number, gold: number, note: string): Promise<Result<{ delivery: Delivery }>> {
+  if (!ADDRESS.test(owner)) return { ok: false, reason: 'A make-good belongs to a wallet.' };
+  const whole = Math.floor(Number(gold));
+  if (!(whole > 0)) return { ok: false, reason: 'Say how much Gold.' };
+  if (!(await ownsPlot(owner, seed))) return { ok: false, reason: 'That plot is not held by that wallet.' };
+  const delivery = await owe(owner, seed, { kind: 'gold', amount: whole, note: note || 'Gold put right by the team' });
+  await record(owner, {
+    at: Date.now(), side: 'bought', kind: 'gold', qty: whole, unitPrice: 0, burned: 0,
+    got: whole, seed, other: '', otherName: note || 'put right by the team',
+  }).catch(() => {});
+  return { ok: true, delivery };
+}
+
 /** Gold burned by the exchange over its life. */
 export const burnedGold = async () => counter(BURNED);
 const burn = async (gold: number) => { if (gold > 0) await incrBy(BURNED, gold).catch(() => {}); };
@@ -265,6 +361,10 @@ export async function buyGoods(input: { id: string; buyer: string; buyerName: st
     await owe(order.seller, order.seed, { kind: 'gold', amount: paid - burned, note: `${qty.toLocaleString()} ${order.resource} sold to ${input.buyerName.slice(0, 32) || 'a buyer'} for ${paid.toLocaleString()} Gold, ${burned.toLocaleString()} burned` });
     const delivery = await owe(buyer, seed, { kind: 'resource', resource: order.resource, amount: qty, note: `${qty.toLocaleString()} ${order.resource} bought from ${order.sellerName || 'a seller'} for ${paid.toLocaleString()} Gold` });
     await burn(burned);
+    await recordBoth(buyer, order.seller,
+      { at: Date.now(), kind: 'resource', resource: order.resource, qty, unitPrice: order.unitPrice, burned },
+      { got: qty, seed, name: input.buyerName.slice(0, 32) },
+      { got: paid - burned, seed: order.seed, name: order.sellerName || '' });
     return { ok: true as const, delivery, paid, burned, remaining };
   }, soonMsg);
 }
@@ -302,6 +402,10 @@ export async function buyGold(input: { id: string; buyer: string; buyerName: str
     else await hdel(ORDERS, id);
     const delivery = await owe(buyer, seed, { kind: 'gold', amount: qty - burned, note: `${qty.toLocaleString()} Gold bought from ${order.sellerName || 'a seller'} for ${price.toLocaleString()} $EMERGE, ${burned.toLocaleString()} burned` });
     await burn(burned);
+    await recordBoth(buyer, order.seller,
+      { at: Date.now(), kind: 'gold', qty, unitPrice: order.unitPrice, burned },
+      { got: qty - burned, seed, name: input.buyerName.slice(0, 32) },
+      { got: price, seed: order.seed, name: order.sellerName || '' });
     return { ok: true as const, delivery, paid: price, burned, remaining };
   }, soonMsg);
 }

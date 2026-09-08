@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { buyGold, buyGoods, cancelOrder, collect, listOrder, orders, owed, releaseGold, reserveGold, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
+import { buyGold, buyGoods, cancelOrder, collect, history, listOrder, makeGood, orders, owed, releaseGold, reserveGold, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
 import { registryShared } from '@/lib/server/registry';
 import { holdsAddress, sessionAddress, sessionsAvailable } from '@/lib/server/session';
 
@@ -20,20 +20,45 @@ export async function GET(request: Request) {
   const asked = String(url.searchParams.get('address') ?? '').toLowerCase();
   const me = sessionAddress(request) ?? (!sessionsAvailable() && /^0x[0-9a-f]{40}$/.test(asked) ? asked : null);
   try {
-    const [rows, mine] = await Promise.all([orders(), me && Number.isFinite(seed) ? owed(me, seed) : Promise.resolve([])]);
-    return NextResponse.json({ orders: rows, owed: mine, terms, shared: registryShared() });
+    const [rows, mine, mineDone] = await Promise.all([
+      orders(),
+      me && Number.isFinite(seed) ? owed(me, seed) : Promise.resolve([]),
+      me ? history(me).catch(() => []) : Promise.resolve([]),
+    ]);
+    return NextResponse.json({ orders: rows, owed: mine, history: mineDone, terms, shared: registryShared() });
   } catch {
-    return NextResponse.json({ orders: [], owed: [], terms, shared: false, degraded: true });
+    return NextResponse.json({ orders: [], owed: [], history: [], terms, shared: false, degraded: true });
   }
+}
+
+/**
+ * The deployment's own secret, for the one action no player may take.
+ *
+ * A make-good puts Gold into a plot without anybody paying for it, so it is
+ * authorised the way the cron routes are — by a secret only the deployment
+ * holds — and never by a session, however well signed in.
+ */
+function operator(request: Request): boolean {
+  const secret = process.env.EMERGE_CRON_SECRET ?? process.env.CRON_SECRET ?? '';
+  if (!secret) return false;
+  const auth = request.headers.get('authorization') ?? '';
+  return auth === `Bearer ${secret}` || request.headers.get('x-cron-secret') === secret;
 }
 
 export async function POST(request: Request) {
   let body: {
     action?: string; address?: string; name?: string; seed?: number; id?: string;
     kind?: 'resource' | 'gold'; resource?: string; qty?: number; unitPrice?: number; txHash?: string; ids?: string[];
+    gold?: number; note?: string;
   };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 }); }
   const address = String(body.address ?? '').toLowerCase();
+  if (body.action === 'makeGood') {
+    if (!operator(request)) return NextResponse.json({ error: 'Not for this door.' }, { status: 403 });
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return NextResponse.json({ error: 'A make-good belongs to a wallet.' }, { status: 400 });
+    const r = await makeGood(address, Number(body.seed), Number(body.gold), String(body.note ?? '').slice(0, 120));
+    return r.ok ? NextResponse.json({ delivery: r.delivery }) : NextResponse.json({ error: r.reason }, { status: 400 });
+  }
   if (!/^0x[0-9a-f]{40}$/.test(address)) return NextResponse.json({ error: 'A trade belongs to a wallet.' }, { status: 400 });
   if (sessionsAvailable() && !holdsAddress(request, address)) return NextResponse.json({ error: 'Sign in with this wallet first.' }, { status: 403 });
   if (!registryShared() && process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_TRIALS) {

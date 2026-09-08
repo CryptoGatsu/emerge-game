@@ -41,7 +41,7 @@ import {
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
   coverPlot, boonPlot, renamePlot,
 } from '@/lib/net/registry';
-import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, finishPending, listOrder } from '@/lib/net/exchange';
+import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, finishPending, listOrder, resumePending } from '@/lib/net/exchange';
 import type { ExchangeActions } from './Exchange';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
@@ -2098,6 +2098,31 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * owed to this world are collected on entry and every minute after, once
    * each by id.
    */
+  /*
+   * Take a delivery in, then save, then tell the server to forget it.
+   *
+   * The world is written to disk every fifteen seconds, and `collect` deletes
+   * the server's record at once — so a tab closed in between lost Gold the
+   * server no longer owed. Saving first closes that window: if anything fails
+   * after this point the delivery is still owed and arrives on the next poll.
+   * The live world is read here rather than captured by the caller, because a
+   * Gold purchase can spend a minute on the chain and the world may have been
+   * reopened underneath it.
+   */
+  const takeDeliveries = useCallback((list: { id: string }[]) => {
+    const world = worldRef.current;
+    if (!world || !wallet.address) return false;
+    const taken: string[] = [];
+    let changed = false;
+    for (const d of list) {
+      if (receiveDelivery(world, d as Parameters<typeof receiveDelivery>[1])) changed = true;
+      taken.push(d.id);
+    }
+    if (changed) saveWorld(world);
+    if (taken.length) void collectDeliveries(wallet.address, claimed.seed, taken);
+    return changed;
+  }, [wallet.address, claimed.seed]);
+
   const exchangeActions = useMemo<ExchangeActions>(() => ({
     list: async (kind, qty, unitPrice, resource) => {
       const world = worldRef.current;
@@ -2125,14 +2150,14 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         if (!drawFromTreasury(world, total, `${total.toLocaleString()} Gold paid on the exchange for ${qty.toLocaleString()} ${order.resource}.`)) return t('The treasury cannot cover that.');
         const r = await buyGoods(wallet.address, player.name, claimed.seed, order.id, qty);
         if (!r.ok) { fundTreasury(world, total, 'Gold back: the trade was refused.'); refresh(); return tx(r.reason); }
-        if (receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
+        takeDeliveries([r.delivery]);
         refresh();
         return null;
       }
       const r = await buyGold(player.ledger, wallet.address, player.name, claimed.seed, order, qty);
       if (!r.ok) return tx(r.reason);
       onPlayer({ ...player, ledger: r.ledger });
-      if (receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
+      takeDeliveries([r.delivery]);
       refresh();
       return null;
     },
@@ -2145,7 +2170,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       // refund waits there for that world to open; crediting it here would
       // pay it twice.
       if (r.seed !== claimed.seed) { refresh(); return t('Taken down. What was unsold goes back to the plot it came from, the next time that world is open.'); }
-      if (r.delivery && receiveDelivery(world, r.delivery)) void collectDeliveries(wallet.address, claimed.seed, [r.delivery.id]);
+      if (r.delivery) takeDeliveries([r.delivery]);
       refresh();
       return null;
     },
@@ -2153,29 +2178,31 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       const world = worldRef.current;
       if (!world || !wallet.address) return t('Connect a wallet to trade.');
       const { settled, reason } = await finishPending(wallet.address, player.name);
-      for (const s of settled) if (receiveDelivery(world, s.delivery)) void collectDeliveries(wallet.address, claimed.seed, [s.delivery.id]);
+      takeDeliveries(settled.map((x) => x.delivery));
       if (settled.length) refresh();
       return reason ? tx(reason) : settled.length ? null : t('Nothing was waiting to be finished.');
     },
-  }), [wallet.address, player, claimed.seed, onPlayer, refresh]);
+  }), [wallet.address, player, claimed.seed, onPlayer, refresh, takeDeliveries]);
+  const nameRef = useRef(player.name);
+  nameRef.current = player.name;
   useEffect(() => {
     if (!wallet.address || visit) return;
     const address = wallet.address;
     let live = true;
     const tick = async () => {
+      // A purchase whose chain payment settled after the buyer's window closed
+      // is handed in here, without anybody pressing anything.
+      const done = await resumePending(address, nameRef.current).catch(() => []);
       const book = await fetchExchange(claimed.seed, address);
-      const world = worldRef.current;
-      if (!live || !book || !world || book.owed.length === 0) return;
-      const taken: string[] = [];
-      let changed = false;
-      for (const d of book.owed) { if (receiveDelivery(world, d)) changed = true; taken.push(d.id); }
-      void collectDeliveries(address, claimed.seed, taken);
-      if (changed) refresh();
+      if (!live) return;
+      const waiting = [...done.map((d) => d.delivery), ...(book?.owed ?? [])];
+      if (!waiting.length) return;
+      if (takeDeliveries(waiting)) refresh();
     };
     void tick();
     const timer = window.setInterval(() => void tick(), 60_000);
     return () => { live = false; window.clearInterval(timer); };
-  }, [wallet.address, claimed.seed, visit, refresh]);
+  }, [wallet.address, claimed.seed, visit, refresh, takeDeliveries]);
 
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
     const world = worldRef.current;

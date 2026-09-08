@@ -17,6 +17,16 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.8.2',
+    date: '2026-09-08',
+    title: 'Gold that was paid for arrives',
+    notes: [
+      'A Gold purchase finishes on its own. Buying Gold pays the seller\u2019s wallet on chain, and the exchange waits for that payment to settle before it hands the Gold over \u2014 three confirmations, which on a slow block takes longer than the minute the browser was willing to wait. A buyer who paid and then watched the wait run out was told to come back and press a button they had no reason to expect, and reported buying Gold and receiving none. That is what happened, and it is fixed: the wait is long enough for the chain, and anything still unsettled is handed in again on its own, every minute, until it lands. Nothing was ever lost \u2014 the receipt was kept the whole time \u2014 but nobody should have to know that.',
+      'A delivery is not forgotten until the world holding it has been saved. Gold and goods went into the settlement in front of you and the server was told at once to forget it owed them, while the world itself is written to disk every fifteen seconds. A tab closed in between lost what had just arrived. The save comes first now, so if anything goes wrong the delivery is still owed and turns up on the next look.',
+      'History, on the exchange. A new tab beside Buy, Sell and Your orders: everything this wallet has bought and sold, what it paid, what it actually received, what was burned and who was on the other side. Deliveries arrive the next time a world is open and Gold goes into a treasury that upkeep is drawing on, so \u201cdid that go through\u201d was a fair question the panel could not answer. It answers it now, for both sides of every trade.',
+    ],
+  },
+  {
     version: '2.8.1',
     date: '2026-09-08',
     title: 'What players reported, and what a city costs',
@@ -276,6 +286,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.8.2',
+    date: '2026-09-08',
+    title: '付了款的金币会到账',
+    notes: [
+      '购买金币会自动完成。买金币是在链上把 $EMERGE 付到卖家钱包，交易所要等这笔付款确认之后才交付金币——需要三个确认，遇到出块慢时会超过浏览器原本只肯等的一分钟。付了款却等到超时的买家，被告知要回来点一个他们根本没理由预料到的按钮，于是报告说买了金币却没收到。事实确实如此，现在已经修好：等待时间足够链完成确认，仍未结算的会每分钟自动重新提交，直到到账为止。钱其实一直没丢——凭据始终保留着——但不该让任何人需要知道这一点。',
+      '在存有这笔货物的世界保存之前，不会让服务器忘记这笔配送。过去金币和货物进入你眼前的聚落后，服务器会立刻被告知不再欠付，而世界本身每十五秒才写入一次。在这中间关闭页面，刚到手的东西就没了。现在先保存再销记，所以万一出问题，这笔配送仍然欠着，下次查看时就会出现。',
+      '交易所新增“成交记录”。在买入、卖出、我的挂单旁边：这个钱包买过卖过什么、付了多少、实际收到多少、销毁了多少，以及对方是谁。配送要等下次打开世界才到达，金币又会进入正在被维护费消耗的金库，所以“那笔到底成没成”是个面板答不上来的合理疑问。现在它能回答了，每笔交易的买卖双方都能看到。',
+    ],
+  },
   {
     version: '2.8.1',
     date: '2026-09-08',
