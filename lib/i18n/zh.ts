@@ -153,6 +153,7 @@ export const UI: Record<string, string> = {
   'A plot belongs to an address, and so does your balance and your name. Connect a wallet and the map opens — nothing before that point costs you anything.':
     '地块属于一个地址，你的余额和名字也是。连接钱包，地图就会打开——在那之前不花你一分钱。',
   'Read the guide first': '先读指南',
+  'See every price': '看看所有价格',
   'Nobody is waiting for orders': '没有人在等命令',
   'Every being on your plot has their own hunger, trade, friends and grudges. You cannot tell anyone what to do — you build them a workshop and watch somebody decide it is theirs.':
     '你地块上的每个居民都有自己的饥饿、手艺、朋友和积怨。你不能命令任何人——你给他们盖一间作坊，然后看着有人决定那是自己的。',

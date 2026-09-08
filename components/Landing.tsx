@@ -204,9 +204,12 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
                 </p>
               </>
             )}
-            <a className="gate-guide" href="/wiki">
-              {t('Read the guide first')} &rarr;
-            </a>
+            {/* Two ways in for somebody who is not ready to connect anything:
+                what the game is, and what everything in it costs. */}
+            <div className="gate-links">
+              <a className="gate-guide" href="/wiki">{t('Read the guide first')} &rarr;</a>
+              <a className="gate-guide" href="/markets">{t('See every price')} &rarr;</a>
+            </div>
           </div>
         </section>
 

@@ -2571,6 +2571,9 @@ button.fold:hover { color: var(--emerald); }
   text-decoration: none;
 }
 .gate-guide:hover { text-decoration: underline; }
+/* The guide and the markets, side by side: one says what the game is,
+   the other what everything in it costs, and neither needs a wallet. */
+.gate-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 22px; margin-top: 2px; }
 
 /* Where the market panel's prices come from — one line, above the figures,
    because "is this number mine or everybody's?" is the first thing worth
