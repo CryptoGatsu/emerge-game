@@ -17,20 +17,9 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
-    version: '2.11',
+    version: '2.9.4',
     date: '2026-09-08',
-    title: 'What a town may hold, on the label',
-    notes: [
-      'Your treasury has a top now, and it is printed next to the Gold: 512,400 / 1,200,000. It climbs with every level and every age \u2014 60,000 for a fresh claim, five million for a level-ten city in the AI era \u2014 so the answer to \u201chow much can I keep?\u201d is a number on the screen rather than something to work out. This came from a player, and their reasoning was the right one: a limit you can see is a limit you can play around.',
-      'It replaces the carrying cost on idle Gold from 2.9. Both were there to stop a hoard so large that Gold stops being a decision, and the charge did work \u2014 but it worked out of sight, as a daily subtraction you had to go looking for in the Bank to understand. Only one of the two should exist, so the charge is gone. Gold sitting in your treasury now costs you nothing at all.',
-      'A full treasury turns income away; it never has Gold taken off it. Nothing you have earned is ever removed \u2014 what the town cannot hold, it simply does not take, and it tells you in the feed when that has been happening. The Gold in the purse turns amber when you are at the ceiling. Spend it, or raise the city a level and it holds more.',
-      'Every age\u2019s smallest treasury is several times its dearest public works \u2014 the AI era\u2019s tenth level costs 450,000 Gold and the smallest AI-era treasury holds 2,700,000 \u2014 so the ceiling can never stand between a player and the next rung.',
-    ],
-  },
-  {
-    version: '2.10',
-    date: '2026-09-08',
-    title: 'Ten levels to every age',
+    title: 'Ten levels to every age, and a treasury with a top',
     notes: [
       'Every age now has its own ten levels. The settlement has ten, the township has ten above those, and so on to the AI era \u2014 fifty in all. Entering a new age puts the city back to level one of that age, where the ten levels ahead are a bigger city than the ten behind. This came from a player, and it is the right shape: each age is a complete climb of its own, and the whole game is a ladder you can see the top of.',
       'Going back to level one is not a step down in what you earn. The reward runs up the fifty rungs, not up the level number, so level one of the township pays a little \u2014 about five per cent \u2014 *more* than level ten of the settlement. Every rung pays more than the one below it, all fifty of them, with no cliff anywhere and no cliff at an age boundary. Nothing you built stops counting when you advance; the buildings, the trades and the improvements all come with you, in the new age\u2019s own forms.',
@@ -38,13 +27,10 @@ export const UPDATES: Update[] = [
       'A level you have paid for is no longer lost to a bad winter. The level is held while the city that earned it is still there, and one death used to be enough to cross a rung and take it back \u2014 played out over a few hundred days, the level flickered up and down. Rungs are further apart now, and holding a level asks for a little less than reaching it did. A real decline still costs you the level; a wobble does not.',
       'No plot that was already here earns less than it did. The ladder redrew the middle of the curve, and a settlement that had climbed levels without advancing an age sat higher on the old table than the new one puts it \u2014 mostly because two of the four age gates were impassable until 2.9.2, so those players were stuck by a fault of ours. Every plot claimed before this build keeps whatever the old table paid it, for as long as it holds the size that earned it, and that floor still rises when it advances an age. A city grows past the floor and stops needing it; until then it is never worse off. Nothing had to be written down at the moment of the change \u2014 the old level came from the settlement\u2019s size, and the size is in the published world, so the old answer is worked out again from the same evidence every time it is judged.',
       'What a plot can earn at the very top is unchanged at 250,000 a day, and a fresh claim still starts at 40,000. The public works that pay for each level are cheap in the settlement era \u2014 55,500 Gold for all ten, about what the old gate asked to have in the treasury \u2014 and steep at the top, where a single AI-era level costs 450,000. Gold has somewhere to go at every stage of the game.',
-    ],
-  },
-  {
-    version: '2.9.4',
-    date: '2026-09-08',
-    title: 'No daily ceiling on selling Gold',
-    notes: [
+      'Your treasury has a top now, and it is printed next to the Gold: 512,400 / 1,200,000. It climbs with every level and every age \u2014 60,000 for a fresh claim, five million for a level-ten city in the AI era \u2014 so the answer to \u201chow much can I keep?\u201d is a number on the screen rather than something to work out. This came from a player, and their reasoning was the right one: a limit you can see is a limit you can play around.',
+      'It replaces the carrying cost on idle Gold from 2.9. Both were there to stop a hoard so large that Gold stops being a decision, and the charge did work \u2014 but it worked out of sight, as a daily subtraction you had to go looking for in the Bank to understand. Only one of the two should exist, so the charge is gone. Gold sitting in your treasury now costs you nothing at all.',
+      'A full treasury turns income away; it never has Gold taken off it. Nothing you have earned is ever removed \u2014 what the town cannot hold, it simply does not take, and it tells you in the feed when that has been happening. The Gold in the purse turns amber when you are at the ceiling. Spend it, or raise the city a level and it holds more.',
+      'Every age\u2019s smallest treasury is several times its dearest public works \u2014 the AI era\u2019s tenth level costs 450,000 Gold and the smallest AI-era treasury holds 2,700,000 \u2014 so the ceiling can never stand between a player and the next rung.',
       'The limit on how much Gold a wallet could put up for \u0024EMERGE in a day is gone. It was 20,000, and its job was to stop somebody who had been sitting on a hoard for months from emptying the whole thing into the token in one afternoon. Idle Gold now costs something to hold \u2014 a month of the town\u2019s running costs is free and the excess is charged every day \u2014 so a hoard that size is already something a player is paying to keep rather than something to be throttled on the way out. Sell as much as you have.',
       'What still bounds a lot is the honest pair, and neither has changed: the Gold must be covered by the treasury in the plot\u2019s last published copy, counting anything you already have standing against it, and it leaves the treasury the moment the order goes up. So the exchange can never sell Gold a settlement does not have, and a plot cannot put the same Gold up twice.',
     ],
@@ -369,20 +355,9 @@ export const UPDATES: Update[] = [
 
 export const UPDATES_ZH: Update[] = [
   {
-    version: '2.11',
+    version: '2.9.4',
     date: '2026-09-08',
-    title: '城镇能持有多少，写在标签上',
-    notes: [
-      '你的金库现在有上限，而且就印在金币旁边：512,400 / 1,200,000。它随每一级、每一个时代上升——新认领的地块 60,000，人工智能时代的十级城市五百万——所以“我能存多少”是屏幕上的一个数字，而不是需要推算的东西。这个想法来自一位玩家，而他的理由是对的：看得见的限制才是可以围绕它来玩的限制。',
-      '它取代了 2.9 引入的闲置金币持有费。两者都是为了防止囤积到让金币不再构成选择的地步，而那笔费用确实起了作用——只是它在看不见的地方起作用，是一笔你得到银行里专门去找才能明白的每日扣款。两者只该留一个，所以那笔费用取消了。放在金库里的金币现在完全不花你一分钱。',
-      '金库满了会把收入挡在门外，而不会从里面拿走金币。你挣到的任何东西都不会被扣除——城镇装不下的，它就干脆不收，并且会在动态里告诉你这件事正在发生。到达上限时，钱包里的金币数字会变成琥珀色。把它花掉，或者把城市升一级以容纳更多。',
-      '每个时代最小的金库都是该时代最贵公共工程的好几倍——人工智能时代的第十级要 450,000 金币，而该时代最小的金库能装 2,700,000——所以上限永远不会挡在玩家和下一级之间。',
-    ],
-  },
-  {
-    version: '2.10',
-    date: '2026-09-08',
-    title: '每个时代各有十级',
+    title: '每个时代各十级，金库也有了上限',
     notes: [
       '现在每个时代都有属于自己的十级。聚落有十级，城镇在其之上另有十级，一直到人工智能时代——总共五十级。进入新时代会把城市放回该时代的第一级，而前方的十级是一座比身后十级更大的城市。这个想法来自一位玩家，而且形状是对的：每个时代都是一段完整的攀登，整个游戏则是一条你能望见顶端的阶梯。',
       '退回一级并不意味着收益下降。奖励沿着这五十级上升，而不是沿着等级数字，所以城镇时代的一级比聚落时代的十级还要高出大约百分之五。五十级中的每一级都比下面那一级给得多，任何地方都没有断崖，时代交界处也没有。推进时代不会让你建起来的任何东西作废：建筑、行业和升级都会随你一同进入新时代，并以新时代自己的形态呈现。',
@@ -390,13 +365,10 @@ export const UPDATES_ZH: Update[] = [
       '你花钱买下的等级不会再被一个严冬夺走。只要挣得它的那座城市还在，等级就保留，而过去一次死亡就足以跨过一个刻度把它收回——连续跑上几百天，等级会来回跳动。现在刻度之间的间距更大了，而且保住一个等级所需要的比达到它时略低一些。真正的衰退依然会让你失去等级；小幅波动不会。',
       '已经在这里的地块，没有一块会赚得比以前少。这条阶梯重画了曲线的中段，而一座只升级、没有推进时代的聚落，在旧表上的位置比新表给它的更高——这多半是因为四道时代门槛里有两道在 2.9.2 之前根本无法通过，那些玩家是被我们的过失卡住的。在这个版本之前认领的每一块地，只要还保有当初挣得它的规模，就保留旧表付给它的数额；而且推进时代时这个下限同样会上升。城市成长到超过这个下限后就不再需要它；在那之前，它绝不会更差。改动发生的那一刻不需要记下任何东西——旧的等级来自聚落的规模，而规模就在已发布的世界里，所以每次裁定都能用同样的证据重新算出旧的答案。',
       '地块在最顶端能赚到的数字没有变，仍是每天 250,000，新认领的地块仍从 40,000 起步。支付每一级的公共工程在聚落时代很便宜——十级合计 55,500 金币，大致相当于旧门槛要求金库里有的数目——而在顶端非常昂贵：人工智能时代的单独一级就要 450,000。金币在游戏的每个阶段都有去处。',
-    ],
-  },
-  {
-    version: '2.9.4',
-    date: '2026-09-08',
-    title: '卖金币不再有每日上限',
-    notes: [
+      '你的金库现在有上限，而且就印在金币旁边：512,400 / 1,200,000。它随每一级、每一个时代上升——新认领的地块 60,000，人工智能时代的十级城市五百万——所以“我能存多少”是屏幕上的一个数字，而不是需要推算的东西。这个想法来自一位玩家，而他的理由是对的：看得见的限制才是可以围绕它来玩的限制。',
+      '它取代了 2.9 引入的闲置金币持有费。两者都是为了防止囤积到让金币不再构成选择的地步，而那笔费用确实起了作用——只是它在看不见的地方起作用，是一笔你得到银行里专门去找才能明白的每日扣款。两者只该留一个，所以那笔费用取消了。放在金库里的金币现在完全不花你一分钱。',
+      '金库满了会把收入挡在门外，而不会从里面拿走金币。你挣到的任何东西都不会被扣除——城镇装不下的，它就干脆不收，并且会在动态里告诉你这件事正在发生。到达上限时，钱包里的金币数字会变成琥珀色。把它花掉，或者把城市升一级以容纳更多。',
+      '每个时代最小的金库都是该时代最贵公共工程的好几倍——人工智能时代的第十级要 450,000 金币，而该时代最小的金库能装 2,700,000——所以上限永远不会挡在玩家和下一级之间。',
       '每个钱包每天能挂出多少金币换 \u0024EMERGE 的限制取消了。原本是 20,000，它的作用是防止有人把囤积了几个月的金币在一个下午全部倒进代币里。现在闲置金币本身就有持有成本——一个月的城镇运营开支免费，超出部分每天计费——所以那种规模的囤积本来就是玩家在付费保有的东西，而不是需要在出口处节流的东西。有多少就卖多少。',
       '仍然约束一笔挂单的是那对老实的条件，两者都没有变：金币必须由该地块最近发布副本中的金库覆盖，并计入你已经挂出的部分；挂单成立的那一刻金币就离开金库。因此交易所永远不会卖出聚落并不拥有的金币，同一笔金币也不可能被挂两次。',
     ],
