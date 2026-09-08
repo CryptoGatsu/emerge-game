@@ -38,9 +38,19 @@ import { claimOf, readWorld } from './registry';
 
 /** The share of the Gold in every trade that is burned. */
 export const TRADE_FEE = 0.05;
-/** The most Gold a wallet may put up for $EMERGE in one UTC day. */
-export const DAILY_GOLD_SALE_CAP = 20_000;
-/** The smallest Gold lot, and the most goods one order may hold. */
+/**
+ * The smallest Gold lot, and the most goods one order may hold.
+ *
+ * There is deliberately no daily ceiling on Gold sold for $EMERGE. There was
+ * one — 20,000 a wallet a day — and its job was to stop a player who had been
+ * sitting on a hoard for months from emptying it into the token in an
+ * afternoon. Idle Gold now carries a cost of its own (see `idleGold` in the
+ * simulation), so a hoard that large is a thing a player is already paying to
+ * keep rather than a thing to be throttled on the way out. What still bounds a
+ * sale is the honest pair: the lot must be covered by the treasury in the
+ * plot's last published copy, and the Gold leaves that treasury when the order
+ * goes up.
+ */
 export const MIN_GOLD_LOT = 100;
 export const MAX_GOODS_LOT = 5_000;
 /** How many orders one wallet may have standing. */
@@ -60,8 +70,6 @@ export interface ExchangeOrder {
   /** Gold a unit for goods; $EMERGE a Gold for a Gold lot. Whole numbers. */
   unitPrice: number;
   at: number;
-  /** The UTC day a Gold lot was counted against the seller's daily cap. */
-  countedDay?: string;
   /**
    * Units held for a buyer who is about to pay, until a deadline. A Gold
    * buyer reserves before sending $EMERGE to the seller, so a lot cannot be
@@ -96,7 +104,6 @@ async function locked<T>(id: string, work: () => Promise<T>, busy: T): Promise<T
   try { return await work(); } finally { await releaseLock(lockKey(id)).catch(() => {}); }
 }
 const owedKey = (owner: string, seed: number) => serverKey(`exchange:owed:${owner.toLowerCase()}:${seed}`);
-const soldKey = (owner: string) => serverKey(`exchange:gold:${owner.toLowerCase()}:${utcDay()}`);
 const BURNED = serverKey('exchange:burned');
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const fee = (gold: number) => Math.ceil(gold * TRADE_FEE);
@@ -266,8 +273,6 @@ export async function listOrder(input: {
     resource = input.resource as Resource;
   } else if (kind === 'gold') {
     if (qty < MIN_GOLD_LOT) return { ok: false, reason: `A Gold lot is at least ${MIN_GOLD_LOT} Gold.` };
-    const sold = Number(await hget(soldKey(seller), 'gold')) || 0;
-    if (sold + qty > DAILY_GOLD_SALE_CAP) return { ok: false, reason: `A wallet may put up ${DAILY_GOLD_SALE_CAP.toLocaleString()} Gold a day for ${'$EMERGE'}; ${(DAILY_GOLD_SALE_CAP - sold).toLocaleString()} is left today.` };
     // What the last published copy of this world held: the only reading of a
     // treasury the server has that is not the seller's word right now.
     const published = await readWorld(seed);
@@ -278,14 +283,12 @@ export async function listOrder(input: {
     // already out of the figure and are not counted twice.
     const escrowed = standing.filter((o) => o.kind === 'gold' && o.seed === seed && o.at > (published.at ?? 0)).reduce((s, o) => s + o.remaining, 0);
     if (!(treasury >= qty + escrowed)) return { ok: false, reason: `The plot's last published treasury was ${Math.floor(treasury || 0).toLocaleString()} Gold, which does not cover this lot and what is already up.` };
-    await hsetWindow(soldKey(seller), 'gold', String(sold + qty), 2 * 86_400);
   } else {
     return { ok: false, reason: 'An order is for goods or for Gold.' };
   }
   const order: ExchangeOrder = {
     id: `o${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     kind, seller: seller.toLowerCase(), sellerName: input.sellerName.slice(0, 32), seed, resource, qty, remaining: qty, unitPrice, at: Date.now(),
-    countedDay: kind === 'gold' ? utcDay() : undefined,
   };
   await hset(ORDERS, order.id, JSON.stringify(order));
   return { ok: true, order };
@@ -300,11 +303,6 @@ export async function cancelOrder(id: string, seller: string): Promise<Result<{ 
     // A lot somebody is paying for right now is not taken down from under them.
     if (available(order, null) < order.remaining) return { ok: false as const, reason: 'Somebody is paying for part of that lot. Try again in a few minutes.' };
     await hdel(ORDERS, id);
-    // The daily cap is a day's figure: only a lot counted today gives today's room back.
-    if (order.kind === 'gold' && order.countedDay === utcDay()) {
-      const sold = Number(await hget(soldKey(seller), 'gold')) || 0;
-      await hsetWindow(soldKey(seller), 'gold', String(Math.max(0, sold - order.remaining)), 2 * 86_400);
-    }
     const delivery = await owe(order.seller, order.seed, order.kind === 'gold'
       ? { kind: 'gold', amount: order.remaining, note: 'Gold back from an order you took down' }
       : { kind: 'resource', resource: order.resource, amount: order.remaining, note: 'goods back from an order you took down' });

@@ -16,7 +16,7 @@ export interface ExchangeOrder {
   resource?: Resource; qty: number; remaining: number; unitPrice: number; at: number;
 }
 export interface Delivery { id: string; kind: 'gold' | 'resource'; resource?: Resource; amount: number; note: string; at: number }
-export interface ExchangeTerms { fee: number; dailyGoldCap: number; minGoldLot: number; maxGoodsLot: number }
+export interface ExchangeTerms { fee: number; minGoldLot: number; maxGoodsLot: number }
 export interface TradeRecord {
   id: string; at: number; side: 'bought' | 'sold'; kind: 'resource' | 'gold';
   resource?: Resource; qty: number; unitPrice: number; burned: number; got: number; seed: number; other: string; otherName: string;
@@ -25,7 +25,7 @@ export interface TradeRecord {
 export interface PaidIntent { txHash: string; id: string; buyer: string; seed: number; qty: number; at: number; problem?: string; tries?: number }
 export interface ExchangeView { orders: ExchangeOrder[]; owed: Delivery[]; history: TradeRecord[]; paid: PaidIntent[]; terms: ExchangeTerms; shared: boolean; degraded?: boolean }
 
-const DEFAULT_TERMS: ExchangeTerms = { fee: 0.05, dailyGoldCap: 20_000, minGoldLot: 100, maxGoodsLot: 5_000 };
+const DEFAULT_TERMS: ExchangeTerms = { fee: 0.05, minGoldLot: 100, maxGoodsLot: 5_000 };
 
 export async function fetchExchange(seed: number | null, address: string | null = null): Promise<ExchangeView | null> {
   try {

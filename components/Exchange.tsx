@@ -39,7 +39,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   const [pending, setPending] = useState(0);
   useEffect(() => { void reload(); }, [reload]);
   const mine = me?.toLowerCase() ?? '';
-  const terms = book?.terms ?? { fee: 0.05, dailyGoldCap: 20_000, minGoldLot: 100, maxGoodsLot: 5_000 };
+  const terms = book?.terms ?? { fee: 0.05, minGoldLot: 100, maxGoodsLot: 5_000 };
   const feePct = Math.round(terms.fee * 100);
   const orders = book?.orders ?? [];
   const goods = useMemo(() => orders.filter((o) => o.kind === 'resource'), [orders]);
@@ -190,7 +190,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
             <>
               <label>{t('Gold to sell')}<input type="number" min={terms.minGoldLot} max={Math.floor(view.treasury)} value={qty} onChange={(e) => setQty(e.target.value)} placeholder={String(terms.minGoldLot)} /></label>
               <label>{t('{ticker} a Gold', { ticker: TOKEN.ticker })}<input type="number" min={1} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="10000" /></label>
-              <p className="muted small">{t('The buyer pays {n} {ticker} straight to your wallet and receives the Gold less the {pct}% burn. Lots are {min} Gold or more, at most {cap} Gold a day per wallet, and never more than the treasury in your last published copy. The Gold leaves the treasury now.', { n: (q * p).toLocaleString(), ticker: TOKEN.ticker, pct: feePct, min: terms.minGoldLot, cap: terms.dailyGoldCap.toLocaleString() })}</p>
+              <p className="muted small">{t('The buyer pays {n} {ticker} straight to your wallet and receives the Gold less the {pct}% burn. Lots are {min} Gold or more, and never more than the treasury in your last published copy. The Gold leaves the treasury now.', { n: (q * p).toLocaleString(), ticker: TOKEN.ticker, pct: feePct, min: terms.minGoldLot })}</p>
             </>
           )}
           <button className="claim-button" disabled={busy || !sellOk} onClick={() => act(async () => { const why = await actions.list(kind, q, p, kind === 'resource' ? resource : undefined); if (!why) { setQty(''); setPrice(''); setTab('mine'); } return why; })}>

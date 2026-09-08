@@ -17,6 +17,15 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.9.4',
+    date: '2026-09-08',
+    title: 'No daily ceiling on selling Gold',
+    notes: [
+      'The limit on how much Gold a wallet could put up for \u0024EMERGE in a day is gone. It was 20,000, and its job was to stop somebody who had been sitting on a hoard for months from emptying the whole thing into the token in one afternoon. Idle Gold now costs something to hold \u2014 a month of the town\u2019s running costs is free and the excess is charged every day \u2014 so a hoard that size is already something a player is paying to keep rather than something to be throttled on the way out. Sell as much as you have.',
+      'What still bounds a lot is the honest pair, and neither has changed: the Gold must be covered by the treasury in the plot\u2019s last published copy, counting anything you already have standing against it, and it leaves the treasury the moment the order goes up. So the exchange can never sell Gold a settlement does not have, and a plot cannot put the same Gold up twice.',
+    ],
+  },
+  {
     version: '2.9.3',
     date: '2026-09-08',
     title: 'A reload that cannot be ignored',
@@ -335,6 +344,15 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.9.4',
+    date: '2026-09-08',
+    title: '卖金币不再有每日上限',
+    notes: [
+      '每个钱包每天能挂出多少金币换 \u0024EMERGE 的限制取消了。原本是 20,000，它的作用是防止有人把囤积了几个月的金币在一个下午全部倒进代币里。现在闲置金币本身就有持有成本——一个月的城镇运营开支免费，超出部分每天计费——所以那种规模的囤积本来就是玩家在付费保有的东西，而不是需要在出口处节流的东西。有多少就卖多少。',
+      '仍然约束一笔挂单的是那对老实的条件，两者都没有变：金币必须由该地块最近发布副本中的金库覆盖，并计入你已经挂出的部分；挂单成立的那一刻金币就离开金库。因此交易所永远不会卖出聚落并不拥有的金币，同一笔金币也不可能被挂两次。',
+    ],
+  },
   {
     version: '2.9.3',
     date: '2026-09-08',

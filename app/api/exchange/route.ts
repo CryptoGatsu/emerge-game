@@ -5,13 +5,13 @@
  */
 
 import { NextResponse } from 'next/server';
-import { buyGold, buyGoods, cancelOrder, collect, history, listOrder, makeGood, orders, owed, recordPaid, releaseGold, reserveGold, settleMine, unsettled, TRADE_FEE, DAILY_GOLD_SALE_CAP, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
+import { buyGold, buyGoods, cancelOrder, collect, history, listOrder, makeGood, orders, owed, recordPaid, releaseGold, reserveGold, settleMine, unsettled, TRADE_FEE, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
 import { registryShared } from '@/lib/server/registry';
 import { holdsAddress, sessionAddress, sessionsAvailable } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
 
-const terms = { fee: TRADE_FEE, dailyGoldCap: DAILY_GOLD_SALE_CAP, minGoldLot: MIN_GOLD_LOT, maxGoodsLot: MAX_GOODS_LOT };
+const terms = { fee: TRADE_FEE, minGoldLot: MIN_GOLD_LOT, maxGoodsLot: MAX_GOODS_LOT };
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
