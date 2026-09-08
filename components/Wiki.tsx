@@ -547,6 +547,14 @@ export default function Wiki() {
             treasury is several times its dearest public works, so the ceiling can never stand
             between you and the next level.
           </p>
+          <p>
+            A town that was <i>already</i> above its ceiling when the ceiling arrived is left
+            alone: it keeps earning, and nothing is turned away. The rule stops a town climbing
+            past a ceiling it is under, and never stops one that is already above. Spend back
+            under it and it applies from then on — which is also why it cannot be worked
+            around: a town beneath the ceiling is stopped exactly at it and never past, so the
+            only way to be above is to have been above when it arrived.
+          </p>
           <p className="wiki-note">
             This replaced the carrying cost on idle Gold. Both were there to stop a hoard so large
             that Gold stops being a decision, and the charge did work &mdash; but it worked out of

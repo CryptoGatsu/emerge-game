@@ -740,10 +740,32 @@ export function goldCap(world: World): number {
  */
 function earn(world: World, line: LedgerLine, amount: number) {
   if (!(amount > 0)) return 0;
+  const cap = goldCap(world);
+  /*
+   * A town already above its ceiling is left alone.
+   *
+   * The ceiling arrived after these settlements did, and some are a long way
+   * over it — a well-played industrial city was found holding more than six
+   * times what its rung allows. Capping those would not take a coin off them,
+   * but it would switch their income off entirely until they had spent
+   * millions down, which is a punishment for having played well before the
+   * rule existed. So the ceiling stops a town climbing past a ceiling it is
+   * *under*. It never stops one that is already above.
+   *
+   * Nothing has to be written down for this, and it cannot be worked: the only
+   * way to be above the ceiling is to have been above it when it arrived,
+   * because a town under it is clamped to exactly the ceiling and never past.
+   * A grandfathered town that spends back under comes under the rule for good.
+   */
+  if (world.treasury > cap) {
+    world.treasury += amount;
+    world.ledger.in[line] = (world.ledger.in[line] ?? 0) + amount;
+    return amount;
+  }
   // A full treasury turns income away rather than having Gold taken off it.
   // Nothing a town has earned is ever removed; what it cannot hold it simply
   // does not take, and the Bank says how much that was.
-  const room = Math.max(0, goldCap(world) - world.treasury);
+  const room = Math.max(0, cap - world.treasury);
   const taken = Math.min(amount, room);
   if (taken < amount) world.ledger.unbanked = (world.ledger.unbanked ?? 0) + (amount - taken);
   if (!(taken > 0)) return 0;
