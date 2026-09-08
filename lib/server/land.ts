@@ -1,6 +1,6 @@
 import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, LEVEL_PRESENCE_DAYS, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
-import { charterMultiplier, plotCeiling } from '../world/eras';
-import { cityLevel, stewardshipScore, type World } from '../simulation';
+import { LADDER_AT, charterMultiplier, legacyLevelForSize, legacyPlotCeiling, plotCeiling } from '../world/eras';
+import { cityLevel, citySize, stewardshipScore, type World } from '../simulation';
 import { worldFromSave, type SavedWorld } from '../world/save';
 import 'server-only';
 
@@ -130,6 +130,22 @@ export interface Judged {
  * last heartbeat on it. The payout route pays the lesser of what the client
  * claims and this. Never more than WALLET_DAILY_CEILING.
  */
+/**
+ * A plot's ceiling: the ladder, or what the old table would have paid if that
+ * is more and the plot is old enough to be owed it.
+ *
+ * Both halves are bounded by the same presence rule. The size in a published
+ * world is the client's word, so an inflated population would otherwise buy an
+ * inflated floor — the floor is capped by the days the owner was actually here,
+ * exactly as the level is.
+ */
+function legacyFloor(row: Claim, people: number, buildings: number, presentDays: number): number {
+  if (!(row.at < LADDER_AT)) return 0;
+  const fromPresence = 1 + Math.floor(Math.max(0, presentDays) / LEVEL_PRESENCE_DAYS);
+  const legacy = Math.max(1, Math.min(legacyLevelForSize(people, buildings), fromPresence));
+  return legacyPlotCeiling(legacy, row.era ?? 1);
+}
+
 export async function judgedFor(address: string): Promise<Judged> {
   const me = address.toLowerCase();
   let rows: Claim[];
@@ -159,7 +175,9 @@ export async function judgedFor(address: string): Promise<Judged> {
     let reported = 1;
     try { reported = world ? cityLevel(world) : 1; } catch { reported = level; }
     const era = row.era ?? 1;
-    const full = Math.round(plotCeiling(level, era) * charterMultiplier(row.charterUntil, now));
+    const size = world ? citySize(world) : { people: 0, buildings: 0 };
+    const rung = Math.max(plotCeiling(level, era), legacyFloor(row, size.people, size.buildings, days));
+    const full = Math.round(rung * charterMultiplier(row.charterUntil, now));
     // The plot's ceiling less what it has already paid out today.
     const cap = Math.max(0, full - (already.get(row.seed) ?? 0));
     let score = 0;
@@ -217,7 +235,16 @@ export async function judgedTotal(now = Date.now()): Promise<Demand> {
     for (const row of mine.sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT)) {
       const head = headOf.get(row.seed);
       const level = Math.max(1, Math.min(head?.level ?? 1, fromPresence));
-      const cap = Math.round(plotCeiling(level, row.era ?? 1) * charterMultiplier(row.charterUntil, now));
+      // The headline counts buildings rather than weighing them by age, so the
+      // floor read here can come out a shade low for a plot in a late era. This
+      // is the estimate of what the vault owes, not what anybody is paid, and
+      // the two readings are identical in the settlement era where nearly every
+      // grandfathered plot sits.
+      const rung = Math.max(
+        plotCeiling(level, row.era ?? 1),
+        legacyFloor(row, head?.population ?? 0, head?.buildings ?? 0, days),
+      );
+      const cap = Math.round(rung * charterMultiplier(row.charterUntil, now));
       yieldSum += cap * (head?.score ?? 0) * attention;
     }
     const judged = Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum));
@@ -245,7 +272,9 @@ export async function handCeilingFor(address: string): Promise<number> {
     } catch { world = null; }
     const days = await presenceDays(job.owner).catch(() => 0);
     const level = judgedLevel(world, days);
-    return Math.max(1, Math.round(plotCeiling(level, job.era ?? 1) * HAND_SHARE));
+    const size = world ? citySize(world) : { people: 0, buildings: 0 };
+    const rung = Math.max(plotCeiling(level, job.era ?? 1), legacyFloor(job, size.people, size.buildings, days));
+    return Math.max(1, Math.round(rung * HAND_SHARE));
   } catch {
     return 0;
   }

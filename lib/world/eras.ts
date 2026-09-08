@@ -200,6 +200,63 @@ export function plotCeiling(level: number, era: number): number {
   return Math.round(PLOT_CEILING_MIN + (PLOT_CEILING_MAX - PLOT_CEILING_MIN) * ((rung - 1) / (LADDER_RUNGS - 1)));
 }
 
+/**
+ * What a plot claimed before the fifty-rung ladder is guaranteed.
+ *
+ * The ladder redrew the middle of the curve. The top and the bottom are where
+ * they were, but a plot that climbed levels without advancing an age sat higher
+ * on the old ten-level table than the new one puts it — and the players in that
+ * position are mostly there because two of the four age gates were impassable
+ * until 2.9.2. They were stuck by a bug of ours; they are not going to be paid
+ * less for it.
+ *
+ * So a plot claimed before the change is never judged below what the old system
+ * would have paid it. That is computed rather than remembered, which is what
+ * makes it trustworthy: the old level was a pure function of the settlement's
+ * size, and the size is in the published world, so the old answer can be worked
+ * out again at any time from the same evidence. Nothing had to be written down
+ * at the moment of the change, and nothing can drift.
+ *
+ * It does not collapse when a grandfathered plot advances an age, because the
+ * old level came from size rather than from a counter that now resets — the old
+ * era multiplier applies on top, exactly as it used to, so advancing raises the
+ * floor as well. A plot grows past its floor and stops needing it.
+ */
+export const LADDER_AT = 1_788_912_000_000;
+
+/** The ten-level size table the game used before the ladder. */
+const LEGACY_LEVELS: { level: number; people: number; buildings: number }[] = [
+  { level: 1, people: 0, buildings: 0 },
+  { level: 2, people: 12, buildings: 8 },
+  { level: 3, people: 20, buildings: 14 },
+  { level: 4, people: 30, buildings: 20 },
+  { level: 5, people: 45, buildings: 28 },
+  { level: 6, people: 60, buildings: 38 },
+  { level: 7, people: 80, buildings: 50 },
+  { level: 8, people: 105, buildings: 65 },
+  { level: 9, people: 130, buildings: 80 },
+  { level: 10, people: 160, buildings: 100 },
+];
+
+/** The level the old table gave a settlement of this size. */
+export function legacyLevelForSize(people: number, buildings: number): number {
+  let level = 1;
+  for (const row of LEGACY_LEVELS) if (people >= row.people && buildings >= row.buildings) level = row.level;
+  return level;
+}
+
+/**
+ * The old ceiling: ten levels from 40,000 to 156,250, times the era.
+ *
+ * Kept in full rather than described, so the floor is auditable against what
+ * players were actually being paid rather than against a memory of it.
+ */
+export function legacyPlotCeiling(level: number, era: number): number {
+  const l = Math.max(1, Math.min(10, Math.round(level)));
+  const base = PLOT_CEILING_MIN + (156_250 - PLOT_CEILING_MIN) * ((l - 1) / 9);
+  return Math.round(base * eraYield(era));
+}
+
 /** A charter: $EMERGE for a share more on the plot's ceiling, for a while. */
 export const CHARTER_BONUS = 0.2;
 export const CHARTER_DAYS = 30;

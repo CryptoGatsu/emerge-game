@@ -8672,7 +8672,7 @@ export function buildBounds(world: World): { x0: number; x1: number; y0: number;
  * an industrial four, and so on — the rebuild that merges pairs of them
  * leaves a city exactly the size it was.
  */
-function citySize(world: World) {
+export function citySize(world: World) {
   return { people: world.citizens.length, buildings: buildingWorth(world) };
 }
 /** What the standing buildings add up to, weighed by age. */
