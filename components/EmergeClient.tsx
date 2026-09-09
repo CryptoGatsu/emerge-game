@@ -39,7 +39,7 @@ import {
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
-  coverPlot, boonPlot, renamePlot,
+  coverPlot, boonPlot, renamePlot, pendingEra, rememberEra, type PendingEra,
 } from '@/lib/net/registry';
 import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, finishPending, listOrder, resumePending } from '@/lib/net/exchange';
 import type { ExchangeActions } from './Exchange';
@@ -52,7 +52,7 @@ import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost, earnRoom } from '@/lib/chain/vault';
-import { tokenBalance } from '@/lib/chain/emerge';
+import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
 import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
@@ -1950,10 +1950,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   /**
    * Advance the plot to the next era.
    *
-   * The world is published first, because the registry judges the gate on
-   * the published copy and not on this browser's word; then paid; then
-   * recorded; and only then does this world change. A refusal at any step
-   * leaves it as it was, and a dismissed wallet prompt costs nothing.
+   * In order: a receipt kept from an earlier attempt is handed in before
+   * anything else; the world is published, because the registry judges the
+   * gate on the published copy and not on this browser's word; the registry
+   * is asked without a payment, which is where a refusal costs nothing and
+   * where anything already on account pays; then paid; then handed in; and
+   * only then does this world change.
+   *
+   * A payment that has left the wallet is kept in this browser until the
+   * registry has accepted it. It used to be shown once, ten characters of
+   * it, in a toast that said keep it and tell us — and the button paid again
+   * the next time it was pressed. A player whose chain was slow to confirm
+   * past the button's patience, or whose connection dropped between the
+   * wallet and the registry, paid a million $EMERGE and stayed a settlement,
+   * and reported exactly that. The receipt is handed in again first now, on
+   * the next press or the next time the world opens, and the registry takes
+   * the same receipt for the same step as often as it is offered.
    */
   const advanceFor = useCallback(async (): Promise<string | null> => {
     const world = worldRef.current;
@@ -1961,10 +1973,66 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const gate = eraGate(world);
     if (!gate.next) return t('This is as far as the eras go, for now.');
     if (!gate.open) return t('The {era} era is not built yet. It is coming.', { era: gate.next.name });
-    if (!gate.ready) return t('The settlement has not earned the next era yet.');
     if (!wallet.address) return t('Connect a wallet to advance the plot.');
+    const address = wallet.address;
+    const next = gate.next;
+    const target = next.id;
+    const seed = claimed.seed;
+
+    const arrived = () => {
+      if (!advanceEra(world)) setEra(world, target);
+      saveWorld(world);
+      // Publish again with the era on it, so another device reading the
+      // published copy opens a township rather than waiting for the claims
+      // poll to catch it up.
+      void publishWorld({
+        seed, owner: address, ownerName: player.name, worldName: world.name,
+        day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
+      });
+      selectedRef.current = null;
+      setSelected(null);
+      sceneRef.current?.reset(world);
+      refresh();
+      announce({
+        id: `era-${seed}-${target}`,
+        kind: 'claim',
+        title: t('A new era'),
+        body: t('{name} is a {era} now. {arrives}', { name: world.name, era: next.name.toLowerCase(), arrives: tx(next.arrives) }),
+        lifetime: 16_000,
+      });
+    };
+    // Ask, and keep asking while the chain is still settling the payment: a
+    // minute, which three confirmations on a slow block can need.
+    const handIn = async (burnTx?: string) => {
+      let result = await advanceOnRegistry(seed, address, target, burnTx);
+      for (let i = 1; i < 24 && !result.ok && result.settling; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        result = await advanceOnRegistry(seed, address, target, burnTx);
+      }
+      return result;
+    };
+    const keptNote = (hash: string) =>
+      t('Your payment {tx}… is kept in this browser and will be handed in again the next time you press this or open the world. Nothing more will be charged for it.', { tx: hash.slice(0, 10) });
+
+    // 1. A receipt kept from before is handed in before anything is paid.
+    const kept = pendingEra(address, seed);
+    if (kept) {
+      const again = await handIn(kept.txHash);
+      if (again.ok) { rememberEra(null, kept); arrived(); return null; }
+      // A receipt the chain says bought nothing, or that was spent on
+      // something else, will not be accepted tomorrow either: let it go, and
+      // say so rather than paying again on top of it.
+      if (again.used || /failed on chain|not a transaction hash|different wallet/i.test(again.reason)) {
+        rememberEra(null, kept);
+        return `${tx(again.reason)} ${t('The earlier payment {tx}… could not be handed in, and nothing was paid today.', { tx: kept.txHash.slice(0, 10) })}`;
+      }
+      return `${tx(again.reason)} ${keptNote(kept.txHash)}`;
+    }
+    if (!gate.ready) return t('The settlement has not earned the next era yet.');
+
+    // 2. Publish, so the registry judges the step on today's copy.
     const put = await publishWorld({
-      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
+      seed, owner: address, ownerName: player.name, worldName: world.name,
       day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
     });
     if (!put.ok && !put.behind) {
@@ -1972,40 +2040,28 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       // large for the relay back to the same button for days.
       return `${t('The world could not be published, and the registry judges the step on the published copy.')} ${put.error ? tx(put.error) : t('Try again in a moment.')}`;
     }
-    const target = gate.next.id;
-    const paid = await spend(player.ledger, advanceCost(target), wallet.address);
+
+    // 3. Ask without paying. A refusal here — the published copy short of the
+    //    gate, a plot that is not this wallet's — costs nothing; and what is
+    //    already on account pays before the wallet is asked for anything.
+    if (tokenLive()) {
+      const dry = await handIn();
+      if (dry.ok) { arrived(); return null; }
+      if (!dry.needsPayment) return tx(dry.reason);
+    }
+
+    // 4. Pay, keep the receipt, hand it in.
+    const paid = await spend(player.ledger, advanceCost(target), address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
-    let result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
-    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 2_500));
-      result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
-    }
-    if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the era never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
-    }
-    if (!advanceEra(world)) setEra(world, target);
-    saveWorld(world);
-    // Publish again with the era on it, so another device reading the
-    // published copy opens a township rather than waiting for the claims
-    // poll to catch it up.
-    void publishWorld({
-      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
-      day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
-    });
-    selectedRef.current = null;
-    setSelected(null);
-    sceneRef.current?.reset(world);
-    refresh();
-    announce({
-      id: `era-${claimed.seed}-${target}`,
-      kind: 'claim',
-      title: t('A new era'),
-      body: t('{name} is a {era} now. {arrives}', { name: world.name, era: gate.next.name.toLowerCase(), arrives: tx(gate.next.arrives) }),
-      lifetime: 16_000,
-    });
+    const receipt: PendingEra | null = paid.txHash
+      ? { seed, era: target, txHash: paid.txHash, address: address.toLowerCase(), at: Date.now() }
+      : null;
+    if (receipt) rememberEra(receipt);
+    const result = await handIn(paid.txHash ?? undefined);
+    if (!result.ok) return receipt ? `${tx(result.reason)} ${keptNote(receipt.txHash)}` : tx(result.reason);
+    if (receipt) rememberEra(null, receipt);
+    arrived();
     return null;
     // `announce` is stable for the life of the world.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2213,14 +2269,26 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }), [wallet.address, player, claimed.seed, onPlayer, refresh, takeDeliveries]);
   const nameRef = useRef(player.name);
   nameRef.current = player.name;
+  const advanceForRef = useRef(advanceFor);
+  advanceForRef.current = advanceFor;
   useEffect(() => {
     if (!wallet.address || visit) return;
     const address = wallet.address;
     let live = true;
+    let eraResumed = false;
     const tick = async () => {
       // A purchase whose chain payment settled after the buyer's window closed
       // is handed in here, without anybody pressing anything.
       const done = await resumePending(address, nameRef.current).catch(() => []);
+      // And a payment for an era that never arrived, once per opening: the
+      // receipt is in this browser, and handing it in costs nothing more.
+      if (live && !eraResumed && pendingEra(address, claimed.seed)) {
+        eraResumed = true;
+        const said = await advanceForRef.current().catch(() => null);
+        if (live && said) {
+          announce({ id: `era-kept-${claimed.seed}`, kind: 'claim', title: t('A payment kept from before'), body: said, lifetime: 20_000 });
+        }
+      }
       const book = await fetchExchange(claimed.seed, address);
       if (!live) return;
       /*

@@ -26,7 +26,7 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN, VAULT_ADDRESS } from '../chain/emerge';
 import { serverKey } from '../limits';
-import { hdel, hgetall, hset, hsetnx } from './kv';
+import { hdel, hget, hgetall, hset, hsetnx } from './kv';
 import { noteCharge } from './treasury';
 
 const chain = () => defineChain({
@@ -234,6 +234,19 @@ const SPENT = serverKey('burns');
  * Answers true for the first caller and false for every other, so one burn
  * cannot buy two plots however many times it is submitted.
  */
+/**
+ * Whether a payment was spent on exactly this, rather than on anything else.
+ *
+ * The registry can take a payment and then fail to finish the step it paid
+ * for — the store unreachable for the write, the reply lost on the way back
+ * to the browser — and the browser comes back with the same receipt. That is
+ * not a second attempt to spend it; it is the first attempt, still going.
+ */
+export async function spentOn(txHash: string, forWhat: string): Promise<boolean> {
+  const record = await hget(SPENT, txHash.toLowerCase()).catch(() => null);
+  return !!record && record.startsWith(`${forWhat}:`);
+}
+
 export async function spendBurn(txHash: string, forWhat: string, whole?: number): Promise<boolean> {
   const first = await hsetnx(SPENT, txHash.toLowerCase(), `${forWhat}:${Date.now()}`);
   // The first use of a payment is the one that books it: what the vault
@@ -306,7 +319,7 @@ async function drawCredit(owner: string, amount: number): Promise<number> {
 }
 
 export type Settlement =
-  | { ok: true; whole: number; fromCredit: number }
+  | { ok: true; whole: number; fromCredit: number; /** The same receipt, already spent on this very step. */ again?: boolean }
   | { ok: false; reason: string; retry: boolean; used?: boolean; banked?: number; credit?: number; short?: number };
 
 /**
@@ -341,6 +354,10 @@ export async function settleCharge(
   if (!paid.ok) return paid;
   if (paid.whole + credit >= due) {
     if (!(await spendBurn(tx, purpose, paid.whole))) {
+      // Offered again for the step it already paid for: a player whose era
+      // never arrived because the registry could not finish after taking the
+      // payment, handing the receipt back in. It is theirs, for this, once.
+      if (await spentOn(tx, purpose)) return { ok: true, whole: paid.whole, fromCredit: 0, again: true };
       return { ok: false, reason: 'That payment has already been used.', retry: false, used: true };
     }
     const fromCredit = paid.whole >= due ? 0 : await drawCredit(owner, due - paid.whole);

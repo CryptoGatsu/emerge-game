@@ -72,6 +72,7 @@ import { noteCharge } from '@/lib/server/treasury';
  */
 const bookDev = async (cost: number) => { if (!tokenLive()) await noteCharge(cost).catch(() => {}); };
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
+import { operator } from '@/lib/server/operator';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
 
@@ -183,7 +184,7 @@ export async function POST(request: Request) {
    * development build, and refusing there would make the game unplayable
    * locally for no gain. Anywhere that can pay people can also check this.
    */
-  if (sessionsAvailable() && !holdsAddress(request, owner)) {
+  if (sessionsAvailable() && !holdsAddress(request, owner) && !operator(request)) {
     return NextResponse.json({ error: 'Sign in with this wallet first.', needsSession: true }, { status: 401 });
   }
 
@@ -478,6 +479,28 @@ export async function POST(request: Request) {
     if (era <= held) return NextResponse.json({ claim, already: true });
     if (era !== held + 1) return NextResponse.json({ error: 'One era at a time.' }, { status: 400 });
     if (era > OPEN_ERA) return NextResponse.json({ error: 'That era is not built yet.' }, { status: 409 });
+    /*
+     * The team putting a step right by hand.
+     *
+     * A player paid for the era and it never arrived — the chain slow to
+     * confirm past the browser's patience, the connection gone between the
+     * wallet and here, or the write failing after the payment was taken. The
+     * gate and the charge are the operator's judgement; ownership is still
+     * the registry's. The receipt, when given, is marked spent on this step
+     * so it cannot also be redeemed on account afterwards. It is not booked
+     * as income here: the receipt is the operator's word, not the chain's.
+     */
+    if (operator(request)) {
+      const burnTx = String(body.burnTx ?? '').trim();
+      if (burnTx) await spendBurn(burnTx, `era:${seed}:${era}`).catch(() => false);
+      try {
+        const result = await markEra(seed, owner, era);
+        if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+        return NextResponse.json({ claim: result.claim, already: result.already, byOperator: true });
+      } catch {
+        return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+      }
+    }
     const published = await readWorld(seed);
     const world = published ? worldFromSave(published.snapshot as SavedWorld, seed, claim.worldName) : null;
     if (!world) return NextResponse.json({ error: 'Publish the world first, then advance it.' }, { status: 409 });

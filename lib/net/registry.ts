@@ -352,7 +352,13 @@ export const placeOffer = (seed: number, bidder: string, bidderName: string, pri
 
 export type ExpandResult =
   | { ok: true; claim: Claim; already: boolean }
-  | { ok: false; reason: string; settling?: boolean };
+  | {
+    ok: false; reason: string; settling?: boolean;
+    /** The registry would take the step but nothing has paid for it yet: pay, then ask again. */
+    needsPayment?: boolean;
+    /** The receipt was spent on something else. Nothing will accept it again. */
+    used?: boolean;
+  };
 
 /**
  * Expand a plot, once.
@@ -465,14 +471,45 @@ export async function advancePlot(seed: number, owner: string, era: number, burn
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean };
+    const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean; short?: number };
     if (!response.ok || !json.claim) {
-      return { ok: false, reason: json.error ?? 'The registry refused the advance.', settling: json.retry === true };
+      return {
+        ok: false, reason: json.error ?? 'The registry refused the advance.', settling: json.retry === true,
+        needsPayment: response.status === 402, used: response.status === 409 && /already been used/i.test(json.error ?? ''),
+      };
     }
     return { ok: true, claim: json.claim, already: json.already === true };
   } catch {
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }
+}
+
+/**
+ * A payment for an era that the registry has not yet accepted, kept in the
+ * browser so the same receipt is handed in again — on the next press, or the
+ * next time the world opens — and never paid twice.
+ *
+ * It used to be shown once, ten characters of it, in a toast that said keep
+ * it and tell us, and the button paid again the next time it was pressed. A
+ * player whose chain took longer than the button's patience to confirm, or
+ * whose connection dropped between the wallet and the registry, paid a
+ * million and stayed a settlement.
+ */
+export interface PendingEra { seed: number; era: number; txHash: string; address: string; at: number }
+const PENDING_ERA = 'emerge.era.pending.v1';
+export function pendingEra(address: string | null, seed?: number): PendingEra | null {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(PENDING_ERA) ?? '[]') as PendingEra[];
+    return all.find((p) => (!address || p.address === address.toLowerCase()) && (seed === undefined || p.seed === seed)) ?? null;
+  } catch { return null; }
+}
+export function rememberEra(p: PendingEra | null, drop?: PendingEra) {
+  try {
+    const all = (JSON.parse(window.localStorage.getItem(PENDING_ERA) ?? '[]') as PendingEra[])
+      .filter((x) => !(x.seed === (drop ?? p)?.seed && x.address === (drop ?? p)?.address));
+    if (p) all.push(p);
+    window.localStorage.setItem(PENDING_ERA, JSON.stringify(all.slice(-10)));
+  } catch { /* private browsing: the receipt is only in the wallet's history then */ }
 }
 
 /** As the owner: open the job at this plot, or close it and let the hand go. */

@@ -6,6 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { buyGold, buyGoods, cancelOrder, collect, history, listOrder, makeGood, orders, owed, recordPaid, releaseGold, reserveGold, settleMine, unsettled, TRADE_FEE, MIN_GOLD_LOT, MAX_GOODS_LOT } from '@/lib/server/exchange';
+import { operator } from '@/lib/server/operator';
 import { registryShared } from '@/lib/server/registry';
 import { holdsAddress, sessionAddress, sessionsAvailable } from '@/lib/server/session';
 
@@ -35,20 +36,6 @@ export async function GET(request: Request) {
   }
 }
 
-/**
- * The deployment's own secret, for the one action no player may take.
- *
- * A make-good puts Gold into a plot without anybody paying for it, so it is
- * authorised the way the cron routes are — by a secret only the deployment
- * holds — and never by a session, however well signed in.
- */
-function operator(request: Request): boolean {
-  const secret = process.env.EMERGE_CRON_SECRET ?? process.env.CRON_SECRET ?? '';
-  if (!secret) return false;
-  const auth = request.headers.get('authorization') ?? '';
-  return auth === `Bearer ${secret}` || request.headers.get('x-cron-secret') === secret;
-}
-
 export async function POST(request: Request) {
   let body: {
     action?: string; address?: string; name?: string; seed?: number; id?: string;
@@ -58,6 +45,9 @@ export async function POST(request: Request) {
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 }); }
   const address = String(body.address ?? '').toLowerCase();
   if (body.action === 'makeGood') {
+    // The one action no player may take: a make-good puts Gold into a plot
+    // without anybody paying for it, so it is the deployment's own secret
+    // that authorises it, never a session, however well signed in.
     if (!operator(request)) return NextResponse.json({ error: 'Not for this door.' }, { status: 403 });
     if (!/^0x[0-9a-f]{40}$/.test(address)) return NextResponse.json({ error: 'A make-good belongs to a wallet.' }, { status: 400 });
     const r = await makeGood(address, Number(body.seed), Number(body.gold), String(body.note ?? '').slice(0, 120));
