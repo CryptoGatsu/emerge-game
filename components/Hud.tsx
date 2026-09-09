@@ -224,6 +224,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 {focus.crew.posted === 0
                   ? t('Nobody is posted here. Train somebody to the trade on the People panel.')
                   : t('{n} of {posts} posts filled', { n: focus.crew.posted, posts: focus.crew.posts })}
+                {focus.crew.over > 0 && ` · ${t('{n} more carry the trade with no post to fill', { n: focus.crew.over })}`}
               </p>
             )}
             {focus.keeper && ('name' in focus.keeper

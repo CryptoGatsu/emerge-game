@@ -1128,6 +1128,7 @@ export const UI: Record<string, string> = {
   '{w} of {c} posts filled': '{c} 个岗位已填 {w}', '{n} over': '超出 {n}', 'Fill {n} for {g} Gold': '花 {g} 金币填满 {n} 个', 'Full': '已满',
   'No workplaces yet. Raise one from the Build panel.': '还没有工作场所。从建造面板建一个。',
   'civic': '市政', 'ruin': '废墟', '{c} of {p} at their posts': '{p} 个岗位 {c} 人在岗', '{c} inside': '{c} 人在内',
+  '{n} more carry the trade with no post to fill': '另有 {n} 人做这门手艺，却没有岗位可填',
   'Training': '培训',
   'Machines for every trade. Everything the town makes, it makes more of.': '每个行当都有机器。镇子做的每样东西都做得更多。',
   'Iron poured rather than hammered. More from every trade, on top of the factory.': '铁是浇铸而不是锤打出来的。在工厂之上，每个行当产出更多。',

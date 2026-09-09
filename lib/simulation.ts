@@ -7616,31 +7616,59 @@ function departures(world: World, rand: () => number) {
       ? `${idle} ${idle === 1 ? 'adult has' : 'adults have'} had no post for ${LEAVE_PATIENCE} days. People will start taking the road unless work is raised.`
       : `${crowded} ${crowded === 1 ? 'person has' : 'people have'} had no bed for ${LEAVE_PATIENCE} days. People will start taking the road unless a house is raised.`);
   }
-  if (rand() >= Math.min(0.6, 0.2 * pressure)) return;
+  /*
+   * How many take the road today.
+   *
+   * One at a time is right for a town three people over its posts. It was
+   * also all a town a hundred and fifteen over ever lost, which at six in ten
+   * days apiece is half a year to come back to its posts — so a player read
+   * "people will start taking the road", watched a hundred and fourteen of
+   * them stay put, and reported the whole thing as broken. They were right:
+   * "gradually" and "never" are not the same word. A share of the surplus
+   * leaves instead, so a small overhang still goes one by one and a large one
+   * visibly empties, and a town barely over keeps the old dice roll rather
+   * than bleeding somebody every single day.
+   */
+  const leaving = Math.max(1, Math.round(pressure / 8));
+  if (pressure < 4 && rand() >= Math.min(0.6, 0.2 * pressure)) return;
 
-  const tally: Partial<Record<Job, number>> = {};
-  for (const c of adults) tally[c.job] = (tally[c.job] ?? 0) + 1;
   const homeless = (c: Citizen) => !homeOf(world, c);
-  const spare = (c: Citizen) => c.job !== 'unemployed' && (tally[c.job] ?? 0) > jobCapacity(world, c.job as WorkingJob);
   const dependants = (c: Citizen) => (world.families.find((f) => f.id === c.familyId)?.members ?? [])
     .filter((id) => (world.citizens.find((x) => x.id === id)?.age ?? 99) < 16).length;
   const learned = (c: Citizen) => Object.values(c.skills ?? {}).reduce((s, d) => s + (d ?? 0), 0);
-  const pool = adults
-    .filter((c) => !heldTrade(world, c) && !c.carried && !c.jailed && !c.rogue)
-    // Somebody with no roof goes first when it is beds that are short, then
-    // somebody in a trade with more hands than posts, then whoever has no
-    // children here and the least learned, so the town keeps its masters.
-    .sort((a, b) => (crowded > 0 ? Number(homeless(b)) - Number(homeless(a)) : 0)
-      || Number(spare(b)) - Number(spare(a))
-      || Number(dependants(a) > 0) - Number(dependants(b) > 0)
-      || learned(a) - learned(b));
-  const leaver = pool[0];
-  if (!leaver) return;
-  const why = crowded > 0 && homeless(leaver) ? 'no roof' : 'no post';
-  forget(world, leaver);
+  const gone: string[] = [];
+  let why = 'no post';
+  for (let n = 0; n < leaving; n += 1) {
+    // Recounted every time round: each departure changes who the town can
+    // next best spare, and it must never take the founding handful with it.
+    const here = world.citizens.filter((c) => c.age >= 16);
+    if (here.length <= FOUNDING_HANDFUL || here.length <= 1) break;
+    const tally: Partial<Record<Job, number>> = {};
+    for (const c of here) tally[c.job] = (tally[c.job] ?? 0) + 1;
+    const spare = (c: Citizen) => c.job !== 'unemployed' && (tally[c.job] ?? 0) > jobCapacity(world, c.job as WorkingJob);
+    const pool = here
+      .filter((c) => !heldTrade(world, c) && !c.carried && !c.jailed && !c.rogue)
+      // Somebody with no roof goes first when it is beds that are short, then
+      // somebody in a trade with more hands than posts, then whoever has no
+      // children here and the least learned, so the town keeps its masters.
+      .sort((a, b) => (crowded > 0 ? Number(homeless(b)) - Number(homeless(a)) : 0)
+        || Number(spare(b)) - Number(spare(a))
+        || Number(dependants(a) > 0) - Number(dependants(b) > 0)
+        || learned(a) - learned(b));
+    const leaver = pool[0];
+    if (!leaver) break;
+    if (n === 0) why = crowded > 0 && homeless(leaver) ? 'no roof' : 'no post';
+    forget(world, leaver);
+    gone.push(leaver.name);
+    world.departures = (world.departures ?? 0) + 1;
+  }
+  if (!gone.length) return;
   staffNow(world);
-  world.departures = (world.departures ?? 0) + 1;
-  pushFeed(world, 'social', `${leaver.name} left ${world.name}: there was ${why} here for them.`);
+  // One line for the day, not fifteen: a feed that is nothing but departures
+  // tells the player less than a feed that says how many and why.
+  pushFeed(world, 'social', gone.length === 1
+    ? `${gone[0]} left ${world.name}: there was ${why} here for them.`
+    : `${gone.length} people left ${world.name}: there was ${why} here for them.`);
 }
 
 const SETTLER_NAMES = [

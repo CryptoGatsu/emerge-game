@@ -56,7 +56,7 @@ export interface FocusBuilding {
   /** Why the trade did not work in full yesterday, when it did not. */
   idle: string | null;
   /** The people posted here against its posts, for a workplace. */
-  crew: { posted: number; posts: number } | null;
+  crew: { posted: number; posts: number; over: number } | null;
   /** The professional who keeps a civic building, or what it lacks: null for a building that wants none, or before the township. */
   keeper: { name: string; role: string; tier: string; id: string } | { wants: string; base: number } | null;
   x: number; y: number; upkeep: number; active: boolean;
@@ -313,6 +313,8 @@ export interface RosterBuilding {
   name: string;
   /** People at their posts inside right now, and the posts it has; null for a building that employs nobody. */
   crew: number; posts: number | null;
+  /** People who carry the trade and report here with no post to fill. */
+  over: number;
   /** The trade that works here, if one does. */
   trade: string | null;
 }
@@ -371,7 +373,24 @@ function rosterOf(world: World): Roster {
       // Who is posted here, not who happens to be inside this minute: at
       // night every farm read "0 of 4 at their posts", and a player with
       // fourteen farms took that for a town that would not work them.
-      crew: trade ? posted.get(b.id) ?? 0 : b.workers.length, posts: trade ? buildingPosts(b, world) : null, trade: trade ? tradeTitle(trade, eraOf(world)) : null,
+      ...(() => {
+        // A workplace cannot have more posts filled than it has posts. It used
+        // to print the head count that reported to the door, so a town with far
+        // more hands in a trade than work for them showed "2 slots, 112 filled"
+        // beside its own count of a hundred and fifteen without work — two
+        // figures from the same panel contradicting each other, which is what
+        // players reported. The count is what fills a post; the rest are the
+        // ones the panel already calls without work, and the card now says how
+        // many of them turned up here.
+        const counted = trade ? posted.get(b.id) ?? 0 : b.workers.length;
+        const posts = trade ? buildingPosts(b, world) : null;
+        return {
+          crew: posts === null ? counted : Math.min(counted, posts),
+          over: posts === null ? 0 : Math.max(0, counted - posts),
+          posts,
+          trade: trade ? tradeTitle(trade, eraOf(world)) : null,
+        };
+      })(),
     };
   }).sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
   return {
@@ -489,7 +508,10 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
     crew: (() => {
       const trade = tradeOf(b.type);
       if (!trade) return null;
-      return { posted: postedAt(world, b), posts: buildingPosts(b, world) };
+      // Posts filled, never bodies at the door — see the roster above.
+      const counted = postedAt(world, b);
+      const posts = buildingPosts(b, world);
+      return { posted: Math.min(counted, posts), posts, over: Math.max(0, counted - posts) };
     })(),
     keeper: (() => {
       const role = roleOf(b.type);

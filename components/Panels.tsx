@@ -2109,6 +2109,7 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates, onHire, on
               <span className="muted">{t('level {n}', { n: b.level })}</span>
               <span className="people-trade">{b.trade ? tn(b.trade) : t('civic')}</span>
               <span className={b.ruined ? 'people-open' : 'muted'}>{b.ruined ? t('ruin') : b.posts !== null ? t('{c} of {p} at their posts', { c: b.crew, p: b.posts }) : t('{c} inside', { c: b.crew })}</span>
+              {b.over > 0 && <span className="people-open">{t('{n} over', { n: b.over })}</span>}
               <span className="muted">{tn(eraName(b.era))}</span>
             </div>
           ))}
