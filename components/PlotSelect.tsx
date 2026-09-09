@@ -1362,7 +1362,19 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                   </div>
                 )}
                 {/* Offers: yours, and the fact of the others'. Any plot can be
-                    offered for, listed or not; the owner decides. */}
+                    offered for, listed or not; the owner decides. Where plots
+                    are tokens an offer is made on OpenSea, and the box gives
+                    way to the link. */}
+                {onChainClaimsLive() ? (
+                  <div className="offer-box">
+                    <span className="eyebrow">{t('OFFERS')}</span>
+                    <p className="muted small">
+                      {openSeaUrl(heldByOther.seed)
+                        ? <>{t('The plot is a token: make an offer on')} <a href={openSeaUrl(heldByOther.seed)!} target="_blank" rel="noreferrer noopener">OpenSea</a>{t(', or buy it from the land market when its holder lists it.')}</>
+                        : t('The plot is a token: buy it from the land market when its holder lists it.')}
+                    </p>
+                  </div>
+                ) : (
                 <div className="offer-box">
                   <span className="eyebrow">{t('OFFERS')}</span>
                   {otherOffers.length > 0 && (
@@ -1417,6 +1429,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                     {t('An offer holds nothing back: if the owner accepts, the plot is held for you at that price for two days and you pay their wallet directly, as for any sale.')}
                   </p>
                 </div>
+                )}
               </div>
             )}
             {registry?.onChain && registry.owner && !mine && !heldByOther && (
