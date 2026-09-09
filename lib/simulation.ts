@@ -5921,17 +5921,40 @@ export function idleAdults(world: World): number {
 }
 
 /**
+ * How much of a post is held for a child: none at birth, all of one by the
+ * time they can take it.
+ *
+ * Every child used to hold a whole post from the day they were born. That is
+ * thirty-two real days of a workplace standing dark for somebody who cannot
+ * lift a tool yet, and because the same rule governs births, a town settled
+ * into `people == posts` could never leave it: the road was shut, the cradle
+ * was shut, and every workplace the owner raised was spoken for by a toddler
+ * before anybody could walk into it. Measured on a plot with ninety-six spare
+ * beds: ten posts standing open, ten children, nobody admitted for forty days
+ * running. A player watching the vacancy count climb overnight reported
+ * exactly that.
+ *
+ * Holding nothing for them is no better — the road fills every post today and
+ * the whole cohort has to take it again in a month, which is churn rather
+ * than growth. A child holds the share of a post they have grown into, so the
+ * room closes smoothly as the cohort approaches instead of all at once, and a
+ * workplace raised today has somebody in it this week.
+ */
+const postsHeldForChildren = (world: World) =>
+  world.citizens.reduce((sum, c) => (c.age >= 16 ? sum : sum + Math.max(0, Math.min(1, c.age / 16))), 0);
+
+/**
  * How many more people the town has a bed and a post for.
  *
- * Children count against both: a child is a bed tonight and a post in
- * thirty-two days, and a town that has children faster than it raises
- * workplaces is a town whose grown children will have nothing to do.
+ * A child is a bed tonight, so every one of them counts in full against the
+ * beds; a child is only as much of a post as they have grown into.
  */
 export function roomToGrow(world: World): { beds: number; posts: number } {
   useWorld(world);
+  const adults = world.citizens.filter((c) => c.age >= 16).length;
   return {
     beds: housingRoom(world) - world.citizens.length,
-    posts: postsOf(world) - world.citizens.length,
+    posts: Math.floor(postsOf(world) - adults - postsHeldForChildren(world)),
   };
 }
 
