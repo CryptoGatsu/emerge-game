@@ -244,6 +244,17 @@ export default function EmergeClient() {
     try {
       if (window.sessionStorage.getItem(SPECTATOR_KEY) === '1') { setSpectator(true); setEntered(true); }
     } catch { /* no storage */ }
+    // `?plot=<seed>` is the token's external link on OpenSea and in wallets:
+    // it opens the world map on that plot, as the land list inside a world
+    // does — as a spectator until a wallet connects, so nobody is stopped at
+    // the front page on the way to look at a plot.
+    try {
+      const seed = Number(new URLSearchParams(window.location.search).get('plot'));
+      if (Number.isInteger(seed) && seed > 0 && seed <= 1e12) {
+        try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }
+        setMapFocus(seed); setSpectator(true); setEntered(true);
+      }
+    } catch { /* no URL to read */ }
   }, []);
   const spectate = useCallback(() => {
     try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }

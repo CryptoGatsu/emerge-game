@@ -13,6 +13,8 @@ export async function GET(request: Request) {
     name: 'Emerge Land',
     description: 'The plots of Emerge, an AI life-sim on Robinhood Chain. Each token is a plot whose id is the seed that grows its land; holding the token holds the settlement on it, and every resale pays a share back to the people who hold land.',
     image: `${base}/emerge-logo.png`,
+    banner_image: `${base}/wiki/settlement.jpg`,
+    featured_image: `${base}/wiki/settlement.jpg`,
     external_link: base,
     ...(ROYALTIES_ADDRESS ? { seller_fee_basis_points: ROYALTY_BPS, fee_recipient: ROYALTIES_ADDRESS } : {}),
   }, { headers: { 'cache-control': 'public, max-age=3600' } });

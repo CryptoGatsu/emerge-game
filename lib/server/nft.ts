@@ -22,6 +22,7 @@ import 'server-only';
  * pool, so a trading fee on land goes back to the people who hold land.
  */
 
+import { after } from 'next/server';
 import { createPublicClient, defineChain, encodeFunctionData, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, TOKEN, tokenLive } from '../chain/emerge';
 import { ERC20_ABI, LAND_ABI, LAND_ADDRESS, MARKET_ABI, MARKET_ADDRESS, ROYALTIES_ABI, ROYALTIES_ADDRESS, plotsAreTokens } from '../chain/plots';
@@ -52,6 +53,18 @@ const ROYALTY_HELD = (token: string) => serverKey(`nft:royalties:held:${token.to
 const ZERO = '0x0000000000000000000000000000000000000000';
 
 export const nftLive = plotsAreTokens;
+
+/**
+ * Work that should happen after the answer goes out — a mint after a claim,
+ * a sync after a stale row is noticed — without the answer waiting for it.
+ * On a serverless host a promise left dangling after the response is not
+ * guaranteed to run; `after` keeps the function alive for it. Outside a
+ * request (a script, a test) it falls back to letting the promise run.
+ */
+export function background(work: () => Promise<unknown>): void {
+  const run = () => work().catch(() => {});
+  try { after(run); } catch { void run(); }
+}
 
 /* ------------------------------------------------------------------ *
  * Reading the chain
@@ -102,14 +115,14 @@ export async function holdsPlot(claim: Claim | null, owner: string): Promise<boo
     if (!nftLive() || !claim) return false;
     try {
       const holder = await holderOnChain(claim.seed);
-      if (holder === me) { void syncOwners().catch(() => {}); return true; }
+      if (holder === me) { background(() => syncOwners()); return true; }
     } catch { /* the row stands */ }
     return false;
   }
   if (!nftLive()) return true;
   try {
     const holder = await holderOnChain(claim.seed);
-    if (holder !== null && holder !== me) { void syncOwners().catch(() => {}); return false; }
+    if (holder !== null && holder !== me) { background(() => syncOwners()); return false; }
   } catch { /* the row stands */ }
   return true;
 }
@@ -208,7 +221,7 @@ export async function flushMints(limit = 30): Promise<Flushed> {
  * The surprise: every plot anybody holds, minted to them. Reads the chain
  * once, queues what is missing, and drains the queue a batch at a time.
  */
-export async function airdrop(): Promise<{ queued: number; alreadyMinted: number; batches: Flushed[] }> {
+export async function airdrop(): Promise<{ queued: number; alreadyMinted: number; batches: Flushed[]; waiting: number }> {
   const rows = await allClaims();
   const chainMap = await readRegistry();
   let queued = 0, alreadyMinted = 0;
@@ -219,13 +232,18 @@ export async function airdrop(): Promise<{ queued: number; alreadyMinted: number
     await queueMint(row.seed, row.owner);
     queued++;
   }
+  // A few batches per call, so the request answers well inside its time
+  // limit however many plots there are; call again until `waiting` is 0.
+  // The queue is durable and the cron drains it too.
   const batches: Flushed[] = [];
-  for (let i = 0; i < 20; i++) {
+  let waiting = (await mintQueue()).length;
+  for (let i = 0; i < 3 && waiting > 0; i++) {
     const done = await flushMints();
     batches.push(done);
-    if (done.problem || done.waiting <= 0) break;
+    waiting = (await mintQueue()).length;
+    if (done.problem) break;
   }
-  return { queued, alreadyMinted, batches };
+  return { queued, alreadyMinted, batches, waiting };
 }
 
 /* ------------------------------------------------------------------ *

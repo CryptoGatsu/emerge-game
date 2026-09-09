@@ -102,8 +102,10 @@ curl -sS -X POST https://www.emergerh.world/api/nft \
   -d '{"airdrop":true}'
 ```
 
-Run it again if the answer reports batches still waiting; it is safe any
-number of times, and a plot already minted is skipped. `GET
+It mints up to ninety plots per call and answers with `"waiting": n` for
+what is still queued; **run it again until `waiting` is 0.** It is safe any
+number of times, a plot already minted is skipped, and the cron drains the
+same queue every fifteen minutes anyway. `GET
 https://www.emergerh.world/api/nft` shows rows, minted count, queue and
 anything in flight.
 

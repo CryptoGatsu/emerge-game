@@ -318,8 +318,8 @@ curl -sS -X POST https://www.emergerh.world/api/nft \
 ```
 
 It reads the chain once, queues every claim row that has no token, and mints
-in batches of thirty; run it again if it reports batches still waiting. It is
-safe to run any number of times. `GET /api/nft` shows the count of rows, the
+in batches of thirty, three batches per call; run it again until it answers
+`"waiting": 0`. It is safe to run any number of times. `GET /api/nft` shows the count of rows, the
 count minted, what is queued and what is in flight.
 
 From then on the chain is the title. A plot sold on OpenSea, in the game's
