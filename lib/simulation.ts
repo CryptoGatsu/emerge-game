@@ -9887,13 +9887,42 @@ export function upgradeAllOfType(world: World, type: string): { ok: boolean; mes
   return { ok: true, message: stopped ? `Improved ${improved} of ${candidates.length}. ${stopped}` : `All ${improved} improved.`, improved, gold };
 }
 
-/** Add Gold to the treasury from outside the settlement's own economy. */
+/**
+ * Add Gold to the treasury from outside the settlement's own economy.
+ *
+ * This never meets the ceiling, and that is the whole point of it. Everything
+ * that arrives this way is property: a cancelled order's own Gold coming back,
+ * a lot somebody paid $EMERGE for, a gift somebody burned tokens to send, a
+ * refund of a trade the exchange refused, principal drawn out of the vault.
+ * None of it is a settlement earning anything.
+ *
+ * It used to go through `earn`, which meant the ceiling could refuse it — so a
+ * player who listed three hundred thousand Gold, changed their mind and took
+ * the order down watched the Gold vanish on its way home. It had been under
+ * the ceiling when it left, because listing it is what made room. They
+ * reported it as the exchange eating their money, and they were right: nothing
+ * had been bought or sold, and three hundred thousand Gold of theirs no longer
+ * existed.
+ *
+ * So the ceiling governs what a settlement *earns*, not what it may *hold*. A
+ * delivery lands in full and may carry a treasury over its rung, which puts it
+ * in exactly the state a grandfathered town is in: nothing is taken, and it
+ * earns nothing more until it has spent back under. The player is told that,
+ * once, on the delivery that does it, rather than left to work out why the
+ * income stopped.
+ */
 export function fundTreasury(world: World, gold: number, note: string) {
   useWorld(world);
   if (!(gold > 0)) return;
   noteAttention(world);
-  earn(world, 'vault', gold);
+  const cap = goldCap(world);
+  const was = world.treasury;
+  world.treasury += gold;
+  world.ledger.in.vault = (world.ledger.in.vault ?? 0) + gold;
   pushFeed(world, 'market', note);
+  if (was <= cap && world.treasury > cap) {
+    pushFeed(world, 'market', `That takes the treasury past the ${Math.round(cap).toLocaleString()} Gold this rung holds. Nothing has been taken off it, but the town earns nothing more until it is spent back under.`);
+  }
 }
 
 /**
