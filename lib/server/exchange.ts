@@ -29,7 +29,7 @@ import 'server-only';
 
 import type { Resource } from '../world/goods';
 import { RESOURCES } from '../world/goods';
-import { serverKey } from '../limits';
+import { MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE, serverKey } from '../limits';
 import { TOKEN, tokenLive } from '../chain/emerge';
 import { goldSaleSplit } from '../chain/vault';
 import { utcDay } from './accounts';
@@ -38,8 +38,9 @@ import { counter, hdel, hget, hgetall, hset, hsetWindow, incrBy, releaseLock, ta
 import { claimOf, readWorld } from './registry';
 import { noteTrade } from './tape';
 
-/** The share of the Gold in every trade that is burned. */
-export const TRADE_FEE = 0.05;
+/** The exchange's own limits live in `limits`, which the guide can read too,
+ *  and are re-exported here, where they are enforced. */
+export { TRADE_FEE, MIN_GOLD_LOT, MAX_GOODS_LOT };
 /**
  * The smallest Gold lot, and the most goods one order may hold.
  *
@@ -53,8 +54,7 @@ export const TRADE_FEE = 0.05;
  * plot's last published copy, and the Gold leaves that treasury when the order
  * goes up.
  */
-export const MIN_GOLD_LOT = 100;
-export const MAX_GOODS_LOT = 5_000;
+
 /** How many orders one wallet may have standing. */
 export const MAX_OPEN_ORDERS = 12;
 

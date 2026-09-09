@@ -2,7 +2,7 @@
 import React from 'react';
 import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
@@ -35,7 +35,7 @@ import {
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
 } from '@/lib/simulation';
-import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { MAX_GIFT_GOLD, MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { BrandLine } from './Brand';
 import { LanguageSwitch } from './LanguageSwitch';
@@ -197,6 +197,7 @@ const SECTIONS = [
   ['costs', 'What things cost'],
   ['earning', 'Earning $EMERGE'],
   ['economy', 'The settlement\u2019s own money'],
+  ['exchange', 'Trading with other players'],
   ['vault', 'Deposits and withdrawals'],
   ['buildings', 'Buildings'],
   ['eras', 'Eras'],
@@ -749,6 +750,107 @@ export default function Wiki() {
               well is stewardship yield, which is capped, and the place itself getting bigger.
             </p>
           </div>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
+        <section id="exchange">
+          <h2>Trading with other players</h2>
+          <p>
+            The world market above is the game&rsquo;s own: it sets one price for each good
+            everywhere and your storekeeper buys and sells at it whether you are watching or not.
+            The <b>exchange</b> is the other thing entirely &mdash; a board where players put things
+            up for each other at whatever price they like, and nobody has to take it.
+          </p>
+          <p>
+            Two things trade on it, and they are paid for in different money.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>What</th><th>Paid in</th><th>Where the money goes</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Goods, out of your store</td>
+                <td>Gold</td>
+                <td className="muted">Out of the buyer&rsquo;s treasury and into the seller&rsquo;s, less the burn.</td>
+              </tr>
+              <tr>
+                <td>Gold, out of your treasury</td>
+                <td>{TOKEN.ticker}</td>
+                <td className="muted">Wallet to wallet. The vault is not in the middle of it and mints nothing.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>What it costs to trade</h3>
+          <table className="wiki-table">
+            <thead><tr><th>On</th><th>Burned</th><th>Out of whose end</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Any trade, the Gold side</td>
+                <td className="num">{Math.round(TRADE_FEE * 100)}%</td>
+                <td className="muted">The buyer of Gold receives {Math.round((1 - TRADE_FEE) * 100)}% of the lot; the seller of goods is paid {Math.round((1 - TRADE_FEE) * 100)}% of the price.</td>
+              </tr>
+              <tr>
+                <td>A Gold lot, the {TOKEN.ticker} side</td>
+                <td className="num">{Math.round(GOLD_SALE_BURN_RATE * 100)}%</td>
+                <td className="muted">The seller&rsquo;s. A lot listed at twenty a Gold costs the buyer exactly twenty; nineteen reaches the seller and one is destroyed.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            So the price on the board is the price the buyer pays, which is what makes the
+            {' '}<Link href="/markets">markets page</Link> honest: the rate it shows is a rate
+            somebody really paid rather than a rate before fees. A seller who wants twenty net
+            lists at twenty-one, and everybody can see that they have.
+          </p>
+          <p>
+            Both burns are real. The Gold leaves the game; the {TOKEN.ticker} leaves the supply.
+            Round-tripping Gold in and out of the exchange costs about
+            {' '}{Math.round((TRADE_FEE + GOLD_SALE_BURN_RATE) * 100)}%, which is deliberate: the
+            exchange is for trading with people, not for churning.
+          </p>
+
+          <h3>Listing something</h3>
+          <ul>
+            <li>
+              <b>What you list leaves you at once.</b> The goods come off your shelves and the Gold
+              comes out of your treasury the moment the order goes up, and come back in full if you
+              take it down. An order cannot promise what your store does not hold.
+            </li>
+            <li>
+              <b>A Gold lot is {MIN_GOLD_LOT.toLocaleString()} Gold or more</b>, and never more than the treasury in your
+              plot&rsquo;s last published copy &mdash; the server checks it against that copy, not
+              against the browser&rsquo;s word. Goods go up to {MAX_GOODS_LOT.toLocaleString()} a lot.
+            </li>
+            <li>
+              <b>Gold is delivered to a plot.</b> You need land of your own for the Gold to arrive
+              in, which is also why Gold bought here cannot become tokens: it lands in a treasury
+              and the only door out of the game is the vault, which pays out what was put in.
+            </li>
+          </ul>
+
+          <h3>What happens when you buy Gold</h3>
+          <p>
+            The lot is held first, so anything that would refuse the trade refuses it before a
+            penny moves. Then your wallet pays the seller and burns its share &mdash; two signatures,
+            because wallet to wallet means there is no contract in the middle to divide one payment.
+            Then the receipts are handed in and the Gold is delivered.
+          </p>
+          <p>
+            If the last step is the one that fails, nothing is lost. Both receipts are written down
+            on the exchange&rsquo;s books before it is asked for anything, and the purchase settles
+            itself afterwards &mdash; from another device, or simply from opening the exchange
+            again. A payment that has been made and not yet settled is shown to you in the panel
+            rather than left to be discovered.
+          </p>
+
+          <h3>Land</h3>
+          <p>
+            Plots are sold on the world map rather than the exchange, and also wallet to wallet:
+            the buyer pays the owner directly and the registry takes {Math.round(RESALE_FEE_RATE * 100)}% into the vault.
+            A plot carries its settlement with it &mdash; the people, the buildings and the level all
+            change hands. Every asking price and every completed sale is on the
+            {' '}<Link href="/markets">markets page</Link>.
+          </p>
         </section>
 
         {/* ---------------------------------------------------------- */}

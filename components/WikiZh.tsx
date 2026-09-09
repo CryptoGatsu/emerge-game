@@ -2,7 +2,7 @@
 import React from 'react';
 import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
@@ -28,7 +28,7 @@ import {
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
 } from '@/lib/simulation';
-import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { MAX_GIFT_GOLD, MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { tj, tn } from '@/lib/i18n';
 import { BrandLine } from './Brand';
@@ -161,6 +161,7 @@ const SECTIONS = [
   ['costs', '各项费用'],
   ['earning', '赚取 $EMERGE'],
   ['economy', '聚落自己的钱'],
+  ['exchange', '与其他玩家交易'],
   ['vault', '存款与取款'],
   ['buildings', '建筑'],
   ['eras', '时代'],
@@ -414,6 +415,60 @@ export function WikiZh() {
             <p>这是诚实的部分，也是游戏之所以有经济的原因。你的聚落赚的金币留在聚落里。它不能兑换成 {T}：金库愿意付给你的以链上显示你存入的为上限，所以再富的金库也变不成代币，不管镇子经营得多好。</p>
             <p>放金币出去试过，它毁了一切——世界变成了印代币的机器，其他什么都不重要了。经营好一个地方的回报是有上限的经营收益，以及这个地方本身变大。</p>
           </div>
+        </section>
+
+        <section id="exchange">
+          <h2>与其他玩家交易</h2>
+          <p>上面说的世界市场是游戏自己的：它给每种货物定一个全世界通用的价格，你的仓管员照价买卖，不管你在不在看。<b>交易所</b>是另一回事——玩家把东西挂到板上，价格随自己开，也没人非买不可。</p>
+          <p>板上有两样东西，用的钱不一样。</p>
+          <table className="wiki-table">
+            <thead><tr><th>卖什么</th><th>用什么付</th><th>钱去哪里</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>仓库里的货物</td>
+                <td>金币</td>
+                <td className="muted">从买家金库出，进卖家金库，扣掉销毁的部分。</td>
+              </tr>
+              <tr>
+                <td>金库里的金币</td>
+                <td>{T}</td>
+                <td className="muted">钱包直达钱包。金库不在中间，也不铸造任何东西。</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>交易要付出什么</h3>
+          <table className="wiki-table">
+            <thead><tr><th>在哪一边</th><th>销毁</th><th>从谁那一端出</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>任何一笔交易的金币那一边</td>
+                <td className="num">{Math.round(TRADE_FEE * 100)}%</td>
+                <td className="muted">买金币的人收到这批的 {Math.round((1 - TRADE_FEE) * 100)}%；卖货物的人拿到价款的 {Math.round((1 - TRADE_FEE) * 100)}%。</td>
+              </tr>
+              <tr>
+                <td>金币批次的 {T} 那一边</td>
+                <td className="num">{Math.round(GOLD_SALE_BURN_RATE * 100)}%</td>
+                <td className="muted">卖家那一端。挂牌每枚金币二十，买家就正好付二十：十九进卖家钱包，一个被销毁。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>所以板上的价格就是买家实付的价格，<Link href="/markets">行情页</Link>也因此诚实：它显示的是真有人付过的价，而不是扣费前的价。想净收二十的卖家就挂二十一，而且所有人都看得见他挂了多少。</p>
+          <p>两笔销毁都是真的：金币离开游戏，{T} 离开总量。把金币在交易所进出走一圈大约要花 {Math.round((TRADE_FEE + GOLD_SALE_BURN_RATE) * 100)}%，这是有意为之——交易所是拿来和人做买卖的，不是拿来来回刷的。</p>
+
+          <h3>挂单</h3>
+          <ul>
+            <li><b>挂出去的东西立刻离开你。</b>订单一挂上，货物就下架、金币就出库；撤单则原样退回。订单不能承诺仓库里没有的东西。</li>
+            <li><b>金币批次至少 {MIN_GOLD_LOT.toLocaleString()} 金币</b>，且不超过你地块最近一次发布副本里的金库——服务器按那份副本核对，不听浏览器的。货物每批最多 {MAX_GOODS_LOT.toLocaleString()}。</li>
+            <li><b>金币是送到地块上的。</b>你得有自己的地，金币才有地方落。这也是为什么这里买到的金币变不成代币：它落进的是金库，而离开游戏的唯一一扇门是金库，金库只付出你存进去的。</li>
+          </ul>
+
+          <h3>买金币时发生了什么</h3>
+          <p>先锁住这批货，所以任何会让交易失败的原因，都在钱动之前就先失败了。然后你的钱包付给卖家，并销毁自己那一份——两次签名，因为钱包直达钱包意味着中间没有合约来拆分一笔付款。最后交上收据，金币送达。</p>
+          <p>如果失败发生在最后一步，什么也不会丢。两张收据在向交易所索取任何东西之前就已经记在它的账上，这笔交易之后会自己完成——换台设备，或者干脆再打开一次交易所都行。已经付过、尚未结算的款项会显示在面板里，而不是等你自己发现。</p>
+
+          <h3>土地</h3>
+          <p>地块在世界地图上转手，不走交易所，同样是钱包直达钱包：买家直接付给地主，登记处从中抽 {Math.round(RESALE_FEE_RATE * 100)}% 进金库。地块是连着聚落一起转手的——人、建筑和等级都跟着走。每一个要价和每一笔已完成的成交都在<Link href="/markets">行情页</Link>上。</p>
         </section>
 
         <section id="vault">
