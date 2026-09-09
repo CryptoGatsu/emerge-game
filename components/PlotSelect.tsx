@@ -653,7 +653,42 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   // back to the plot on every player update.
   const showPlotRef = useRef(showPlot); showPlotRef.current = showPlot;
   const onFocusedRef = useRef(onFocused); onFocusedRef.current = onFocused;
-  useEffect(() => { if (focusSeed !== null) { showPlotRef.current(focusSeed); onFocusedRef.current?.(); } }, [focusSeed]);
+  /*
+   * Hold the focus until the plot can actually be found.
+   *
+   * Only the home chart's nine plots are known from the seed alone; every
+   * other plot was surveyed into existence with a random seed, and which
+   * chart it sits on is something only the shared register knows. That
+   * register arrives a moment after this screen mounts, so a link straight
+   * to a plot — a token's link from OpenSea or a wallet — used to be spent
+   * on the frame before the answer existed, and the map opened on whatever
+   * was first instead. So the focus is kept until the seed is placeable,
+   * and only then handed back.
+   */
+  useEffect(() => {
+    if (focusSeed === null) return;
+    const placeable = chartOfSeed(focusSeed, player, discovered) !== null;
+    if (!placeable && finds.length === 0) return;
+    showPlotRef.current(focusSeed);
+    onFocusedRef.current?.();
+  }, [focusSeed, player, discovered, finds.length]);
+  /*
+   * Put the plot in the address bar.
+   *
+   * A plot is a token somebody may want to link to — on OpenSea, in a
+   * message, to themselves later — and until now every plot in the game
+   * wore the same URL. Written with `replaceState` so it does not fill the
+   * back button with one entry per plot tapped.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined' || selectedSeed === null) return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('plot') === String(selectedSeed)) return;
+      url.searchParams.set('plot', String(selectedSeed));
+      window.history.replaceState(null, '', url.toString());
+    } catch { /* an address bar we cannot write is not worth failing over */ }
+  }, [selectedSeed]);
   const room = useMemo(() => chartRoom(player, chart, discovered), [player, chart, discovered]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
   const registry = useChainOwner(selected?.seed ?? null);

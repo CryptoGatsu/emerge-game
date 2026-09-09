@@ -3496,3 +3496,57 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
    than pushing the page sideways. */
 .markets .wiki-table { display: block; overflow-x: auto; max-width: 100%; }
 .markets h3 { margin-top: 22px; }
+
+/* --- The land marketplace ------------------------------------------------
+   A gallery of plots: the picture carries the page, so the card is mostly
+   picture and the figures sit under it in one quiet column. */
+.landmkt-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0 6px; }
+.landmkt-wallet { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 14px 0 2px; }
+.landmkt-notice { margin: 8px 0 0; padding: 9px 12px; border: 1px solid rgba(184, 231, 86, 0.35); border-radius: 10px; background: rgba(1, 10, 6, 0.6); color: #e6f5c8; }
+
+.landmkt-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 18px 0 14px; }
+.landmkt-controls select,
+.landmkt-search input { background: rgba(1, 10, 6, 0.6); border: 1px solid rgba(184, 231, 86, 0.28); border-radius: 10px; color: #e6f5c8; padding: 8px 11px; font: inherit; }
+.landmkt-search { flex: 1 1 260px; display: block; }
+.landmkt-search input { width: 100%; }
+.landmkt-controls select:focus-visible,
+.landmkt-search input:focus-visible,
+.landmkt-toggle:focus-visible { outline: 2px solid #b8e756; outline-offset: 2px; }
+.landmkt-toggle { background: rgba(1, 10, 6, 0.6); border: 1px solid rgba(184, 231, 86, 0.28); border-radius: 999px; color: #cfe6a4; padding: 8px 14px; font: inherit; cursor: pointer; }
+.landmkt-toggle.on { background: rgba(184, 231, 86, 0.16); border-color: rgba(184, 231, 86, 0.7); color: #eaffc4; }
+.landmkt-count { margin-left: auto; color: #8fae74; font-variant-numeric: tabular-nums; }
+
+.landmkt-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.landmkt-card { display: flex; flex-direction: column; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 14px; background: rgba(1, 10, 6, 0.55); overflow: hidden; }
+.landmkt-card.mine { border-color: rgba(240, 208, 94, 0.6); }
+.landmkt-art { display: block; position: relative; aspect-ratio: 1; background: #0a1418; max-width: 100%; }
+.landmkt-art img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.landmkt-tag { position: absolute; left: 8px; top: 8px; font-style: normal; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 7px; border-radius: 6px; background: rgba(1, 10, 6, 0.8); color: #f0d05e; border: 1px solid rgba(240, 208, 94, 0.5); }
+.landmkt-body { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px 12px; }
+.landmkt-body h3 { margin: 0; font-size: 16px; color: #eaffc4; overflow-wrap: anywhere; }
+.landmkt-where { margin: 0; color: #8fae74; font-size: 12px; }
+.landmkt-facts { margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: #cfe6a4; font-variant-numeric: tabular-nums; }
+.landmkt-holder { margin: 2px 0 0; font-size: 12px; color: #8fae74; overflow-wrap: anywhere; }
+.landmkt-deal { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.landmkt-deal b { color: #f0d05e; font-size: 15px; }
+.landmkt-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.landmkt-actions button,
+.landmkt-actions .ghost { font: inherit; font-size: 13px; padding: 7px 11px; border-radius: 9px; cursor: pointer; text-decoration: none; }
+.landmkt-actions button { background: rgba(184, 231, 86, 0.9); border: 1px solid rgba(184, 231, 86, 0.9); color: #06180c; font-weight: 600; }
+.landmkt-actions button:disabled { opacity: 0.55; cursor: default; }
+.landmkt-actions .ghost { background: transparent; border: 1px solid rgba(184, 231, 86, 0.28); color: #cfe6a4; }
+.landmkt-more { display: block; margin: 18px auto 0; background: rgba(1, 10, 6, 0.6); border: 1px solid rgba(184, 231, 86, 0.35); border-radius: 10px; color: #cfe6a4; padding: 10px 18px; font: inherit; cursor: pointer; }
+
+.landmkt-sales { display: flex; flex-direction: column; gap: 8px; }
+.landmkt-sale { display: grid; grid-template-columns: minmax(0, 1.5fr) auto minmax(0, 1.4fr) auto; gap: 8px 14px; align-items: baseline; padding: 9px 12px; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 12px; background: rgba(1, 10, 6, 0.55); font-variant-numeric: tabular-nums; }
+.landmkt-sale-price { color: #f0d05e; font-weight: 600; }
+.landmkt-sale-who { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .landmkt-sale { grid-template-columns: 1fr auto; }
+  .landmkt-sale-who, .landmkt-sale-when { grid-column: 1 / -1; }
+  .landmkt-count { margin-left: 0; }
+}
+
+/* A label that only a screen reader reads: the control's shape says what it
+   is to everybody else, but "a dropdown" is not a name. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

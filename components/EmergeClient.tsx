@@ -276,9 +276,32 @@ export default function EmergeClient() {
   /** Back to the front page from the world map. Nothing is forgotten but the way in. */
   const goHome = useCallback(() => {
     try { window.sessionStorage.removeItem(SPECTATOR_KEY); } catch { /* no storage */ }
+    // The front page is not a plot, so it should not keep a plot's address.
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('plot')) { url.searchParams.delete('plot'); window.history.replaceState(null, '', url.toString()); }
+    } catch { /* an address bar we cannot write is not worth failing over */ }
     setSpectator(false);
     setEntered(false);
   }, []);
+
+  /*
+   * The world you are in is the plot the address bar names.
+   *
+   * The map writes its own selection; this covers walking into a settlement,
+   * visiting somebody else's, and arriving on a token's link — so the URL of
+   * a plot is the same URL whether you got there by tapping or by pasting.
+   */
+  useEffect(() => {
+    const seed = visit?.seed ?? claimed?.seed ?? null;
+    if (seed === null || typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('plot') === String(seed)) return;
+      url.searchParams.set('plot', String(seed));
+      window.history.replaceState(null, '', url.toString());
+    } catch { /* as above */ }
+  }, [claimed?.seed, visit?.seed]);
 
   useEffect(() => {
     const stored = loadClaimedWorld();

@@ -234,6 +234,7 @@ export default function Markets() {
                    which is the only figure that says what land is worth. */}
             <section id="land">
               <h2>{t('Land')}</h2>
+              <p><Link href="/land">{t('Every plot and who holds it')} &rarr;</Link></p>
               <p>{t('{n} plot(s) for sale, paid wallet to wallet in {ticker}. A plot carries its settlement with it — the people, the buildings and the level all change hands.', { n: board.landTotal, ticker: TOKEN.ticker })}</p>
               {board.land.length === 0 ? <p className="muted">{t('No land is for sale right now.')}</p> : (
                 <table className="wiki-table">

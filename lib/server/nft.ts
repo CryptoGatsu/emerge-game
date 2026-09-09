@@ -33,6 +33,7 @@ import { allClaims, claimOf, displayNames, publishWorld, readPlayerRecord, readW
 import { callFromVault, receiptOf, vaultAddress, vaultCanSign } from './signer';
 import { DIVIDEND_POOL } from './treasury';
 import { forgetLandMarket } from './landMarket';
+import { forgetLandCatalogue } from './landCatalogue';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
@@ -285,7 +286,11 @@ export async function syncOwners(chain?: Map<number, string | null>): Promise<Sy
         out.moved.push({ seed: row.seed, from: row.owner.toLowerCase(), to: holder });
       }
     }
-    if (out.moved.length || out.released.length) await forgetLandMarket().catch(() => {});
+    if (out.moved.length || out.released.length) {
+      await forgetLandMarket().catch(() => {});
+      await forgetLandCatalogue().catch(() => {});
+      await forgetChainSales().catch(() => {});
+    }
     await setValue(LAST_SYNC, JSON.stringify(out), 7 * 86_400);
     return out;
   } finally {
@@ -350,6 +355,72 @@ export async function marketBoard(): Promise<ChainListing[]> {
     seeds.forEach((seed, i) => out.push({ seed: Number(seed), seller: sellers[i].toLowerCase(), price: Number(prices[i] / 10n ** 18n), live: live[i] }));
   }
   return out;
+}
+
+/**
+ * What plots have actually sold for, from the market contract itself.
+ *
+ * An asking price is an opinion; a `Sold` event is a fact, with the buyer,
+ * the seller and the royalty that went to the holders. Read from the chain
+ * rather than kept in a ledger of our own, so it stays true even for a sale
+ * the game never saw. Cached, because a log query is not a thing to do on
+ * every page view, and empty rather than loud when the node will not serve
+ * a range that long.
+ */
+export interface ChainSale { seed: number; seller: string; buyer: string; price: number; fee: number; at: number; txHash: string }
+
+const SALES_CACHE = serverKey('nft:sales');
+const SALES_SECONDS = 120;
+
+/**
+ * Forget the sale record, so the next read goes back to the chain.
+ *
+ * Called when a plot moves, because the person most likely to look at what
+ * land has sold for is whoever has just bought some, and telling them their
+ * own purchase never happened for the next two minutes is the one moment the
+ * cache is not worth having.
+ */
+export async function forgetChainSales(): Promise<void> {
+  await setValue(SALES_CACHE, '', 1).catch(() => {});
+}
+
+export async function recentChainSales(limit = 60): Promise<ChainSale[]> {
+  if (!MARKET_ADDRESS) return [];
+  const held = await getValue(SALES_CACHE).catch(() => null);
+  if (held) { try { return (JSON.parse(held) as ChainSale[]).slice(0, limit); } catch { /* re-read below */ } }
+  try {
+    const client = reader();
+    // From the block the market was deployed in where that is known, else a
+    // bounded window back from the head, so the query is never unbounded.
+    const head = await client.getBlockNumber();
+    const configured = BigInt(Number(process.env.EMERGE_MARKET_FROM_BLOCK) || 0);
+    const window = BigInt(Number(process.env.EMERGE_LOG_WINDOW) || 500_000);
+    const fromBlock = configured > 0n ? configured : head > window ? head - window : 0n;
+    const logs = await client.getContractEvents({
+      address: MARKET_ADDRESS as Hex, abi: MARKET_ABI, eventName: 'Sold', fromBlock, toBlock: 'latest',
+    });
+    const times = new Map<bigint, number>();
+    const out: ChainSale[] = [];
+    for (const log of logs.slice(-limit)) {
+      const a = log.args as { seed?: bigint; seller?: string; buyer?: string; price?: bigint; fee?: bigint };
+      if (a.seed === undefined || a.price === undefined) continue;
+      let at = times.get(log.blockNumber ?? 0n) ?? 0;
+      if (!at && log.blockNumber !== null && log.blockNumber !== undefined) {
+        const block = await client.getBlock({ blockNumber: log.blockNumber }).catch(() => null);
+        at = block ? Number(block.timestamp) * 1000 : 0;
+        times.set(log.blockNumber, at);
+      }
+      out.push({
+        seed: Number(a.seed), seller: (a.seller ?? ZERO).toLowerCase(), buyer: (a.buyer ?? ZERO).toLowerCase(),
+        price: Number(a.price / 10n ** 18n), fee: Number((a.fee ?? 0n) / 10n ** 18n), at, txHash: log.transactionHash ?? '',
+      });
+    }
+    out.reverse();
+    if (out.length) await setValue(SALES_CACHE, JSON.stringify(out), SALES_SECONDS).catch(() => {});
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------------ *

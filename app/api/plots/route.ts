@@ -42,6 +42,7 @@
 
 import { NextResponse } from 'next/server';
 import { forgetLandMarket } from '@/lib/server/landMarket';
+import { forgetLandCatalogue } from '@/lib/server/landCatalogue';
 import {
   allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
@@ -663,6 +664,7 @@ export async function POST(request: Request) {
         const row = await listClaim(seed, owner, listed ? listed.price : null);
         if (!row) return NextResponse.json({ error: 'That plot is not yours to list.' }, { status: 409 });
         await forgetLandMarket();
+        await forgetLandCatalogue();
         return NextResponse.json({ claim: row, onChain: !!listed });
       } catch {
         return NextResponse.json({ error: 'The chain is not reachable.' }, { status: 502 });
@@ -675,6 +677,7 @@ export async function POST(request: Request) {
       // Listing or delisting changes what it should say, so drop it rather
       // than advertise a stale price for the next sixty seconds.
       await forgetLandMarket();
+        await forgetLandCatalogue();
       return NextResponse.json({ claim: row });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -748,6 +751,7 @@ export async function POST(request: Request) {
       if (tokenLive() && transferTx) await spendBurn(transferTx, `resale:${seed}`).catch(() => false);
       // A plot that has just sold must not go on being advertised.
       await forgetLandMarket();
+        await forgetLandCatalogue();
       return NextResponse.json({ claim: moved.claim, price: moved.price, seller: moved.seller });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
