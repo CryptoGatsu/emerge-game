@@ -153,6 +153,7 @@ export const UI: Record<string, string> = {
   'A plot belongs to an address, and so does your balance and your name. Connect a wallet and the map opens — nothing before that point costs you anything.':
     '地块属于一个地址，你的余额和名字也是。连接钱包，地图就会打开——在那之前不花你一分钱。',
   'Read the guide first': '先读指南',
+  '{n} with its posts full': '岗位满员时为 {n}',
   '+{n} listed': '挂单中 +{n}',
   'HELD': '持有', 'SPENDABLE': '可用', 'LISTED ON THE EXCHANGE': '已挂到交易所',
   'See every price': '看看所有价格',

@@ -3,7 +3,7 @@ import React from 'react';
 import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
+import { UPKEEP_EMPTY_SHARE, BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES_ZH } from '@/lib/updates';
 
@@ -83,7 +83,7 @@ const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
 const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', '每个工作的人每天都领工资。这是大多数聚落最大的一笔支出。'],
   ['imports', '按世界市场的价格买进镇子自己造不出的东西。'],
-  ['upkeep', `每栋建筑立着就要花钱，从房屋每天 ${maintenanceCost('House')} 金币到市场每天 ${maintenanceCost('Market')} 金币——时代越晚越贵，每升一级更贵，居民富足、期待一个体面市镇的城镇也更贵。`],
+  ['upkeep', `每栋建筑立着就要花钱，从房屋每天 ${maintenanceCost('House')} 金币到市场每天 ${maintenanceCost('Market')} 金币——时代越晚越贵，每升一级更贵，居民富足、期待一个体面市镇的城镇也更贵。工作场所按实际上工的人收费：本行当岗位满员时收全额，完全没人干活时只收 ${Math.round(UPKEEP_EMPTY_SHARE * 100)}% 的空置费。房屋、仓库和市场不是谁的工作场所，收费和以前一样。`],
   ['building', '你建造的东西，花金币，也从堆场花材料。'],
   ['works', '通往无人能到之地的桥，以及随之而来的路。'],
   ['vault', '金库门的另一半：你取回存款时离开金库的金币。'],

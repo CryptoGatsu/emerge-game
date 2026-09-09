@@ -7992,6 +7992,64 @@ export function upkeepOf(b: Building) {
 }
 export const UPKEEP_PER_ERA = 0.25;
 
+/**
+ * What a workplace costs to keep standing with nobody in it, as a share of what
+ * it costs when its posts are full.
+ *
+ * Not nothing: a roof still leaks whether or not anybody is under it, and a
+ * building that cost nothing while empty would make over-building free. A
+ * third is enough to keep a wasted workshop a real mistake and small enough
+ * that it is not a punishment.
+ */
+export const UPKEEP_EMPTY_SHARE = 1 / 3;
+
+/** Which trade works in this kind of building, if any. */
+const tradeOfType = (type: string): WorkingJob | null =>
+  (Object.keys(jobs) as WorkingJob[]).find((j) => jobs[j].building === type) ?? null;
+
+/** How fully each trade's posts are filled, nothing to one, for a whole town. */
+function postsFilled(world: World): Partial<Record<WorkingJob, number>> {
+  const heads: Partial<Record<WorkingJob, number>> = {};
+  for (const c of world.citizens) {
+    if (c.age < 16 || c.job === 'unemployed') continue;
+    heads[c.job] = (heads[c.job] ?? 0) + 1;
+  }
+  const out: Partial<Record<WorkingJob, number>> = {};
+  for (const j of Object.keys(jobs) as WorkingJob[]) {
+    const posts = jobCapacity(world, j);
+    out[j] = posts > 0 ? Math.max(0, Math.min(1, (heads[j] ?? 0) / posts)) : 1;
+  }
+  return out;
+}
+
+/**
+ * What one building costs today, given who is actually working in it.
+ *
+ * A player put the problem plainly: a town's people are a fifth to a quarter
+ * children, who hold a post open for the day they grow into it and cannot work
+ * meanwhile, so a settlement in balance always has a fifth of its posts empty —
+ * and it was paying full upkeep on every one of them. Worse for anybody who
+ * built workplaces faster than houses, where more than half the posts stand
+ * empty and cost full price. Buildings raised to let the town grow were a
+ * standing tax for as long as the town took to grow into them.
+ *
+ * So a workplace costs what its crew makes it cost: full when its posts are
+ * full, and never below `UPKEEP_EMPTY_SHARE` of that when it is empty. Read at
+ * the level of the trade rather than the door, because who reports where is
+ * decided as people walk to work and this is a bill, which should not move
+ * about during the day.
+ *
+ * A house, a store, a market — anything nobody is posted to — costs what it
+ * always did.
+ */
+export function upkeepAt(world: World, b: Building, filled?: Partial<Record<WorkingJob, number>>): number {
+  const full = upkeepOf(b);
+  const trade = tradeOfType(b.type);
+  if (!trade) return full;
+  const share = (filled ?? postsFilled(world))[trade] ?? 1;
+  return full * (UPKEEP_EMPTY_SHARE + (1 - UPKEEP_EMPTY_SHARE) * share);
+}
+
 /* ------------------------------------------------------------------ *
  * What the town is worth keeping, and to whom
  * ------------------------------------------------------------------ */
@@ -8045,7 +8103,10 @@ export const WEALTH_UPKEEP = 0.5;
  */
 export function upkeepBill(world: World): number {
   useWorld(world);
-  const plain = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + upkeepOf(b), 0);
+  // The staffing is read once and handed to every building, rather than each
+  // one counting the town's people over again.
+  const filled = postsFilled(world);
+  const plain = world.buildings.filter((b) => b.active).reduce((sum, b) => sum + upkeepAt(world, b, filled), 0);
   return plain * (1 + WEALTH_UPKEEP * standardOfLiving(world));
 }
 

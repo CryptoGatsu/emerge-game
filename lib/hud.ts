@@ -13,7 +13,7 @@ import { cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, insured, bui
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
-  skillLevel, skillOutput, upgradeCost, upgradeAllQuote, upkeepOf,
+  skillLevel, skillOutput, upgradeCost, upgradeAllQuote, upkeepOf, upkeepAt, UPKEEP_EMPTY_SHARE,
   RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP,
   UNDEMOLISHABLE, activeGathering, buildMaterials, describeTemperature, friendsOf, ledgerTotals,
   readiness, talkingWith, WEALTH_WORDS, wealthOf,
@@ -60,6 +60,8 @@ export interface FocusBuilding {
   /** The professional who keeps a civic building, or what it lacks: null for a building that wants none, or before the township. */
   keeper: { name: string; role: string; tier: string; id: string } | { wants: string; base: number } | null;
   x: number; y: number; upkeep: number; active: boolean;
+  /** What it would cost with its posts full, when the crew has it costing less. */
+  upkeepFull: number;
   people: { id: string; name: string; doing: string }[];
   /** Whether it can be pulled down, and what comes back if it is. */
   ruined: boolean;
@@ -524,7 +526,10 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
         : { wants: NOTABLE_ROLES[role].label, base: Math.round(NOTABLE_BASE * 100) };
     })(),
     x: b.x, y: b.y,
-    upkeep: Math.round(upkeepOf(b)),
+    // What it costs today, which is what the crew makes it cost. The full rate
+    // is carried beside it so a card that is being charged less can say so.
+    upkeep: Math.round(upkeepAt(world, b)),
+    upkeepFull: Math.round(upkeepOf(b)),
     level: levelOf(b),
     maxLevel: maxLevelFor(world),
     // Why the cap is where it is, for the card to say when it is reached.

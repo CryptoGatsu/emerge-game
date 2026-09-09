@@ -3,7 +3,7 @@ import React from 'react';
 import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
+import { UPKEEP_EMPTY_SHARE, BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -113,7 +113,7 @@ const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
 const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', 'Everyone who works is paid, every day. It is the largest line in most settlements.'],
   ['imports', 'Buying what the town cannot make for itself, at the world market\u2019s price.'],
-  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market — more in each later age, more for each improvement, and more again in a town whose people are well off and expect a well-kept place.`],
+  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market — more in each later age, more for each improvement, and more again in a town whose people are well off and expect a well-kept place. A workplace costs what its crew makes it cost: full when its trade's posts are full, and a ${Math.round(UPKEEP_EMPTY_SHARE * 100)}% standing charge when nobody works there at all. Houses, stores and the market are nobody's workplace and cost what they always did.`],
   ['building', 'What you raise, in Gold and in materials out of the yard.'],
   ['works', 'Bridges to land nobody can walk to, and the roads that follow.'],
   ['vault', 'The other half of the vault door: Gold leaving the treasury when you take a deposit back out.'],

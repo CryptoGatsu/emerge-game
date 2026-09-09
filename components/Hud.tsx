@@ -236,6 +236,10 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 improving everything a decision rather than a free win. */}
             <p className="muted small building-level">
               {t('Level {level} of {max} · {upkeep} Gold a day to keep', { level: focus.level, max: focus.maxLevel, upkeep: focus.upkeep })}
+              {/* A workplace with empty posts is charged less, so the card says
+                  what it would cost full rather than leaving the figure looking
+                  wrong against the guide's table. */}
+              {focus.upkeepFull > focus.upkeep && ` · ${t('{n} with its posts full', { n: focus.upkeepFull })}`}
             </p>
             {focus.beds && (
               <p className="muted small building-level building-beds">
