@@ -92,6 +92,9 @@ Two consequences:
 
 ### 2. The land, as tokens
 
+**The mainnet launch, with every value filled in, is `docs/NFT-LAUNCH.md`.**
+This section is the reference behind it.
+
 Three contracts, none with imports, so each compiles in Remix as it stands.
 Deploy them in this order from the wallet that will own them.
 
@@ -149,8 +152,8 @@ NEXT_PUBLIC_EMERGE_TOKEN=0x…        # the ERC-20
 NEXT_PUBLIC_EMERGE_REGISTRY=0x…     # EmergeLand — set, and plots are tokens
 NEXT_PUBLIC_EMERGE_MARKET=0x…       # EmergeMarket — set, and the land market sells on chain
 NEXT_PUBLIC_EMERGE_ROYALTIES=0x…    # EmergeRoyalties — set, and the cron sweeps it
-NEXT_PUBLIC_OPENSEA_CHAIN=…         # OpenSea's slug for the chain, for "View on OpenSea" links: the segment after /assets/ in any OpenSea URL for a Robinhood Chain token
-NEXT_PUBLIC_ROBINHOOD_EXPLORER=…    # the chain's Blockscout, for "Verify on Robinhood Chain" links (https://…, no trailing path)
+NEXT_PUBLIC_OPENSEA_CHAIN=robinhood # built in; OpenSea's slug for the chain, for "View on OpenSea" links
+NEXT_PUBLIC_ROBINHOOD_EXPLORER=https://robinhoodchain.blockscout.com   # built in; the chain's Blockscout
 NEXT_PUBLIC_EMERGE_ROYALTY_BPS=500  # the royalty the land contract was deployed with, so the panel and the collection metadata say the same
 NEXT_PUBLIC_SITE_URL=https://www.emergerh.world   # what the token metadata links back to
 EMERGE_ROYALTY_TOKENS=USDG:0x…:6    # optional: other tokens royalties may arrive in, as SYMBOL:address:decimals, comma-separated

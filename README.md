@@ -1013,13 +1013,13 @@ still wins where it is set, which is how you point a build at a fork or a local 
 NEXT_PUBLIC_CHAIN_TARGET=mainnet|testnet   # default: mainnet (chain 4663); testnet is chain 46630
 NEXT_PUBLIC_ROBINHOOD_CHAIN_ID=            # default: 4663
 NEXT_PUBLIC_ROBINHOOD_RPC_URL=             # default: https://rpc.mainnet.chain.robinhood.com
-NEXT_PUBLIC_ROBINHOOD_EXPLORER=            # the chain's Blockscout, for explorer links
+NEXT_PUBLIC_ROBINHOOD_EXPLORER=            # default: https://robinhoodchain.blockscout.com
 NEXT_PUBLIC_EMERGE_TOKEN=                  # the ERC-20
 NEXT_PUBLIC_EMERGE_REGISTRY=               # contracts/EmergeLand.sol — set, and plots are tokens
 NEXT_PUBLIC_EMERGE_MARKET=                 # contracts/EmergeMarket.sol — the land market settles on chain
 NEXT_PUBLIC_EMERGE_ROYALTIES=              # contracts/EmergeRoyalties.sol — swept into the dividend pool
 NEXT_PUBLIC_EMERGE_ROYALTY_BPS=            # default: 500 (5%), what the land contract was deployed with
-NEXT_PUBLIC_OPENSEA_CHAIN=                 # OpenSea's slug for the chain, for "View on OpenSea" links
+NEXT_PUBLIC_OPENSEA_CHAIN=                 # default: robinhood (OpenSea's slug for the chain)
 NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID=    # default: 46630
 NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL=     # default: https://rpc.testnet.chain.robinhood.com/rpc
 NEXT_PUBLIC_ROBINHOOD_TESTNET_EXPLORER=

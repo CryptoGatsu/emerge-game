@@ -50,6 +50,7 @@ const envNumber = (value: string | undefined, fallback: number | null = null) =>
 /** Robinhood Chain mainnet. */
 export const MAINNET_RPC = 'https://rpc.mainnet.chain.robinhood.com';
 export const MAINNET_CHAIN_ID = 4663;
+export const MAINNET_EXPLORER = 'https://robinhoodchain.blockscout.com';
 /** Robinhood Chain testnet. Note the `/rpc` path — the host alone is not an endpoint. */
 export const TESTNET_RPC = 'https://rpc.testnet.chain.robinhood.com/rpc';
 export const TESTNET_CHAIN_ID = 46630;
@@ -60,7 +61,8 @@ export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
     label: 'Robinhood Chain',
     chainId: envNumber(process.env.NEXT_PUBLIC_ROBINHOOD_CHAIN_ID, MAINNET_CHAIN_ID),
     rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ?? MAINNET_RPC,
-    explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_EXPLORER ?? null,
+    // The chain's Blockscout: a public fact about the network, like the RPC.
+    explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_EXPLORER ?? MAINNET_EXPLORER,
     tokenAddress: process.env.NEXT_PUBLIC_EMERGE_TOKEN ?? null,
     registryAddress: process.env.NEXT_PUBLIC_EMERGE_REGISTRY ?? null,
   },

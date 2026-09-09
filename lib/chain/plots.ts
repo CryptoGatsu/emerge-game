@@ -11,7 +11,7 @@
  *   NEXT_PUBLIC_EMERGE_MARKET     the market, optional
  *   NEXT_PUBLIC_EMERGE_ROYALTIES  the royalty receiver, optional
  *   (…_TESTNET variants of all three when NEXT_PUBLIC_CHAIN_TARGET=testnet)
- *   NEXT_PUBLIC_OPENSEA_CHAIN     OpenSea's slug for the chain, for links
+ *   NEXT_PUBLIC_OPENSEA_CHAIN     OpenSea's slug for the chain, for links (default: robinhood)
  *   NEXT_PUBLIC_EMERGE_ROYALTY_BPS the royalty the land contract was deployed with (default 500 = 5%)
  */
 
@@ -40,17 +40,22 @@ export const plotsAreTokens = () => LAND_ADDRESS !== null;
 /** The in-game market can settle sales on chain. */
 export const marketLive = () => plotsAreTokens() && MARKET_ADDRESS !== null;
 
-/** The plot's page on OpenSea, when the chain has a slug there; otherwise null. */
+/**
+ * OpenSea's name for Robinhood Chain in its URLs — `opensea.io/token/robinhood/…`
+ * is how it links the chain's ERC-20s — overridable should it change.
+ */
+export const OPENSEA_CHAIN = process.env.NEXT_PUBLIC_OPENSEA_CHAIN ?? (ACTIVE_CHAIN.key === 'robinhood' ? 'robinhood' : null);
+
+/** The plot's page on OpenSea; null where plots are not tokens or the chain has no slug. */
 export function openSeaUrl(seed: number): string | null {
-  const slug = process.env.NEXT_PUBLIC_OPENSEA_CHAIN;
-  if (!slug || !LAND_ADDRESS) return null;
-  return `https://opensea.io/assets/${slug}/${LAND_ADDRESS}/${seed}`;
+  if (!OPENSEA_CHAIN || !LAND_ADDRESS) return null;
+  return `https://opensea.io/item/${OPENSEA_CHAIN}/${LAND_ADDRESS}/${seed}`;
 }
 
-/** The token on the chain's explorer. */
+/** The token on the chain's explorer, in Blockscout's shape: the contract, then the instance. */
 export function tokenExplorerUrl(seed: number): string | null {
   if (!ACTIVE_CHAIN.explorerUrl || !LAND_ADDRESS) return null;
-  return `${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/token/${LAND_ADDRESS}?a=${seed}`;
+  return `${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/token/${LAND_ADDRESS}/instance/${seed}`;
 }
 
 export const LAND_ABI = [
