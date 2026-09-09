@@ -33,7 +33,7 @@ import { MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE, serverKey } from '../limits';
 import { TOKEN, tokenLive } from '../chain/emerge';
 import { goldSaleSplit } from '../chain/vault';
 import { utcDay } from './accounts';
-import { spendBurn, verifyBurn, verifyTransfer } from './burns';
+import { spendBurn, spentOn, verifyBurn, verifyTransfer } from './burns';
 import { counter, hdel, hget, hgetall, hset, hsetWindow, incrBy, releaseLock, takeLock } from './kv';
 import { claimOf, readWorld } from './registry';
 import { noteTrade } from './tape';
@@ -507,7 +507,13 @@ export async function buyGoods(input: { id: string; buyer: string; buyerName: st
  * the Gold less the fee. Off chain (the token not live) the transfer is not
  * checked, as with a plot resale.
  */
-export async function buyGold(input: { id: string; buyer: string; buyerName: string; seed: number; qty: number; txHash?: string; burnTx?: string }): Promise<Result<{ delivery: Delivery; paid: number; burned: number; tokensBurned: number; remaining: number }>> {
+/** Which Gold-sale receipts have had their Gold owed, and what was owed, so a retry answers rather than refuses. */
+const DELIVERED = serverKey('exchange:delivered');
+async function deliveredFor(txHash: string): Promise<Delivery | null> {
+  try { return JSON.parse((await hget(DELIVERED, txHash.toLowerCase())) ?? 'null') as Delivery | null; } catch { return null; }
+}
+
+export async function buyGold(input: { id: string; buyer: string; buyerName: string; seed: number; qty: number; txHash?: string; burnTx?: string }): Promise<Result<{ delivery: Delivery; paid: number; burned: number; tokensBurned: number; remaining: number; already?: boolean }>> {
   const { id, buyer, seed } = input;
   const qty = Math.floor(Number(input.qty));
   if (!(qty > 0)) return { ok: false, reason: 'Say how much Gold.' };
@@ -552,8 +558,19 @@ export async function buyGold(input: { id: string; buyer: string; buyerName: str
       // A purchase paid for before the burn existed sent the whole price to
       // the seller. It is settled as it was sold: nothing burned, rather than
       // a receipt stranded for ever over a rule that came after it.
-      if (!(await spendBurn(tx, `exchange:${id}`))) return { ok: false as const, reason: 'That payment was already used.' };
-      if (burnTx && !(await spendBurn(burnTx, `exchange-burn:${id}`))) {
+      if (!(await spendBurn(tx, `exchange:${id}`))) {
+        /*
+         * Spent on this very order. With the Gold already owed, the reply
+         * was lost and the delivery is answered with again. With nothing
+         * owed, the store failed between spending the receipt and writing
+         * the delivery, and the Gold is delivered now — the receipt was
+         * never "used" for anything but this.
+         */
+        if (!(await spentOn(tx, `exchange:${id}`))) return { ok: false as const, reason: 'That payment was already used.' };
+        const done = await deliveredFor(tx);
+        if (done) return { ok: true as const, delivery: done, paid: split.whole, burned: fee(qty), tokensBurned: gone ? split.burned : 0, remaining: order.remaining, already: true };
+      }
+      if (burnTx && !(await spendBurn(burnTx, `exchange-burn:${id}`)) && !(await spentOn(burnTx, `exchange-burn:${id}`))) {
         return { ok: false as const, reason: 'That payment was already used.' };
       }
       tokensBurned = gone ? split.burned : 0;
@@ -568,6 +585,7 @@ export async function buyGold(input: { id: string; buyer: string; buyerName: str
     if (remaining > 0) await hset(ORDERS, id, JSON.stringify({ ...order, remaining, holds }));
     else await hdel(ORDERS, id);
     const delivery = await owe(buyer, seed, { kind: 'gold', amount: qty - burned, note: `${qty.toLocaleString()} Gold bought from ${order.sellerName || 'a seller'} for ${price.toLocaleString()} $EMERGE, ${burned.toLocaleString()} burned` });
+    if (tokenLive() && input.txHash) await hset(DELIVERED, String(input.txHash).toLowerCase(), JSON.stringify(delivery)).catch(() => {});
     await burn(burned);
     await recordBoth(buyer, order.seller,
       { at: Date.now(), kind: 'gold', qty, unitPrice: order.unitPrice, burned },

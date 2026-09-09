@@ -301,9 +301,16 @@ export async function settleGld(id: string): Promise<GldSettle> {
         await hset(GLD_PENDING, id, JSON.stringify(payout));
         units = swap.received;
       }
-      const sent = await sendTokenFromVault(GLD_ADDRESS, payout.address, units);
-      if (!sent.ok) return fail(`The GLD could not be sent: ${sent.problem}`);
-      payout.sendTx = sent.txHash;
+      let sent: Awaited<ReturnType<typeof sendTokenFromVault>>;
+      try {
+        sent = await sendTokenFromVault(GLD_ADDRESS, payout.address, units);
+      } catch {
+        return fail('The GLD could not be sent.');
+      }
+      // Sent, or signed and handed to the chain with the reply lost: the hash
+      // is written down either way, so the GLD is never sent twice.
+      if (!sent.ok && !(sent.maybeSent && sent.txHash)) return fail(`The GLD could not be sent: ${sent.problem}`);
+      payout.sendTx = sent.txHash ?? null;
     } else {
       units = BigInt(payout.emerge) * 1_000_000_000_000_000_000n;
       payout.units = String(units);

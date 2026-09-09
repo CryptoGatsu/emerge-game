@@ -408,6 +408,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'The transfer could not be sent. Nothing has been taken from your balance.' }, { status: 502 });
   }
   if (!sent.ok) {
+    if (sent.maybeSent && sent.txHash) {
+      /*
+       * Signed and handed to the chain, answer lost. Not given back: if the
+       * chain has it, giving the reservation back is how the same day's
+       * room pays out twice. Written down unconfirmed instead, and the next
+       * look at the Bank settles it — a hash the chain never saw, an hour
+       * on, is marked failed and the reservation returned then.
+       */
+      if (money.burned > 0) await noteHold(money.burned).catch(() => {});
+      const payout = await recordPayout({
+        address, name: clean(String(body.name ?? ''), MAX_NAME),
+        seed: Number.isInteger(Number(body.seed)) ? Number(body.seed) : 0,
+        worldName: clean(String(body.worldName ?? ''), MAX_NAME),
+        kind, gold: kind === 'principal' ? asked : 0, gross: money.gross, burned: money.burned, net: money.net,
+        txHash: sent.txHash, confirmed: false,
+      }).catch(() => null);
+      return NextResponse.json({ error: sent.problem, payout, txHash: sent.txHash, pending: true }, { status: 202 });
+    }
     // Put it back. A refusal must cost nothing.
     await give().catch(() => {});
     return NextResponse.json({ error: sent.problem }, { status: 502 });

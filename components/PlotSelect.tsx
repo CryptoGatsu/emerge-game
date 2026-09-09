@@ -43,6 +43,7 @@ import {
   buyPlot, fetchClaims, placeOffer, priceFor, quotePlot, redeemPayment, reservePlot, surveyPlot, takePlot, withdrawOffer,
   type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader,
 } from '@/lib/net/registry';
+import { keepReceipt, dropReceipt, resumeReceipts, redeemFallback, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { LandMarket } from './LandMarket';
 import SoftStake from './SoftStake';
@@ -666,6 +667,40 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   const surveyOwed = Math.max(0, surveyCost - credit);
   const [receipt, setReceipt] = useState('');
   const [redeeming, setRedeeming] = useState(false);
+  /*
+   * Receipts this browser kept from purchases the registry never confirmed —
+   * a survey, a claim, a resale fee — are redeemed on account when the map
+   * opens, without anybody typing a hash into the box below.
+   */
+  useEffect(() => {
+    const owner = wallet.address;
+    if (!owner) return;
+    let live = true;
+    void resumeReceipts(owner, {
+      /*
+       * A resale fee whose purchase never finished is handed back to the
+       * purchase, with the seller's transfer, so the land arrives rather than
+       * the fee merely coming back; a fee paid for a purchase the seller's
+       * transfer never followed is redeemed on account.
+       */
+      'resale-fee': async (r) => {
+        const transferTx = typeof r.payload?.transferTx === 'string' ? r.payload.transferTx : '';
+        if (!transferTx) return redeemFallback(owner)(r);
+        const moved = await buyPlot({ seed: r.seed, owner, ownerName: String(r.payload?.ownerName ?? ''), transferTx, feeTx: r.txHash });
+        if (moved.ok) {
+          setClaims((held) => (held.some((c) => c.seed === r.seed) ? held.map((c) => (c.seed === r.seed ? moved.claim : c)) : [...held, moved.claim]));
+          return { done: true, note: t('The land you paid for earlier is yours: {name}.', { name: moved.claim.worldName }) };
+        }
+        if (moved.settling) return { done: false };
+        return { done: SETTLED_ANSWER.test(moved.reason), note: SETTLED_ANSWER.test(moved.reason) ? moved.reason : undefined };
+      },
+    }, redeemFallback(owner), ['survey', 'claim', 'resale-fee']).then((said) => {
+      if (!live || !said.length) return;
+      setNotice(said.map((x) => x.note).join(' '));
+      requote();
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [wallet.address, requote]);
   const explorer = selected ? plotExplorerUrl(selected.seed) : null;
   /*
    * Land this wallet holds according to the registry, whatever this browser
@@ -806,6 +841,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     const paid = await spend(player.ledger, toPay, wallet.address);
     if (!paid.ok) { setSurveying(false); setSurveyNote(paid.refused); return; }
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'survey', txHash: paid.txHash, address: wallet.address, seed: 0, payload: { chart } });
 
     setSurveyNote(toPay > 0 ? t('Payment sent. Waiting for the chain to settle it…') : t('Asking the registry for land…'));
     const result = await whileSettling(() => surveyPlot({
@@ -819,12 +855,17 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     requote();
     if (!result.ok) {
       // The registry says what became of the payment: banked against the
-      // wallet when it fell short, and how much more settles it.
-      setSurveyNote(paid.txHash && !/on account/.test(result.reason)
-        ? `${tx(result.reason)} ${t('Your payment {tx}… was accepted by the chain. If it bought nothing, redeem it below and it goes on account.', { tx: paid.txHash.slice(0, 10) })}`
+      // wallet when it fell short, given back on account when the chart was
+      // out of land, or — a reply lost, a chain still settling — kept here
+      // and redeemed the next time the map opens.
+      const settled = SETTLED_ANSWER.test(result.reason);
+      if (paid.txHash && settled) dropReceipt(paid.txHash);
+      setSurveyNote(paid.txHash && !settled
+        ? `${tx(result.reason)} ${t('Your payment {tx}… is kept in this browser and is redeemed on account the next time you open the map. Nothing more will be charged for it.', { tx: paid.txHash.slice(0, 10) })}`
         : paid.txHash ? tx(result.reason) : `${tx(result.reason)} ${t('Sail to another chart to find new land.')}`);
       return;
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
 
     const { find } = result;
     const found = inspectPlot(find.seed, find.slot, find.chart);
@@ -956,6 +997,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       return;
     }
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'claim', txHash: paid.txHash, address: wallet.address, seed: selected.seed });
 
     setNotice(t('Payment sent. Waiting for the chain to settle it…'));
     const registered = await whileSettling(() => takePlot({
@@ -971,8 +1013,10 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     requote();
 
     if (!registered.ok) {
-      setNotice(paid.txHash && !/on account/.test(registered.reason)
-        ? `${registered.reason} ${t('Your payment {tx}… went through. If it bought nothing, redeem it below and it goes on account.', { tx: paid.txHash.slice(0, 10) })}`
+      const settled = SETTLED_ANSWER.test(registered.reason);
+      if (paid.txHash && settled) dropReceipt(paid.txHash);
+      setNotice(paid.txHash && !settled
+        ? `${registered.reason} ${t('Your payment {tx}… is kept in this browser and is redeemed on account the next time you open the map. Nothing more will be charged for it.', { tx: paid.txHash.slice(0, 10) })}`
         : registered.reason);
       // Show the land as theirs straight away rather than making the player
       // wait for the next poll to understand why they were refused.
@@ -982,6 +1026,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       return;
     }
 
+    if (paid.txHash) dropReceipt(paid.txHash);
     onEnter({
       seed: selected.seed,
       name: worldName,
@@ -1037,8 +1082,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     const fee = resaleFee(askPrice);
     const feePaid = await spend(player.ledger, fee, wallet.address);
     if (!feePaid.ok) { setBuying(false); setNotice(feePaid.refused); return; }
+    if (feePaid.txHash) keepReceipt({ kind: 'resale-fee', txHash: feePaid.txHash, address: wallet.address, seed: listing.seed });
     const paid = await pay(feePaid.ledger, askPrice, wallet.address, listing.owner);
     if (!paid.ok) { setBuying(false); onPlayer({ ...player, ledger: feePaid.ledger }); setNotice(paid.refused); return; }
+    // The fee's receipt now carries the seller's transfer, so handing it in again is the purchase again, not a refund.
+    if (feePaid.txHash) keepReceipt({ kind: 'resale-fee', txHash: feePaid.txHash, address: wallet.address, seed: listing.seed, payload: { transferTx: paid.txHash ?? '', ownerName: player.name } });
     onPlayer({ ...player, ledger: paid.ledger });
     setNotice(t('Payment sent. Waiting for the chain to settle it…'));
     const moved = await whileSettling(() => buyPlot({
@@ -1050,11 +1098,13 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     }));
     setBuying(false);
     if (!moved.ok) {
-      setNotice(paid.txHash
-        ? `${moved.reason} ${t('Your payment {tx}… went through — keep it, and tell us if the land never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+      if (feePaid.txHash && SETTLED_ANSWER.test(moved.reason)) dropReceipt(feePaid.txHash);
+      setNotice(paid.txHash && !SETTLED_ANSWER.test(moved.reason)
+        ? `${moved.reason} ${t('Your payment {tx}… is kept in this browser and the purchase is finished the next time the map opens. Nothing more will be charged for it.', { tx: paid.txHash.slice(0, 10) })}`
         : moved.reason);
       return;
     }
+    if (feePaid.txHash) dropReceipt(feePaid.txHash);
     setClaims((held) => held.map((c) => (c.seed === listing.seed ? moved.claim : c)));
     onEnter({
       seed: listing.seed,

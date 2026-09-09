@@ -29,10 +29,10 @@
 import { NextResponse } from 'next/server';
 import { MAX_GIFT_GOLD, claimOf, collectGifts, leaveGift, type Gift } from '@/lib/server/registry';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
-import { spendBurn, verifyBurn } from '@/lib/server/burns';
+import { spendBurn, spentOn, verifyBurn } from '@/lib/server/burns';
 import { EMERGE_PER_GOLD } from '@/lib/chain/vault';
 import { tokenLive } from '@/lib/chain/emerge';
-import { incrWindow } from '@/lib/server/kv';
+import { hget, hset, incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
 
 export const dynamic = 'force-dynamic';
@@ -50,6 +50,11 @@ const clean = (value: string, limit: number) =>
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, limit);
+
+/** Which gift receipts have had their gift queued, so a retry never queues it twice. */
+const GIFT_QUEUED = serverKey('gifts:queued');
+const giftQueued = async (tx: string) => !!(await hget(GIFT_QUEUED, tx.toLowerCase()).catch(() => null));
+const markGiftQueued = (tx: string) => hset(GIFT_QUEUED, tx.toLowerCase(), String(Date.now()));
 
 export async function POST(request: Request) {
   let body: {
@@ -110,28 +115,47 @@ export async function POST(request: Request) {
     }, { status: 429 });
   }
 
+  /*
+   * Whose plot, and not your own, before anything is spent.
+   *
+   * These two refusals used to come after the payment had been marked used,
+   * so a gift to a plot nobody held, or to your own, cost the sender the
+   * $EMERGE and delivered nothing.
+   */
+  let claim;
+  try {
+    claim = await claimOf(seed);
+  } catch {
+    return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+  }
+  if (!claim) {
+    return NextResponse.json({ error: 'Nobody owns that plot.' }, { status: 409 });
+  }
+  if (claim.owner.toLowerCase() === from.toLowerCase()) {
+    // Sending Gold to yourself through this door would convert $EMERGE into
+    // treasury Gold at a rate nobody set, which is the deposit path's job.
+    return NextResponse.json({ error: 'That world is already yours.' }, { status: 409 });
+  }
+
   // Paid for, at the same rate a deposit buys Gold.
+  const burnTx = String(body.burnTx ?? '');
   if (tokenLive()) {
-    const burnTx = String(body.burnTx ?? '');
     const paid = await verifyBurn(burnTx, from, gold * EMERGE_PER_GOLD);
     if (!paid.ok) {
       return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
     }
     if (!(await spendBurn(burnTx, `gift:${seed}`, paid.whole))) {
-      return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      // Spent on this very gift and the gift already waiting: the reply was
+      // lost, not the money. Spent on this gift and nothing waiting: the
+      // store failed between the two, and the gift is queued now.
+      if (!(await spentOn(burnTx, `gift:${seed}`))) {
+        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      }
+      if (await giftQueued(burnTx)) return NextResponse.json({ ok: true, already: true, to: claim.ownerName || claim.owner });
     }
   }
 
   try {
-    const claim = await claimOf(seed);
-    if (!claim) {
-      return NextResponse.json({ error: 'Nobody owns that plot.' }, { status: 409 });
-    }
-    if (claim.owner.toLowerCase() === from.toLowerCase()) {
-      // Sending Gold to yourself through this door would convert $EMERGE into
-      // treasury Gold at a rate nobody set, which is the deposit path's job.
-      return NextResponse.json({ error: 'That world is already yours.' }, { status: 409 });
-    }
 
     const gift: Gift = {
       id: `g${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
@@ -142,6 +166,7 @@ export async function POST(request: Request) {
       at: Date.now(),
     };
     await leaveGift(gift);
+    if (burnTx) await markGiftQueued(burnTx).catch(() => {});
     return NextResponse.json({ gift, to: claim.ownerName || claim.owner });
   } catch {
     return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });

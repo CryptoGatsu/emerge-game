@@ -39,8 +39,9 @@ import {
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
-  coverPlot, boonPlot, renamePlot, pendingEra, rememberEra, type PendingEra,
+  coverPlot, boonPlot, renamePlot, pendingEra, rememberEra, type PendingEra, setHiring as setHiringOnRegistry,
 } from '@/lib/net/registry';
+import { keepReceipt, dropReceipt, resumeReceipts, redeemFallback, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, finishPending, listOrder, resumePending } from '@/lib/net/exchange';
 import type { ExchangeActions } from './Exchange';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
@@ -1249,6 +1250,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     };
   }, [claimed.seed, wallet.address, player.name, spectating]);
 
+  /** What a player is told when a payment is kept for handing in again. */
+  const keptLine = (hash: string) =>
+    t('Your payment {tx}… is kept in this browser and will be handed in again the next time you press this or open the world. Nothing more will be charged for it.', { tx: hash.slice(0, 10) });
+
   /**
    * Burn $EMERGE to put Gold in the treasury of the world being visited.
    *
@@ -1264,6 +1269,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!paid.ok) return paid.refused;
     // The tokens are already gone; keep the receipt so the server can check it.
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'gift', txHash: paid.txHash, address: wallet.address, seed: visit.seed, payload: { gold, fromName: player.name } });
 
     /*
      * The registry verifies the burn against the chain, and the first ask
@@ -1281,10 +1287,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       });
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} Your payment ${paid.txHash.slice(0, 10)}… went through — keep it, and tell us if the Gold never lands.`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     return null;
   }, [visit, wallet.address, player, onPlayer]);
 
@@ -1851,6 +1857,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, EXPAND_COST_EMERGE, wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'expand', txHash: paid.txHash, address: wallet.address, seed: claimed.seed });
     let result = await expandOnRegistry(claimed.seed, wallet.address, paid.txHash ?? undefined);
     // The chain takes a moment to show the burn; the registry says so, and is asked again.
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
@@ -1858,10 +1865,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       result = await expandOnRegistry(claimed.seed, wallet.address, paid.txHash ?? undefined);
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the expansion never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     expandPlot(world);
     saveWorld(world);
     // The land itself grew: the ground, the water and the camera's limits are
@@ -1895,16 +1902,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, cost, wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'cover', txHash: paid.txHash, address: wallet.address, seed: claimed.seed, payload: { kind } });
     let result = await coverPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
       result = await coverPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     setCover(world, kind, result.until);
     saveWorld(world);
     refresh();
@@ -1926,16 +1934,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, BOON_COST_EMERGE[kind], wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'boon', txHash: paid.txHash, address: wallet.address, seed: claimed.seed, payload: { kind, emblem } });
     let result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined, emblem);
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
       result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined, emblem);
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     const done = applyBoon(world, kind, emblem);
     if (!done.ok) return done.message;
     saveWorld(world);
@@ -2276,6 +2285,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const address = wallet.address;
     let live = true;
     let eraResumed = false;
+    let receiptsResumed = false;
     const tick = async () => {
       // A purchase whose chain payment settled after the buyer's window closed
       // is handed in here, without anybody pressing anything.
@@ -2287,6 +2297,64 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         const said = await advanceForRef.current().catch(() => null);
         if (live && said) {
           announce({ id: `era-kept-${claimed.seed}`, kind: 'claim', title: t('A payment kept from before'), body: said, lifetime: 20_000 });
+        }
+      }
+      /*
+       * And every other receipt this browser kept — an expansion, a charter,
+       * a boon, a gift, a job opened — handed in to its own step, which
+       * takes the same receipt as often as it is offered; or, for one with
+       * no step to take it back, redeemed on account.
+       */
+      if (live && !receiptsResumed) {
+        receiptsResumed = true;
+        const said = await resumeReceipts(address, {
+          expand: async (r) => {
+            const res = await expandOnRegistry(r.seed, address, r.txHash);
+            if (!res.ok) return { done: SETTLED_ANSWER.test(res.reason) };
+            const w = worldRef.current;
+            if (w && r.seed === claimed.seed && !w.expanded) { expandPlot(w); saveWorld(w); selectedRef.current = null; setSelected(null); sceneRef.current?.reset(w); refresh(); }
+            return { done: true, note: t('An expansion paid for earlier has arrived.') };
+          },
+          boon: async (r) => {
+            const kind = String(r.payload?.kind ?? '') as BoonKind;
+            const emblem = typeof r.payload?.emblem === 'string' ? r.payload.emblem : undefined;
+            if (!kind || !BOON_COST_EMERGE[kind]) return { done: true };
+            const res = await boonPlot(r.seed, address, kind, r.txHash, emblem);
+            if (!res.ok) return { done: SETTLED_ANSWER.test(res.reason) };
+            const w = worldRef.current;
+            if (w && r.seed === claimed.seed) {
+              const applied = applyBoon(w, kind, emblem);
+              if (applied.ok) { saveWorld(w); if (kind === 'restore') sceneRef.current?.reset(w); else sceneRef.current?.syncBuildings(); refresh(); }
+            }
+            return { done: true, note: t('A boon paid for earlier has been delivered.') };
+          },
+          cover: async (r) => {
+            const kind = String(r.payload?.kind ?? '') as CoverKind;
+            if (kind !== 'charter' && kind !== 'insurance' && kind !== 'builders') return { done: true };
+            const res = await coverPlot(r.seed, address, kind, r.txHash);
+            if (!res.ok) return { done: SETTLED_ANSWER.test(res.reason) };
+            const w = worldRef.current;
+            if (w && r.seed === claimed.seed) { setCover(w, kind, res.until); saveWorld(w); refresh(); }
+            return { done: true, note: t('A cover paid for earlier is in force.') };
+          },
+          hire: async (r) => {
+            const res = await setHiringOnRegistry(r.seed, address, true, r.txHash);
+            return res.ok ? { done: true, note: t('The job you paid to open is open.') } : { done: SETTLED_ANSWER.test(res.reason ?? '') };
+          },
+          gift: async (r) => {
+            const gold = Math.floor(Number(r.payload?.gold ?? 0));
+            if (!(gold > 0)) return { done: true };
+            const res = await sendGift({ seed: r.seed, gold, from: address, fromName: String(r.payload?.fromName ?? nameRef.current), burnTx: r.txHash });
+            if (res.ok) return { done: true, note: t('A gift paid for earlier has been sent.') };
+            if (res.settling) return { done: false };
+            if (SETTLED_ANSWER.test(res.reason)) return { done: true };
+            // Refused for good before the payment was taken — the plot given
+            // up since, say. The payment is still whole, so it goes on account.
+            return redeemFallback(address)(r);
+          },
+        }, redeemFallback(address), ['expand', 'boon', 'hire', 'gift', 'cover']).catch(() => []);
+        if (live) {
+          for (const s of said) announce({ id: `receipt-${s.receipt.txHash.slice(0, 12)}`, kind: 'claim', title: t('A payment kept from before'), body: s.note, lifetime: 16_000 });
         }
       }
       const book = await fetchExchange(claimed.seed, address);

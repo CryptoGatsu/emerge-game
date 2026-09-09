@@ -17,8 +17,8 @@ import {
 } from '@/lib/server/arena';
 import { claimOf } from '@/lib/server/registry';
 import { sessionAddress } from '@/lib/server/session';
-import { betOf, placeTokenBet, settleTokenBets } from '@/lib/server/book';
-import { spendBurn, verifyTransfer } from '@/lib/server/burns';
+import { betOf, mayPlaceTokenBet, placeTokenBet, settleTokenBets } from '@/lib/server/book';
+import { creditBack, spendBurn, spentOn, verifyTransfer } from '@/lib/server/burns';
 import { VAULT_ADDRESS, tokenLive, vaultLive } from '@/lib/chain/emerge';
 import { vaultCanSign } from '@/lib/server/signer';
 
@@ -106,16 +106,38 @@ export async function POST(request: Request) {
       const running = await currentBout();
       if (!running || running.id !== Number(body.bet.boutId)) return NextResponse.json({ error: 'That bout is not open.' }, { status: 409 });
       if (Date.now() >= running.closesAt) return NextResponse.json({ error: 'Betting has closed on this bout.' }, { status: 409 });
+      /*
+       * The book is asked before the stake is spent, and a stake the book
+       * still refuses afterwards goes back on account.
+       *
+       * The stake used to be marked used and then offered to the book, and a
+       * refusal there — a second bet on the same bout, a day's cap reached
+       * between the wallet prompt and here — left it spent and the bet unmade.
+       */
+      const room = await mayPlaceTokenBet(running, address, stake);
+      if (!room.ok) return NextResponse.json({ error: room.reason }, { status: 409 });
       let txHash: string | null = null;
       if (tokenLive()) {
         if (!vaultLive()) return NextResponse.json({ error: 'No vault is configured to hold stakes.' }, { status: 503 });
         txHash = String(body.bet.txHash ?? '');
         const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, stake);
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-        if (!(await spendBurn(txHash, `bet:${running.id}:${txHash}`))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+        if (!(await spendBurn(txHash, `bet:${running.id}:${txHash}`))) {
+          // The same stake, offered again for the same bout: the bet it made
+          // is answered with, and one it never got to make is made now.
+          if (!(await spentOn(txHash, `bet:${running.id}:${txHash}`))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+          const held = await betOf(running.id, address);
+          if (held) return NextResponse.json({ ok: true, bet: held.bet, boutId: running.id, already: true });
+        }
       }
       const placed = await placeTokenBet(running, address, side, stake, txHash);
-      if (!placed.ok) return NextResponse.json({ error: placed.reason }, { status: 409 });
+      if (!placed.ok) {
+        const back = txHash ? await creditBack(address, txHash, stake).catch(() => false) : false;
+        return NextResponse.json({
+          error: back ? `${placed.reason} Your ${stake.toLocaleString()} stake is on account and pays for the next thing you buy.` : placed.reason,
+          refunded: back ? stake : 0,
+        }, { status: 409 });
+      }
       return NextResponse.json({ ok: true, bet: placed.bet, boutId: running.id });
     } catch {
       return NextResponse.json({ error: 'The arena is not reachable.' }, { status: 502 });

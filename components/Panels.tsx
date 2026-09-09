@@ -39,6 +39,7 @@ import {
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchNames } from '@/lib/net/names';
 import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
+import { keepReceipt, dropReceipt, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
 import { untilUtcMidnight, MAX_GIFT_GOLD } from '@/lib/limits';
@@ -2450,10 +2451,20 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
       if (!paid.ok) { setHiringBusy(false); setHiringNote(paid.refused); return; }
       onPlayer({ ...player, ledger: paid.ledger });
       feeTx = paid.txHash ?? undefined;
+      // Kept until the registry has taken it, and handed in again when the
+      // world next opens if this reply is lost.
+      if (feeTx) keepReceipt({ kind: 'hire', txHash: feeTx, address: wallet.address, seed: claimed.seed });
     }
     const result = await setHiring(claimed.seed, wallet.address, on, feeTx);
     setHiringBusy(false);
-    if (!result.ok || !result.claim) { setHiringNote(result.reason ?? null); return; }
+    if (!result.ok || !result.claim) {
+      if (feeTx && SETTLED_ANSWER.test(result.reason ?? '')) dropReceipt(feeTx);
+      setHiringNote(feeTx && !SETTLED_ANSWER.test(result.reason ?? '')
+        ? `${result.reason ?? ''} ${t('Your payment {tx}… is kept in this browser and will be handed in again the next time you press this or open the world. Nothing more will be charged for it.', { tx: feeTx.slice(0, 10) })}`
+        : (result.reason ?? null));
+      return;
+    }
+    if (feeTx) dropReceipt(feeTx);
     setRow(result.claim);
     setHiringNote(on ? t('The job is open. It shows on the world map for every player without land.') : t('Closed.'));
   };

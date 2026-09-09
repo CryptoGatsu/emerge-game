@@ -11,10 +11,26 @@
 import { NextResponse } from 'next/server';
 import { holdsAddress } from '@/lib/server/session';
 import { VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { spendBurn, verifyNative, verifyTransfer } from '@/lib/server/burns';
+import { spendBurn, spentOn, verifyNative, verifyTransfer } from '@/lib/server/burns';
 import { sendNativeFromVault } from '@/lib/server/signer';
 import { addCasinoCredit, casinoCreditOf } from '@/lib/server/accounts';
-import { counter, incrBy } from '@/lib/server/kv';
+import { counter, hget, hset, hsetnx, incrBy } from '@/lib/server/kv';
+import { serverKey } from '@/lib/limits';
+
+/**
+ * What each stake at the GLD table came to, by its receipt.
+ *
+ * Written before the stake is marked used and before the win is booked, so
+ * the same receipt offered again — a reply lost, a browser closed on the
+ * draw, a store that failed between the draw and the booking — is answered
+ * with the draw it already had, and a win it never got to book is booked
+ * then. Without it a second offer was "already played" and nothing more,
+ * and the player never learned whether they had won.
+ */
+const GLD_DRAWS = serverKey('casino:gld-draws');
+type GldDraw = { game: CasinoGame; pick: number; drawn: number; won: boolean; stake: number; at: number; booked?: boolean; payoutId?: string | null; emerge?: number; capped?: boolean };
+/** Which pass receipts have had their plays granted, so a retry never grants twice or refuses a purchase it took. */
+const PASS_GRANTED = serverKey('casino:pass-granted');
 import { noteCharge } from '@/lib/server/treasury';
 import { displayNames } from '@/lib/server/registry';
 import {
@@ -118,36 +134,65 @@ export async function POST(request: Request) {
     if (stake < MIN_STAKE_EMERGE) return NextResponse.json({ error: `The GLD table takes ${MIN_STAKE_EMERGE.toLocaleString()} $EMERGE at least.` }, { status: 400 });
     if (stake > MAX_STAKE_EMERGE) return NextResponse.json({ error: `The GLD table takes ${MAX_STAKE_EMERGE.toLocaleString()} $EMERGE at most.` }, { status: 400 });
     const txHash = body.play.txHash ? String(body.play.txHash) : null;
+    let record: GldDraw | null = null;
+    let already = false;
     if (tokenLive()) {
       if (!txHash) return NextResponse.json({ error: 'The stake has not been paid.' }, { status: 402 });
       const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, Math.floor(stake * 0.97));
       if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       stake = Math.min(stake, Math.floor(paid.whole));
-      // Not booked as a charge here: what the stake becomes depends on the draw.
-      if (!(await spendBurn(txHash, 'casino-gld'))) return NextResponse.json({ error: 'That stake has already been played.' }, { status: 409 });
+      // The draw is made and written against the receipt first; whichever
+      // request writes it first owns the play, and every other is answered
+      // with the same draw.
+      const fresh: GldDraw = { game, pick, drawn: draw(game), won: false, stake, at: Date.now() };
+      fresh.won = fresh.drawn === pick;
+      const mine = await hsetnx(GLD_DRAWS, txHash.toLowerCase(), JSON.stringify(fresh));
+      if (mine) {
+        // Not booked as a charge here: what the stake becomes depends on the draw.
+        if (!(await spendBurn(txHash, 'casino-gld'))) {
+          // Used for something else before it reached the table.
+          await hset(GLD_DRAWS, txHash.toLowerCase(), JSON.stringify({ ...fresh, void: true }));
+          return NextResponse.json({ error: 'That stake has already been played.' }, { status: 409 });
+        }
+        record = fresh;
+      } else {
+        let held: (GldDraw & { void?: boolean }) | null = null;
+        try { held = JSON.parse((await hget(GLD_DRAWS, txHash.toLowerCase())) ?? 'null'); } catch { held = null; }
+        if (!held || held.void || !(await spentOn(txHash, 'casino-gld'))) return NextResponse.json({ error: 'That stake has already been played.' }, { status: 409 });
+        record = held;
+        already = true;
+      }
     } else if (!(await mayPlay(address))) return NextResponse.json({ error: 'One play at a time.' }, { status: 429 });
-    const drawn = draw(game);
-    const won = drawn === pick;
-    await incrBy(GLD_STAKED_EMERGE, stake);
-    let emerge = 0, capped = false, payout = null;
-    if (won) {
-      const booked = await bookGldWin(address, game, stake * GOLD_PAYS[game], stake);
-      emerge = booked.emerge; capped = booked.capped; payout = booked.payout;
-      // The house keeps the stake either way; on a win it pays out more than
-      // it took, from the kept share. What is not paid for the cap stays
-      // in the vault as a charge would.
-      if (emerge <= 0) await noteCharge(stake);
-    } else {
-      // The stake is the house's: burned, kept and pooled like every charge.
-      await noteCharge(stake);
+    const drawn = record ? record.drawn : draw(game);
+    const won = record ? record.won : drawn === pick;
+    let emerge = record?.emerge ?? 0, capped = record?.capped ?? false, payout = null;
+    if (!already || (record && won && !record.booked)) {
+      if (!already) await incrBy(GLD_STAKED_EMERGE, stake);
+      if (won) {
+        const booked = await bookGldWin(address, game, stake * GOLD_PAYS[game], stake);
+        emerge = booked.emerge; capped = booked.capped; payout = booked.payout;
+        // The house keeps the stake either way; on a win it pays out more than
+        // it took, from the kept share. What is not paid for the cap stays
+        // in the vault as a charge would.
+        if (emerge <= 0) await noteCharge(stake);
+      } else {
+        // The stake is the house's: burned, kept and pooled like every charge.
+        await noteCharge(stake);
+      }
+      if (txHash && record) await hset(GLD_DRAWS, txHash.toLowerCase(), JSON.stringify({ ...record, booked: true, payoutId: payout?.id ?? null, emerge, capped })).catch(() => {});
+    } else if (record?.payoutId) {
+      // Booked before: the payout it made is the one answered with.
+      payout = (await pendingGld(address)).find((p) => p.id === record.payoutId) ?? null;
     }
     // Pay now if the chain is quick; otherwise it waits on the list.
     let settled = null;
     if (payout) {
       const r = await settleGld(payout.id);
       settled = r.ok ? r.payout : r.payout ?? payout;
+    } else if (already && record?.payoutId) {
+      settled = (await settledGld(address, 20)).find((p) => p.id === record.payoutId) ?? null;
     }
-    return NextResponse.json({ won, drawn, gold: 0, emerge, capped, stake, prize: 'gld', gldPayout: settled, plays: await playsOf(address) });
+    return NextResponse.json({ won, drawn, gold: 0, emerge, capped, stake, prize: 'gld', gldPayout: settled, already, plays: await playsOf(address) });
   }
 
   if (body.play) {
@@ -198,16 +243,29 @@ export async function POST(request: Request) {
     let weiIn = method === 'eth' ? BigInt(prices.ethWei) * BigInt(passes) : 0n;
     if (tokenLive()) {
       if (!txHash) return NextResponse.json({ error: 'The pass has not been paid for.' }, { status: 402 });
+      /*
+       * A receipt already spent on a pass, with the plays already granted, is
+       * a reply that was lost: answered with the plays. Spent with nothing
+       * granted, the store failed between the two, and the plays are granted
+       * now. Spent on anything else, refused.
+       */
+      const granted = async () => !!(await hget(PASS_GRANTED, txHash.toLowerCase()).catch(() => null));
       if (method === 'emerge') {
         const paid = await verifyTransfer(txHash, address, VAULT_ADDRESS, Math.floor(prices.emerge * passes * 0.97));
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-        if (!(await spendBurn(txHash, 'casino-pass', paid.whole))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+        if (!(await spendBurn(txHash, 'casino-pass', paid.whole))) {
+          if (!(await spentOn(txHash, 'casino-pass'))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+          if (await granted()) return NextResponse.json({ plays: await playsOf(address), already: true });
+        }
         emergeIn = paid.whole;
       } else {
         const wei = BigInt(prices.ethWei) * BigInt(passes);
         const paid = await verifyNative(txHash, address, VAULT_ADDRESS, (wei * 97n) / 100n);
         if (!paid.ok) return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-        if (!(await spendBurn(txHash, 'casino-pass-eth'))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+        if (!(await spendBurn(txHash, 'casino-pass-eth'))) {
+          if (!(await spentOn(txHash, 'casino-pass-eth'))) return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+          if (await granted()) return NextResponse.json({ plays: await playsOf(address), already: true });
+        }
         weiIn = paid.wei;
         // The development share, kept in gwei so it stays a safe integer.
         const devGwei = Number((paid.wei * BigInt(Math.round(DEV_SHARE * 100))) / 100n / 1_000_000_000n);
@@ -216,6 +274,7 @@ export async function POST(request: Request) {
       }
     }
     await grantPlays(address, PASS_PLAYS * passes);
+    if (txHash) await hset(PASS_GRANTED, txHash.toLowerCase(), String(Date.now())).catch(() => {});
     await incrBy(PASSES_SOLD, passes);
     // Book the take at the prices of the day, in cents, so the ledger can say
     // what the tables made in dollars without re-pricing history.

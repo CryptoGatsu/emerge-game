@@ -47,7 +47,7 @@ import {
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
   type Claim, type CoverKind, markCover, renameClaim } from '@/lib/server/registry';
-import { bankCredit, creditOf, settleCharge, spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
+import { bankCredit, creditBack, creditOf, settleCharge, spendBurn, spentOn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
 import { buildId } from '@/lib/server/build';
 import { TOKEN, tokenBalance, tokenLive } from '@/lib/chain/emerge';
 import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
@@ -102,11 +102,39 @@ const clean = (value: string, limit: number) =>
  * spent; `402` anything else, including a payment that fell short — which is
  * banked, and the message says so.
  */
-async function charge(owner: string, burnTx: string, due: number, purpose: string): Promise<NextResponse | { whole: number }> {
+/** What a settled charge was paid with, so a refusal after it can give it back. */
+type Charged = { whole: number; fromCredit: number; tx?: string; again?: boolean };
+async function charge(owner: string, burnTx: string, due: number, purpose: string): Promise<NextResponse | Charged> {
   const paid = await settleCharge(owner, burnTx, due, purpose);
-  if (paid.ok) return { whole: paid.whole };
+  // What the step cost, not what the receipt carried: anything over the
+  // price is already on account as the receipt's rest, and a refusal must
+  // not give that part back twice.
+  if (paid.ok) return { whole: Math.min(paid.whole, due), fromCredit: paid.fromCredit, tx: paid.tx, again: paid.again };
   const status = paid.retry ? 202 : paid.used ? 409 : 402;
   return NextResponse.json({ error: paid.reason, retry: paid.retry, banked: paid.banked, credit: paid.credit, short: paid.short }, { status });
+}
+
+/**
+ * Give a charge back on account when the thing it paid for could not be
+ * delivered, and say so in the reply.
+ *
+ * Only for refusals a retry cannot cure — the plot taken by somebody else,
+ * the chart surveyed out, the plot not this wallet's any more. A store that
+ * merely blinked is not one of those: the receipt stays spent on the step and
+ * the browser hands it in again.
+ */
+async function refused(owner: string, purpose: string, paid: Charged, error: string, status: number, extra: Record<string, unknown> = {}): Promise<NextResponse> {
+  const back = Math.floor(paid.whole + paid.fromCredit);
+  const key = paid.tx ?? `${purpose}:${Date.now()}`;
+  let credited = false;
+  if (back > 0) credited = await creditBack(owner, key, back).catch(() => false);
+  const credit = credited ? await creditOf(owner).catch(() => null) : null;
+  return NextResponse.json({
+    error: credited
+      ? `${error} The ${back.toLocaleString()} ${TOKEN.ticker} you paid is on account — ${(credit ?? back).toLocaleString()} in all — and pays for the next thing you buy.`
+      : error,
+    refunded: credited ? back : 0, credit, ...extra,
+  }, { status });
 }
 
 export async function GET() {
@@ -277,9 +305,11 @@ export async function POST(request: Request) {
      * Without this a script with a wallet could survey every chart in the game
      * to exhaustion for nothing, and land is finite.
      */
+    let surveyPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const paid = await charge(owner, String(body.burnTx ?? ''), PROSPECT_COST_EMERGE, `survey:${chart}`);
       if (paid instanceof NextResponse) return paid;
+      surveyPaid = paid;
     }
 
     try {
@@ -289,7 +319,9 @@ export async function POST(request: Request) {
         owner,
         clean(String(body.ownerName ?? ''), MAX_NAME),
       );
-      if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
+      // A chart with nothing left to find is a refusal no retry cures: the
+      // payment goes back on account rather than buying nothing.
+      if (!result.ok) return refused(owner, `survey:${chart}`, surveyPaid, result.reason, 409);
       return NextResponse.json({ find: result.find, shared: registryShared() });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -356,13 +388,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     if (claim.expandedAt) return NextResponse.json({ claim, already: true });
+    let expandPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const paid = await charge(owner, String(body.burnTx ?? ''), EXPAND_COST_EMERGE, `expand:${seed}`);
       if (paid instanceof NextResponse) return paid;
+      expandPaid = paid;
     }
     try {
       const result = await markExpanded(seed, owner);
-      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      if (!result) return refused(owner, `expand:${seed}`, expandPaid, 'That plot is not yours.', 409);
       return NextResponse.json({ claim: result.claim, already: result.already });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -389,18 +423,23 @@ export async function POST(request: Request) {
     if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
+    // Asked before the charge, not after it: a banner with no emblem chosen
+    // used to be refused with the payment already taken.
+    if (kind === 'banner' && !isEmblem(body.emblem)) return NextResponse.json({ error: 'Choose an emblem.' }, { status: 400 });
+    let boonPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
       const paid = await charge(owner, burnTx, cost, `boon:${kind}:${seed}:${burnTx}`);
       if (paid instanceof NextResponse) return paid;
+      boonPaid = paid;
     }
     await bookDev(cost);
     // A banner is recorded on the row, so the world map flies it.
     if (kind === 'banner') {
-      if (!isEmblem(body.emblem)) return NextResponse.json({ error: 'Choose an emblem.' }, { status: 400 });
       try {
-        const flown = await markBanner(seed, owner, body.emblem);
-        return NextResponse.json({ ok: true, boon: kind, claim: flown ?? claim });
+        const flown = await markBanner(seed, owner, body.emblem as string);
+        if (!flown) return refused(owner, `boon:${kind}:${seed}`, boonPaid, 'That plot is not yours.', 409);
+        return NextResponse.json({ ok: true, boon: kind, claim: flown });
       } catch {
         return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
       }
@@ -440,15 +479,17 @@ export async function POST(request: Request) {
       const days = await presenceDays(owner).catch(() => 0);
       price = Math.max(CHARTER_COST_EMERGE, charterCost(judgedLevel(world, days), claim.era ?? 1));
     }
+    let coverPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
       const paid = await charge(owner, burnTx, price, `${kind}:${seed}:${burnTx}`);
       if (paid instanceof NextResponse) return paid;
+      coverPaid = paid;
     }
     await bookDev(price);
     try {
       const result = await markCover(seed, owner, kind, span);
-      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      if (!result) return refused(owner, `${kind}:${seed}`, coverPaid, 'That plot is not yours.', 409);
       return NextResponse.json({ claim: result.claim, until: result.until });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -517,13 +558,15 @@ export async function POST(request: Request) {
         gate: { days: gate.days, checks: gate.checks },
       }, { status: 409 });
     }
+    let eraPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const paid = await charge(owner, String(body.burnTx ?? ''), advanceCost(era), `era:${seed}:${era}`);
       if (paid instanceof NextResponse) return paid;
+      eraPaid = paid;
     }
     try {
       const result = await markEra(seed, owner, era);
-      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      if (!result) return refused(owner, `era:${seed}:${era}`, eraPaid, 'That plot is not yours.', 409);
       return NextResponse.json({ claim: result.claim, already: result.already });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -540,14 +583,16 @@ export async function POST(request: Request) {
    */
   if (body.hire !== undefined) {
     // Opening a job costs a hiring fee, paid like any charge.
+    let hirePaid: Charged = { whole: 0, fromCredit: 0 };
     if (body.hire === true && tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
       const paid = await charge(owner, burnTx, HIRE_FEE_EMERGE, `hire:${seed}:${burnTx}`);
       if (paid instanceof NextResponse) return paid;
+      hirePaid = paid;
     }
     try {
       const row = await setHiring(seed, owner, body.hire === true);
-      return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      return row ? NextResponse.json({ claim: row }) : refused(owner, `hire:${seed}`, hirePaid, 'That plot is not yours.', 409);
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
@@ -655,22 +700,39 @@ export async function POST(request: Request) {
     if (due === null) {
       return NextResponse.json({ error: 'That plot is not for sale.' }, { status: 409 });
     }
+    /*
+     * Both receipts are checked before either is spent, and the row moves
+     * before either is spent too.
+     *
+     * The transfer used to be spent first and the fee settled second, so a fee
+     * the chain had not confirmed yet answered "ask again" and every later
+     * attempt was refused as already used — the buyer had paid the seller and
+     * had no plot, which is the exact shape of the Gold-purchase bug this
+     * exchange was rebuilt once to prevent. Now: verify both; move the row;
+     * spend both. A receipt already spent on this very resale, with the row
+     * already the buyer's, answers with the row — a reply lost on the way
+     * back is asked for again, not paid for again.
+     */
+    let feePaid: Charged = { whole: 0, fromCredit: 0 };
+    const transferTx = String(body.transferTx ?? '');
     if (tokenLive()) {
-      const transferTx = String(body.transferTx ?? '');
       const paid = await verifyTransfer(transferTx, owner, listed.owner, due);
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
-      if (!(await spendBurn(transferTx, `resale:${seed}`))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      if (await spentOn(transferTx, `resale:${seed}`)) {
+        const now = await claimOf(seed).catch(() => null);
+        if (now && now.owner.toLowerCase() === owner.toLowerCase()) return NextResponse.json({ claim: now, price: due, seller: listed.owner, already: true });
       }
       // The registry's fee, into the vault, from the buyer.
       const fee = await charge(owner, String(body.feeTx ?? ''), resaleFee(due), `resale-fee:${seed}`);
       if (fee instanceof NextResponse) return fee;
+      feePaid = fee;
     }
     try {
       const moved = await transferClaim(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME));
-      if (!moved.ok) return NextResponse.json({ error: moved.reason }, { status: 409 });
+      if (!moved.ok) return refused(owner, `resale-fee:${seed}`, feePaid, moved.reason, 409);
+      if (tokenLive() && transferTx) await spendBurn(transferTx, `resale:${seed}`).catch(() => false);
       // A plot that has just sold must not go on being advertised.
       await forgetLandMarket();
       return NextResponse.json({ claim: moved.claim, price: moved.price, seller: moved.seller });
@@ -726,6 +788,7 @@ export async function POST(request: Request) {
    * Skipped where a land contract exists, because there the claim *is* the
    * payment and the `ownerOf` check above already proves it happened.
    */
+  let plotPaid: Charged = { whole: 0, fromCredit: 0 };
   if (!registryConfigured() && tokenLive()) {
     if (!(await holdsReservation(seed, owner))) {
       return NextResponse.json({
@@ -735,6 +798,7 @@ export async function POST(request: Request) {
     // Settled before the plot is written, so one payment cannot buy two.
     const paid = await charge(owner, String(body.burnTx ?? ''), priceOfSeed(seed), `plot:${seed}`);
     if (paid instanceof NextResponse) return paid;
+    plotPaid = paid;
   }
 
   const claim: Claim = {
@@ -755,10 +819,11 @@ export async function POST(request: Request) {
     const result = await takeClaim(claim);
     if (result.ok) await dropReservation(seed).catch(() => {});
     if (!result.ok) {
-      return NextResponse.json({
-        error: `${result.taken.region} already belongs to somebody else.`,
+      // Somebody else's now. The payment goes back on account: it bought
+      // nothing, and the next plot this wallet claims is paid from it.
+      return refused(owner, `plot:${seed}`, plotPaid, `${result.taken.region} already belongs to somebody else.`, 409, {
         taken: result.taken,
-      }, { status: 409 });
+      });
     }
     return NextResponse.json({ claim: result.claim, shared: registryShared() });
   } catch {

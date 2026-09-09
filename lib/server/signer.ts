@@ -28,7 +28,7 @@ import 'server-only';
  * where that matters.
  */
 
-import { TransactionNotFoundError, TransactionReceiptNotFoundError, createPublicClient, createWalletClient, defineChain, http, parseUnits, type Hex } from 'viem';
+import { TransactionNotFoundError, TransactionReceiptNotFoundError, createPublicClient, createWalletClient, defineChain, encodeFunctionData, http, keccak256, parseUnits, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ACTIVE_CHAIN, BURN_ADDRESS, GLD_ADDRESS, SWAP_ROUTER, TOKEN, burnTargetBroken, tokenBurnable } from '../chain/emerge';
 import { serverKey } from '../limits';
@@ -161,7 +161,13 @@ export type SendResult =
    * it as sent and `receiptOf` settles it later.
    */
   | { ok: true; txHash: string; confirmed: boolean }
-  | { ok: false; problem: string };
+  /**
+   * `maybeSent` is the one case a caller must not retry: the transfer was
+   * signed and handed to the chain, and the chain's answer was lost. The hash
+   * is known, because the transaction was signed here before it went; the
+   * caller writes it down as unconfirmed and `receiptOf` settles it later.
+   */
+  | { ok: false; problem: string; maybeSent?: boolean; txHash?: string };
 
 /**
  * How long a payout waits for its receipt before answering the player.
@@ -239,13 +245,26 @@ export async function sendFromVault(to: string, whole: number): Promise<SendResu
     // chain has not mined yet still owns its nonce.
     const nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
 
-    const txHash = await wallet.writeContract({
-      address: token() as Hex,
-      abi: ERC20,
-      functionName: 'transfer',
-      args: [to as Hex, units],
+    /*
+     * Signed here, broadcast second, so the hash is known before the chain
+     * is asked. `writeContract` signs and broadcasts in one call, and a
+     * broadcast whose reply is lost — the node accepted it, the connection
+     * dropped — threw with no hash at all, the caller gave the player's
+     * reservation back, and the same withdrawal could go out twice.
+     */
+    const request = await wallet.prepareTransactionRequest({
+      account,
+      to: token() as Hex,
+      data: encodeFunctionData({ abi: ERC20, functionName: 'transfer', args: [to as Hex, units] }),
       nonce,
     });
+    const signed = await wallet.signTransaction(request);
+    const txHash = keccak256(signed);
+    try {
+      await client.sendRawTransaction({ serializedTransaction: signed });
+    } catch {
+      return { ok: false, problem: 'The chain did not answer when the transfer was sent. It is being checked; nothing more will be sent until it is.', maybeSent: true, txHash };
+    }
     /*
      * Sent is not paid. A transfer the chain rejects is a hash with nothing
      * behind it, and a player told "sent" on the strength of one watches a
@@ -326,7 +345,10 @@ const ROUTER_V3 = [
   },
 ] as const;
 
-export type TokenSend = { ok: true; txHash: string } | { ok: false; problem: string };
+export type TokenSend =
+  | { ok: true; txHash: string }
+  /** `maybeSent`: signed and handed to the chain, reply lost — never retried; the hash is written down instead. */
+  | { ok: false; problem: string; maybeSent?: boolean; txHash?: string };
 
 /** Send any ERC-20 the vault holds, in base units. GLD dividends go out this way. */
 export async function sendTokenFromVault(tokenAddress: string, to: string, units: bigint): Promise<TokenSend> {
@@ -342,7 +364,22 @@ export async function sendTokenFromVault(tokenAddress: string, to: string, units
     const held = await client.readContract({ address: tokenAddress as Hex, abi: ERC20, functionName: 'balanceOf', args: [account.address] });
     if (held < units) return { ok: false, problem: 'The vault holds less than that.' };
     const nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
-    const txHash = await wallet.writeContract({ address: tokenAddress as Hex, abi: ERC20, functionName: 'transfer', args: [to as Hex, units], nonce });
+    // Signed first, broadcast second, as `sendFromVault` does: the hash is
+    // known before the chain is asked, so a reply lost on the way back is a
+    // transfer to check on, not one to send again.
+    const request = await wallet.prepareTransactionRequest({
+      account,
+      to: tokenAddress as Hex,
+      data: encodeFunctionData({ abi: ERC20, functionName: 'transfer', args: [to as Hex, units] }),
+      nonce,
+    });
+    const signed = await wallet.signTransaction(request);
+    const txHash = keccak256(signed);
+    try {
+      await client.sendRawTransaction({ serializedTransaction: signed });
+    } catch {
+      return { ok: false, problem: 'The chain did not answer when the transfer was sent. It is being checked; nothing more will be sent until it is.', maybeSent: true, txHash };
+    }
     return { ok: true, txHash };
   } catch {
     return { ok: false, problem: 'The transfer could not be sent.' };

@@ -26,7 +26,7 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, BURN_ADDRESS, TOKEN, VAULT_ADDRESS } from '../chain/emerge';
 import { serverKey } from '../limits';
-import { hdel, hget, hgetall, hset, hsetnx } from './kv';
+import { hdel, hget, hgetall, hset, hsetnx, releaseLock, takeLock } from './kv';
 import { noteCharge } from './treasury';
 
 const chain = () => defineChain({
@@ -298,6 +298,29 @@ export async function bankCredit(owner: string, txHash: string, whole: number): 
   return { banked: first, credit: await creditOf(owner) };
 }
 
+/**
+ * Put a payment back on account when what it paid for could not be delivered.
+ *
+ * For the refusals a retry can never cure: the plot taken by somebody else
+ * between the payment and the row, the chart surveyed out, the plot no longer
+ * this wallet's by the time the row is written. The payment was real and was
+ * spent on the step, so it cannot be redeemed the ordinary way; this is the
+ * registry giving it back on account, once per key, so a second attempt with
+ * the same receipt cannot be paid back twice.
+ *
+ * Not for a store that blinked: a receipt spent on a step the registry could
+ * not finish is handed in again by the browser and accepted for that step,
+ * and crediting it back as well would pay the player twice.
+ */
+const CREDITED_BACK = serverKey('burns:credited-back');
+export async function creditBack(owner: string, key: string, whole: number): Promise<boolean> {
+  if (!(whole > 0) || !key) return false;
+  const first = await hsetnx(CREDITED_BACK, key.toLowerCase(), `${owner.toLowerCase()}:${Date.now()}`);
+  if (!first) return false;
+  await hset(creditKey(owner), `back:${key.toLowerCase()}`, String(Math.floor(whole)));
+  return true;
+}
+
 /** Draw this much from what is on account, largest payments first. Returns what was actually drawn. */
 async function drawCredit(owner: string, amount: number): Promise<number> {
   if (amount <= 0) return 0;
@@ -319,7 +342,7 @@ async function drawCredit(owner: string, amount: number): Promise<number> {
 }
 
 export type Settlement =
-  | { ok: true; whole: number; fromCredit: number; /** The same receipt, already spent on this very step. */ again?: boolean }
+  | { ok: true; whole: number; fromCredit: number; /** The same receipt, already spent on this very step. */ again?: boolean; /** The receipt it was settled from, when there was one. */ tx?: string }
   | { ok: false; reason: string; retry: boolean; used?: boolean; banked?: number; credit?: number; short?: number };
 
 /**
@@ -337,6 +360,31 @@ export async function settleCharge(
   due: number,
   purpose: string,
   verify: (txHash: string, payer: string, atLeastWhole: number) => Promise<BurnCheck> = verifyBurn,
+): Promise<Settlement> {
+  /*
+   * One settlement per wallet at a time. Drawing from the account is a read
+   * and then deletes, and two charges settling together — two tabs, a double
+   * press — could both read the same row and both count it as drawn. A wallet
+   * that is mid-settlement is asked to try again in a moment, which the
+   * browsers already do for a payment the chain has not confirmed.
+   */
+  const lock = serverKey(`credit:lock:${owner.toLowerCase()}`);
+  if (!(await takeLock(lock, 20))) {
+    return { ok: false, retry: true, reason: 'Another payment of yours is settling. Try again in a moment.' };
+  }
+  try {
+    return await settleCharged(owner, burnTx, due, purpose, verify);
+  } finally {
+    await releaseLock(lock);
+  }
+}
+
+async function settleCharged(
+  owner: string,
+  burnTx: string,
+  due: number,
+  purpose: string,
+  verify: (txHash: string, payer: string, atLeastWhole: number) => Promise<BurnCheck>,
 ): Promise<Settlement> {
   const credit = await creditOf(owner);
   const tx = burnTx.trim();
@@ -357,14 +405,14 @@ export async function settleCharge(
       // Offered again for the step it already paid for: a player whose era
       // never arrived because the registry could not finish after taking the
       // payment, handing the receipt back in. It is theirs, for this, once.
-      if (await spentOn(tx, purpose)) return { ok: true, whole: paid.whole, fromCredit: 0, again: true };
+      if (await spentOn(tx, purpose)) return { ok: true, whole: paid.whole, fromCredit: 0, again: true, tx };
       return { ok: false, reason: 'That payment has already been used.', retry: false, used: true };
     }
     const fromCredit = paid.whole >= due ? 0 : await drawCredit(owner, due - paid.whole);
     // Paid over the odds — a page quoting a higher price than today's, say.
     // The difference is theirs, on account.
     if (paid.whole > due) await hset(creditKey(owner), `rest:${tx.toLowerCase()}`, String(paid.whole - due));
-    return { ok: true, whole: paid.whole, fromCredit };
+    return { ok: true, whole: paid.whole, fromCredit, tx };
   }
   const banked = await bankCredit(owner, tx, paid.whole);
   if (!banked.banked) {
