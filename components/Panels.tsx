@@ -41,7 +41,7 @@ import { fetchNames } from '@/lib/net/names';
 import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
 import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
 import { onChainClaimsLive } from '@/lib/chain/registry';
-import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { untilUtcMidnight, MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet, currentWallet } from './WalletPicker';
 import { LandMarket } from './LandMarket';
@@ -1866,11 +1866,15 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
           */}
         {history?.room && collectable === 0 && (
           <p className="muted small">
+            {/* How long is left, not just that the day turns at midnight UTC. A
+                player whose own midnight had passed asked why nothing had
+                reset; theirs had, the vault's had not, and "at midnight UTC"
+                does not answer that for somebody eight hours ahead of it. */}
             {history.room.left <= 0 && typeof history.room.share === 'number' && typeof history.room.demand === 'number' && typeof history.room.budget === 'number'
-              ? t('Today the vault pays {budget} {ticker} across everybody and {demand} is judged in all, so your share is {share}, and it is collected. The day turns at midnight UTC.', { budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), share: history.room.share.toLocaleString(), ticker: TOKEN.ticker })
+              ? t('Today the vault pays {budget} {ticker} across everybody and {demand} is judged in all, so your share is {share}, and it is collected. The day turns in {when}, at midnight UTC.', { budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), share: history.room.share.toLocaleString(), ticker: TOKEN.ticker, when: untilUtcMidnight() })
               : history.room.left <= 0
-                ? t('Today’s judgement is collected. What the plots earn from here goes to tomorrow.')
-                : t('The vault has paid today’s {budget} {ticker} across everybody. The day turns at midnight UTC.', { budget: (history.room.budget ?? 0).toLocaleString(), ticker: TOKEN.ticker })}
+                ? t('Today’s judgement is collected. What the plots earn from here goes to tomorrow, which begins in {when}, at midnight UTC.', { when: untilUtcMidnight() })
+                : t('The vault has paid today’s {budget} {ticker} across everybody. The day turns in {when}, at midnight UTC.', { budget: (history.room.budget ?? 0).toLocaleString(), ticker: TOKEN.ticker, when: untilUtcMidnight() })}
           </p>
         )}
         {/*

@@ -37,7 +37,7 @@
  */
 
 import { DAILY_EARN_CEILING, EMERGE_PER_GOLD, WITHDRAW_BURN_RATE } from '../chain/vault';
-import { serverKey } from '../limits';
+import { serverKey, untilUtcMidnight } from '../limits';
 import { counter, hget, hsetnx, incrBy, incrWindow } from './kv';
 
 /** Today, in UTC, as a plain key. The server's day, not the player's. */
@@ -93,12 +93,9 @@ export async function takePayoutSlot(address: string): Promise<PayoutAllowance> 
   return { ok: true };
 }
 
-/** How long until the daily counters roll over, as 'Nh Nm'. */
-export function untilUtcMidnight(now = Date.now()): string {
-  const next = new Date(now); next.setUTCHours(24, 0, 0, 0);
-  const minutes = Math.max(1, Math.round((next.getTime() - now) / 60000));
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
+/** How long until the daily counters roll over. Defined in `limits`, which the
+ *  Bank can read too, and re-exported here where the counters live. */
+export { untilUtcMidnight };
 
 /* ------------------------------------------------------------------ *
  * Casino credit
