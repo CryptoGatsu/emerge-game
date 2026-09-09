@@ -1797,7 +1797,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       if (!live || !world || !gifts.length) return;
       const arrived: { fromName: string; gold: number }[] = [];
       for (const g of gifts) {
-        fundTreasury(world, g.gold, `Gift from ${g.fromName || 'a visitor'}`);
+        // Somebody else's generosity is not the owner attending their plot.
+        fundTreasury(world, g.gold, `Gift from ${g.fromName || 'a visitor'}`, false);
         arrived.push(g);
       }
       for (const g of arrived) {

@@ -10043,10 +10043,13 @@ export function setFrozenGold(world: World, gold: number) {
  * once, on the delivery that does it, rather than left to work out why the
  * income stopped.
  */
-export function fundTreasury(world: World, gold: number, note: string) {
+export function fundTreasury(world: World, gold: number, note: string, attend = true) {
   useWorld(world);
   if (!(gold > 0)) return;
-  noteAttention(world);
+  // Gold the player themselves brought in is them attending the place; Gold
+  // that simply turned up — an order filled while they were elsewhere, a gift
+  // from a visitor — is not, and the caller says which.
+  if (attend) noteAttention(world);
   const cap = goldCap(world);
   const was = world.treasury + frozenGold(world);
   world.treasury += gold;
@@ -10072,19 +10075,28 @@ export function escrowGoods(world: World, resource: Resource, qty: number): bool
   return true;
 }
 
-/** Take in what the exchange owes this world: once per delivery, by id. Returns false when it was already taken. */
+/**
+ * Take in what the exchange owes this world: once per delivery, by id.
+ * Returns false when it was already taken.
+ *
+ * A delivery is not attention. It used to stamp the attention clock, and that
+ * was a hole in the whole anti-farming rule: the client polls the exchange on
+ * a timer, so a player with resting orders had every fill reset their plot to
+ * full attention while they did nothing at all. A player reported their yield
+ * climbing fast on land they were not playing, and this was why. Placing the
+ * order was attention. The order filling, hours later, is the exchange.
+ */
 export function receiveDelivery(world: World, d: { id: string; kind: 'gold' | 'resource'; resource?: Resource; amount: number; note: string }): boolean {
   useWorld(world);
   const seen = world.exchangeSeen ?? [];
   if (seen.includes(d.id)) return false;
   world.exchangeSeen = [...seen.slice(-199), d.id];
   if (d.kind === 'gold') {
-    fundTreasury(world, d.amount, `From the exchange: ${d.note}.`);
+    fundTreasury(world, d.amount, `From the exchange: ${d.note}.`, false);
   } else if (d.resource && d.resource in world.resources) {
     world.resources[d.resource] += Math.max(0, Math.floor(d.amount));
     pushFeed(world, 'market', `From the exchange: ${d.note}.`);
   }
-  noteAttention(world);
   return true;
 }
 

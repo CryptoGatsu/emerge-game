@@ -412,7 +412,10 @@ export default function Wiki() {
             is being run. Attention is <em>yours</em>, not the plot&rsquo;s: with two or more plots
             you can only have one open, so acting on any of them keeps every plot you own attended,
             and the ones you are not looking at go on earning at the shape you left them in. The
-            vault judges it the same way, from your presence anywhere in the game.
+            vault judges it the same way, from your presence anywhere in the game. What it is
+            <em>not</em> is something happening to your plot while you are elsewhere: an order
+            filling on the exchange, or a gift arriving from a visitor, does not refresh it.
+            Placing the order was attention; the exchange filling it hours later is the exchange.
           </p>
           <table className="wiki-table">
             <thead>
