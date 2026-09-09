@@ -441,6 +441,35 @@ export default function Wiki() {
             money buys past it. That is deliberate: the cap is what stops the game being a machine
             for turning capital into tokens.
           </p>
+          <h3>The day&rsquo;s budget, and your share of it</h3>
+          <p>
+            Those ceilings are what one wallet may take. There is a second limit above them: the
+            vault pays out only so much stewardship in a day across <em>everybody</em>, and that
+            budget starts again at midnight UTC. The Bank shows the figure and how much of it is
+            left.
+          </p>
+          <p>
+            When what everybody is judged to earn fits inside the budget, it does not bind at all
+            and each wallet is simply paid what it is judged. When it does not fit, the day is
+            <b> divided in proportion</b>: a wallet judged a tenth of the total is paid a tenth of
+            the budget. <b>Your share waits for you all day and nobody else can take it</b>, so
+            there is nothing to be gained by being awake at any particular hour.
+          </p>
+          <p>
+            What divides the day is <b>what every wallet could claim</b> — not how many of them
+            happen to be playing at that moment. It has to be, or the hour you live in would decide
+            your income: attention decays while you sleep, so if the divisor counted only the people
+            currently awake, whoever was up at midnight UTC would split the budget among a small
+            number and take oversized shares, and the far side of the world would wake to an empty
+            pot. Modelled on twenty wallets with half asleep, that was an early riser taking
+            769,230 against a late riser&rsquo;s 230,770, with half the late risers paid nothing.
+            Dividing by what everyone could claim, both take 500,000.
+          </p>
+          <p>
+            Attention still decides <em>your own</em> figure — a plot you never look at earns
+            little, as it should. It just no longer decides anybody else&rsquo;s.
+          </p>
+
           <h3>Earning without land: hired hands</h3>
           <p>
             You do not need a plot to earn, only a job. An owner can open one on their plot; a

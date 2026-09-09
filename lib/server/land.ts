@@ -193,15 +193,38 @@ export async function judgedFor(address: string): Promise<Judged> {
 }
 
 /**
- * What everybody is judged to earn today, added up: the demand on the vault.
+ * What everybody could claim today, added up: the demand on the vault.
  *
  * Read off the published headlines — the level and score the registry took
- * when each world was published — with each owner's presence days, charter
- * and attention, the same way one wallet is judged, and capped per wallet
- * the same way. Reading every world in full for every payout would be far
- * too slow, so this is an estimate from the headlines, and it is kept for a
- * quarter of an hour: the day's shares must not shift under a player
- * between the Bank's figure and the button.
+ * when each world was published — with each owner's presence days and
+ * charter, and capped per wallet the same way one wallet is judged. Reading
+ * every world in full for every payout would be far too slow, so this is an
+ * estimate from the headlines, and it is kept for a quarter of an hour: the
+ * day's shares must not shift under a player between the Bank's figure and
+ * the button.
+ *
+ * What it deliberately does *not* weigh is attention.
+ *
+ * Attention belongs in what a wallet is paid — a player who does not show up
+ * earns less, and should. It has no business in the divisor. It was there,
+ * and the effect was a timezone lottery: attention decays while you sleep, so
+ * being asleep at midnight UTC both shrank your own place in the sum and
+ * fattened everybody else's slice of it. Whoever was awake early divided the
+ * budget among a small total and took oversized shares; by the afternoon the
+ * total had grown, the shares had shrunk and the pot was already empty. A
+ * player asked for the day's budget to be released in batches so that the
+ * far side of the world got a turn. Batches were tried once before and only
+ * made the race hourly; this is the same complaint answered at its cause.
+ *
+ * Modelled on twenty wallets with half of them asleep at midnight UTC: an
+ * early riser took 769,230 and a late one 230,770, with five of ten late
+ * risers paid nothing at all. Divided by what everybody could claim, both
+ * take 500,000 and nobody is paid nothing. Freezing the old sum at the
+ * day's first read does not fix it, because that read is exactly when the
+ * sum is most understated.
+ *
+ * Each wallet is still paid its own attention-adjusted yield, so this can
+ * only ever leave the budget under-spent, never over.
  */
 export interface Demand { total: number; wallets: number; at: number }
 const DEMAND_TTL_SECONDS = 900;
@@ -228,8 +251,6 @@ export async function judgedTotal(now = Date.now()): Promise<Demand> {
   let total = 0, wallets = 0;
   for (const [owner, mine] of byOwner) {
     const days = await presenceDays(owner).catch(() => 0);
-    const anywhere = await lastSeenAnywhere(owner).catch(() => 0);
-    const attention = attentionFrom(anywhere, now);
     const fromPresence = 1 + Math.floor(Math.max(0, days) / LEVEL_PRESENCE_DAYS);
     let yieldSum = 0;
     for (const row of mine.sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT)) {
@@ -245,7 +266,9 @@ export async function judgedTotal(now = Date.now()): Promise<Demand> {
         legacyFloor(row, head?.population ?? 0, head?.buildings ?? 0, days),
       );
       const cap = Math.round(rung * charterMultiplier(row.charterUntil, now));
-      yieldSum += cap * (head?.score ?? 0) * attention;
+      // No attention here: see above. This is what the plot could pay its
+      // owner today, not what it would pay them at this minute.
+      yieldSum += cap * (head?.score ?? 0);
     }
     const judged = Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum));
     if (judged > 0) { total += judged; wallets += 1; }
