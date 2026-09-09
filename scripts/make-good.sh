@@ -19,12 +19,15 @@
 # or the delivery waits somewhere they will never open. The registry is public
 # and needs no secret, so a wallet or a world name is enough to find it:
 #
-#   curl -s https://emergerh.world/api/plots \
+#   curl -sL https://emergerh.world/api/plots \
 #     | python3 -c 'import json,sys; [print(c["seed"], c["worldName"], c["owner"]) \
 #         for c in json.load(sys.stdin)["claims"] if "0xWALLET".lower() in c["owner"].lower()]'
 set -euo pipefail
 
-SITE="${EMERGE_SITE:-https://emergerh.world}"
+# The bare domain redirects to www, and curl drops the Authorization header
+# when a redirect crosses hosts — so every call here came back "Not for this
+# door" until it was pointed at www directly.
+SITE="${EMERGE_SITE:-https://www.emergerh.world}"
 : "${EMERGE_CRON_SECRET:?export EMERGE_CRON_SECRET before running this}"
 
 if [ $# -lt 3 ]; then

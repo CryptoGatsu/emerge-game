@@ -21,12 +21,15 @@
 #
 # Find the seed from the public registry, no secret needed:
 #
-#   curl -s https://emergerh.world/api/plots \
+#   curl -sL https://emergerh.world/api/plots \
 #     | python3 -c 'import json,sys; [print(c["seed"], c["worldName"], c.get("era", 1)) \
 #         for c in json.load(sys.stdin)["claims"] if "0xWALLET".lower() in c["owner"].lower()]'
 set -euo pipefail
 
-SITE="${EMERGE_SITE:-https://emergerh.world}"
+# The bare domain redirects to www, and curl drops the Authorization header
+# when a redirect crosses hosts — so every call here came back "Not for this
+# door" until it was pointed at www directly.
+SITE="${EMERGE_SITE:-https://www.emergerh.world}"
 : "${EMERGE_CRON_SECRET:?export EMERGE_CRON_SECRET before running this}"
 
 if [ $# -lt 3 ]; then
