@@ -984,6 +984,16 @@ export default function Wiki() {
             jobs you are missing once there are thirty of them.
           </p>
           <p>
+            The settlement staffs itself. Every morning anyone whose own trade has no post for
+            them &mdash; more hands than furrows, or a workplace pulled down under them &mdash;
+            walks into a post standing empty somewhere else, a dark building first and then
+            whichever trade is shortest, least-skilled first so the masters stay where they are.
+            Nobody is taken out of a post to do it, so filling one place never empties another.
+            You should never see idle hands and open posts in the same town: if the panel says
+            people are without work, the town is genuinely short of workplaces, and the answer is
+            to build one.
+          </p>
+          <p>
             <b>Training</b> is the lever. Retrain one person into any trade that has a workplace,
             or fill every open post in a trade at once with the people who can best be spared: the
             unemployed first, then anyone in a trade with more hands than posts, then the least

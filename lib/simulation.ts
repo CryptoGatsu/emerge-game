@@ -7328,7 +7328,7 @@ function settlementBuilds(world: World) {
 }
 
 /**
- * Put somebody in a building that has nobody in it.
+ * Put people where there is work for them.
  *
  * Jobs are only re-rolled for a citizen whose needs have dipped or whose trade
  * is over capacity, which is right for a settled town and wrong the moment a
@@ -7337,42 +7337,67 @@ function settlementBuilds(world: World) {
  * A player who has just spent Gold and timber on a building should see somebody
  * walk into it.
  *
- * The person who moves is taken from the most crowded trade, so filling the new
- * place does not empty an old one.
+ * This used to fill only a trade with nobody at all in it, and that was half a
+ * mechanism. A trade merely short of hands never pulled anyone, so a second
+ * Blacksmith post stood empty for a fortnight while a hundred and fifteen
+ * people in over-manned trades were counted as without work — vacancies and
+ * idle hands in the same town, which is exactly what players reported. Every
+ * open post is filled now, from the people whose own trade has no post for
+ * them, so labour follows the buildings without the player retraining anybody
+ * by hand.
+ *
+ * Only surplus hands move: somebody with no trade, somebody whose trade has no
+ * building left standing, or somebody already beyond their trade's posts. That
+ * way filling one place can never empty another.
  */
-function fillEmptyTrades(world: World, tally: Partial<Record<Job, number>>) {
-  const workers = world.citizens.filter((c) => c.age >= 16);
-  for (const job of Object.keys(jobs) as WorkingJob[]) {
-    if (!jobCapacity(world, job)) continue;
-    if ((tally[job] ?? 0) > 0) continue;
+function staffOpenPosts(world: World, tally: Partial<Record<Job, number>>) {
+  const working = Object.keys(jobs) as WorkingJob[];
+  const capacity = new Map<WorkingJob, number>(working.map((j) => [j, jobCapacity(world, j)]));
+  const openings = () => working
+    .map((j) => ({ j, open: (capacity.get(j) ?? 0) - (tally[j] ?? 0) }))
+    .filter((o) => o.open > 0)
+    // A dark building first, then whichever trade is shortest of hands: the
+    // player who just built something sees somebody walk into it today.
+    .sort((a, b) => Number((tally[a.j] ?? 0) > 0) - Number((tally[b.j] ?? 0) > 0) || b.open - a.open);
 
-    // The trade with the most people beyond what its buildings can use, or
-    // failing that simply the most crowded one.
-    let from: WorkingJob | null = null;
-    let surplus = 0;
-    for (const other of Object.keys(jobs) as WorkingJob[]) {
-      const have = tally[other] ?? 0;
-      if (!have) continue;
-      const room = jobCapacity(world, other);
-      // A trade with no building at all is a trade in name only: its one
-      // worker is the first to move. A coast opened with a fishery and nobody
-      // in it for weeks, because every founder was the sole carpenter or
-      // smith of a workshop that did not exist.
-      if (have < 2 && room > 0) continue;
-      const over = have - room;
-      const score = room === 0 ? have + 20 : over > 0 ? over + 10 : have;
-      if (score > surplus) { surplus = score; from = other; }
+  // Who the town can spare, worst-placed first, and within that the least
+  // learned — a town keeps its masters at the trade they have mastered.
+  const surplus = (c: Citizen): number => {
+    if (c.job === 'unemployed') return 0;
+    const room = capacity.get(c.job as WorkingJob) ?? 0;
+    if (room === 0) return 1;
+    return (tally[c.job] ?? 0) > room ? 2 : 99;
+  };
+  const learned = (c: Citizen) => (c.job === 'unemployed' ? 0 : skillDays(c, c.job as WorkingJob));
+  const pool = world.citizens
+    .filter((c) => c.age >= 16 && !heldTrade(world, c) && surplus(c) < 99)
+    .sort((a, b) => surplus(a) - surplus(b) || learned(a) - learned(b));
+
+  const moved: { name: string; job: WorkingJob; fresh: boolean }[] = [];
+  for (const c of pool) {
+    const want = openings().find((o) => o.j !== c.job);
+    if (!want) break;
+    // Read again: earlier moves may have brought this person's trade back
+    // down to its posts, and then there is nobody to spare here after all.
+    if (surplus(c) >= 99) continue;
+    const fresh = (tally[want.j] ?? 0) === 0;
+    tally[c.job] = (tally[c.job] ?? 1) - 1;
+    c.job = want.j;
+    c.workplaceId = undefined;
+    tally[want.j] = (tally[want.j] ?? 0) + 1;
+    moved.push({ name: c.name, job: want.j, fresh });
+  }
+  if (!moved.length) return;
+  // One line for the day, not fifty: a whole town changing trade at once
+  // would bury everything else the feed has to say.
+  if (moved.length <= 2) {
+    for (const m of moved) {
+      pushFeed(world, 'work', m.fresh
+        ? `${m.name} took up ${tradeWord(world, m.job)} at the new ${named(world, jobs[m.job].building)}.`
+        : `${m.name} took up ${tradeWord(world, m.job)}, where there was a post standing empty.`);
     }
-    // Never somebody the owner trained and is still holding to a trade.
-    const mover = from
-      ? workers.find((c) => c.job === from && !heldTrade(world, c))
-      : workers.find((c) => c.job === 'unemployed');
-    if (!mover) continue;
-
-    tally[mover.job] = (tally[mover.job] ?? 1) - 1;
-    mover.job = job;
-    tally[job] = (tally[job] ?? 0) + 1;
-    pushFeed(world, 'work', `${mover.name} took up ${tradeWord(world, job)} at the new ${named(world, jobs[job].building)}.`);
+  } else {
+    pushFeed(world, 'work', `${moved.length} people changed trade to fill posts that were standing empty.`);
   }
 }
 
@@ -8426,7 +8451,7 @@ function daily(world: World) {
     tally[jobKey] = (tally[jobKey] ?? 0) + 1;
   }
 
-  fillEmptyTrades(world, tally);
+  staffOpenPosts(world, tally);
 
   // Payroll is paid from the treasury, pro rata when it cannot cover the bill.
   // What the settlement has chosen to pay multiplies every wage in it, so a
@@ -9665,7 +9690,7 @@ function linkToRoads(world: World, building: Building) {
 function staffNow(world: World) {
   const tally: Partial<Record<Job, number>> = {};
   for (const c of world.citizens) if (c.age >= 16) tally[c.job] = (tally[c.job] ?? 0) + 1;
-  fillEmptyTrades(world, tally);
+  staffOpenPosts(world, tally);
 }
 
 /**
