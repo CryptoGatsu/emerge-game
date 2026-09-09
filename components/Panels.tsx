@@ -1713,12 +1713,14 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
               * them, when it is the same standing beginning again.
               */}
             <div><span>{t('YOUR LAND WEIGHT THIS WEEK')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present · it grows with every day you play, and starts again on Monday', { n: dividend.presentDays })}</em></div>
-            {(() => { const w = stakeWords(dividend, STAKE_MIN_EMERGE, TOKEN.ticker); return (
-              <div><span>{t('YOUR SOFT STAKE')}</span><b>{tx(w.figure)}</b><em className="muted small">{tx(w.note)}</em></div>
-            ); })()}
+            <div><span>{t('YOUR SOFT STAKE')}</span><b>{tx(stakeWords(dividend, STAKE_MIN_EMERGE, TOKEN.ticker).figure)}</b></div>
             <div><span>{t('GLD TO CLAIM')}</span><b>{gld(dividend.claimable)}</b></div>
           </div>
         )}
+        {/* The soft stake's explanation, under the figures rather than wedged
+            into one of them: it is a paragraph, and a paragraph in a quarter
+            of a card draws as a column of single words. */}
+        {dividend && <p className="muted small flywheel-hint">{tx(stakeWords(dividend, STAKE_MIN_EMERGE, TOKEN.ticker).note)}</p>}
         <div className="dividend-actions">
           {dividend && !dividend.registered && (
             <button onClick={() => void stakeNow()} disabled={dividendBusy || !wallet.address}>{wallet.address ? t('Register a soft stake') : t('Connect a wallet first')}</button>

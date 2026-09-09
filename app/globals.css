@@ -3065,10 +3065,15 @@ button.fold:hover { color: var(--emerald); }
 .soft-stake { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px 18px; align-items: center; margin: 0 0 14px; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--panel-edge-soft); background: rgba(255, 255, 255, 0.03); }
 .soft-stake .eyebrow { display: block; margin-bottom: 4px; }
 .soft-stake-text p { margin: 0; line-height: 1.5; }
-.soft-stake-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+/* Auto-fit rather than a fixed three: on a phone three columns of a panel
+   are ninety pixels each, which is narrower than the words in them. They
+   wrap to two, then one, and stop stretching to the tallest. */
+.soft-stake-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; align-items: start; }
 .soft-stake-figures div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; min-width: 0; }
 .soft-stake-figures span { font-size: 9.5px; letter-spacing: 0.08em; color: var(--muted); }
-.soft-stake-figures b { font-size: 14px; color: var(--cream); overflow-wrap: anywhere; }
+/* A figure may wrap between its number and its unit, never inside the number. */
+.soft-stake-figures b { font-size: 14px; color: var(--cream); overflow-wrap: normal; }
+.soft-stake-hint { grid-column: 1 / -1; margin: 0; line-height: 1.5; }
 .soft-stake-actions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .soft-stake-actions button { padding: 8px 14px; border-radius: 9px; border: 1px solid var(--emerald); background: rgba(184, 231, 86, 0.12); color: var(--emerald); font: inherit; font-size: 12px; cursor: pointer; }
 .soft-stake-actions button:disabled { opacity: 0.5; cursor: default; }
@@ -3228,7 +3233,10 @@ button.fold:hover { color: var(--emerald); }
 .boon-row span { grid-column: 1; }
 .boon-row button { grid-row: 1 / span 2; grid-column: 2; margin: 0; white-space: nowrap; }
 
-.flywheel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+/* Two where there is room, one where there is not — and never stretched to
+   the tallest card, so a figure beside a longer one is not a tall box
+   with a number at the top of it. */
+.flywheel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; align-items: start; }
 .flywheel-grid div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }
 .flywheel-grid span { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); }
 .flywheel-grid b { font-size: 16px; color: var(--cream); }
@@ -3242,7 +3250,8 @@ button.fold:hover { color: var(--emerald); }
 .arena-bet-row.token label span { color: var(--gold, #f0d05e); }
 
 .dividend-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.flywheel-grid em { font-size: 10px; }
+.flywheel-grid em { font-size: 10px; line-height: 1.45; }
+.flywheel-hint { margin: 8px 0 0; line-height: 1.5; }
 
 
 /* ---- the first day ---- */

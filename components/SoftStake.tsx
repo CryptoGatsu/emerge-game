@@ -55,6 +55,7 @@ export default function SoftStake({ address, balance, hasLand }: { address: stri
   };
 
   const short = balance < STAKE_MIN_EMERGE;
+  const words = address && standing ? stakeWords(standing, STAKE_MIN_EMERGE, TOKEN.ticker) : null;
   return (
     <section className="soft-stake" aria-label={t('Soft stake')}>
       <div className="soft-stake-text">
@@ -64,11 +65,20 @@ export default function SoftStake({ address, balance, hasLand }: { address: stri
           {hasLand && ` ${t('Land earns its own share as well.')}`}
         </p>
       </div>
+      {/*
+        * Three figures, and the sentence that explains one of them underneath
+        * rather than inside it. The note ran to forty words in a column a
+        * third of a phone wide, so it drew as a ribbon two words across and
+        * the length of the screen, with the other two cards stretched empty
+        * beside it. A figure card holds a figure; the prose goes below, where
+        * it has the whole width to be read in.
+        */}
       <div className="soft-stake-figures">
-        <div><span>{t('YOUR SOFT STAKE')}</span><b>{!address ? '—' : !standing ? '…' : tx(stakeWords(standing, STAKE_MIN_EMERGE, TOKEN.ticker).figure)}</b>{address && standing && <em className="muted small">{tx(stakeWords(standing, STAKE_MIN_EMERGE, TOKEN.ticker).note)}</em>}</div>
+        <div><span>{t('YOUR SOFT STAKE')}</span><b>{!address ? '—' : !standing ? '…' : tx(words!.figure)}</b></div>
         <div><span>{t('THIS WEEK’S POOL')}</span><b>{standing ? `${standing.pool.toLocaleString()} ${TOKEN.ticker}` : '…'}</b></div>
         <div><span>{t('GLD TO CLAIM')}</span><b>{standing ? gld(standing.claimable) : '…'}</b></div>
       </div>
+      {words && <p className="muted small soft-stake-hint">{tx(words.note)}</p>}
       <div className="soft-stake-actions">
         {!address ? (
           <span className="muted small">{t('Connect a wallet to register.')}</span>
