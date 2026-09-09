@@ -156,7 +156,8 @@ NEXT_PUBLIC_OPENSEA_CHAIN=robinhood # built in; OpenSea's slug for the chain, fo
 NEXT_PUBLIC_ROBINHOOD_EXPLORER=https://robinhoodchain.blockscout.com   # built in; the chain's Blockscout
 NEXT_PUBLIC_EMERGE_ROYALTY_BPS=500  # the royalty the land contract was deployed with, so the panel and the collection metadata say the same
 NEXT_PUBLIC_SITE_URL=https://www.emergerh.world   # what the token metadata links back to
-EMERGE_ROYALTY_TOKENS=USDG:0x…:6    # optional: other tokens royalties may arrive in, as SYMBOL:address:decimals, comma-separated
+EMERGE_ROYALTY_TOKENS=SYM:0x…:6     # optional: further tokens royalties may arrive in. $EMERGE, wrapped ETH and the
+                                    # EMERGE_SWAP_PATH stablecoin (USDG) are watched already; decimals are read from the token
 ```
 
 A testnet deployment (`NEXT_PUBLIC_CHAIN_TARGET=testnet`, chain id 46630)
@@ -512,6 +513,18 @@ with the rest, in GLD, to everybody holding land. The chain's own coin or a
 stablecoin also goes to the vault, is counted under its own heading
 (`POST /api/nft {"royalties":true}` shows it), and is turned into $EMERGE by
 hand. `POST /api/nft {"sweep":true}` runs a sweep now.
+
+**Which tokens are watched.** A royalty in a token nobody looks for is worse
+than one nobody receives: it sits in the receiver, no sweep collects it, and
+no page says it is there. So the watch list is built rather than configured.
+$EMERGE always; wrapped ETH on mainnet, because a marketplace settling from
+an offer pays in it; and the stepping-stone token named in `EMERGE_SWAP_PATH`
+— USDG, which is what OpenSea lists in on this chain — so the address is not
+configured twice. `EMERGE_ROYALTY_TOKENS` adds any others as
+`SYMBOL:address:decimals`. **Decimals are read from each token contract**,
+with that setting only as the fallback: this number decides what holders are
+told they are owed, and reading a six-decimal stablecoin as eighteen would
+understate a royalty by a factor of a trillion, invisibly.
 
 ## Reading the registry without the game
 

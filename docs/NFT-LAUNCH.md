@@ -128,19 +128,40 @@ Land" with the OpenSea and explorer links; the token is in their wallet.
 - **The in-game land market is priced in $EMERGE.** `EmergeMarket` only
   takes $EMERGE: a buyer approves the price, the contract pays the seller
   95% and the royalty receiver 5%, and the plot moves, in one transaction.
-- **OpenSea is priced in whatever OpenSea offers on Robinhood Chain**, which
-  is the chain's own coin (ETH) and typically wrapped ETH; a listing there is
-  the seller's choice of price in those. OpenSea lets a collection owner add
-  ERC-20 payment tokens in the collection's settings where the chain supports
-  it — if $EMERGE can be added there, add it, and OpenSea buyers can pay in
-  $EMERGE too. Whatever they pay in, OpenSea pays the 5% to the same royalty
-  receiver, because it reads it from the contract (ERC-2981).
+- **OpenSea is priced in USDG.** OpenSea does not offer $EMERGE as a payment
+  token on Robinhood Chain, so the collection is listed and bought in USDG
+  there. Add USDG in the collection's payment-token settings once you have
+  claimed the page. Sellers may also see the chain's own coin (ETH) and
+  wrapped ETH offered; whichever a buyer pays in, OpenSea pays the same 5%
+  to the same royalty receiver, because it reads the rate from the contract
+  (ERC-2981).
 - **Royalties in $EMERGE go straight into the dividend pool** when the cron
-  sweeps the receiver (every fifteen minutes). **Royalties in ETH are swept to
-  the vault and held**, counted under their own heading in `/api/nft` and the
-  royalty book, until they are turned into $EMERGE by hand and added to the
-  pool. Gold never becomes tokens; this is the other direction, and it is a
-  deliberate manual step so the vault never swaps unattended.
+  sweeps the receiver, every fifteen minutes.
+- **Royalties in anything else — USDG, ETH, wrapped ETH — are swept to the
+  vault and held**, counted under their own heading, until they are turned
+  into $EMERGE by hand and added to the pool. Gold never becomes tokens;
+  this is the other direction, and it is a deliberate manual step so the
+  vault never swaps unattended.
+
+The server watches USDG without being told: it reads the stepping-stone
+token out of `EMERGE_SWAP_PATH`, which the GLD dividend swap already sets.
+Wrapped ETH is built in. Anything else is named in `EMERGE_ROYALTY_TOKENS`
+as `SYMBOL:address:decimals`. Each token's decimals are read from the token
+itself rather than trusted from that setting, so a stablecoin can never be
+counted as if it had eighteen.
+
+### What is waiting, and turning it into $EMERGE
+
+```bash
+curl -sS -X POST https://www.emergerh.world/api/nft \
+  -H "Authorization: Bearer $CRON_SECRET" -H 'content-type: application/json' \
+  -d '{"royalties":true}'
+```
+
+`held` is what the vault is holding for the holders and has not yet converted,
+per token; `swept` is every sweep so far. To convert: sell the held USDG for
+$EMERGE from the vault wallet, then add the proceeds to the pool. Do it when
+the amount is worth the trade, not on a schedule.
 
 ## Does the collection start by itself?
 

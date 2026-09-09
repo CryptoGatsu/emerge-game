@@ -25,6 +25,7 @@ import 'server-only';
 import { after } from 'next/server';
 import { createPublicClient, defineChain, encodeFunctionData, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, TOKEN, tokenLive } from '../chain/emerge';
+import { UNISWAP_ON_ROBINHOOD, parseRoute } from '../chain/universal';
 import { ERC20_ABI, LAND_ABI, LAND_ADDRESS, MARKET_ABI, MARKET_ADDRESS, ROYALTIES_ABI, ROYALTIES_ADDRESS, plotsAreTokens } from '../chain/plots';
 import { serverKey } from '../limits';
 import { counter, getValue, hdel, hget, hgetall, hset, incrBy, push, range, releaseLock, setValue, takeLock } from './kv';
@@ -366,20 +367,74 @@ export async function royaltiesWaiting(): Promise<{ token: string; symbol: strin
   out.push({ token: ZERO, symbol: 'ETH', amount: Number(native) / 1e18 });
   for (const t of royaltyTokens()) {
     const raw = await client.readContract({ address: t.address as Hex, abi: ERC20_ABI, functionName: 'balanceOf', args: [ROYALTIES_ADDRESS as Hex] }).catch(() => 0n);
-    out.push({ token: t.address, symbol: t.symbol, amount: Number(raw / 10n ** BigInt(t.decimals - 6)) / 1e6 });
+    const decimals = await decimalsOf(t.address, t.decimals);
+    out.push({ token: t.address, symbol: t.symbol, amount: wholeUnits(raw, decimals) });
   }
   return out;
 }
 
-/** The tokens royalties may arrive in: $EMERGE always, plus whatever `EMERGE_ROYALTY_TOKENS` names as `SYMBOL:address:decimals`. */
+/**
+ * The tokens royalties may arrive in.
+ *
+ * $EMERGE always, because the game's own market prices in it. **WETH**,
+ * because a marketplace settling from an offer rather than a straight
+ * purchase pays in wrapped ETH. **Whatever the GLD swap route steps
+ * through** — USDG — because that is the stablecoin this chain's
+ * marketplaces list in, and it is already named in `EMERGE_SWAP_PATH`, so
+ * it need not be configured twice. Native ETH is watched separately, by
+ * balance.
+ *
+ * A token nobody watches is worse than one nobody has: the money sits in
+ * the receiver, no sweep collects it, and no page says it is there.
+ *
+ * `EMERGE_ROYALTY_TOKENS` adds any others as `SYMBOL:address:decimals`,
+ * comma-separated, and naming an address already listed renames it.
+ */
 function royaltyTokens(): { address: string; symbol: string; decimals: number }[] {
   const out: { address: string; symbol: string; decimals: number }[] = [];
-  if (tokenLive() && ACTIVE_CHAIN.tokenAddress) out.push({ address: ACTIVE_CHAIN.tokenAddress, symbol: TOKEN.ticker, decimals: 18 });
+  const add = (address: string | null | undefined, symbol: string, decimals: number) => {
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address) || address.toLowerCase() === ZERO) return;
+    const held = out.find((t) => t.address.toLowerCase() === address.toLowerCase());
+    if (held) { held.symbol = symbol; return; }
+    out.push({ address, symbol, decimals });
+  };
+  if (tokenLive()) add(ACTIVE_CHAIN.tokenAddress, TOKEN.ticker, 18);
+  if (ACTIVE_CHAIN.key === 'robinhood') add(UNISWAP_ON_ROBINHOOD.weth, 'WETH', 18);
+  // The swap route's stepping stones: USDG, on this chain.
+  try {
+    for (const via of parseRoute(process.env.EMERGE_SWAP_PATH, Number(process.env.EMERGE_SWAP_FEE) || 3000).via) add(via, 'USDG', 6);
+  } catch { /* a route we cannot read names no tokens */ }
   for (const entry of (process.env.EMERGE_ROYALTY_TOKENS ?? '').split(',')) {
     const [symbol, address, decimals] = entry.split(':').map((x) => x.trim());
-    if (symbol && /^0x[0-9a-fA-F]{40}$/.test(address ?? '')) out.push({ address, symbol, decimals: Number(decimals) || 18 });
+    if (symbol) add(address, symbol, Number(decimals) || 18);
   }
   return out;
+}
+
+/**
+ * Whole units from a raw balance, without losing the small change on an
+ * eighteen-decimal token or overflowing on a six-decimal one.
+ */
+const wholeUnits = (raw: bigint, decimals: number) =>
+  decimals <= 6 ? Number(raw) / 10 ** decimals : Number(raw / 10n ** BigInt(decimals - 6)) / 1e6;
+
+/**
+ * What a token says its own decimals are.
+ *
+ * Asked of the contract rather than taken from configuration, because this
+ * number decides what the holders are told they are owed: reading a
+ * six-decimal stablecoin as eighteen understates a royalty by a factor of a
+ * trillion, and the mistake would be invisible. Configuration is the
+ * fallback for a token that will not answer.
+ */
+async function decimalsOf(address: string, fallback: number): Promise<number> {
+  try {
+    const said = await reader().readContract({ address: address as Hex, abi: ERC20_ABI, functionName: 'decimals' });
+    const n = Number(said);
+    return Number.isInteger(n) && n >= 0 && n <= 36 ? n : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /**
