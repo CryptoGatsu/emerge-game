@@ -77,7 +77,18 @@ transaction it signs. A few dollars' worth covers hundreds of mints.
 
 ## 3. Check before minting anything
 
-From a checkout of the repo, with the three addresses:
+The easiest way needs nothing installed: once the site is redeployed with
+the three variables, open this in a browser or curl, with your cron secret:
+
+```bash
+curl -sS https://www.emergerh.world/api/nft?check=1 -H "Authorization: Bearer $CRON_SECRET"
+```
+
+It answers as plain text, one line per check, and ends with "Everything
+agrees." or names what to fix.
+
+The same checks also exist as a script for a computer with the repo checked
+out (`git clone`, `npm install`, then this from the repo folder):
 
 ```bash
 NEXT_PUBLIC_EMERGE_TOKEN=0x4Cd8bBfa2ED66d8f4c328e15617a2a24141219Ce \
