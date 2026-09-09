@@ -31,7 +31,7 @@ import { ACTIVE_CHAIN, TOKEN } from '../chain/emerge';
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
   name: ACTIVE_CHAIN.label,
-  nativeCurrency: { name: 'Robinhood', symbol: 'RH', decimals: 18 },
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: { default: { http: [ACTIVE_CHAIN.rpcUrl ?? ''] } },
 });
 

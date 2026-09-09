@@ -41,7 +41,8 @@ import { fetchNames } from '@/lib/net/names';
 import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
 import { keepReceipt, dropReceipt, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
-import { onChainClaimsLive, openSeaUrl, plotExplorerUrl } from '@/lib/chain/registry';
+import { marketLive, onChainClaimsLive, openSeaUrl, plotExplorerUrl } from '@/lib/chain/registry';
+import { ROYALTY_PERCENT } from '@/lib/chain/plots';
 import { untilUtcMidnight, MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet, currentWallet } from './WalletPicker';
@@ -2751,7 +2752,9 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
             <>
               <h3>{t('Listed at {price} {ticker}', { price: listing.price.toLocaleString(), ticker: TOKEN.ticker })}</h3>
               <p className="muted small">
-                {t('On the map for every player. A buyer pays your wallet directly in {ticker} — a transfer, not a burn — and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker })}
+                {marketLive()
+                  ? t('Listed on the land market contract. The plot stays in your wallet until it sells; a buyer pays the price in {ticker} in one transaction, {fee}% of it goes to the holders’ dividend pool, and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker, fee: ROYALTY_PERCENT })
+                  : t('On the map for every player. A buyer pays your wallet directly in {ticker} — a transfer, not a burn — and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker })}
               </p>
               <button onClick={() => onList(null)}>{t('Withdraw listing')}</button>
             </>
@@ -2765,7 +2768,9 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
                 {t('List for sale')}
               </button>
               <p className="muted small">
-                {t('A sale is between you and the buyer: they pay your wallet the asking price in {ticker}, nothing is burned, and they walk into this settlement as you left it.', { ticker: TOKEN.ticker })}
+                {marketLive()
+                  ? t('The plot is a token: listing it takes one signature to let the market move it when it sells, then one to name the price. It stays in your wallet until a buyer pays, on the world map or on OpenSea; {fee}% of every resale goes to the holders’ dividend pool.', { fee: ROYALTY_PERCENT })
+                  : t('A sale is between you and the buyer: they pay your wallet the asking price in {ticker}, nothing is burned, and they walk into this settlement as you left it.', { ticker: TOKEN.ticker })}
               </p>
             </>
           )}

@@ -415,7 +415,10 @@ export async function switchToEmergeChain(config: ChainConfig = ACTIVE_CHAIN): P
         params: [{
           chainId: hexId,
           chainName: config.label,
-          nativeCurrency: { name: TOKEN.name, symbol: TOKEN.symbol, decimals: TOKEN.decimals },
+          // The chain's own coin is ETH — what gas is paid in — not $EMERGE. A
+          // wallet checks this against what it knows of chain 4663 and refuses
+          // to add a network whose currency symbol is wrong.
+          nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
           rpcUrls: [config.rpcUrl],
           blockExplorerUrls: config.explorerUrl ? [config.explorerUrl] : undefined,
         }],

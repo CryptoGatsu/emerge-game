@@ -10,7 +10,9 @@
  *   NEXT_PUBLIC_EMERGE_REGISTRY   the land contract — set, and plots are tokens
  *   NEXT_PUBLIC_EMERGE_MARKET     the market, optional
  *   NEXT_PUBLIC_EMERGE_ROYALTIES  the royalty receiver, optional
+ *   (…_TESTNET variants of all three when NEXT_PUBLIC_CHAIN_TARGET=testnet)
  *   NEXT_PUBLIC_OPENSEA_CHAIN     OpenSea's slug for the chain, for links
+ *   NEXT_PUBLIC_EMERGE_ROYALTY_BPS the royalty the land contract was deployed with (default 500 = 5%)
  */
 
 import { ACTIVE_CHAIN } from './emerge';
@@ -19,8 +21,19 @@ const address = (raw: string | undefined | null) => (raw && /^0x[0-9a-fA-F]{40}$
 
 /** The land contract: plots are tokens exactly when this is set. */
 export const LAND_ADDRESS = address(ACTIVE_CHAIN.registryAddress);
-export const MARKET_ADDRESS = address(process.env.NEXT_PUBLIC_EMERGE_MARKET);
-export const ROYALTIES_ADDRESS = address(process.env.NEXT_PUBLIC_EMERGE_ROYALTIES);
+// The testnet build reads its own addresses, as the token and land do, so a
+// testnet deployment never points at mainnet contracts by accident.
+const testnet = process.env.NEXT_PUBLIC_CHAIN_TARGET === 'testnet';
+export const MARKET_ADDRESS = address(testnet ? process.env.NEXT_PUBLIC_EMERGE_MARKET_TESTNET : process.env.NEXT_PUBLIC_EMERGE_MARKET);
+export const ROYALTIES_ADDRESS = address(testnet ? process.env.NEXT_PUBLIC_EMERGE_ROYALTIES_TESTNET : process.env.NEXT_PUBLIC_EMERGE_ROYALTIES);
+
+/**
+ * The holders' share of every resale, in basis points, as the land contract
+ * was deployed with (`royaltyBps`). The contract is the authority — this is
+ * what the interface and the collection metadata say, so keep them the same.
+ */
+export const ROYALTY_BPS = Math.max(0, Math.min(1000, Number(process.env.NEXT_PUBLIC_EMERGE_ROYALTY_BPS ?? 500) || 0));
+export const ROYALTY_PERCENT = ROYALTY_BPS / 100;
 
 /** Plots are ERC-721 tokens on this build. */
 export const plotsAreTokens = () => LAND_ADDRESS !== null;

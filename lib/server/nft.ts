@@ -35,7 +35,7 @@ import { forgetLandMarket } from './landMarket';
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
   name: ACTIVE_CHAIN.label,
-  nativeCurrency: { name: 'Robinhood', symbol: 'RH', decimals: 18 },
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: { default: { http: [ACTIVE_CHAIN.rpcUrl ?? ''] } },
 });
 const reader = () => createPublicClient({ chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });

@@ -95,6 +95,15 @@ Two consequences:
 Three contracts, none with imports, so each compiles in Remix as it stands.
 Deploy them in this order from the wallet that will own them.
 
+**Compiler settings, before anything else.** Solidity 0.8.20 or later,
+optimizer on (200 runs), and **EVM version `paris`** — in Remix that is the
+"EVM VERSION" dropdown under Advanced Configurations. The compiler's default
+target (`cancun`) emits opcodes some chains do not run yet; `paris` needs
+nothing newer than the merge and is what the contract tests and the local
+rehearsal below were compiled with. Gas on Robinhood Chain is paid in ETH
+(the chain's own coin), so the deploying wallet and the vault both need a
+little ETH, not $EMERGE.
+
 **a. `EmergeRoyalties`** — the royalty receiver.
 
 ```solidity
@@ -140,10 +149,17 @@ NEXT_PUBLIC_EMERGE_TOKEN=0x…        # the ERC-20
 NEXT_PUBLIC_EMERGE_REGISTRY=0x…     # EmergeLand — set, and plots are tokens
 NEXT_PUBLIC_EMERGE_MARKET=0x…       # EmergeMarket — set, and the land market sells on chain
 NEXT_PUBLIC_EMERGE_ROYALTIES=0x…    # EmergeRoyalties — set, and the cron sweeps it
-NEXT_PUBLIC_OPENSEA_CHAIN=…         # OpenSea's slug for the chain, for "View on OpenSea" links; leave unset until OpenSea lists the chain
+NEXT_PUBLIC_OPENSEA_CHAIN=…         # OpenSea's slug for the chain, for "View on OpenSea" links: the segment after /assets/ in any OpenSea URL for a Robinhood Chain token
+NEXT_PUBLIC_ROBINHOOD_EXPLORER=…    # the chain's Blockscout, for "Verify on Robinhood Chain" links (https://…, no trailing path)
+NEXT_PUBLIC_EMERGE_ROYALTY_BPS=500  # the royalty the land contract was deployed with, so the panel and the collection metadata say the same
 NEXT_PUBLIC_SITE_URL=https://www.emergerh.world   # what the token metadata links back to
 EMERGE_ROYALTY_TOKENS=USDG:0x…:6    # optional: other tokens royalties may arrive in, as SYMBOL:address:decimals, comma-separated
 ```
+
+A testnet deployment (`NEXT_PUBLIC_CHAIN_TARGET=testnet`, chain id 46630)
+reads `NEXT_PUBLIC_EMERGE_TOKEN_TESTNET`, `NEXT_PUBLIC_EMERGE_REGISTRY_TESTNET`,
+`NEXT_PUBLIC_EMERGE_MARKET_TESTNET` and `NEXT_PUBLIC_EMERGE_ROYALTIES_TESTNET`
+instead, so a test build can never point at the mainnet contracts by accident.
 
 All are read at build time, so a deployment has to be rebuilt after they
 change. Nothing else needs editing. The vault and burn addresses have working
@@ -215,10 +231,57 @@ For the test network, the same two variables with a `_TESTNET` suffix, plus
 
 ### 7. Check it
 
+Before the first mint, run the pre-flight from the repo with the deployment's
+environment. It reads the chain and the site and writes nothing:
+
+```bash
+NEXT_PUBLIC_EMERGE_TOKEN=0x… NEXT_PUBLIC_EMERGE_REGISTRY=0x… NEXT_PUBLIC_EMERGE_MARKET=0x… \
+NEXT_PUBLIC_EMERGE_ROYALTIES=0x… NEXT_PUBLIC_SITE_URL=https://www.emergerh.world \
+node scripts/check-nft-chain.mjs
+```
+
+It confirms the RPC answers for chain 4663, the vault holds ETH for gas, the
+token has 18 decimals, the land contract is Emerge Land with the vault as its
+minter and the royalty receiver as its receiver, `baseURI` and `contractURI`
+point at this site, the ERC-721/2981/4906 interfaces are declared, the market
+sells this land for this token and is not paused, the royalty receiver sweeps
+to the vault, and `/api/nft` on the site was built with the same addresses and
+can sign. Anything that disagrees is named. Add `NEXT_PUBLIC_CHAIN_TARGET=testnet`
+and the `…_TESTNET` addresses to check a testnet deployment first.
+
 With the token set, the world map's balance comes from the wallet rather than
-reading 2,000,000, and the plot price comes from the contract. With the registry
-set as well, the claim panel says *"This is real ownership"* and names the token
-id, and claiming asks for two signatures instead of one.
+reading 2,000,000. With the land contract set as well, a plot's card says
+*"Token #seed of Emerge Land"* with its OpenSea and explorer links, `GET
+/api/nft` answers `live: true` with the minted count, and the first claim
+after the deploy appears as a token in the buyer's wallet within the minute.
+
+### Rehearsed end to end
+
+Everything the game does with these contracts has been run against a live EVM
+carrying chain id 4663 — a local node with the three contracts and an ERC-20
+standing in for $EMERGE, with the app built against it and real signed
+transactions on both sides. What passed, in order: a claim paid on chain and
+verified by `/api/plots` (a payment short of the price refused, the same
+payment refused twice); the vault minting the plot; `tokenURI`, the metadata,
+the picture and `contractURI` as OpenSea reads them; release refused while the
+token stands; the market refusing an unapproved listing, a listing at the
+chain's price mirrored to the row and the land market; a buy below the price
+refused, a buy at it paying the seller 95% and the royalty receiver 5%; the
+seller unable to relist what the chain says is sold; the row following the
+buyer; the sweep booking the $EMERGE royalty into the dividend pool and holding
+ETH; the airdrop counting what is already minted; a wallet-to-wallet transfer
+picked up by the cron door; a burn releasing the row and freeing the seed. And
+in the browser, with a wallet that signs: listing from the On-Chain panel
+(approval, then listing), buying from the world map (allowance, then the
+purchase, then walking in), and giving the plot up (the burn, then the row).
+
+The rehearsal is in the repo — `contracts/rehearsal/`, with its own README —
+and runs against a local node in a few minutes, or against the testnet with
+three funded keys.
+
+What that rehearsal cannot prove is the real network itself — the public RPC,
+the explorer's URL, OpenSea's slug for the chain — which is what the pre-flight
+above and a first claim on the testnet are for.
 
 ---
 
