@@ -8,10 +8,10 @@
  * rather than having whichever one won the injection race picked for them.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   ACTIVE_CHAIN, INITIAL_WALLET, PREFERRED_WALLETS, connectWallet, discoverWallets,
-  resumeWallet, shortAddress, switchToEmergeChain,
+  resumeWallet, shortAddress, switchToEmergeChain, walletDeepLinks, walletSighting,
   type DiscoveredWallet, type WalletState,
 } from '@/lib/chain/emerge';
 import { t, useLocale } from '@/lib/i18n';
@@ -100,6 +100,9 @@ function resumeOnce(available: DiscoveredWallet[]) {
   }).catch(() => { /* nothing to resume */ });
 }
 
+/** "MetaMask, Trust Wallet and Binance Wallet": a list said the way a person says one. */
+const listOf = (words: readonly string[], conj: string) => words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')}${conj}${words[words.length - 1]}`;
+
 export function useWallet() {
   const [wallet, setLocal] = useState<WalletState>(current);
   const [available, setAvailable] = useState<DiscoveredWallet[]>([]);
@@ -163,19 +166,39 @@ export function WalletPicker({ compact = false }: { compact?: boolean }) {
   }
 
   if (!available.length) {
+    const sighting = walletSighting();
     return (
       <div className="wallet-box">
         <small className="muted">
-          {t('No wallet detected. {wallets} works with {chain}', { wallets: PREFERRED_WALLETS.join(t(' or ')), chain: ACTIVE_CHAIN.label })}
+          {t('No wallet detected. {wallets} works with {chain}', { wallets: listOf(PREFERRED_WALLETS, t(' or ')), chain: ACTIVE_CHAIN.label })}
           {compact ? t(' — you can still claim and play.') : '.'}
         </small>
+        {sighting.mobile && !sighting.inApp && (
+          <small className="muted wallet-open">
+            {t('A phone browser has no wallet in it. Open this page inside your wallet’s own browser:')}
+            {' '}
+            {walletDeepLinks().map((l) => <a key={l.name} href={l.href}>{l.name}</a>).reduce<ReactNode[]>((acc, el, i) => (i ? [...acc, ' · ', el] : [el]), [])}
+            {' · '}
+            {t('Binance: in the Binance app, open Wallet → Web3 and enter emergerh.world on its Discover page.')}
+          </small>
+        )}
+        {!compact && (
+          <details className="wallet-why">
+            <summary>{t('Why can’t the game see my wallet?')}</summary>
+            <small className="muted">
+              {t('The game listens for wallets that announce themselves and looks for the ones that only inject, for eight seconds after the page opens. What it can see right now:')}
+              {' '}<code>{sighting.line}</code>{' '}
+              {t('If your wallet is installed and this says none, send this line to support.')}
+            </small>
+          </details>
+        )}
       </div>
     );
   }
 
   return (
     <div className="wallet-box">
-      {!compact && <small className="muted">{t('{wallets} both work with {chain}.', { wallets: PREFERRED_WALLETS.join(t(' and ')), chain: ACTIVE_CHAIN.label })}</small>}
+      {!compact && <small className="muted">{t('{wallets} all work with {chain}.', { wallets: listOf(PREFERRED_WALLETS, t(' and ')), chain: ACTIVE_CHAIN.label })}</small>}
       <div className="wallet-options">
         {available.map((option) => (
           <button key={option.id} className="wallet-option" onClick={() => connect(option)} disabled={wallet.status === 'connecting'}>

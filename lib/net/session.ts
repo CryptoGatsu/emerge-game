@@ -69,10 +69,16 @@ export async function ensureSession(address: string): Promise<boolean> {
       if (!askResponse.ok) return false;
       const { message, issuedAt } = (await askResponse.json()) as { message: string; issuedAt: number };
 
-      const signature = (await provider.request({
-        method: 'personal_sign',
-        params: [message, address],
-      })) as string;
+      // A wallet prompt that is never answered — dismissed without rejecting,
+      // or a mobile wallet that never came back — used to leave this promise
+      // open for ever, and because every sign-in shares the one in flight,
+      // every later click waited on it too: "Surveying…" and nothing else.
+      // Two minutes is long enough to find the prompt; after that the click
+      // is answered and the next one asks again.
+      const signature = (await Promise.race([
+        provider.request({ method: 'personal_sign', params: [message, address] }),
+        new Promise<never>((_, reject) => { window.setTimeout(() => reject(new Error('unsigned')), 120_000); }),
+      ])) as string;
 
       const response = await fetch('/api/session', {
         method: 'POST',

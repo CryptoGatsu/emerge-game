@@ -50,6 +50,7 @@ const envNumber = (value: string | undefined, fallback: number | null = null) =>
 /** Robinhood Chain mainnet. */
 export const MAINNET_RPC = 'https://rpc.mainnet.chain.robinhood.com';
 export const MAINNET_CHAIN_ID = 4663;
+export const MAINNET_EXPLORER = 'https://robinhoodchain.blockscout.com';
 /** Robinhood Chain testnet. Note the `/rpc` path — the host alone is not an endpoint. */
 export const TESTNET_RPC = 'https://rpc.testnet.chain.robinhood.com/rpc';
 export const TESTNET_CHAIN_ID = 46630;
@@ -60,7 +61,8 @@ export const CHAINS: Record<ChainConfig['key'], ChainConfig> = {
     label: 'Robinhood Chain',
     chainId: envNumber(process.env.NEXT_PUBLIC_ROBINHOOD_CHAIN_ID, MAINNET_CHAIN_ID),
     rpcUrl: process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ?? MAINNET_RPC,
-    explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_EXPLORER ?? null,
+    // The chain's Blockscout: a public fact about the network, like the RPC.
+    explorerUrl: process.env.NEXT_PUBLIC_ROBINHOOD_EXPLORER ?? MAINNET_EXPLORER,
     tokenAddress: process.env.NEXT_PUBLIC_EMERGE_TOKEN ?? null,
     registryAddress: process.env.NEXT_PUBLIC_EMERGE_REGISTRY ?? null,
   },
@@ -118,7 +120,13 @@ interface Eip6963ProviderInfo { uuid: string; name: string; icon: string; rdns: 
 interface Eip6963AnnounceEvent extends Event { detail: { info: Eip6963ProviderInfo; provider: Eip1193Provider } }
 
 declare global {
-  interface Window { ethereum?: Eip1193Provider & { providers?: Eip1193Provider[]; isMetaMask?: boolean; isTrust?: boolean; isTrustWallet?: boolean } }
+  interface Window {
+    ethereum?: Eip1193Provider & { providers?: Eip1193Provider[]; isMetaMask?: boolean; isTrust?: boolean; isTrustWallet?: boolean; isBinance?: boolean };
+    /** The Binance app's in-app Web3 wallet, which injects under its own name rather than `window.ethereum`. */
+    binancew3w?: { ethereum?: Eip1193Provider };
+    /** The older Binance Chain Wallet extension. */
+    BinanceChain?: Eip1193Provider;
+  }
 }
 
 export interface DiscoveredWallet {
@@ -130,13 +138,35 @@ export interface DiscoveredWallet {
 }
 
 /** Wallets we name explicitly, because they are the ones Robinhood Chain users have. */
-export const PREFERRED_WALLETS = ['MetaMask', 'Trust Wallet'] as const;
+export const PREFERRED_WALLETS = ['MetaMask', 'Trust Wallet', 'Binance Wallet'] as const;
 
 const nameFromLegacy = (provider: Window['ethereum']) => {
   if (!provider) return 'Browser wallet';
+  // Binance first: its extension also sets isMetaMask for sites that only
+  // look for that, and would otherwise be listed under the wrong name.
+  if (provider.isBinance) return 'Binance Wallet';
   if (provider.isMetaMask) return 'MetaMask';
   if (provider.isTrust || provider.isTrustWallet) return 'Trust Wallet';
   return 'Browser wallet';
+};
+
+/**
+ * Binance's wallets, where they inject.
+ *
+ * The Binance Wallet extension announces itself through EIP-6963 like the
+ * others and needs nothing from here. The Web3 wallet inside the Binance app
+ * puts its provider at `window.binancew3w.ethereum`, and the older Binance
+ * Chain Wallet at `window.BinanceChain`; neither announces, so a player
+ * opening the game from the Binance app saw "No wallet detected".
+ */
+const binanceProviders = (): Eip1193Provider[] => {
+  if (typeof window === 'undefined') return [];
+  const out: Eip1193Provider[] = [];
+  const inApp = window.binancew3w?.ethereum;
+  if (inApp && typeof inApp.request === 'function') out.push(inApp);
+  const legacy = window.BinanceChain;
+  if (legacy && typeof legacy.request === 'function' && legacy !== inApp) out.push(legacy);
+  return out;
 };
 
 /**
@@ -171,21 +201,97 @@ export function discoverWallets(onChange: (wallets: DiscoveredWallet[]) => void)
   window.addEventListener('eip6963:announceProvider', onAnnounce);
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 
-  // Fall back to the injected object for wallets that do not announce.
-  const legacy = window.ethereum;
-  if (legacy) {
-    const list = legacy.providers?.length ? legacy.providers : [legacy];
+  /*
+   * The injected objects, for wallets that do not announce — looked for
+   * now, and again for a while.
+   *
+   * A wallet app's browser injects its provider on its own schedule, often
+   * after the page has run: Trust Wallet and the Binance app both do, and a
+   * player who opened the game from the Binance app saw "No wallet detected"
+   * because the one look at `window.ethereum` came before the wallet had put
+   * anything there. So the look repeats for a few seconds, fires again on
+   * the `ethereum#initialized` event wallets send when they are ready, and
+   * asks the announcing wallets a second and third time for the ones that
+   * register their listener late. Every provider found is reported once,
+   * by object and by name.
+   */
+  const seen = new Set<Eip1193Provider>();
+  const legacyLook = () => {
+    let changed = false;
+    const legacy = window.ethereum;
+    const list: Eip1193Provider[] = legacy ? (legacy.providers?.length ? legacy.providers : [legacy]) : [];
     list.forEach((provider, i) => {
+      if (seen.has(provider)) return;
+      seen.add(provider);
       const named = nameFromLegacy(provider as Window['ethereum']);
       const id = `legacy:${named}:${i}`;
-      if (![...found.values()].some((w) => w.name === named)) {
+      if (![...found.values()].some((w) => w.name === named || w.provider === provider)) {
         found.set(id, { id, name: named, icon: null, rdns: null, provider });
+        changed = true;
       }
     });
-    publish();
-  }
+    binanceProviders().forEach((provider, i) => {
+      if (seen.has(provider)) return;
+      seen.add(provider);
+      const id = `binance:${i}`;
+      if (![...found.values()].some((w) => w.name === 'Binance Wallet' || /binance/i.test(w.rdns ?? '') || w.provider === provider)) {
+        found.set(id, { id, name: 'Binance Wallet', icon: null, rdns: null, provider });
+        changed = true;
+      }
+    });
+    if (changed) publish();
+  };
+  legacyLook();
+  if (!found.size) publish();
 
-  return () => window.removeEventListener('eip6963:announceProvider', onAnnounce);
+  const timers: number[] = [];
+  const again = () => { window.dispatchEvent(new Event('eip6963:requestProvider')); legacyLook(); };
+  for (const ms of [300, 1000, 2500, 5000, 8000]) timers.push(window.setTimeout(again, ms));
+  const poll = window.setInterval(legacyLook, 400);
+  timers.push(window.setTimeout(() => window.clearInterval(poll), 8000));
+  window.addEventListener('ethereum#initialized', again);
+  window.addEventListener('focus', again);
+
+  return () => {
+    window.removeEventListener('eip6963:announceProvider', onAnnounce);
+    window.removeEventListener('ethereum#initialized', again);
+    window.removeEventListener('focus', again);
+    window.clearInterval(poll);
+    for (const id of timers) window.clearTimeout(id);
+  };
+}
+
+/**
+ * What the page can see of a wallet, for the line under "No wallet detected".
+ *
+ * Written for the support channel: a player's screenshot of this line says
+ * whether the wallet injected anything at all, under which name, and whether
+ * the page is inside a wallet app's browser or a plain mobile browser where
+ * no extension can exist. Nothing here is a secret.
+ */
+export function walletSighting(): { line: string; mobile: boolean; inApp: string | null } {
+  if (typeof window === 'undefined') return { line: '', mobile: false, inApp: null };
+  const ua = navigator.userAgent || '';
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const inApp = /BNC|Binance/i.test(ua) ? 'Binance app' : /Trust/i.test(ua) ? 'Trust Wallet' : /MetaMaskMobile/i.test(ua) ? 'MetaMask' : null;
+  const eth = window.ethereum;
+  const parts: string[] = [];
+  parts.push(eth ? `ethereum: ${nameFromLegacy(eth)}${eth.providers?.length ? ` (${eth.providers.length})` : ''}` : 'ethereum: none');
+  parts.push(`binancew3w: ${window.binancew3w?.ethereum ? 'yes' : 'none'}`);
+  parts.push(`BinanceChain: ${window.BinanceChain ? 'yes' : 'none'}`);
+  parts.push(mobile ? `mobile${inApp ? `, ${inApp}` : ', plain browser'}` : 'desktop');
+  return { line: parts.join(' · '), mobile, inApp };
+}
+
+/** Where a phone can open this page inside a wallet's own browser. */
+export function walletDeepLinks(): { name: string; href: string }[] {
+  if (typeof window === 'undefined') return [];
+  const here = window.location.href;
+  const bare = here.replace(/^https?:\/\//, '');
+  return [
+    { name: 'MetaMask', href: `https://metamask.app.link/dapp/${bare}` },
+    { name: 'Trust Wallet', href: `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(here)}` },
+  ];
 }
 
 export interface WalletState {
@@ -311,7 +417,10 @@ export async function switchToEmergeChain(config: ChainConfig = ACTIVE_CHAIN): P
         params: [{
           chainId: hexId,
           chainName: config.label,
-          nativeCurrency: { name: TOKEN.name, symbol: TOKEN.symbol, decimals: TOKEN.decimals },
+          // The chain's own coin is ETH — what gas is paid in — not $EMERGE. A
+          // wallet checks this against what it knows of chain 4663 and refuses
+          // to add a network whose currency symbol is wrong.
+          nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
           rpcUrls: [config.rpcUrl],
           blockExplorerUrls: config.explorerUrl ? [config.explorerUrl] : undefined,
         }],
@@ -731,6 +840,20 @@ async function burnViaToken(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The transaction was rejected.';
     return { ok: false, txHash: null, message };
+  }
+}
+
+/** Send the chain's own coin from the player's wallet, for a casino pass. */
+export async function sendEth(from: string, to: string, wei: bigint): Promise<{ ok: true; txHash: string } | { ok: false; message: string }> {
+  if (!walletAvailable()) return { ok: false, message: 'No wallet to sign with.' };
+  try {
+    const txHash = (await activeProvider()!.request({
+      method: 'eth_sendTransaction',
+      params: [{ from, to, value: '0x' + wei.toString(16) }],
+    })) as string;
+    return { ok: true, txHash };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'The transaction was rejected.' };
   }
 }
 

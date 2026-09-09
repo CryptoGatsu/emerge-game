@@ -24,13 +24,34 @@ export interface Payout {
   net: number;
   at: number;
   txHash: string;
+  /** False while the transfer was sent and not yet seen mined; absent on older rows. */
+  confirmed?: boolean;
+  /** The chain rejected the transfer after it was booked: nothing arrived, and the balance is restored. */
+  failed?: boolean;
 }
 
-/** How much of today's ceiling a wallet has left. */
+/**
+ * What the vault judges this wallet's plots earn today — the figure a
+ * withdrawal is actually measured against. `level` is the level each plot is
+ * paid at, `reported` what its published city says; `days` the present days
+ * that bound the one to the other.
+ */
+export interface JudgedYield {
+  ceiling: number;
+  yield: number;
+  days: number;
+  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
+}
+
+/** How much of today's ceiling a wallet has left, and its share of the day when the day is shared out. */
 export interface EmissionRoom {
   spent: number;
   left: number;
   globalLeft: number;
+  budget?: number;
+  emitted?: number;
+  share?: number | null;
+  demand?: number | null;
 }
 
 export interface PayoutHistory {
@@ -49,6 +70,8 @@ export interface PayoutHistory {
   land: 'holds' | 'none' | 'no-registry' | 'unreachable' | null;
   /** No land, but a job: this wallet is paid as a hired hand. */
   hand: boolean;
+  /** The vault's own reckoning of today's yield, for a land holder. */
+  judged: JudgedYield | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -118,7 +141,7 @@ export interface WithdrawRequest {
 }
 
 export type PayoutResult =
-  | { ok: true; payout: Payout; txHash: string }
+  | { ok: true; payout: Payout; txHash: string; note: string | null }
   | { ok: false; reason: string };
 
 /** Take money out of the vault. Resolves once the transfer has been sent. */
@@ -133,11 +156,11 @@ export async function withdrawFromVault(request: WithdrawRequest): Promise<Payou
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { payout?: Payout; txHash?: string; error?: string };
+    const json = (await response.json()) as { payout?: Payout; txHash?: string; error?: string; note?: string | null };
     if (!response.ok || !json.payout || !json.txHash) {
       return { ok: false, reason: json.error ?? 'The vault refused the withdrawal.' };
     }
-    return { ok: true, payout: json.payout, txHash: json.txHash };
+    return { ok: true, payout: json.payout, txHash: json.txHash, note: json.note ?? null };
   } catch {
     return { ok: false, reason: 'Could not reach the vault. Nothing was taken.' };
   }
@@ -146,7 +169,7 @@ export async function withdrawFromVault(request: WithdrawRequest): Promise<Payou
 /** What a wallet has been paid, and what it may still be paid today. */
 export async function fetchPayouts(address: string): Promise<PayoutHistory> {
   const empty: PayoutHistory = {
-    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null, hand: false,
+    payouts: [], principal: 0, room: null, automatic: false, shared: false, land: null, hand: false, judged: null,
   };
   try {
     const response = await fetch(`/api/payouts?address=${encodeURIComponent(address)}`, { cache: 'no-store' });
@@ -160,6 +183,7 @@ export async function fetchPayouts(address: string): Promise<PayoutHistory> {
       shared: json.shared === true,
       land: json.land ?? null,
       hand: json.hand === true,
+      judged: json.judged ?? null,
     };
   } catch {
     return empty;

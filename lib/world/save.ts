@@ -20,7 +20,7 @@
  * cost a player their progress, never their ability to open the game.
  */
 
-import { createWorld, type World } from '../simulation';
+import { catchUpForms, createWorld, type Citizen, type World } from '../simulation';
 import { RESOURCES } from './goods';
 import { clientKey } from '../limits';
 
@@ -50,12 +50,12 @@ export interface SavedWorld {
  */
 const KEEP = [
   'id', 'name', 'seed', 'biome', 'day', 'hour', 'terrain', 'layout',
-  'season', 'weather', 'weatherSeed', 'treasury', 'population', 'temperature',
+  'season', 'weather', 'weatherSeed', 'treasury', 'frozenGold', 'population', 'temperature',
   'deaths', 'births', 'amenities', 'bridgeWorks', 'connectedIslands',
   'families', 'citizens', 'buildings', 'resources', 'market',
   'feed', 'gatherings', 'bonds', 'projects', 'hazards', 'resolution',
   'artworks', 'unlockedAreas', 'wageRate', 'marketClock', 'flow', 'flowYesterday', 'ledger',
-  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'wildlife', 'hunt', 'counter', 'expanded', 'era', 'eraSince', 'works', 'charterUntil', 'insuredUntil', 'buildersUntil', 'banner', 'festivalDay',
+  'ledgerYesterday', 'stewardship', 'grants', 'clearings', 'wildlife', 'hunt', 'counter', 'expanded', 'era', 'eraSince', 'works', 'charterUntil', 'insuredUntil', 'buildersUntil', 'banner', 'festivalDay', 'gatesClosed', 'keep', 'dug', 'formed', 'restoredForms', 'departures', 'idleDays', 'notables', 'talent', 'exchangeSeen',
 ] as const;
 
 /**
@@ -174,6 +174,9 @@ export function worldFromSave(parsed: SavedWorld | null, seed: number, name: str
     if (!Number.isFinite(world.resources[r])) world.resources[r] = 0;
     if (!world.market[r]) world.market[r] = freshMarket[r];
   }
+  // A save that reached its age before buildings had forms, or on a device
+  // without them, owes the age its rebuild: done here, once, before play.
+  catchUpForms(world);
   // Never revived: see above.
   world.conversations = [];
   // The name comes from the claim, which the player can have changed in the
@@ -185,8 +188,43 @@ export function worldFromSave(parsed: SavedWorld | null, seed: number, name: str
 /** The save payload for a world, to hand to the relay for visitors. */
 export function snapshotOf(world: World): SavedWorld {
   const slim: Record<string, unknown> = {};
-  for (const field of KEEP) slim[field] = world[field];
+  for (const field of KEEP) slim[field] = EXACT.has(field) ? world[field] : tidy(world[field]);
+  // The route somebody was walking is recomputed on the first frame after a
+  // load, and it is the one thing on a citizen that is pure bulk: a long
+  // detour is dozens of pairs of seventeen-digit floats.
+  slim.citizens = world.citizens.map((c) => {
+    const { detour: _detour, ...rest } = tidy(c) as Citizen & { detour?: unknown };
+    void _detour;
+    return { ...rest, path: [], navWait: 0 };
+  });
   return { version: SAVE_VERSION, seed: world.seed, at: Date.now(), world: slim };
+}
+
+/**
+ * The books are kept exactly: what the vault pays is judged from them, and a
+ * rounding on every save would drift. Everything else is a position, a mood
+ * or a price, and three decimals are more than the game ever reads.
+ */
+const EXACT = new Set<string>(['treasury', 'frozenGold', 'ledger', 'ledgerYesterday', 'flow', 'flowYesterday', 'stewardship', 'works', 'counter', 'seed', 'weatherSeed']);
+
+/**
+ * A copy with every non-integer number cut to three decimals.
+ *
+ * A settlement that has run for months carries thousands of numbers like
+ * 230.13199999999998, and at seventeen characters each they were a fifth
+ * of the save. Two hundred people and a hundred buildings came to more
+ * than the relay would take, and a world that cannot be published cannot
+ * advance an era.
+ */
+function tidy<T>(value: T): T {
+  if (typeof value === 'number') return (Number.isInteger(value) || !Number.isFinite(value) ? value : Math.round(value * 1000) / 1000) as T;
+  if (Array.isArray(value)) return value.map(tidy) as T;
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = tidy(v);
+    return out as T;
+  }
+  return value;
 }
 
 /** Forget a settlement. Used when a plot is given up. */

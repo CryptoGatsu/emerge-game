@@ -25,12 +25,12 @@ import {
   glow, groundShadow, isoTop, isoWalls, outline, rect, rng, shade, speckle, surface, type Pixels,
 } from './pixelCanvas';
 
-const DARK = '#0c130d';
+const DARK = '#2a1d13';
 
 type Side = 'left' | 'right';
 type RoofStyle = 'gable' | 'hip' | 'flat' | 'mansard' | 'sawtooth' | 'stepped' | 'dome' | 'curved';
 type WallStyle = 'plaster' | 'stone' | 'timber' | 'dark' | 'log' | 'brick' | 'concrete' | 'composite';
-type RoofColor = 'red' | 'green' | 'slate' | 'thatch' | 'iron' | 'glass' | 'white' | 'garden';
+type RoofColor = 'red' | 'green' | 'slate' | 'thatch' | 'shingle' | 'iron' | 'glass' | 'white' | 'garden';
 
 interface Geometry {
   cx: number; wallTopY: number; bw: number; bh: number; wallH: number; roofH: number;
@@ -42,6 +42,8 @@ const ROOFS: Record<RoofColor, [string, string, string]> = {
   green: [BUILD.roofGreenLight, BUILD.roofGreen, BUILD.roofGreenDark],
   slate: [BUILD.roofSlateLight, BUILD.roofSlate, BUILD.roofSlateDark],
   thatch: [BUILD.roofThatchLight, BUILD.roofThatch, BUILD.roofThatchDark],
+  // Split wooden shakes, weathered: the settlement's roof.
+  shingle: ['#a58c6c', '#7d684e', '#554636'],
   // The later eras: iron sheet, glass, white composite, a garden on the roof.
   iron: ['#5a6068', '#3e444c', '#2a2f36'],
   glass: ['#8fd0e0', '#5aa8c0', '#3a7890'],
@@ -53,7 +55,7 @@ const WALLS: Record<WallStyle, [string, string, string]> = {
   stone: [BUILD.stoneWallLight, BUILD.stoneWall, BUILD.stoneWallDark],
   timber: [BUILD.timberLight, BUILD.timber, BUILD.timberDark],
   dark: ['#3e4139', '#2e302b', '#20221e'],
-  log: ['#6c5138', '#4f3a27', '#35271a'],
+  log: ['#a27c54', '#7b5b3d', '#523a27'],
   brick: ['#9a5a44', '#7a4434', '#563024'],
   concrete: ['#b8bcc0', '#969ba2', '#6e7278'],
   composite: ['#f2f4f6', '#d8dde3', '#aeb6bf'],
@@ -91,30 +93,119 @@ function wallPoint(g: Geometry, side: Side, t: number, v: number): [number, numb
   return [Math.round(x), Math.round(edgeY + v * g.wallH)];
 }
 
+/**
+ * The material of a wall, drawn as courses rather than noise.
+ *
+ * Stone is laid in rows of blocks with a sand mortar line; plaster shows its
+ * timber frame with braces at the corners; logs are round, lit along the
+ * top and dark along the bottom; planks stand vertical with a nail in each.
+ * The shaded (left) face gets the same texture a step darker, so the join
+ * at the corner reads as a corner and not a seam.
+ */
 function paintWallTexture(p: Pixels, g: Geometry, style: WallStyle, seed: number) {
-  const [light, , dark] = WALLS[style];
-  if (style === 'stone') {
-    const r = rng(seed);
-    for (let i = 0; i < 46; i++) {
-      const side: Side = r() < 0.5 ? 'left' : 'right';
-      wallPatch(p, g, side, r() * 0.9, r() * 0.85, 3 + Math.floor(r() * 5), 2 + Math.floor(r() * 2), r() < 0.5 ? light : dark);
-    }
-  } else if (style === 'plaster') {
-    // Exposed timber framing: verticals plus a mid rail.
+  const [light, mid, dark] = WALLS[style];
+  const r = rng(seed);
+  const faceLen = Math.round(g.bw / 2);
+  const tone = (side: Side, c: string) => (side === 'left' ? shade(c, -0.16) : c);
+  if (style === 'stone' || style === 'brick' || style === 'concrete') {
+    const course = style === 'brick' ? 3 : 5;
     for (const side of ['left', 'right'] as Side[]) {
-      for (const t of [0.12, 0.38, 0.64, 0.9]) wallPatch(p, g, side, t, 0, 2, g.wallH, BUILD.timberDark);
-      wallBand(p, g, side, 0.44, 2, BUILD.timberDark);
+      let row = 0;
+      for (let y = 0; y < g.wallH - 1; y += course, row++) {
+        const v = y / g.wallH;
+        // Mortar line under the course.
+        wallPatch(p, g, side, 0, v + (course - 1) / g.wallH, faceLen, 1, tone(side, shade(dark, -0.12)));
+        const offset = row % 2 ? 3 : 0;
+        for (let x = offset; x < faceLen; x += 7 + Math.floor(r() * 4)) {
+          const w = Math.min(faceLen - x, 5 + Math.floor(r() * 5));
+          const c = r() < 0.3 ? light : r() < 0.7 ? mid : shade(mid, -0.08);
+          wallPatch(p, g, side, x / faceLen, v, w, course - 1, tone(side, c));
+          // Each block lit along its top and dark down its right edge.
+          wallPatch(p, g, side, x / faceLen, v, w, 1, tone(side, shade(c, 0.14)));
+          wallPatch(p, g, side, (x + w - 1) / faceLen, v, 1, course - 1, tone(side, shade(c, -0.18)));
+        }
+      }
+    }
+  } else if (style === 'plaster' || style === 'composite') {
+    for (const side of ['left', 'right'] as Side[]) {
+      // Plaster is never flat: a soft mottle, then the frame over it.
+      for (let i = 0; i < 40; i++) {
+        wallPatch(p, g, side, r() * 0.95, r() * 0.95, 2 + Math.floor(r() * 4), 1 + Math.floor(r() * 2), tone(side, r() < 0.5 ? shade(mid, 0.06) : shade(mid, -0.06)));
+      }
+      if (style === 'plaster') {
+        const beam = tone(side, BUILD.timberDark);
+        const beamLit = tone(side, BUILD.timber);
+        for (const t of [0.02, 0.3, 0.58, 0.86]) {
+          wallPatch(p, g, side, t, 0, 3, g.wallH, beam);
+          wallPatch(p, g, side, t, 0, 1, g.wallH, beamLit);
+        }
+        wallBand(p, g, side, 0.46, 2, beam);
+        wallBand(p, g, side, 0, 2, beam);
+        // Diagonal braces in the lower panels.
+        for (const t0 of [0.06, 0.62]) {
+          for (let i = 0; i < 10; i++) wallPatch(p, g, side, t0 + i * 0.02, 0.9 - i * 0.04, 2, 2, beam);
+        }
+      }
     }
   } else if (style === 'log') {
-    for (let i = 0; i < 6; i++) {
-      const v = i / 6;
-      for (const side of ['left', 'right'] as Side[]) wallBand(p, g, side, v, 1, dark);
-    }
-  } else if (style === 'timber') {
+    const logH = 4;
     for (const side of ['left', 'right'] as Side[]) {
-      for (let t = 0; t < 1; t += 0.07) wallPatch(p, g, side, t, 0, 1, g.wallH, dark);
+      for (let y = 0; y < g.wallH; y += logH) {
+        const v = y / g.wallH;
+        wallPatch(p, g, side, 0, v, faceLen, 1, tone(side, light));
+        wallPatch(p, g, side, 0, v + (logH - 1) / g.wallH, faceLen, 1, tone(side, shade(dark, -0.2)));
+        if (r() < 0.6) wallPatch(p, g, side, r() * 0.8, v + 1 / g.wallH, 3 + Math.floor(r() * 6), 1, tone(side, shade(mid, 0.08)));
+      }
+    }
+    // Log ends at the front corner, stacked.
+    for (let y = 0; y < g.wallH; y += logH) {
+      const [x, yy] = wallPoint(g, 'right', 0, y / g.wallH);
+      rect(p, x - 2, yy, 4, logH - 1, shade(light, 0.1));
+      rect(p, x - 1, yy + 1, 2, 1, dark);
+    }
+  } else if (style === 'timber' || style === 'dark') {
+    for (const side of ['left', 'right'] as Side[]) {
+      for (let x = 0; x < faceLen; x += 4) {
+        const c = (x / 4) % 2 ? mid : shade(mid, -0.07);
+        wallPatch(p, g, side, x / faceLen, 0, 4, g.wallH, tone(side, c));
+        wallPatch(p, g, side, x / faceLen, 0, 1, g.wallH, tone(side, shade(dark, -0.1)));
+        wallPatch(p, g, side, (x + 2) / faceLen, 0.18, 1, 1, tone(side, dark));
+        wallPatch(p, g, side, (x + 2) / faceLen, 0.78, 1, 1, tone(side, dark));
+      }
+      wallBand(p, g, side, 0.5, 2, tone(side, shade(dark, -0.15)));
     }
   }
+}
+
+/**
+ * Shadow under the eave and at the foot of the wall.
+ *
+ * This is most of what makes a box read as a building with a roof on it:
+ * a band of shade where the eave hangs over, deepening on the face away
+ * from the sun, and the ground's own darkness climbing the last few pixels.
+ */
+function ambientOcclusion(p: Pixels, g: Geometry) {
+  const faceLen = Math.round(g.bw / 2);
+  p.ctx.save();
+  p.ctx.globalAlpha = 1;
+  for (const side of ['left', 'right'] as Side[]) {
+    const strength = side === 'left' ? 0.34 : 0.24;
+    for (let i = 0; i < 5; i++) {
+      p.ctx.globalAlpha = strength * (1 - i / 5);
+      wallPatch(p, g, side, 0, i / g.wallH, faceLen, 1, '#1a1208');
+    }
+    for (let i = 0; i < 4; i++) {
+      p.ctx.globalAlpha = 0.22 * (1 - i / 4);
+      wallPatch(p, g, side, 0, 1 - (i + 1) / g.wallH, faceLen, 1, '#1a1208');
+    }
+  }
+  p.ctx.restore();
+  // The front corner: a dark seam and a lit edge on the sunward face.
+  const [cx0, cy0] = wallPoint(g, 'right', 0, 0);
+  rect(p, cx0 - 1, cy0, 1, g.wallH, shade(DARK, 0.08));
+  p.ctx.save(); p.ctx.globalAlpha = 0.35;
+  rect(p, cx0, cy0, 1, g.wallH, '#fff2d0');
+  p.ctx.restore();
 }
 
 /**
@@ -127,14 +218,14 @@ function paintWallTexture(p: Pixels, g: Geometry, style: WallStyle, seed: number
 function weather(p: Pixels, g: Geometry, seed: number) {
   const r = rng(seed + 977);
   for (const side of ['left', 'right'] as Side[]) {
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 8; i++) {
       const t = r() * 0.96;
-      const v = 0.72 + r() * 0.26;
-      const w = 1 + Math.floor(r() * 4);
-      wallPatch(p, g, side, t, v, w, 1 + Math.floor(r() * 2), r() < 0.6 ? BUILD.mossDark : BUILD.moss);
+      const v = 0.86 + r() * 0.12;
+      const w = 1 + Math.floor(r() * 3);
+      wallPatch(p, g, side, t, v, w, 1, r() < 0.6 ? BUILD.mossDark : BUILD.moss);
     }
-    // One vine per face, climbing from the ground with a few leaves off it.
-    if (r() < 0.7) {
+    // A vine on the shaded face now and then, climbing from the ground.
+    if (side === 'left' && r() < 0.5) {
       const t = 0.05 + r() * 0.3;
       const height = 0.45 + r() * 0.4;
       for (let v = 1; v > 1 - height; v -= 0.06) {
@@ -256,66 +347,112 @@ function drawRoof(p: Pixels, g: Geometry, style: RoofStyle, color: RoofColor, ov
     return;
   }
 
+  /*
+   * Courses of tiles on a slope, drawn inside the slope's own outline.
+   *
+   * `a` and `b` are the two ends of the eave, `ridgeA` and `ridgeB` the
+   * points above them on the ridge (the same point twice for a hip). Rows
+   * run parallel to the eave, each a step higher and a little narrower.
+   * Terracotta and slate get scalloped tiles; thatch gets strokes down the
+   * slope and a ragged eave; the moss roof gets plank-like shingles.
+   */
+  const texture = (a: [number, number], b: [number, number], ridgeA: [number, number], ridgeB: [number, number], base: string, lit: boolean) => {
+    p.ctx.save();
+    p.ctx.beginPath();
+    p.ctx.moveTo(a[0], a[1]); p.ctx.lineTo(b[0], b[1]); p.ctx.lineTo(ridgeB[0], ridgeB[1]); p.ctx.lineTo(ridgeA[0], ridgeA[1]); p.ctx.closePath();
+    p.ctx.clip();
+    const rr = rng(seed + 17);
+    const rows = Math.max(3, Math.round(g.roofH / (color === 'thatch' ? 3 : 4)));
+    for (let i = 0; i <= rows; i++) {
+      const t = i / rows;
+      const x0 = a[0] + (ridgeA[0] - a[0]) * t, y0 = a[1] + (ridgeA[1] - a[1]) * t;
+      const x1 = b[0] + (ridgeB[0] - b[0]) * t, y1 = b[1] + (ridgeB[1] - b[1]) * t;
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      const ux = (x1 - x0) / (len || 1), uy = (y1 - y0) / (len || 1);
+      if (color === 'thatch') {
+        // Bundles: short strokes down the slope, lighter on the lit side.
+        for (let d = 0; d < len; d += 2 + Math.floor(rr() * 2)) {
+          const x = x0 + ux * d, y = y0 + uy * d;
+          const c = rr() < 0.5 ? shade(base, lit ? 0.12 : 0.04) : shade(base, -0.12);
+          rect(p, x, y, 1, 2 + Math.floor(rr() * 3), c);
+        }
+        rect(p, x0, y0, 0, 0, base);
+        p.ctx.strokeStyle = shade(base, -0.22); p.ctx.lineWidth = 1; p.ctx.beginPath(); p.ctx.moveTo(x0, y0 + 0.5); p.ctx.lineTo(x1, y1 + 0.5); p.ctx.stroke();
+      } else {
+        // A dark seam under the course, then tiles along it with a light lip.
+        p.ctx.strokeStyle = shade(base, -0.3); p.ctx.lineWidth = 1; p.ctx.beginPath(); p.ctx.moveTo(x0, y0 + 0.5); p.ctx.lineTo(x1, y1 + 0.5); p.ctx.stroke();
+        const tileW = color === 'green' ? 6 : color === 'shingle' ? 3 : 4;
+        const offset = i % 2 ? tileW / 2 : 0;
+        for (let d = offset; d < len; d += tileW) {
+          const x = x0 + ux * d, y = y0 + uy * d;
+          // Shakes split unevenly, so they vary more than fired tile does.
+          const c = color === 'shingle'
+            ? (rr() < 0.3 ? shade(base, lit ? 0.2 : 0.1) : rr() < 0.55 ? shade(base, -0.16) : base)
+            : rr() < 0.25 ? shade(base, lit ? 0.16 : 0.06) : rr() < 0.5 ? shade(base, -0.08) : base;
+          rect(p, x, y - 2, tileW - 1, 2, c);
+          rect(p, x, y - 3, tileW - 1, 1, shade(c, lit ? 0.22 : 0.1));
+          rect(p, x + tileW - 2, y - 2, 1, 2, shade(c, -0.25));
+        }
+      }
+    }
+    p.ctx.restore();
+  };
+
   if (style === 'hip') {
     const peak: [number, number] = [cx, cy - g.roofH];
-    poly([W, N, peak], shade(dark, -0.1));
-    poly([N, E, peak], shade(dark, -0.05));
+    poly([W, N, peak], shade(dark, -0.14));
+    poly([N, E, peak], shade(dark, -0.02));
     poly([W, S, peak], mid);
     poly([S, E, peak], light);
-    // Shingle courses running parallel to the eaves.
-    for (let i = 1; i < 7; i++) {
-      const t = i / 7;
-      const ly: [number, number] = [W[0] + (peak[0] - W[0]) * t, W[1] + (peak[1] - W[1]) * t];
-      const ry: [number, number] = [S[0] + (peak[0] - S[0]) * t, S[1] + (peak[1] - S[1]) * t];
-      const ey: [number, number] = [E[0] + (peak[0] - E[0]) * t, E[1] + (peak[1] - E[1]) * t];
-      p.ctx.strokeStyle = shade(mid, -0.22);
-      p.ctx.lineWidth = 1;
-      p.ctx.beginPath();
-      p.ctx.moveTo(ly[0], ly[1]); p.ctx.lineTo(ry[0], ry[1]); p.ctx.lineTo(ey[0], ey[1]);
-      p.ctx.stroke();
-    }
+    texture(W, S, peak, peak, mid, false);
+    texture(S, E, peak, peak, light, true);
+    // The hip rafters, caught by the light.
+    p.ctx.strokeStyle = shade(light, 0.18); p.ctx.lineWidth = 1; p.ctx.beginPath();
+    p.ctx.moveTo(S[0], S[1]); p.ctx.lineTo(peak[0], peak[1]); p.ctx.lineTo(E[0], E[1]); p.ctx.stroke();
+    p.ctx.strokeStyle = shade(mid, -0.1); p.ctx.beginPath(); p.ctx.moveTo(W[0], W[1]); p.ctx.lineTo(peak[0], peak[1]); p.ctx.stroke();
   } else {
     const ridgeW: [number, number] = [W[0], W[1] - g.roofH];
     const ridgeE: [number, number] = [E[0], E[1] - g.roofH];
+    const ridgeM: [number, number] = [cx, cy - g.roofH];
     // Far slope first, then the near slope over the top of it.
-    poly([W, N, E, ridgeE, ridgeW], shade(dark, -0.06));
-    poly([W, S, E, ridgeE, ridgeW], mid);
-    // Light catches the western half of the near slope.
-    poly([W, S, [cx, S[1]], [cx, S[1] - g.roofH], ridgeW], light);
-    for (let i = 1; i < 6; i++) {
-      const t = i / 6;
-      p.ctx.strokeStyle = shade(mid, -0.24);
-      p.ctx.lineWidth = 1;
-      p.ctx.beginPath();
-      p.ctx.moveTo(W[0] + (ridgeW[0] - W[0]) * t, W[1] + (ridgeW[1] - W[1]) * t);
-      p.ctx.lineTo(S[0] + ((ridgeW[0] + ridgeE[0]) / 2 - S[0]) * t, S[1] + ((ridgeW[1] + ridgeE[1]) / 2 - S[1]) * t);
-      p.ctx.lineTo(E[0] + (ridgeE[0] - E[0]) * t, E[1] + (ridgeE[1] - E[1]) * t);
-      p.ctx.stroke();
-    }
-    // Ridge cap.
-    p.ctx.strokeStyle = light;
+    poly([W, N, E, ridgeE, ridgeW], shade(dark, -0.1));
+    poly([W, S, ridgeM, ridgeW], mid);
+    // Light catches the eastern half of the near slope: the sun is upper right.
+    poly([S, E, ridgeE, ridgeM], light);
+    texture(W, S, ridgeW, ridgeM, mid, false);
+    texture(S, E, ridgeM, ridgeE, light, true);
+    // Bargeboards and the ridge cap.
+    p.ctx.strokeStyle = shade(dark, -0.2); p.ctx.lineWidth = 1; p.ctx.beginPath();
+    p.ctx.moveTo(W[0], W[1]); p.ctx.lineTo(ridgeW[0], ridgeW[1]); p.ctx.moveTo(E[0], E[1]); p.ctx.lineTo(ridgeE[0], ridgeE[1]); p.ctx.stroke();
+    p.ctx.strokeStyle = shade(light, 0.16);
     p.ctx.lineWidth = 2;
     p.ctx.beginPath();
     p.ctx.moveTo(ridgeW[0], ridgeW[1]); p.ctx.lineTo(ridgeE[0], ridgeE[1]);
     p.ctx.stroke();
+    if (color === 'thatch') {
+      // A ragged eave: the straw hangs past the edge unevenly.
+      const rr = rng(seed + 5);
+      for (let x = Math.round(W[0]); x < E[0]; x += 2) {
+        const t = x < cx ? (x - W[0]) / (cx - W[0]) : (E[0] - x) / (E[0] - cx);
+        const y = Math.round(W[1] + t * (S[1] - W[1]));
+        rect(p, x, y, 2, 1 + Math.floor(rr() * 3), rr() < 0.5 ? shade(mid, -0.18) : shade(dark, -0.05));
+      }
+    }
   }
-
-  if (color === 'thatch') {
-    speckle(p, seed + 31, 340, [shade(mid, 0.16), shade(dark, -0.12)], (x, y) => y > g.wallTopY - g.roofH - 6 && y < cy + halfH + 2);
-  } else {
-    speckle(p, seed + 41, 220, [shade(mid, 0.1), shade(dark, -0.08)], (x, y) => y > g.wallTopY - g.roofH - 6 && y < cy + halfH + 2);
-  }
-  // Moss on the shaded slope: a roof in the forest is never clean.
-  speckle(p, seed + 53, 70, [BUILD.mossDark, shade(BUILD.moss, -0.15)], (x, y) => x < cx - 4 && y > g.wallTopY - g.roofH && y < cy + halfH);
 }
 
 function chimney(p: Pixels, g: Geometry, dx: number, height: number): [number, number] {
   const x = Math.round(g.cx + dx);
   const topY = Math.round(g.wallTopY + g.bh / 2 - g.roofH - height + 6);
-  rect(p, x - 5, topY, 10, height, BUILD.stoneWallDark);
-  rect(p, x - 4, topY, 8, height, BUILD.stoneWall);
-  speckle(p, 77, 40, [BUILD.stoneWallLight, BUILD.stoneWallDark], (px, py) => px > x - 5 && px < x + 5 && py > topY && py < topY + height);
-  rect(p, x - 6, topY, 12, 3, BUILD.stoneWallDark);
+  rect(p, x - 5, topY, 5, height, shade(BUILD.stoneWall, -0.22));
+  rect(p, x, topY, 5, height, BUILD.stoneWall);
+  for (let y = topY + 3; y < topY + height; y += 4) {
+    rect(p, x - 5, y, 10, 1, shade(BUILD.stoneWallDark, -0.1));
+    rect(p, x - 4 + ((y >> 2) % 2) * 3, y - 2, 1, 2, shade(BUILD.stoneWallDark, -0.05));
+  }
+  rect(p, x - 6, topY - 1, 12, 3, BUILD.stoneWallDark);
+  rect(p, x - 6, topY - 2, 12, 1, BUILD.stoneWallLight);
+  rect(p, x - 4, topY - 4, 8, 2, '#1e1a16');
   return [x, topY];
 }
 
@@ -426,7 +563,7 @@ interface Recipe {
   sign?: string;
   extras?: (p: Pixels, lit: Pixels, g: Geometry, seed: number) => void;
   /** The era whose structural dressing this body wears, when it is a later era's rebuild. */
-  eraLook?: 2 | 3 | 4 | 5;
+  eraLook?: 1 | 2 | 3 | 4 | 5;
 }
 
 const BOTTOM_MARGIN = 6;
@@ -454,36 +591,53 @@ function buildOne(name: string, seed: number, r: Recipe, level: ArtLevel): Build
     canvasH,
   };
 
-  groundShadow(p, g.cx, g.groundY - 2, bw * 0.52, bh * 0.36, 0.4);
+  // The sun is upper right: the shadow falls away to the lower left.
+  groundShadow(p, g.cx - bw * 0.1, g.groundY - 2, bw * 0.58, bh * 0.4, 0.34);
 
   // Stone plinth under the walls so buildings sit into the ground.
-  isoWalls(p, g.cx, g.wallTopY + 3, bw + 4, bh + 2, wallH, GROUND.stoneDark, shade(GROUND.stoneDark, -0.12));
+  isoWalls(p, g.cx, g.wallTopY + 3, bw + 4, bh + 2, wallH, shade(GROUND.stoneDark, -0.2), GROUND.stoneDark);
 
-  const [wLight, wMid, wDark] = WALLS[r.wall];
-  isoWalls(p, g.cx, g.wallTopY, bw, bh, wallH, wMid, wDark);
+  // The left face is the shaded one, the right face the lit one.
+  const [wLight, wMid] = WALLS[r.wall];
+  isoWalls(p, g.cx, g.wallTopY, bw, bh, wallH, shade(wMid, -0.16), wMid);
   isoTop(p, g.cx, g.wallTopY, bw, bh, wLight);
   paintWallTexture(p, g, r.wall, seed);
+  ambientOcclusion(p, g);
 
-  // Windows, dark by day and glowing on the lit overlay. At the top level a
+  // Windows: a timber frame, a cross of mullions, a sill, and warm glass —
+  // the reference's houses glow a little even by day. At the top level a
   // second row goes in above the first, the way a building that has been
   // extended upward gets one.
   const windows = [...(r.windows ?? [])];
   if (level === 3) for (const [side, t, v] of r.windows ?? []) if (v > 0.3) windows.push([side, t, v - 0.34]);
   for (const [side, t, v] of windows) {
-    wallPatch(p, g, side, t, v, 9, 10, BUILD.timberDark);
-    wallPatch(p, g, side, t + 0.012, v + 0.06, 7, 7, BUILD.glassDark);
+    const frame = side === 'left' ? shade(BUILD.timberDark, -0.1) : BUILD.timberDark;
+    wallPatch(p, g, side, t, v, 9, 10, frame);
+    wallPatch(p, g, side, t + 0.012, v + 0.06, 7, 7, side === 'left' ? shade('#c98a44', -0.25) : '#d69a4e');
+    wallPatch(p, g, side, t + 0.012, v + 0.06, 7, 2, side === 'left' ? shade(BUILD.glassDark, 0.1) : shade(BUILD.glassDark, 0.3));
+    wallPatch(p, g, side, t + 0.03, v + 0.14, 3, 3, side === 'left' ? '#e8b868' : '#f6d48c');
+    // Mullions and the sill.
+    wallPatch(p, g, side, t + 0.03 + 0.012, v + 0.06, 1, 7, frame);
+    wallPatch(p, g, side, t + 0.012, v + 0.06 + 3 / g.wallH, 7, 1, frame);
+    wallPatch(p, g, side, t - 0.006, v + 10 / g.wallH, 11, 1, shade(BUILD.plasterLight, side === 'left' ? -0.2 : 0.05));
     wallPatch(lit, g, side, t + 0.012, v + 0.06, 7, 7, BUILD.glassLit);
     wallPatch(lit, g, side, t + 0.03, v + 0.1, 3, 4, BUILD.glassLitCore);
-    // Warm by day too — a little — so a home reads as lived in at noon.
-    wallPatch(p, g, side, t + 0.03, v + 0.1, 3, 4, shade(BUILD.glassLit, -0.45));
-    wallPatch(p, g, side, t + 0.03, v + 0.08, 2, 5, shade(BUILD.glassDark, 0.18));
   }
 
   const doorSpec = r.door ?? (['right', 0.42] as [Side, number]);
   const [dSide, dT] = doorSpec;
-  wallPatch(p, g, dSide, dT, 0.3, 12, Math.round(wallH * 0.72), BUILD.timberDark);
-  wallPatch(p, g, dSide, dT + 0.014, 0.34, 10, Math.round(wallH * 0.68), BUILD.timber);
-  wallPatch(p, g, dSide, dT + 0.09, 0.55, 2, 2, BUILD.gold);
+  // An arched doorway: a stone surround, planked timber inside it, a step.
+  const doorH = Math.round(wallH * 0.7);
+  wallPatch(p, g, dSide, dT - 0.012, 0.3, 14, doorH + 2, shade(BUILD.stoneWallLight, -0.05));
+  wallPatch(p, g, dSide, dT, 0.3, 12, doorH, BUILD.timberDark);
+  for (let i = 1; i < 12; i += 3) wallPatch(p, g, dSide, dT + i / g.bw, 0.34, 2, doorH - 2, BUILD.timber);
+  for (const [dx, dy, w] of [[1, -2, 10], [3, -3, 6], [5, -4, 2]] as [number, number, number][]) {
+    wallPatch(p, g, dSide, dT + dx / g.bw, 0.3 + dy / g.wallH, w, 1, BUILD.timberDark);
+    wallPatch(p, g, dSide, dT + (dx - 1) / g.bw, 0.3 + (dy - 1) / g.wallH, w + 2, 1, shade(BUILD.stoneWallLight, -0.05));
+  }
+  wallPatch(p, g, dSide, dT + 0.09, 0.58, 2, 2, BUILD.gold);
+  wallPatch(p, g, dSide, dT - 0.02, 1 - 2 / g.wallH, 16, 2, BUILD.stoneWallLight);
+  wallPatch(p, g, dSide, dT - 0.02, 1 - 1 / g.wallH, 16, 1, BUILD.stoneWallDark);
   // Light spilling out of the doorway after dark.
   wallPatch(lit, g, dSide, dT + 0.03, 0.4, 7, Math.round(wallH * 0.5), shade(BUILD.glassLit, -0.3));
 
@@ -495,6 +649,14 @@ function buildOne(name: string, seed: number, r: Recipe, level: ArtLevel): Build
 
   weather(p, g, seed);
   drawRoof(p, g, r.roof, r.roofColor, overhang, seed);
+  // The eave's shadow on the wall, under the overhang.
+  p.ctx.save();
+  for (let i = 0; i < 4; i++) {
+    p.ctx.globalAlpha = 0.28 * (1 - i / 4);
+    wallPatch(p, g, 'left', 0, i / wallH, Math.round(bw / 2), 1, '#1a1208');
+    wallPatch(p, g, 'right', 0, i / wallH, Math.round(bw / 2), 1, '#1a1208');
+  }
+  p.ctx.restore();
   r.extras?.(p, lit, g, seed);
   // A later era's rebuild of the body: what that era does to every building.
   if (r.eraLook) {
@@ -1196,13 +1358,38 @@ const classOf = (name: string): BuildingClass => name.startsWith('House') ? 'hou
  * attic in it on every home, a steep gable over the workshops, a hipped
  * roof with height to it on the civic buildings.
  */
-function townshipDress(r: Recipe, name = ''): Recipe {
-  const wall: WallStyle = 'stone';
-  const roofColor: RoofColor = r.roofColor === 'thatch' ? 'red' : r.roofColor === 'green' ? 'slate' : r.roofColor;
+/**
+ * The settlement builds with what the wood gives it. Homes and workshops
+ * are log cabins: round logs notched at the corners under a low gable of
+ * split shakes or thatch, a porch over the door, firewood against the wall.
+ * The halls are plank lodges. Nothing is dressed stone yet; that is what the
+ * township is for.
+ */
+function settlementDress(r: Recipe, name = ''): Recipe {
+  if (name === 'Monument') return r;
   const cls = classOf(name);
-  if (cls === 'house') return { ...r, wall, roofColor, roof: 'mansard', roofH: r.roofH + 8, wallH: r.wallH + 10, bw: Math.round(r.bw * 0.9), eraLook: 2 };
-  if (cls === 'civic') return { ...r, wall, roofColor, roof: r.roof === 'flat' ? 'flat' : 'hip', roofH: r.roof === 'flat' ? r.roofH : r.roofH + 10, wallH: r.wallH + 8, eraLook: 2 };
-  return { ...r, wall, roofColor, roof: r.roof === 'flat' ? 'flat' : 'gable', roofH: r.roof === 'flat' ? r.roofH : r.roofH + 6, wallH: r.wallH + 4, eraLook: 2 };
+  const flat = r.roof === 'flat';
+  const roof: RoofStyle = flat ? 'flat' : 'gable';
+  const roofH = flat ? r.roofH : Math.max(9, Math.round(r.roofH * 0.7));
+  const shakes: RoofColor = r.roofColor === 'thatch' ? 'thatch' : 'shingle';
+  if (cls === 'house') return { ...r, wall: 'log', roofColor: shakes, roof, roofH, wallH: Math.max(14, r.wallH - 2), overhang: (r.overhang ?? 4) + 2, eraLook: 1 };
+  if (cls === 'civic') return { ...r, wall: 'timber', roofColor: 'shingle', roof, roofH: flat ? r.roofH : Math.max(10, Math.round(r.roofH * 0.8)), wallH: r.wallH + 2, overhang: (r.overhang ?? 4) + 1, eraLook: 1 };
+  return { ...r, wall: name === 'Farm' ? 'timber' : 'log', roofColor: r.roofColor === 'red' ? 'red' : shakes, roof, roofH, overhang: (r.overhang ?? 4) + 2, eraLook: 1 };
+}
+
+/**
+ * The township is the first place built to last: timber-framed homes on two
+ * floors with plaster between the beams and fired tile above, a dormer in
+ * the roof; the halls in dressed stone under slate; the workshops framed
+ * the same way as the homes.
+ */
+function townshipDress(r: Recipe, name = ''): Recipe {
+  const cls = classOf(name);
+  const tile: RoofColor = r.roofColor === 'thatch' || r.roofColor === 'green' || r.roofColor === 'shingle' ? 'red' : r.roofColor;
+  const flat = r.roof === 'flat';
+  if (cls === 'house') return { ...r, wall: 'plaster', roofColor: tile, roof: 'gable', roofH: r.roofH + 6, wallH: r.wallH + 10, overhang: (r.overhang ?? 4) + 1, eraLook: 2 };
+  if (cls === 'civic') return { ...r, wall: 'stone', roofColor: tile === 'red' ? 'slate' : tile, roof: flat ? 'flat' : 'hip', roofH: flat ? r.roofH : r.roofH + 10, wallH: r.wallH + 8, eraLook: 2 };
+  return { ...r, wall: r.wall === 'stone' ? 'stone' : 'plaster', roofColor: name === 'Farm' ? 'red' : tile === 'red' ? 'slate' : tile, roof: flat ? 'flat' : 'gable', roofH: flat ? r.roofH : r.roofH + 6, wallH: r.wallH + 4, eraLook: 2 };
 }
 
 /** As the industrial era rebuilds it: brick, and iron sheet on the roof. */
@@ -1254,12 +1441,70 @@ const isoDiamond = (p: Pixels, cx: number, cy: number, w: number, h: number, col
  */
 type EraLook = (p: Pixels, lit: Pixels, g: Geometry, r: Recipe, seed: number, door: [Side, number], overhang: number) => [number, number] | null;
 const ERA_LOOK: Record<number, EraLook> = {
-  // Township: dressed stone. Quoins up the near corner, shutters at the
-  // windows, a dormer in the roof, an arch over the door, pots on the chimney.
+  // Settlement: the cabin. Log butts crossed at the near corner, plank
+  // shutters, a lean-to porch on posts over the door, a fieldstone chimney,
+  // firewood stacked against the wall away from the door.
+  1: (p, _lit, g, r, seed, [dSide, dT]) => {
+    const rr = rng(seed + 1);
+    const [logLight, logMid, logDark] = WALLS.log;
+    if (r.wall === 'log') {
+      const logH = 4;
+      for (let y = 0, i = 0; y < g.wallH; y += logH, i++) {
+        const [x, yy] = wallPoint(g, 'right', 0, y / g.wallH);
+        const left = i % 2 === 0;
+        const bx = left ? x - 6 : x + 1;
+        rect(p, bx, yy, 5, logH - 1, left ? shade(logMid, -0.14) : logLight);
+        rect(p, bx, yy + logH - 2, 5, 1, shade(logDark, -0.1));
+        rect(p, left ? bx : bx + 4, yy, 1, logH - 1, shade(logLight, 0.25));
+      }
+    }
+    for (const [side, t, v] of r.windows ?? []) {
+      wallPatch(p, g, side, t - 0.035, v + 0.005, 3, 9, BUILD.timberDark);
+      wallPatch(p, g, side, t + 0.05, v + 0.005, 3, 9, BUILD.timberDark);
+      wallPatch(p, g, side, t - 0.03, v + 0.03, 2, 1, shade(BUILD.timberDark, 0.25));
+      wallPatch(p, g, side, t + 0.055, v + 0.03, 2, 1, shade(BUILD.timberDark, 0.25));
+    }
+    // The porch: a plank roof on two posts, flat to the door's wall.
+    const [ax, ay] = wallPoint(g, dSide, dT, 0.2);
+    const [, floorY] = wallPoint(g, dSide, dT, 1);
+    rect(p, ax - 10, ay - 1, 20, 3, BUILD.timberDark);
+    rect(p, ax - 10, ay - 2, 20, 1, BUILD.timberLight);
+    rect(p, ax - 9, ay + 2, 2, floorY - ay - 2, shade(BUILD.timberDark, -0.15));
+    rect(p, ax + 7, ay + 2, 2, floorY - ay - 2, shade(BUILD.timberDark, -0.15));
+    // A fieldstone stack where the recipe put a chimney.
+    if (r.chimneyAt !== undefined) {
+      const x = Math.round(g.cx + r.chimneyAt), h = r.chimneyH ?? 20;
+      const topY = Math.round(g.wallTopY + g.bh / 2 - g.roofH - h + 6);
+      for (let y = 0; y < h - 2; y += 3) {
+        const off = (y / 3) % 2 ? 1 : 0;
+        rect(p, x - 4 + off, topY + y, 8, 2, y % 6 === 0 ? BUILD.stoneWall : BUILD.stoneWallLight);
+        rect(p, x - 4 + off + (rr() < 0.5 ? 1 : 4), topY + y, 3, 2, BUILD.stoneWallDark);
+      }
+      rect(p, x - 5, topY - 1, 10, 1, BUILD.stoneWallLight);
+    }
+    // Firewood.
+    const other: Side = dSide === 'left' ? 'right' : 'left';
+    const [wx, wy] = wallPoint(g, other, 0.72, 0.68);
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 4 - (row === 2 ? 1 : 0); col++) {
+      rect(p, wx - 6 + col * 3 + (row === 2 ? 1 : 0), wy + row * 2, 2, 2, rr() < 0.5 ? logLight : shade(logMid, 0.1));
+    }
+    return null;
+  },
+  // Township: dressed stone on the halls, framed plaster on the homes.
+  // Quoins up the near corner of stone, a stone base course under plaster,
+  // shutters at the windows, a dormer in the roof, an arch over the door,
+  // pots on the chimney.
   2: (p, _lit, g, r, seed, [dSide, dT]) => {
     const rr = rng(seed + 2);
     const cornerX = g.cx, cornerY = g.wallTopY + g.bh;
-    for (let i = 0; i < g.wallH; i += 4) rect(p, cornerX - 2 + (i % 8 === 0 ? 0 : 1), cornerY + i, 4, 3, i % 8 === 0 ? BUILD.stoneWallLight : shade(BUILD.stoneWallLight, 0.15));
+    if (r.wall === 'stone') {
+      for (let i = 0; i < g.wallH; i += 4) rect(p, cornerX - 2 + (i % 8 === 0 ? 0 : 1), cornerY + i, 4, 3, i % 8 === 0 ? BUILD.stoneWallLight : shade(BUILD.stoneWallLight, 0.15));
+    } else {
+      for (const side of ['left', 'right'] as Side[]) {
+        wallBand(p, g, side, 0.86, 3, side === 'left' ? shade(BUILD.stoneWall, -0.16) : BUILD.stoneWall);
+        wallBand(p, g, side, 0.86, 1, side === 'left' ? shade(BUILD.stoneWallLight, -0.16) : BUILD.stoneWallLight);
+      }
+    }
     for (const [side, t, v] of r.windows ?? []) {
       wallPatch(p, g, side, t - 0.035, v + 0.005, 3, 9, '#2f5a3a');
       wallPatch(p, g, side, t + 0.05, v + 0.005, 3, 9, '#2f5a3a');
@@ -1581,7 +1826,7 @@ export function buildBuildings(): { art: BuildingArt[]; overlays: { name: string
   let seed = 6000;
   for (const [name, recipe] of Object.entries(RECIPES)) {
     seed += 137;
-    for (const level of ART_LEVELS) art.push(buildOne(name, seed, recipe, level));
+    for (const level of ART_LEVELS) art.push(buildOne(name, seed, settlementDress(recipe, name), level));
   }
   for (const [, set] of ERA_SETS) {
     for (const [name, recipe] of Object.entries(set)) {

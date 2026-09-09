@@ -541,13 +541,21 @@ export function mergeRecords(local: PlayerRecord, remote: PlayerRecord): PlayerR
     for (const item of [...(b ?? []), ...(a ?? [])]) out.set(item.seed, item);
     return [...out.values()];
   };
+  // The name follows whoever has actually changed it. "Newer wins" handed a
+  // fresh device's random name the day over a name the player had paid to
+  // choose elsewhere, and the next push wrote the random one over the
+  // server's copy: players wrote in that their nicknames were gone.
+  const localChanges = local.nameChanges ?? 0, remoteChanges = remote.nameChanges ?? 0;
+  const name = remoteChanges > localChanges ? remote.name : localChanges > remoteChanges ? local.name : newer.name;
   return {
     ...newer,
+    name,
     ledger: {
       ...newer.ledger,
       earnedEmerge: Math.max(local.ledger?.earnedEmerge ?? 0, remote.ledger?.earnedEmerge ?? 0),
     },
-    nameChanges: Math.max(local.nameChanges ?? 0, remote.nameChanges ?? 0),
+    nameChanges: Math.max(localChanges, remoteChanges),
+    nameTokens: Math.max(local.nameTokens ?? 0, remote.nameTokens ?? 0),
     claims: bySeed(newer.claims, older.claims),
     prospected: bySeed(newer.prospected, older.prospected),
     listings: bySeed(newer.listings, older.listings),
@@ -667,6 +675,13 @@ export function marketPlots(
     used.add(renamed);
   }
   return all;
+}
+
+/** Which chart a seed sits on: the home chart's catalogue, else wherever it was surveyed, else null. */
+export function chartOfSeed(seed: number, record: PlayerRecord | null, shared: FoundPlot[] = []): number | null {
+  if (catalogue().some((p) => p.seed === seed)) return HOME_CHART_INDEX;
+  const found = [...(record?.prospected ?? []), ...shared].find((p) => p.seed === seed);
+  return found ? found.chart : null;
 }
 
 /** How much room is left on a chart. */

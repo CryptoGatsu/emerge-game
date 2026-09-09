@@ -513,6 +513,39 @@ the claim row by `markCover` (extending from the later of now and the running
 cover); `setCover` puts them on the world, and the claims poll catches another
 device up.
 
+v2.6 also: people talk like people. `lib/dialogue.ts` composes every
+exchange from two `Brief`s and a `TownBrief` (`compose`): an opener by
+`Relation` (spouse, kin, friends, known, strangers, rivals), a subject drawn
+from the other's or one's own recent `Episode`s, the last talk with that
+person, the town or the weather, a reply in the listener's voice
+(`REPLY[trait][cut]`), an acknowledgement and a parting that names where
+they are bound. `traitsOf(hash)` gives two traits; `noteEpisode` records
+life events on `Citizen.recent` (six, saved with the citizen);
+`rememberTalk` keeps `Citizen.lastTalk` per person; `relationOf`, `briefOf`
+and `townBrief` in the simulation feed the composer. The card shows
+`traits`, `lately` and `lastTalk`. `lib/i18n/zh.ts` carries every template
+as a `DIALOGUE` pair, turned into patterns with typed slots so a bare name
+cannot swallow a sentence. The settlement art pass lives in
+`lib/render/palette.ts` (golden-hour colour script and ambient stops),
+`buildings.ts` (coursed materials, `ambientOcclusion`, roof `texture`,
+arched doors, sun upper right), `props.ts` (`conifer`, lobed `canopy`),
+`tiles.ts` (`mottle`, `tufts`, flagstone plaza, softer shallows) and the
+scene's base tile under raised ground.
+
+v2.6: ages that mean something, and a Bank that tells the truth.
+`POSTS_PER_ERA`, `BEDS_PER_ERA` and `OUTPUT_PER_ERA` in `lib/simulation.ts`
+scale every workplace's posts (`buildingPosts(b, world)`), every house's beds
+(`houseRoom(b, world)`) and every trade's output (`eraOutput` in `produce`)
+by the plot's era; `maxLevelFor(world)` lifts the improvement cap a level per
+age (`UPGRADE_STEPS` runs to six) and `upgradeCost(b, world)` reads it; the
+Build panel opens on the age's own tab. `judgedFor` returns present days and
+per-plot judged and reported levels; `GET /api/payouts` measures the day's
+room against the judged yield and returns `judged`; `sendFromVault` waits for
+the receipt (`EMERGE_RECEIPT_WAIT_MS`) and refuses a revert, an unconfirmed
+transfer is settled by `confirmPayouts` on the next read and refunded
+(`Payout.failed`, `VaultLedger.refunded`). `rampExit`/`crossingExits` make a
+crossing land on open ground, `ensureRamps` lengthens old bridges on load.
+
 v2.5 also: `components/FirstDay.tsx` (a first-day card under
 `emerge:firstday:<address>`, ticked by the things themselves), the
 leaderboard (`lib/server/leaderboard.ts` from the headline index, which now
@@ -550,7 +583,15 @@ GLD, e.g. `3000,<USDG>,3000`), paid through Permit2 (`EMERGE_PERMIT2`,
 default the canonical address) and floored under QuoterV2 when
 `EMERGE_SWAP_QUOTER` is set (`lib/chain/universal.ts` does the encoding).
 `v2` (`swapExactTokensForTokens`) and `v3` (`exactInputSingle`, fee from
-`EMERGE_SWAP_FEE`) remain for plain routers. Without a live token the
+`EMERGE_SWAP_FEE`) remain for plain routers. Pools the Uniswap app makes on a
+new chain are v4: for those set `EMERGE_SWAP_KIND=v4` with the same path
+syntax (a hop may carry its tick spacing as `fee/spacing`) and the V4Quoter
+in `EMERGE_SWAP_QUOTER`. `GET /api/vault?probe=1` with the cron secret
+simulates the swap as configured and reports allowances, the quote and the
+decoded revert reason, sending nothing; `&search=1` tries every kind and
+fee tier along the configured tokens and lists the routes that fill;
+`&pool=<id>` reads a v4 pool's key by the id a chart shows and writes the
+route from it, hook included. Without a live token the
 settlement is simulated in $EMERGE units so the flow can be exercised.
 
 v2.3: stewardship is judged on the server (`judgedFor` in
@@ -941,8 +982,12 @@ because browsers will not start audio unprompted; the choice is remembered.
 Wallets are discovered through EIP-6963, so a browser with both MetaMask and Trust
 Wallet installed offers a choice rather than silently using whichever extension won the
 injection race. `window.ethereum` is still read as a fallback for wallets that do not
-announce themselves. Both MetaMask and Trust Wallet work with Robinhood Chain; the
-Connect panel can also add or switch to the configured network.
+announce themselves, and the two Binance wallets that inject under their own names —
+the Web3 wallet inside the Binance app at `window.binancew3w.ethereum` and the older
+Binance Chain Wallet at `window.BinanceChain` — are looked for as well, so the game opened
+from the Binance app offers that wallet rather than "No wallet detected". MetaMask, Trust
+Wallet and Binance Wallet all work with Robinhood Chain; the Connect panel can also add
+or switch to the configured network.
 
 ## Blockchain
 
@@ -961,21 +1006,27 @@ public facts about the network rather than deployment secrets:
 | Testnet | `https://rpc.testnet.chain.robinhood.com/rpc` | 46630 |
 
 So a fresh clone already knows how to reach the chain, and the Connect panel's "switch
-network" really does add Robinhood Chain to MetaMask or Trust Wallet. The environment
+network" really does add Robinhood Chain to MetaMask, Trust Wallet or Binance Wallet. The environment
 still wins where it is set, which is how you point a build at a fork or a local node:
 
 ```
-NEXT_PUBLIC_CHAIN_TARGET=testnet|mainnet   # default: testnet
+NEXT_PUBLIC_CHAIN_TARGET=mainnet|testnet   # default: mainnet (chain 4663); testnet is chain 46630
 NEXT_PUBLIC_ROBINHOOD_CHAIN_ID=            # default: 4663
 NEXT_PUBLIC_ROBINHOOD_RPC_URL=             # default: https://rpc.mainnet.chain.robinhood.com
-NEXT_PUBLIC_ROBINHOOD_EXPLORER=
+NEXT_PUBLIC_ROBINHOOD_EXPLORER=            # default: https://robinhoodchain.blockscout.com
 NEXT_PUBLIC_EMERGE_TOKEN=                  # the ERC-20
-NEXT_PUBLIC_EMERGE_REGISTRY=               # contracts/EmergeLand.sol
+NEXT_PUBLIC_EMERGE_REGISTRY=               # contracts/EmergeLand.sol — set, and plots are tokens
+NEXT_PUBLIC_EMERGE_MARKET=                 # contracts/EmergeMarket.sol — the land market settles on chain
+NEXT_PUBLIC_EMERGE_ROYALTIES=              # contracts/EmergeRoyalties.sol — swept into the dividend pool
+NEXT_PUBLIC_EMERGE_ROYALTY_BPS=            # default: 500 (5%), what the land contract was deployed with
+NEXT_PUBLIC_OPENSEA_CHAIN=                 # default: robinhood (OpenSea's slug for the chain)
 NEXT_PUBLIC_ROBINHOOD_TESTNET_CHAIN_ID=    # default: 46630
 NEXT_PUBLIC_ROBINHOOD_TESTNET_RPC_URL=     # default: https://rpc.testnet.chain.robinhood.com/rpc
 NEXT_PUBLIC_ROBINHOOD_TESTNET_EXPLORER=
 NEXT_PUBLIC_EMERGE_TOKEN_TESTNET=
 NEXT_PUBLIC_EMERGE_REGISTRY_TESTNET=
+NEXT_PUBLIC_EMERGE_MARKET_TESTNET=
+NEXT_PUBLIC_EMERGE_ROYALTIES_TESTNET=
 
 NEXT_PUBLIC_EMERGE_VAULT=                  # default: 0x282f8A44…6062
 NEXT_PUBLIC_BURN_ADDRESS=                  # default: the zero address
@@ -988,14 +1039,20 @@ them in the browser bundle:
 ```
 NEXT_PUBLIC_TOKEN_BURNABLE=                # true for any ERC20Burnable token (Pons v2 is)
 EMERGE_VAULT_PRIVATE_KEY=                  # the vault's key, for automatic withdrawals
+EMERGE_DEV_WALLET=                         # the development wallet; 30% of casino ETH passes go here
 EMERGE_SESSION_SECRET=                      # signs sign-in cookies; derived from the vault key if unset
-EMERGE_DAILY_EMISSION=                     # default: 1,000,000 $EMERGE a day, vault-wide
+EMERGE_DAILY_EMISSION=                     # default: 10,000,000 $EMERGE a day, vault-wide; shared out per wallet in proportion to judged yield when demand exceeds it
 EMERGE_DEPOSIT_CONFIRMATIONS=              # default: 3
 EMERGE_DEV_ADDRESS=                        # the 30% development share of the dividend pool
 EMERGE_CRON_SECRET=                        # or Vercel's CRON_SECRET: the crons' bearer token
-EMERGE_SWAP_KIND=                          # universal (Robinhood Chain), v3 or v2 (default)
-EMERGE_SWAP_PATH=                          # universal: fee,token,fee… e.g. 3000,<USDG>,3000
-EMERGE_SWAP_QUOTER=                        # universal: QuoterV2, for the 3% floor
+EMERGE_SWAP_KIND=                          # universal (v3 pools through the Universal Router), v4 (v4 pools through it), v3 or v2 (default)
+EMERGE_SWAP_PATH=                          # universal/v4: fee,token,fee… e.g. 3000,<USDG>,500; a v4 hop may name its tick spacing as fee/spacing
+EMERGE_SWAP_QUOTER=                        # universal: QuoterV2; v4: the V4Quoter — for the 3% floor; on Robinhood Chain Uniswap's own are the default
+EMERGE_V3_FACTORY=                         # for the probe's pool check; Uniswap's on Robinhood Chain by default
+EMERGE_V4_STATE_VIEW=                      # likewise, the v4 StateView
+EMERGE_V4_POOL_MANAGER=                    # likewise, the v4 PoolManager, whose Initialize events the probe reads to find the token's pools
+EMERGE_V4_SCAN_FROM=                       # the oldest block the probe's event scan reaches back to (or &from= on the probe); 0 for the whole chain
+EMERGE_V4_POSITION_MANAGER=                # the v4 PositionManager, whose poolKeys lookup resolves a pool id in one call; Uniswap's on Robinhood Chain by default
 EMERGE_PERMIT2=                            # universal: default 0x000000000022D473030F116dDEE9F6B43aC78BA3
 EMERGE_SWAP_FEE=                           # v3: the pool's fee tier, default 3000
 KV_REST_API_URL=                           # required in production: the settlement ledger

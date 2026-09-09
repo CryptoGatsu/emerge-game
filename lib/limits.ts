@@ -55,3 +55,44 @@ export const clientKey = (name: string) => `emerge.e${DATA_EPOCH}.${name}`;
  * forging a request could be worth. Both halves matter.
  */
 export const MAX_GIFT_GOLD = 2_000;
+
+/* ------------------------------------------------------------------ *
+ * The player exchange
+ * ------------------------------------------------------------------ */
+
+/**
+ * The share of the Gold in every exchange trade that is burned.
+ *
+ * Here rather than beside the exchange itself because the guide prints it and
+ * the guide runs in the browser: a rate documented from one constant and
+ * enforced from another is a rate that drifts.
+ */
+export const TRADE_FEE = 0.05;
+/**
+ * The smallest Gold lot, and the largest lot of goods.
+ *
+ * A floor under Gold lots keeps the book readable; a ceiling on goods keeps a
+ * single order from being the whole market.
+ */
+export const MIN_GOLD_LOT = 100;
+export const MAX_GOODS_LOT = 5_000;
+
+/* ------------------------------------------------------------------ *
+ * The UTC day
+ * ------------------------------------------------------------------ */
+
+/**
+ * How long until the daily counters roll over, as 'Nh Nm'.
+ *
+ * Here rather than beside the counters because the panel that has to explain
+ * a nought needs it too, and the panel runs in a browser. A player asked why
+ * their rewards were still nought "after the new day has started" — theirs
+ * had, in their own timezone; the vault's had not. Saying how long is left
+ * answers that before it is asked, and it can only be said in one place if
+ * both halves of the game can read it.
+ */
+export function untilUtcMidnight(now = Date.now()): string {
+  const next = new Date(now); next.setUTCHours(24, 0, 0, 0);
+  const minutes = Math.max(1, Math.round((next.getTime() - now) / 60000));
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}

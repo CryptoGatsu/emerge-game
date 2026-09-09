@@ -1,372 +1,192 @@
 /**
- * The land registry, on chain.
+ * The land as tokens, from the browser's side.
  *
  * `contracts/EmergeLand.sol` is an ERC-721 in which **the token id is the plot
- * seed** — the same number that generates the terrain. So a plot is not a row
- * in our database that happens to mention a wallet: it is a token in that
- * wallet, transferable, visible in any explorer, and readable by anybody
- * without asking this game anything.
+ * seed** — the same number that generates the terrain. A plot is not a row in
+ * our database that happens to mention a wallet: it is a token in that wallet,
+ * transferable, visible in any explorer and on any marketplace, and readable
+ * by anybody without asking this game anything.
  *
- * What that buys, concretely:
+ * The game still sells land the way it always has — a claim is paid for in
+ * $EMERGE and verified off the chain — and then the plot is minted to the
+ * buyer. What changes is everything after: a plot changes hands as a token,
+ * on OpenSea or in the game's own market (`contracts/EmergeMarket.sol`,
+ * priced in $EMERGE), and the game follows the chain.
  *
- *   - Ownership is the chain's answer, not the server's. Clear your site data,
- *     change browser, come back in a year: the plots are still yours.
- *   - The price is read from the contract, so the number on the button is the
- *     number the transaction enforces. `claim` takes a `maxPrice` and reverts
- *     above it, so a price change between reading and signing cannot overcharge.
- *   - The claim fee goes to the burn address from inside the contract. Nothing
- *     we run can intercept it.
- *
- * Every function here answers rather than throwing, and every one degrades to
- * "no registry deployed" rather than pretending. Until
- * `NEXT_PUBLIC_EMERGE_REGISTRY` is set the shared relay in `lib/server` is
- * still what keeps two players off the same land, and the interface says so.
+ * Every function here answers rather than throwing, and every one degrades
+ * to "plots are not tokens on this build" rather than pretending.
  */
 
-import {
-  ACTIVE_CHAIN, TOKEN, activeProvider, ethCall, hexWord, numWord, registryLive, rpc, tokenLive,
-  walletAvailable, type ChainConfig,
-} from './emerge';
+import { encodeFunctionData, decodeFunctionResult, type Abi, type Hex } from 'viem';
+import { ACTIVE_CHAIN, TOKEN, activeProvider, ethCall, rpc, tokenLive, walletAvailable, type ChainConfig } from './emerge';
+import { ERC20_ABI, LAND_ABI, LAND_ADDRESS, MARKET_ABI, MARKET_ADDRESS, marketLive, openSeaUrl, plotsAreTokens, tokenExplorerUrl } from './plots';
 
-/* ------------------------------------------------------------------ *
- * Selectors
- *
- * Written out rather than derived, because deriving them needs a keccak
- * implementation in the browser bundle to compute constants that never change.
- * Each is the first four bytes of the hash of the signature beside it.
- * ------------------------------------------------------------------ */
-
-const SEL = {
-  ownerOf: '0x6352211e',          // ownerOf(uint256)
-  priceOf: '0xb9186d7d',          // priceOf(uint256)
-  claimedCount: '0xc08fa1a4',     // claimedCount()
-  registry: '0x6f111692',         // registry(uint256,uint256)
-  claim: '0xabae21de',            // claim(uint256,string,uint256)
-  release: '0x37bdc99b',          // release(uint256)
-  rename: '0x3ec2d836',           // rename(uint256,string)
-  allowance: '0xdd62ed3e',        // allowance(address,address)
-  approve: '0x095ea7b3',          // approve(address,uint256)
-} as const;
+export { openSeaUrl, plotsAreTokens, marketLive };
 
 /**
- * True once a claim can settle end to end.
- *
- * The registry alone is not enough: claiming pays in $EMERGE, so the token has
- * to exist for the contract to take payment from. One without the other is a
- * half-deployed build, and the interface should say that rather than offering
- * a button that always reverts.
+ * True once plots are tokens on this build. The name is kept from the earlier
+ * design, where a claim was itself the on-chain transaction; today a claim is
+ * paid to the game and the token follows.
  */
-export const onChainClaimsLive = (config: ChainConfig = ACTIVE_CHAIN) =>
-  registryLive(config) && tokenLive(config);
+export const onChainClaimsLive = (config: ChainConfig = ACTIVE_CHAIN) => plotsAreTokens() && !!config.registryAddress;
 
-/* ------------------------------------------------------------------ *
- * ABI, by hand
- * ------------------------------------------------------------------ */
-
-const strip = (hex: string) => hex.replace(/^0x/, '');
-
-/** Split return data into 32-byte words. */
-const words = (hex: string) => strip(hex).match(/.{1,64}/g) ?? [];
-
-/** A word at a byte offset. */
-const wordAt = (hex: string, byteOffset: number) => strip(hex).slice(byteOffset * 2, byteOffset * 2 + 64);
-
-const asNumber = (word: string) => Number(BigInt(`0x${word || '0'}`));
-
-const asAddress = (word: string) => `0x${word.slice(-40)}`;
-
-/** UTF-8 into ABI's length-prefixed, 32-byte-padded bytes. */
-function encodeString(value: string): { head: string; tail: string } {
-  const bytes = new TextEncoder().encode(value);
-  let hex = '';
-  for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
-  const padded = hex.padEnd(Math.ceil(hex.length / 64) * 64, '0');
-  return { head: numWord(bytes.length), tail: padded };
-}
-
-/** ABI bytes back into a string. */
-function decodeString(hex: string, byteOffset: number): string {
-  const length = asNumber(wordAt(hex, byteOffset));
-  if (!Number.isFinite(length) || length <= 0 || length > 4096) return '';
-  const data = strip(hex).slice((byteOffset + 32) * 2, (byteOffset + 32) * 2 + length * 2);
-  const bytes = new Uint8Array(length);
-  for (let i = 0; i < length; i++) bytes[i] = Number.parseInt(data.slice(i * 2, i * 2 + 2), 16) || 0;
-  return new TextDecoder().decode(bytes);
+export function plotExplorerUrl(seed: number): string | null {
+  return tokenExplorerUrl(seed);
 }
 
 /* ------------------------------------------------------------------ *
- * Reads
+ * Reading
  * ------------------------------------------------------------------ */
 
-/**
- * What the contract will charge for a plot, in whole $EMERGE.
- *
- * The price shown to a player must come from here and not from the game's own
- * generator, or the two will disagree the first time the contract's owner
- * adjusts `basePrice` — and the disagreement would show up as a transaction
- * that reverts for no visible reason.
- *
- * Null means there is no registry to ask, which is the caller's signal to fall
- * back to the local price and say the claim is not on chain.
- */
-export async function registryPrice(
-  seed: number,
-  config: ChainConfig = ACTIVE_CHAIN,
-): Promise<number | null> {
-  if (!registryLive(config)) return null;
-  const result = await ethCall(config.registryAddress!, SEL.priceOf + numWord(seed), config);
-  if (!result) return null;
+async function read<T>(to: string, abi: Abi, functionName: string, args: unknown[]): Promise<T | null> {
   try {
-    // The contract prices in token units; the game talks in whole tokens.
-    const units = BigInt(result);
-    return Number(units / 10n ** BigInt(TOKEN.decimals));
+    const data = encodeFunctionData({ abi, functionName, args });
+    const raw = await ethCall(to, data);
+    if (!raw || raw === '0x') return null;
+    return decodeFunctionResult({ abi, functionName, data: raw as Hex }) as T;
   } catch {
     return null;
   }
 }
 
-export interface RegistryPlot {
-  seed: number;
-  owner: string;
-  worldName: string;
-}
+export interface RegistryPlot { seed: number; owner: string }
 
-/** How many plots have ever been claimed on chain. */
-export async function claimedCount(config: ChainConfig = ACTIVE_CHAIN): Promise<number | null> {
-  if (!registryLive(config)) return null;
-  const result = await ethCall(config.registryAddress!, SEL.claimedCount, config);
-  if (!result) return null;
-  const n = asNumber(words(result)[0] ?? '');
-  return Number.isFinite(n) ? n : null;
-}
-
-/** How many plots one page of the registry asks for. */
-const PAGE = 100;
-
-/**
- * Every plot the chain says is held, with its owner and its name.
- *
- * Paged, because a single call returning ten thousand names is a call that
- * times out. A plot that has been released reads as owner zero and is dropped
- * here rather than shown as owned by nobody.
- */
-export async function allOnChainPlots(config: ChainConfig = ACTIVE_CHAIN): Promise<RegistryPlot[] | null> {
-  const total = await claimedCount(config);
+/** Every minted plot and who holds it, or null when the chain cannot be read. */
+export async function allOnChainPlots(): Promise<RegistryPlot[] | null> {
+  if (!LAND_ADDRESS) return null;
+  const total = await read<bigint>(LAND_ADDRESS, LAND_ABI as Abi, 'mintedCount', []);
   if (total === null) return null;
-
   const out: RegistryPlot[] = [];
-  for (let start = 0; start < total; start += PAGE) {
-    const data = SEL.registry + numWord(start) + numWord(Math.min(PAGE, total - start));
-    const result = await ethCall(config.registryAddress!, data, config);
-    if (!result) return out.length ? out : null;
-    out.push(...decodeRegistryPage(result));
+  for (let start = 0n; start < total; start += 200n) {
+    const page = await read<readonly [readonly bigint[], readonly string[]]>(LAND_ADDRESS, LAND_ABI as Abi, 'registry', [start, 200n]);
+    if (!page) return null;
+    page[0].forEach((seed, i) => { const owner = page[1][i].toLowerCase(); if (!/^0x0+$/.test(owner)) out.push({ seed: Number(seed), owner }); });
   }
   return out;
 }
 
-/**
- * Decode `(uint256[] seeds, address[] owners, string[] names)`.
- *
- * Three dynamic arrays, so the return data opens with three offsets and every
- * name is itself behind another offset. Written out longhand because pulling
- * in an ABI library to read one view is a lot of bundle for one function.
- */
-function decodeRegistryPage(hex: string): RegistryPlot[] {
-  const seedsAt = asNumber(wordAt(hex, 0));
-  const ownersAt = asNumber(wordAt(hex, 32));
-  const namesAt = asNumber(wordAt(hex, 64));
-  if (![seedsAt, ownersAt, namesAt].every(Number.isFinite)) return [];
+/** Who holds a plot on chain: null when nobody, undefined when the chain could not be read. */
+export async function holderOf(seed: number): Promise<string | null | undefined> {
+  if (!LAND_ADDRESS) return undefined;
+  try {
+    const data = encodeFunctionData({ abi: LAND_ABI, functionName: 'ownerOf', args: [BigInt(seed)] });
+    const raw = await ethCall(LAND_ADDRESS, data);
+    if (!raw || raw === '0x') return null;
+    const who = decodeFunctionResult({ abi: LAND_ABI, functionName: 'ownerOf', data: raw as Hex });
+    return /^0x0+$/.test(who) ? null : who.toLowerCase();
+  } catch (error) {
+    // A revert is "no owner"; a network failure is unknown.
+    const message = error instanceof Error ? error.message : String(error);
+    return /revert|no owner|execution/i.test(message) ? null : undefined;
+  }
+}
 
-  const count = asNumber(wordAt(hex, seedsAt));
-  if (!Number.isFinite(count) || count <= 0 || count > 10_000) return [];
+export interface MarketListing { seed: number; seller: string; price: number; live: boolean }
 
-  const out: RegistryPlot[] = [];
-  for (let i = 0; i < count; i++) {
-    const seed = asNumber(wordAt(hex, seedsAt + 32 + i * 32));
-    const owner = asAddress(wordAt(hex, ownersAt + 32 + i * 32));
-    // Each name sits at an offset measured from the start of the array's body.
-    const nameAt = namesAt + 32 + asNumber(wordAt(hex, namesAt + 32 + i * 32));
-    const worldName = decodeString(hex, nameAt);
-    if (/^0x0+$/.test(owner)) continue; // released
-    out.push({ seed, owner, worldName });
+/** A plot's listing on the market, if any. */
+export async function marketListing(seed: number): Promise<MarketListing | null> {
+  if (!MARKET_ADDRESS) return null;
+  const row = await read<readonly [string, bigint, bigint]>(MARKET_ADDRESS, MARKET_ABI as Abi, 'listings', [BigInt(seed)]);
+  if (!row || /^0x0+$/.test(row[0])) return null;
+  return { seed, seller: row[0].toLowerCase(), price: Number(row[1] / 10n ** 18n), live: true };
+}
+
+/** The whole market board. */
+export async function marketBoard(): Promise<MarketListing[]> {
+  if (!MARKET_ADDRESS) return [];
+  const total = await read<bigint>(MARKET_ADDRESS, MARKET_ABI as Abi, 'listedCount', []);
+  if (total === null) return [];
+  const out: MarketListing[] = [];
+  for (let start = 0n; start < total; start += 200n) {
+    const page = await read<readonly [readonly bigint[], readonly string[], readonly bigint[], readonly boolean[]]>(MARKET_ADDRESS, MARKET_ABI as Abi, 'board', [start, 200n]);
+    if (!page) break;
+    page[0].forEach((seed, i) => out.push({ seed: Number(seed), seller: page[1][i].toLowerCase(), price: Number(page[2][i] / 10n ** 18n), live: page[3][i] }));
   }
   return out;
 }
 
 /* ------------------------------------------------------------------ *
- * Writes
+ * Signing
  * ------------------------------------------------------------------ */
 
-export interface ChainTx {
-  ok: boolean;
-  txHash: string | null;
-  message: string;
-}
+type Sent = { ok: true; txHash: string } | { ok: false; message: string };
 
-/** Send a transaction from the player's wallet. They sign; we never do. */
-async function send(from: string, to: string, data: string): Promise<ChainTx> {
-  if (!walletAvailable()) return { ok: false, txHash: null, message: 'No wallet to sign with.' };
+async function send(from: string, to: string, data: string): Promise<Sent> {
+  const provider = activeProvider();
+  if (!provider || !walletAvailable()) return { ok: false, message: 'Connect a wallet first.' };
   try {
-    const txHash = (await activeProvider()!.request({
-      method: 'eth_sendTransaction',
-      params: [{ from, to, data }],
-    })) as string;
-    return { ok: true, txHash, message: 'Sent.' };
+    const txHash = (await provider.request({ method: 'eth_sendTransaction', params: [{ from, to, data }] })) as string;
+    if (typeof txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { ok: false, message: 'The wallet did not return a transaction hash.' };
+    return { ok: true, txHash };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'The transaction was rejected.';
-    return { ok: false, txHash: null, message };
+    const message = error instanceof Error ? error.message : 'The wallet refused.';
+    return { ok: false, message: /rejected|denied|cancel/i.test(message) ? 'You cancelled the signature.' : message.slice(0, 200) };
   }
 }
 
-/** How long to wait for a transaction before giving up on watching it. */
-const RECEIPT_TIMEOUT_MS = 90_000;
-const RECEIPT_POLL_MS = 2_000;
-
-/**
- * Wait for a transaction to be mined.
- *
- * Needed because an approval and the claim that spends it are two
- * transactions: sending the second before the first is mined makes it revert
- * on an allowance that is not there yet. Returns false on a revert and null on
- * a timeout, which are different things — the second may still succeed, so the
- * caller says "still pending" rather than "failed".
- */
-async function waitForReceipt(txHash: string, config: ChainConfig): Promise<boolean | null> {
-  const deadline = Date.now() + RECEIPT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const receipt = await rpc<{ status?: string }>('eth_getTransactionReceipt', [txHash], config);
-    if (receipt) return receipt.status === '0x1';
-    await new Promise((resolve) => setTimeout(resolve, RECEIPT_POLL_MS));
+/** Wait for a transaction to be mined, up to about a minute. */
+export async function mined(txHash: string, tries = 30): Promise<'success' | 'reverted' | 'pending'> {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const receipt = await ethReceipt(txHash);
+      if (receipt) return receipt.status === '0x1' ? 'success' : 'reverted';
+    } catch { /* keep waiting */ }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  return null;
+  return 'pending';
 }
 
-/** What the registry is currently allowed to take from a wallet, in units. */
-async function allowanceUnits(owner: string, config: ChainConfig): Promise<bigint> {
-  const data = SEL.allowance + hexWord(owner.toLowerCase()) + hexWord(config.registryAddress!.toLowerCase());
-  const result = await ethCall(config.tokenAddress!, data, config);
-  try {
-    return result ? BigInt(result) : 0n;
-  } catch {
-    return 0n;
-  }
+async function ethReceipt(txHash: string): Promise<{ status: string } | null> {
+  return rpc<{ status: string } | null>('eth_getTransactionReceipt', [txHash]);
 }
 
-export interface OnChainClaim extends ChainTx {
-  /** What the contract actually charged, in whole tokens. */
-  price: number | null;
-  /** True when the claim transaction was mined successfully. */
-  settled: boolean;
+/** Give a plot up: burn the token. Only the holder's wallet can sign this. */
+export async function burnPlotOnChain(from: string, seed: number): Promise<Sent> {
+  if (!LAND_ADDRESS) return { ok: false, message: 'Plots are not tokens on this build.' };
+  return send(from, LAND_ADDRESS, encodeFunctionData({ abi: LAND_ABI, functionName: 'burn', args: [BigInt(seed)] }));
 }
 
-/**
- * Claim a plot on chain: approve, then claim.
- *
- * Two signatures, and the player is told that before the first one. The
- * approval is for exactly this claim's price rather than an unlimited
- * allowance, because an unlimited allowance on a contract is a standing
- * permission to drain a wallet and there is no reason to ask for one here.
- *
- * `maxPrice` is what the player agreed to. If the contract's price moved
- * between the quote and the signature the transaction reverts rather than
- * quietly charging more.
- */
-export async function claimOnChain(
-  from: string,
-  seed: number,
-  worldName: string,
-  config: ChainConfig = ACTIVE_CHAIN,
-): Promise<OnChainClaim> {
-  const refuse = (message: string): OnChainClaim =>
-    ({ ok: false, txHash: null, message, price: null, settled: false });
-
-  if (!onChainClaimsLive(config)) {
-    return refuse('The land registry is not deployed yet.');
-  }
-
-  const price = await registryPrice(seed, config);
-  if (price === null) return refuse('Could not read the price from the registry.');
-
-  const units = BigInt(price) * 10n ** BigInt(TOKEN.decimals);
-
-  // Approve only what this claim costs, and only when the standing allowance
-  // will not already cover it.
-  if ((await allowanceUnits(from, config)) < units) {
-    const approval = await send(
-      from,
-      config.tokenAddress!,
-      SEL.approve + hexWord(config.registryAddress!.toLowerCase()) + numWord(units),
-    );
-    if (!approval.ok) return { ...approval, price, settled: false };
-    const mined = await waitForReceipt(approval.txHash!, config);
-    if (mined === false) return { ...refuse('The approval failed on chain.'), price };
-    if (mined === null) {
-      return {
-        ok: false, txHash: approval.txHash, price, settled: false,
-        message: 'The approval is still pending. Wait for it to confirm and claim again — you will not be asked to approve twice.',
-      };
-    }
-  }
-
-  const name = encodeString(worldName);
-  const data = SEL.claim
-    + numWord(seed)
-    // Three arguments, so the string's body starts after three words.
-    + numWord(96)
-    + numWord(units)
-    + name.head
-    + name.tail;
-
-  const claim = await send(from, config.registryAddress!, data);
-  if (!claim.ok) return { ...claim, price, settled: false };
-
-  const mined = await waitForReceipt(claim.txHash!, config);
-  if (mined === false) {
-    return {
-      ok: false, txHash: claim.txHash, price, settled: false,
-      message: 'The claim was rejected on chain. Somebody may have taken this plot first.',
-    };
-  }
-  if (mined === null) {
-    return {
-      ok: true, txHash: claim.txHash, price, settled: false,
-      message: 'Your claim was sent and is still confirming.',
-    };
-  }
-  return {
-    ok: true, txHash: claim.txHash, price, settled: true,
-    message: `Claimed on chain for ${price.toLocaleString()} ${TOKEN.ticker}, burned by the contract.`,
-  };
+/** Whether the market may move this wallet's plots. */
+export async function marketApproved(owner: string): Promise<boolean> {
+  if (!LAND_ADDRESS || !MARKET_ADDRESS) return false;
+  return (await read<boolean>(LAND_ADDRESS, LAND_ABI as Abi, 'isApprovedForAll', [owner as Hex, MARKET_ADDRESS as Hex])) === true;
 }
 
-/** Give a plot up. The token is burned and the seed is claimable again. */
-export async function releaseOnChain(
-  from: string,
-  seed: number,
-  config: ChainConfig = ACTIVE_CHAIN,
-): Promise<ChainTx> {
-  if (!registryLive(config)) return { ok: false, txHash: null, message: 'No registry deployed.' };
-  return send(from, config.registryAddress!, SEL.release + numWord(seed));
+/** Let the market move this wallet's plots when they sell. One signature, once. */
+export async function approveMarket(from: string): Promise<Sent> {
+  if (!LAND_ADDRESS || !MARKET_ADDRESS) return { ok: false, message: 'The market is not deployed on this build.' };
+  return send(from, LAND_ADDRESS, encodeFunctionData({ abi: LAND_ABI, functionName: 'setApprovalForAll', args: [MARKET_ADDRESS as Hex, true] }));
 }
 
-/** Rename a world on chain, so the name travels with the token. */
-export async function renameOnChain(
-  from: string,
-  seed: number,
-  worldName: string,
-  config: ChainConfig = ACTIVE_CHAIN,
-): Promise<ChainTx> {
-  if (!registryLive(config)) return { ok: false, txHash: null, message: 'No registry deployed.' };
-  const name = encodeString(worldName);
-  return send(
-    from,
-    config.registryAddress!,
-    SEL.rename + numWord(seed) + numWord(64) + name.head + name.tail,
-  );
+/** List a plot on the market at a price in whole $EMERGE. */
+export async function listOnChain(from: string, seed: number, price: number): Promise<Sent> {
+  if (!MARKET_ADDRESS) return { ok: false, message: 'The market is not deployed on this build.' };
+  if (!(price > 0)) return { ok: false, message: 'Name a price.' };
+  return send(from, MARKET_ADDRESS, encodeFunctionData({ abi: MARKET_ABI, functionName: 'list', args: [BigInt(seed), BigInt(Math.round(price)) * 10n ** 18n] }));
 }
 
-/** Where to look a plot up, when the chain has an explorer. */
-export function plotExplorerUrl(seed: number, config: ChainConfig = ACTIVE_CHAIN): string | null {
-  if (!config.explorerUrl || !config.registryAddress) return null;
-  return `${config.explorerUrl.replace(/\/$/, '')}/token/${config.registryAddress}?a=${seed}`;
+export async function cancelOnChain(from: string, seed: number): Promise<Sent> {
+  if (!MARKET_ADDRESS) return { ok: false, message: 'The market is not deployed on this build.' };
+  return send(from, MARKET_ADDRESS, encodeFunctionData({ abi: MARKET_ABI, functionName: 'cancel', args: [BigInt(seed)] }));
 }
+
+/** What the buyer has let the market spend, in whole $EMERGE. */
+export async function marketAllowance(owner: string): Promise<number> {
+  if (!MARKET_ADDRESS || !tokenLive() || !ACTIVE_CHAIN.tokenAddress) return 0;
+  const raw = await read<bigint>(ACTIVE_CHAIN.tokenAddress, ERC20_ABI as Abi, 'allowance', [owner as Hex, MARKET_ADDRESS as Hex]);
+  return raw === null ? 0 : Number(raw / 10n ** 18n);
+}
+
+/** Let the market take the price from the buyer. */
+export async function approveMarketSpend(from: string, price: number): Promise<Sent> {
+  if (!MARKET_ADDRESS || !ACTIVE_CHAIN.tokenAddress) return { ok: false, message: 'The market is not deployed on this build.' };
+  return send(from, ACTIVE_CHAIN.tokenAddress, encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [MARKET_ADDRESS as Hex, BigInt(Math.round(price)) * 10n ** 18n] }));
+}
+
+/** Buy a listed plot at the price shown; the contract refuses if it moved. */
+export async function buyOnChain(from: string, seed: number, price: number): Promise<Sent> {
+  if (!MARKET_ADDRESS) return { ok: false, message: 'The market is not deployed on this build.' };
+  return send(from, MARKET_ADDRESS, encodeFunctionData({ abi: MARKET_ABI, functionName: 'buy', args: [BigInt(seed), BigInt(Math.round(price)) * 10n ** 18n] }));
+}
+
+export const marketTicker = () => TOKEN.ticker;

@@ -37,7 +37,7 @@
  */
 
 import { DAILY_EARN_CEILING, EMERGE_PER_GOLD, WITHDRAW_BURN_RATE } from '../chain/vault';
-import { serverKey } from '../limits';
+import { serverKey, untilUtcMidnight } from '../limits';
 import { counter, hget, hsetnx, incrBy, incrWindow } from './kv';
 
 /** Today, in UTC, as a plain key. The server's day, not the player's. */
@@ -88,9 +88,39 @@ export async function takePayoutSlot(address: string): Promise<PayoutAllowance> 
   }
   const today = await incrWindow(payoutCountKey(address, day), 1, 26 * 3600);
   if (today > MAX_PAYOUTS_PER_DAY) {
-    return { ok: false, reason: `That is ${MAX_PAYOUTS_PER_DAY} withdrawals today. Take the rest out tomorrow.` };
+    return { ok: false, reason: `That is ${MAX_PAYOUTS_PER_DAY} withdrawals since midnight UTC. The count resets in ${untilUtcMidnight()}.` };
   }
   return { ok: true };
+}
+
+/** How long until the daily counters roll over. Defined in `limits`, which the
+ *  Bank can read too, and re-exported here where the counters live. */
+export { untilUtcMidnight };
+
+/* ------------------------------------------------------------------ *
+ * Casino credit
+ * ------------------------------------------------------------------ */
+
+/**
+ * $EMERGE won at the tables, not yet paid out. It widens the wallet's daily
+ * room by exactly this much and is consumed as withdrawals go out, so a win
+ * is paid under the same rules as stewardship: the burn share, the day's
+ * count, the vault's cover.
+ */
+const casinoKey = (address: string) => serverKey(`casino:credit:${address.toLowerCase()}`);
+export async function casinoCreditOf(address: string): Promise<number> {
+  return Math.max(0, await counter(casinoKey(address)));
+}
+export async function addCasinoCredit(address: string, whole: number): Promise<void> {
+  const n = Math.floor(whole);
+  if (n > 0) await incrBy(casinoKey(address), n);
+}
+/** Consume up to `upTo` of the credit; returns what was taken. */
+export async function takeCasinoCredit(address: string, upTo: number): Promise<number> {
+  const have = await casinoCreditOf(address);
+  const take = Math.min(have, Math.floor(upTo));
+  if (take > 0) await incrBy(casinoKey(address), -take);
+  return take;
 }
 
 /* ------------------------------------------------------------------ *
@@ -152,26 +182,51 @@ export const dailyEmissionBudget = () => {
   return Number.isFinite(configured) && configured > 0 ? configured : DAILY_EARN_CEILING * 10;
 };
 
+/**
+ * The day's budget is shared out, not raced for.
+ *
+ * It used to be there in full at UTC midnight for whoever was awake, and
+ * then, for a week, opened through the day by the hour — which only made
+ * the race hourly: a player who refreshed at ten in the evening was told
+ * "this hour's are taken" and to come back in two minutes, and whoever
+ * pressed the button most won. Now each wallet has its own share of the day
+ * (see `fairShare`), in proportion to what it is judged to earn against what
+ * everybody is judged to earn, and that share waits for it all day. The
+ * global counter stays as the hard stop it always was.
+ */
 export interface EmissionRoom {
   /** What this address has already been paid today. */
   spent: number;
   /** What it may still be paid. */
   left: number;
-  /** What the vault as a whole has left today. */
+  /** What the vault as a whole has left of the day's budget. */
   globalLeft: number;
+  /** The whole day's budget. */
+  budget: number;
+  /** What the vault has paid out today, across everybody. */
+  emitted: number;
+  /** This wallet's share of the day, when the day is being shared out; null when it is paid what it is judged. */
+  share: number | null;
+  /** What everybody is judged to earn today, added up. */
+  demand: number | null;
 }
 
 /** How much stewardship this address may still be paid today. */
-export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING): Promise<EmissionRoom> {
+export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING, share: number | null = null, demand: number | null = null): Promise<EmissionRoom> {
   const day = utcDay();
   const [spent, emitted] = await Promise.all([
     counter(earnedKey(address, day)),
     counter(globalKey(day)),
   ]);
+  const bound = share === null ? ceiling : Math.min(ceiling, share);
   return {
     spent,
-    left: Math.max(0, ceiling - spent),
+    left: Math.max(0, bound - spent),
     globalLeft: Math.max(0, dailyEmissionBudget() - emitted),
+    budget: dailyEmissionBudget(),
+    emitted,
+    share,
+    demand,
   };
 }
 
@@ -185,14 +240,15 @@ export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING
  * atomically, and a reservation that turns out to breach either is rolled back
  * before anything is signed.
  */
-export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING): Promise<boolean> {
+export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING, share: number | null = null): Promise<boolean> {
   const day = utcDay();
   const amount = Math.floor(whole);
   if (!(amount > 0)) return false;
+  const bound = share === null ? ceiling : Math.min(ceiling, share);
 
   // Expiring, so a day's tally does not become a key that lives for ever.
   const mine = await incrWindow(earnedKey(address, day), amount, 26 * 3600);
-  if (mine > ceiling) {
+  if (mine > bound) {
     await incrBy(earnedKey(address, day), -amount);
     return false;
   }
@@ -203,6 +259,72 @@ export async function reserveEmission(address: string, whole: number, ceiling = 
     return false;
   }
   return true;
+}
+
+/* ------------------------------------------------------------------ *
+ * A plot's own day
+ * ------------------------------------------------------------------ */
+
+/*
+ * The day's room belongs to the plot as well as to the wallet.
+ *
+ * The wallet counter alone could be walked around: hand the plot to a fresh
+ * wallet and its counter is empty, so the same land paid out again, and
+ * again, for as many wallets as somebody cared to make. A player found that
+ * and reported it. Stewardship is what a plot earns for being well kept, so
+ * the plot is what the day is counted against — a transfer moves who is paid,
+ * never how much the land has already paid today.
+ */
+const plotEarnedKey = (seed: number, day: string) => serverKey(`plot-earned:${day}:${seed}`);
+
+/** What each of these plots has already been paid today, whoever held it. */
+export async function plotsSpentToday(seeds: number[]): Promise<Map<number, number>> {
+  const day = utcDay();
+  const spent = await Promise.all(seeds.map((seed) => counter(plotEarnedKey(seed, day)).catch(() => 0)));
+  return new Map(seeds.map((seed, i) => [seed, spent[i]]));
+}
+
+/** One plot's charge against its day, for a rollback. */
+export interface PlotCharge { seed: number; amount: number }
+
+/**
+ * Charge a payout against the plots that earned it.
+ *
+ * Walked in the order given, each plot taking what it still has room for,
+ * until the whole amount is placed. A plot that would go over its own
+ * ceiling takes only what is left of it. If the plots between them cannot
+ * cover the amount, every charge is given back and the answer is null: the
+ * caller refuses rather than paying land that has already been paid.
+ */
+export async function chargePlots(plots: { seed: number; cap: number }[], whole: number): Promise<PlotCharge[] | null> {
+  const day = utcDay();
+  let owing = Math.floor(whole);
+  const made: PlotCharge[] = [];
+  for (const { seed, cap } of plots) {
+    if (owing <= 0) break;
+    const before = await counter(plotEarnedKey(seed, day)).catch(() => 0);
+    const room = Math.max(0, Math.floor(cap) - before);
+    const take = Math.min(owing, room);
+    if (take <= 0) continue;
+    // Expiring, so a day's tally does not become a key that lives for ever.
+    const after = await incrWindow(plotEarnedKey(seed, day), take, 26 * 3600);
+    if (after > Math.floor(cap)) {
+      // Somebody else was charging the same plot between the read and the
+      // write. Give this one back and carry on to the next plot.
+      await incrBy(plotEarnedKey(seed, day), -take).catch(() => {});
+      continue;
+    }
+    made.push({ seed, amount: take });
+    owing -= take;
+  }
+  if (owing > 0) { await refundPlots(made); return null; }
+  return made;
+}
+
+/** Give plot charges back when the transfer did not happen. */
+export async function refundPlots(charges: PlotCharge[]): Promise<void> {
+  const day = utcDay();
+  await Promise.all(charges.map((c) => incrBy(plotEarnedKey(c.seed, day), -c.amount).catch(() => {})));
 }
 
 /** Give a reservation back when the transfer did not happen. */

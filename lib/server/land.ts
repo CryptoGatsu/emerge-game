@@ -1,6 +1,6 @@
-import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
-import { charterMultiplier, plotCeiling } from '../world/eras';
-import { cityLevel, stewardshipScore, type World } from '../simulation';
+import { DAILY_EARN_CEILING, EARNING_PLOT_LIMIT, LEVEL_PRESENCE_DAYS, WALLET_DAILY_CEILING, HAND_SHARE } from '../chain/vault';
+import { LADDER_AT, charterMultiplier, legacyLevelForSize, legacyPlotCeiling, plotCeiling } from '../world/eras';
+import { cityLevel, citySize, stewardshipScore, type World } from '../simulation';
 import { worldFromSave, type SavedWorld } from '../world/save';
 import 'server-only';
 
@@ -36,12 +36,15 @@ import 'server-only';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ACTIVE_CHAIN, tokenBalance, tokenLive } from '../chain/emerge';
 import { HAND_MIN_EMERGE } from '../chain/vault';
-import { allClaims, jobOf, readWorld, type Claim, presenceDays, lastSeenAt, lastSeenAnywhere } from './registry';
+import { allClaims, jobOf, readWorld, worldHeadlines, type Claim, presenceDays, lastSeenAt, lastSeenAnywhere } from './registry';
+import { plotsSpentToday } from './accounts';
+import { getValue, setValue } from './kv';
+import { serverKey } from '../limits';
 
 const chain = () => defineChain({
   id: ACTIVE_CHAIN.chainId ?? 4663,
   name: ACTIVE_CHAIN.label,
-  nativeCurrency: { name: 'Robinhood', symbol: 'RH', decimals: 18 },
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: { default: { http: [ACTIVE_CHAIN.rpcUrl ?? ''] } },
 });
 
@@ -84,7 +87,7 @@ export async function eraHeldBy(address: string): Promise<number> {
  * level-ten snapshot is paid as level one; a city somebody has looked in on
  * for a month is paid as what it is.
  */
-export const LEVEL_PRESENCE_DAYS = 3;
+export { LEVEL_PRESENCE_DAYS };
 export function judgedLevel(world: World | null, presentDays: number): number {
   const fromWorld = world ? cityLevel(world) : 1;
   const fromPresence = 1 + Math.floor(Math.max(0, presentDays) / LEVEL_PRESENCE_DAYS);
@@ -108,7 +111,14 @@ export interface Judged {
   ceiling: number;
   /** What those plots earn in a real day as the server sees them: ceiling times score times attention. */
   yield: number;
-  plots: { seed: number; level: number; era: number; score: number; attention: number; ceiling: number }[];
+  /** UTC days the owner has been present, which bound the judged level. */
+  days: number;
+  /**
+   * One row per earning plot: `level` is what it is paid at, `reported` what
+   * the published city says it is (the two differ until enough days have been
+   * present), and `yield` is that plot's share of the day.
+   */
+  plots: { seed: number; name: string; level: number; reported: number; era: number; score: number; attention: number; ceiling: number; yield: number }[];
 }
 
 /**
@@ -120,12 +130,28 @@ export interface Judged {
  * last heartbeat on it. The payout route pays the lesser of what the client
  * claims and this. Never more than WALLET_DAILY_CEILING.
  */
+/**
+ * A plot's ceiling: the ladder, or what the old table would have paid if that
+ * is more and the plot is old enough to be owed it.
+ *
+ * Both halves are bounded by the same presence rule. The size in a published
+ * world is the client's word, so an inflated population would otherwise buy an
+ * inflated floor — the floor is capped by the days the owner was actually here,
+ * exactly as the level is.
+ */
+function legacyFloor(row: Claim, people: number, buildings: number, presentDays: number): number {
+  if (!(row.at < LADDER_AT)) return 0;
+  const fromPresence = 1 + Math.floor(Math.max(0, presentDays) / LEVEL_PRESENCE_DAYS);
+  const legacy = Math.max(1, Math.min(legacyLevelForSize(people, buildings), fromPresence));
+  return legacyPlotCeiling(legacy, row.era ?? 1);
+}
+
 export async function judgedFor(address: string): Promise<Judged> {
   const me = address.toLowerCase();
   let rows: Claim[];
-  try { rows = await allClaims(); } catch { return { ceiling: DAILY_EARN_CEILING, yield: 0, plots: [] }; }
+  try { rows = await allClaims(); } catch { return { ceiling: DAILY_EARN_CEILING, yield: 0, days: 0, plots: [] }; }
   const mine = rows.filter((c) => c.owner.toLowerCase() === me).sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT);
-  if (!mine.length) return { ceiling: DAILY_EARN_CEILING, yield: 0, plots: [] };
+  if (!mine.length) return { ceiling: DAILY_EARN_CEILING, yield: 0, days: 0, plots: [] };
   const now = Date.now();
   let days = 0;
   try { days = await presenceDays(me); } catch { days = 0; }
@@ -133,6 +159,11 @@ export async function judgedFor(address: string): Promise<Judged> {
   let anywhere = 0;
   try { anywhere = await lastSeenAnywhere(me); } catch { anywhere = 0; }
   const plots: Judged['plots'] = [];
+  // What each of these plots has already been paid today, by this wallet or by
+  // whoever held it earlier: a plot's day is the plot's, so handing it on does
+  // not hand on a fresh day's room with it.
+  let already = new Map<number, number>();
+  try { already = await plotsSpentToday(mine.map((c) => c.seed)); } catch { already = new Map(); }
   let ceiling = 0, yieldSum = 0;
   for (const row of mine) {
     let world: World | null = null;
@@ -141,18 +172,110 @@ export async function judgedFor(address: string): Promise<Judged> {
       world = published ? worldFromSave(published.snapshot as SavedWorld, row.seed, row.worldName) : null;
     } catch { world = null; }
     const level = judgedLevel(world, days);
+    let reported = 1;
+    try { reported = world ? cityLevel(world) : 1; } catch { reported = level; }
     const era = row.era ?? 1;
-    const cap = Math.round(plotCeiling(level, era) * charterMultiplier(row.charterUntil, now));
+    const size = world ? citySize(world) : { people: 0, buildings: 0 };
+    const rung = Math.max(plotCeiling(level, era), legacyFloor(row, size.people, size.buildings, days));
+    const full = Math.round(rung * charterMultiplier(row.charterUntil, now));
+    // The plot's ceiling less what it has already paid out today.
+    const cap = Math.max(0, full - (already.get(row.seed) ?? 0));
     let score = 0;
     try { score = world ? stewardshipScore(world) : 0; } catch { score = 0; }
     let attention = ATTENTION_FLOOR;
     try { attention = attentionFrom(Math.max(anywhere, await lastSeenAt(row.seed, me)), now); } catch { attention = attentionFrom(anywhere, now); }
     ceiling += cap;
     yieldSum += cap * score * attention;
-    plots.push({ seed: row.seed, level, era, score, attention, ceiling: cap });
+    plots.push({ seed: row.seed, name: row.worldName ?? '', level, reported, era, score, attention, ceiling: cap, yield: Math.round(cap * score * attention) });
   }
   // Five plots at the top would come to more than a wallet may take in a day.
-  return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), plots };
+  return { ceiling: Math.max(1, Math.min(WALLET_DAILY_CEILING, ceiling)), yield: Math.max(0, Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum))), days, plots };
+}
+
+/**
+ * What everybody could claim today, added up: the demand on the vault.
+ *
+ * Read off the published headlines — the level and score the registry took
+ * when each world was published — with each owner's presence days and
+ * charter, and capped per wallet the same way one wallet is judged. Reading
+ * every world in full for every payout would be far too slow, so this is an
+ * estimate from the headlines, and it is kept for a quarter of an hour: the
+ * day's shares must not shift under a player between the Bank's figure and
+ * the button.
+ *
+ * What it deliberately does *not* weigh is attention.
+ *
+ * Attention belongs in what a wallet is paid — a player who does not show up
+ * earns less, and should. It has no business in the divisor. It was there,
+ * and the effect was a timezone lottery: attention decays while you sleep, so
+ * being asleep at midnight UTC both shrank your own place in the sum and
+ * fattened everybody else's slice of it. Whoever was awake early divided the
+ * budget among a small total and took oversized shares; by the afternoon the
+ * total had grown, the shares had shrunk and the pot was already empty. A
+ * player asked for the day's budget to be released in batches so that the
+ * far side of the world got a turn. Batches were tried once before and only
+ * made the race hourly; this is the same complaint answered at its cause.
+ *
+ * Modelled on twenty wallets with half of them asleep at midnight UTC: an
+ * early riser took 769,230 and a late one 230,770, with five of ten late
+ * risers paid nothing at all. Divided by what everybody could claim, both
+ * take 500,000 and nobody is paid nothing. Freezing the old sum at the
+ * day's first read does not fix it, because that read is exactly when the
+ * sum is most understated.
+ *
+ * Each wallet is still paid its own attention-adjusted yield, so this can
+ * only ever leave the budget under-spent, never over.
+ */
+export interface Demand { total: number; wallets: number; at: number }
+const DEMAND_TTL_SECONDS = 900;
+const demandKey = (day: string) => serverKey(`judged-total:${day}`);
+
+export async function judgedTotal(now = Date.now()): Promise<Demand> {
+  const day = new Date(now).toISOString().slice(0, 10);
+  try {
+    const cached = await getValue(demandKey(day));
+    if (cached) {
+      const parsed = JSON.parse(cached) as Demand;
+      if (parsed && Number.isFinite(parsed.total) && now - parsed.at < DEMAND_TTL_SECONDS * 1000) return parsed;
+    }
+  } catch { /* recomputed below */ }
+  let rows: Claim[] = [];
+  let heads: Awaited<ReturnType<typeof worldHeadlines>> = [];
+  try { [rows, heads] = await Promise.all([allClaims(), worldHeadlines()]); } catch { return { total: 0, wallets: 0, at: now }; }
+  const headOf = new Map(heads.map((h) => [h.seed, h]));
+  const byOwner = new Map<string, Claim[]>();
+  for (const c of rows) {
+    const me = c.owner.toLowerCase();
+    byOwner.set(me, [...(byOwner.get(me) ?? []), c]);
+  }
+  let total = 0, wallets = 0;
+  for (const [owner, mine] of byOwner) {
+    const days = await presenceDays(owner).catch(() => 0);
+    const fromPresence = 1 + Math.floor(Math.max(0, days) / LEVEL_PRESENCE_DAYS);
+    let yieldSum = 0;
+    for (const row of mine.sort((a, b) => a.at - b.at).slice(0, EARNING_PLOT_LIMIT)) {
+      const head = headOf.get(row.seed);
+      const level = Math.max(1, Math.min(head?.level ?? 1, fromPresence));
+      // The headline counts buildings rather than weighing them by age, so the
+      // floor read here can come out a shade low for a plot in a late era. This
+      // is the estimate of what the vault owes, not what anybody is paid, and
+      // the two readings are identical in the settlement era where nearly every
+      // grandfathered plot sits.
+      const rung = Math.max(
+        plotCeiling(level, row.era ?? 1),
+        legacyFloor(row, head?.population ?? 0, head?.buildings ?? 0, days),
+      );
+      const cap = Math.round(rung * charterMultiplier(row.charterUntil, now));
+      // No attention here: see above. This is what the plot could pay its
+      // owner today, not what it would pay them at this minute.
+      yieldSum += cap * (head?.score ?? 0);
+    }
+    const judged = Math.min(WALLET_DAILY_CEILING, Math.round(yieldSum));
+    if (judged > 0) { total += judged; wallets += 1; }
+  }
+  const out = { total, wallets, at: now };
+  try { await setValue(demandKey(day), JSON.stringify(out), DEMAND_TTL_SECONDS); } catch { /* served uncached */ }
+  return out;
 }
 
 /** Kept for callers that only want the ceiling. */
@@ -172,7 +295,9 @@ export async function handCeilingFor(address: string): Promise<number> {
     } catch { world = null; }
     const days = await presenceDays(job.owner).catch(() => 0);
     const level = judgedLevel(world, days);
-    return Math.max(1, Math.round(plotCeiling(level, job.era ?? 1) * HAND_SHARE));
+    const size = world ? citySize(world) : { people: 0, buildings: 0 };
+    const rung = Math.max(plotCeiling(level, job.era ?? 1), legacyFloor(job, size.people, size.buildings, days));
+    return Math.max(1, Math.round(rung * HAND_SHARE));
   } catch {
     return 0;
   }

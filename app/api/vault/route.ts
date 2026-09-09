@@ -7,16 +7,64 @@
  * `POST /api/vault` with `{ sweep: true }` asks the vault to burn what it
  * owes now rather than after the next charge. Anybody may ask; it only ever
  * burns the vault's own owed share, once, under a lock.
+ *
+ * `GET /api/vault?probe=1`, with the cron secret, simulates the GLD swap as
+ * configured and says what it would do, allowances and revert reason
+ * included; `&search=1` also tries every kind and fee tier and lists the
+ * routes that fill; `&pool=<id>` reads a v4 pool's key by the id a chart
+ * shows and writes the route from it. Nothing is sent, except that
+ * `&approve=1` renews the vault's Permit2 approvals first, as a swap would,
+ * and `&pay=1` pays the oldest waiting GLD win and reports how it went.
  */
 
 import { NextResponse } from 'next/server';
 import { sweepBurn, vaultBook } from '@/lib/server/treasury';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
+import { probeSwap } from '@/lib/server/signer';
+import { pendingGld, settlePendingGld, settledGld } from '@/lib/server/casino';
 
 export const dynamic = 'force-dynamic';
+// A probe with search simulates a few dozen swaps.
+export const maxDuration = 60;
 
-export async function GET() {
+const cronAllowed = (request: Request) => {
+  const secret = process.env.EMERGE_CRON_SECRET ?? process.env.CRON_SECRET ?? '';
+  if (!secret) return false;
+  const auth = request.headers.get('authorization') ?? '';
+  return auth === `Bearer ${secret}` || request.headers.get('x-cron-secret') === secret;
+};
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('probe')) {
+    if (!cronAllowed(request)) return NextResponse.json({ error: 'Not for you.' }, { status: 401 });
+    const amount = Number(url.searchParams.get('amount')) || 100;
+    // `search=1` also tries every kind and standard fee tier along the configured tokens.
+    const from = BigInt(Math.max(0, Math.floor(Number(url.searchParams.get('from')) || 0)));
+    // `pool=<id>` names a v4 pool by the id a chart shows; its key is read off the chain.
+    const pool = url.searchParams.get('pool') ?? '';
+    const poolId = /^0x[0-9a-fA-F]{64}$/.test(pool) ? (pool as `0x${string}`) : null;
+    // `approve=1` renews the vault's Permit2 approvals first, as the swap would; the only thing the probe ever sends.
+    // `steps=1` takes the swap apart and simulates each thing the router does on its own.
+    const report = await probeSwap(amount, !!url.searchParams.get('search'), from, poolId, !!url.searchParams.get('approve'), !!url.searchParams.get('steps'));
+    // The wins waiting to be paid, with the reason each last try gave, and
+    // `pay=1` to pay the oldest now and report exactly how that went.
+    try {
+      report.pendingWins = (await pendingGld()).map((p) => ({ id: p.id, address: p.address, emerge: p.emerge, tries: p.tries ?? 0, problem: p.problem ?? null, swapTx: p.swapTx ?? null, units: p.units ?? null, at: p.at }));
+      if (url.searchParams.get('pay')) {
+        report.payment = await settlePendingGld(undefined, 1);
+        report.paidLately = (await settledGld(undefined, 3)).map((p) => ({ id: p.id, address: p.address, emerge: p.emerge, units: p.units, plan: p.plan ?? null, swapTx: p.swapTx, sendTx: p.sendTx, settledAt: p.settledAt }));
+      }
+    } catch (error) {
+      report.pendingWins = `unread: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    // `brief=1` keeps only what the diagnosis turns on, for a terminal that cuts long answers.
+    const body = url.searchParams.get('brief')
+      ? { simulation: report.simulation, plan: report.plan, quote: report.quote, steps: report.steps, pendingWins: report.pendingWins, payment: report.payment, paidLately: report.paidLately }
+      : report;
+    return NextResponse.json(body, { headers: { 'cache-control': 'no-store, max-age=0' } });
+  }
   try {
     return NextResponse.json(await vaultBook(), { headers: { 'cache-control': 'no-store, max-age=0' } });
   } catch {

@@ -9,6 +9,13 @@
 
 import { withSession } from './session';
 
+/** How long a registry request may take before it is given up as unreachable. A request that never returned used to leave a button on "Surveying…" for ever. */
+const REGISTRY_TIMEOUT_MS = 30_000;
+
+/** The sign-in was not completed: the wallet's prompt was dismissed, timed out, or never showed. */
+export const UNSIGNED = 'The sign-in request was not signed. Open your wallet, sign it, and try again.';
+const refused = (status: number, error: string | undefined, fallback: string) => (status === 401 ? UNSIGNED : error ?? fallback);
+
 export interface Claim {
   seed: number;
   region: string;
@@ -124,8 +131,64 @@ export async function fetchClaims(): Promise<ClaimsResult> {
 }
 
 export type ReserveResult =
-  | { ok: true; seconds: number }
+  | { ok: true; seconds: number; price?: number; credit?: number; build?: string }
   | { ok: false; reason: string };
+
+/** Today's prices from the registry's own build, and what the wallet has on account toward them. */
+export type Quote = { survey: number; price: number | null; credit: number; build: string };
+
+/**
+ * Ask what things cost before paying for them.
+ *
+ * The number in this bundle is the number this bundle was built with; the
+ * registry's is the one the payment will be checked against, and after a
+ * deployment the two can differ. Paying the bundle's number was how five
+ * payments on one wallet bought nothing.
+ */
+export async function quotePlot(input: { owner: string; seed?: number | null }): Promise<{ ok: true; quote: Quote } | { ok: false; reason: string }> {
+  try {
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ owner: input.owner, seed: input.seed ?? undefined, quote: true }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as Partial<Quote> & { error?: string };
+    if (!response.ok || typeof json.survey !== 'number') {
+      return { ok: false, reason: refused(response.status, json.error, 'The registry could not quote a price.') };
+    }
+    return { ok: true, quote: { survey: json.survey, price: typeof json.price === 'number' ? json.price : null, credit: Number(json.credit) || 0, build: String(json.build ?? '') } };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
+
+/** Put a refused payment on account, by its transaction hash. */
+export async function redeemPayment(input: { owner: string; burnTx: string }): Promise<{ ok: true; banked: number; credit: number } | { ok: false; reason: string; settling?: boolean }> {
+  try {
+    const response = await withSession(
+      input.owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ owner: input.owner, burnTx: input.burnTx, redeem: true }),
+      }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { banked?: number; credit?: number; error?: string; retry?: boolean };
+    if (!response.ok || typeof json.banked !== 'number') {
+      return { ok: false, reason: refused(response.status, json.error, 'The registry refused the receipt.'), settling: json.retry === true };
+    }
+    return { ok: true, banked: json.banked, credit: Number(json.credit) || 0 };
+  } catch {
+    return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
+  }
+}
 
 /**
  * Hold a plot before paying for it.
@@ -139,16 +202,17 @@ export async function reservePlot(seed: number, owner: string): Promise<ReserveR
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, reserve: true }),
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { reserved?: boolean; seconds?: number; error?: string };
+    const json = (await response.json()) as { reserved?: boolean; seconds?: number; price?: number; credit?: number; build?: string; error?: string };
     if (!response.ok || !json.reserved) {
-      return { ok: false, reason: json.error ?? 'That plot could not be held.' };
+      return { ok: false, reason: refused(response.status, json.error, 'That plot could not be held.') };
     }
-    return { ok: true, seconds: json.seconds ?? 240 };
+    return { ok: true, seconds: json.seconds ?? 240, price: typeof json.price === 'number' ? json.price : undefined, credit: Number(json.credit) || 0, build: json.build };
   } catch {
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }
@@ -173,6 +237,7 @@ export async function surveyPlot(input: {
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...input, survey: true }),
       }),
@@ -182,7 +247,7 @@ export async function surveyPlot(input: {
     if (!response.ok || !json.find) {
       return {
         ok: false,
-        reason: json.error ?? 'The registry refused the survey.',
+        reason: refused(response.status, json.error, 'The registry refused the survey.'),
         settling: json.retry === true,
       };
     }
@@ -216,6 +281,7 @@ export async function takePlot(input: {
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(input),
       }),
@@ -227,7 +293,7 @@ export async function takePlot(input: {
     if (!response.ok || !json.claim) {
       return {
         ok: false,
-        reason: json.error ?? 'The registry refused the claim.',
+        reason: refused(response.status, json.error, 'The registry refused the claim.'),
         taken: json.taken,
         settling: json.retry === true,
       };
@@ -245,6 +311,7 @@ export async function listPlot(seed: number, owner: string, price: number | null
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, list: true, price }),
       }),
@@ -265,6 +332,7 @@ async function offerCall(owner: string, body: Record<string, unknown>): Promise<
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...body, owner }),
       }),
@@ -284,7 +352,13 @@ export const placeOffer = (seed: number, bidder: string, bidderName: string, pri
 
 export type ExpandResult =
   | { ok: true; claim: Claim; already: boolean }
-  | { ok: false; reason: string; settling?: boolean };
+  | {
+    ok: false; reason: string; settling?: boolean;
+    /** The registry would take the step but nothing has paid for it yet: pay, then ask again. */
+    needsPayment?: boolean;
+    /** The receipt was spent on something else. Nothing will accept it again. */
+    used?: boolean;
+  };
 
 /**
  * Expand a plot, once.
@@ -293,12 +367,32 @@ export type ExpandResult =
  * first, then ask — and a plot already expanded comes back `already` rather
  * than refused, so a lost reply can be asked for again.
  */
+/** Carry a world's new name to its claim row, so the map shows it. */
+export async function renamePlot(seed: number, owner: string, name: string): Promise<boolean> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', {
+        method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed, owner, rename: name }),
+      }),
+      async (r) => r,
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function expandPlot(seed: number, owner: string, burnTx?: string): Promise<ExpandResult> {
   try {
     const response = await withSession(
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, expand: true, burnTx }),
       }),
@@ -322,6 +416,7 @@ export async function boonPlot(seed: number, owner: string, kind: string, burnTx
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, boon: kind, burnTx, emblem }),
       }),
@@ -341,6 +436,7 @@ export async function coverPlot(seed: number, owner: string, kind: 'charter' | '
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, [kind === 'charter' ? 'charter' : kind === 'insurance' ? 'insure' : 'builders']: true, burnTx }),
       }),
@@ -369,19 +465,51 @@ export async function advancePlot(seed: number, owner: string, era: number, burn
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, advance: true, era, burnTx }),
       }),
       async (r) => r,
     );
-    const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean };
+    const json = (await response.json()) as { claim?: Claim; already?: boolean; error?: string; retry?: boolean; short?: number };
     if (!response.ok || !json.claim) {
-      return { ok: false, reason: json.error ?? 'The registry refused the advance.', settling: json.retry === true };
+      return {
+        ok: false, reason: json.error ?? 'The registry refused the advance.', settling: json.retry === true,
+        needsPayment: response.status === 402, used: response.status === 409 && /already been used/i.test(json.error ?? ''),
+      };
     }
     return { ok: true, claim: json.claim, already: json.already === true };
   } catch {
     return { ok: false, reason: 'Could not reach the land registry. Check your connection.' };
   }
+}
+
+/**
+ * A payment for an era that the registry has not yet accepted, kept in the
+ * browser so the same receipt is handed in again — on the next press, or the
+ * next time the world opens — and never paid twice.
+ *
+ * It used to be shown once, ten characters of it, in a toast that said keep
+ * it and tell us, and the button paid again the next time it was pressed. A
+ * player whose chain took longer than the button's patience to confirm, or
+ * whose connection dropped between the wallet and the registry, paid a
+ * million and stayed a settlement.
+ */
+export interface PendingEra { seed: number; era: number; txHash: string; address: string; at: number }
+const PENDING_ERA = 'emerge.era.pending.v1';
+export function pendingEra(address: string | null, seed?: number): PendingEra | null {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(PENDING_ERA) ?? '[]') as PendingEra[];
+    return all.find((p) => (!address || p.address === address.toLowerCase()) && (seed === undefined || p.seed === seed)) ?? null;
+  } catch { return null; }
+}
+export function rememberEra(p: PendingEra | null, drop?: PendingEra) {
+  try {
+    const all = (JSON.parse(window.localStorage.getItem(PENDING_ERA) ?? '[]') as PendingEra[])
+      .filter((x) => !(x.seed === (drop ?? p)?.seed && x.address === (drop ?? p)?.address));
+    if (p) all.push(p);
+    window.localStorage.setItem(PENDING_ERA, JSON.stringify(all.slice(-10)));
+  } catch { /* private browsing: the receipt is only in the wallet's history then */ }
 }
 
 /** As the owner: open the job at this plot, or close it and let the hand go. */
@@ -419,6 +547,26 @@ export type BuyResult =
  * Buy a listed plot from its owner. `transferTx` is the payment to the seller;
  * the registry checks it before moving the title.
  */
+/**
+ * Ask the registry to read one plot off the chain and follow it: after a
+ * purchase on the market, or on OpenSea, so the buyer's map shows the plot
+ * as theirs at once rather than at the next quarter-hour sync.
+ */
+export async function followPlot(seed: number, owner: string): Promise<{ ok: true; claim: Claim } | { ok: false; reason: string }> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seed, owner, follow: true }) }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; error?: string };
+    if (!response.ok || !json.claim) return { ok: false, reason: json.error ?? 'The registry could not read the chain.' };
+    return { ok: true, claim: json.claim };
+  } catch {
+    return { ok: false, reason: 'Could not reach the registry.' };
+  }
+}
+
 export async function buyPlot(input: {
   seed: number; owner: string; ownerName: string; transferTx?: string; feeTx?: string;
 }): Promise<BuyResult> {
@@ -427,6 +575,7 @@ export async function buyPlot(input: {
       input.owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...input, buy: true }),
       }),
@@ -449,6 +598,7 @@ export async function releasePlot(seed: number, owner: string): Promise<boolean>
       owner,
       () => fetch('/api/plots', {
         method: 'POST',
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seed, owner, release: true }),
       }),
@@ -467,6 +617,8 @@ export async function releasePlot(seed: number, owner: string): Promise<boolean>
 
 export interface PublishResult {
   ok: boolean;
+  /** Why the relay refused, in its own words, when it said. */
+  error?: string;
   /** The store holds a later copy of this world; read it back and continue from it. */
   behind?: boolean;
   /** Where that later copy is, when the store said. */
@@ -530,19 +682,25 @@ export async function publishWorld(input: {
     // that is being put in a pocket gets its last few minutes saved.
     const response = await fetch('/api/worlds', { method: 'POST', headers, body, keepalive });
     if (response.ok) return { ok: true };
-    const json = (await response.json().catch(() => ({}))) as { behind?: boolean; day?: number; hour?: number | null };
-    return { ok: false, behind: json.behind === true, day: json.day, hour: json.hour };
+    const json = (await response.json().catch(() => ({}))) as { error?: string; behind?: boolean; day?: number; hour?: number | null };
+    return { ok: false, error: json.error ?? `The relay answered ${response.status}.`, behind: json.behind === true, day: json.day, hour: json.hour };
   } catch {
-    return { ok: false };
+    return { ok: false, error: 'The relay could not be reached.' };
   }
 }
 
-/** Somebody's settlement, or a sentence saying why there is nothing to show. */
-export async function fetchWorld(seed: number): Promise<{ world: PublishedWorld | null; reason?: string }> {
+/** The plot's claim, handed back when its owner has published nothing: enough to grow the world from its seed. */
+export interface UnpublishedClaim {
+  seed: number; owner: string; ownerName: string; worldName: string; region: string; at: number;
+  era: number; expanded: boolean;
+}
+
+/** Somebody's settlement — or, when they have never published it, their claim — or a sentence saying why there is nothing to show. */
+export async function fetchWorld(seed: number): Promise<{ world: PublishedWorld | null; claim?: UnpublishedClaim; reason?: string }> {
   try {
     const response = await fetch(`/api/worlds?seed=${seed}`, { cache: 'no-store' });
     if (!response.ok) return { world: null, reason: 'Could not reach that world.' };
-    return (await response.json()) as { world: PublishedWorld | null; reason?: string };
+    return (await response.json()) as { world: PublishedWorld | null; claim?: UnpublishedClaim; reason?: string };
   } catch {
     return { world: null, reason: 'Could not reach that world.' };
   }
@@ -615,6 +773,30 @@ export async function fetchLeaderboard(): Promise<{ rows: Leader[]; total: numbe
     const response = await fetch('/api/leaderboard', { cache: 'no-store' });
     if (!response.ok) return null;
     const json = (await response.json()) as { rows?: Leader[]; total?: number };
+    return { rows: json.rows ?? [], total: json.total ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * The land market
+ * ------------------------------------------------------------------ */
+
+export interface LandListing {
+  seed: number; region: string; worldName: string; owner: string; ownerName: string;
+  price: number; listedAt: number; offers: number; bestOffer: number | null;
+  era: number; expanded: boolean; banner: string | null; biome: string;
+  level: number | null; score: number | null; population: number | null; buildings: number | null; day: number | null; publishedAt: number | null;
+  charter: boolean; insured: boolean;
+}
+
+/** Every plot up for sale, with what its owner last published about it, or null when the relay could not say. */
+export async function fetchLandMarket(): Promise<{ rows: LandListing[]; total: number } | null> {
+  try {
+    const response = await fetch('/api/land', { cache: 'no-store' });
+    if (!response.ok) return null;
+    const json = (await response.json()) as { rows?: LandListing[]; total?: number };
     return { rows: json.rows ?? [], total: json.total ?? 0 };
   } catch {
     return null;

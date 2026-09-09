@@ -14,16 +14,18 @@
  *   hudRoot     screen-space speech bubbles and building activity badges
  */
 
+import { formName } from '../world/forms';
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite, type FederatedPointerEvent } from 'pixi.js';
+import { GradeFilter } from './grade';
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
-import { spokenLine, waterOf, type Animal, type Hazard } from '../simulation';
+import { waterOf, type Animal, type Hazard } from '../simulation';
 import type { Dir } from './character';
 import { speechFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
-import { CLEARING_DAYS, CLEAR_RADIUS } from '../simulation';
+import { CLEARING_DAYS, CLEAR_RADIUS, bridgeAt, buildBounds, digProblem, dugAt, placementProblem } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
 import { extentOf } from '../world/extent';
@@ -171,6 +173,21 @@ function groundTint(tone: number) {
 
 /** Tile kinds drawn over grass so their ragged edges blend into it. */
 const BLENDED = new Set<Tile>([Tile.Path, Tile.Plaza, Tile.Sand, Tile.Tilled, Tile.CropWheat, Tile.CropVeg]);
+/**
+ * Which ground spills over which. A kind spills onto every neighbour that
+ * ranks below it: vegetation over bare ground, the wood's floor over the
+ * meadow, and never the other way, so each shared edge gets one tongue.
+ */
+const BLEND_RANK: Partial<Record<Tile, number>> = {
+  [Tile.Rock]: 1, [Tile.Soil]: 2, [Tile.Sand]: 3, [Tile.Dune]: 3.5, [Tile.Grass]: 5, [Tile.Flowers]: 5.5,
+  [Tile.Meadow]: 6, [Tile.Scrub]: 6.5, [Tile.Marsh]: 7, [Tile.Forest]: 8,
+};
+const BLEND_KEY: Partial<Record<Tile, string>> = {
+  [Tile.Rock]: 'rock', [Tile.Soil]: 'soil', [Tile.Sand]: 'sand', [Tile.Dune]: 'dune', [Tile.Grass]: 'grass', [Tile.Flowers]: 'flowers',
+  [Tile.Meadow]: 'meadow', [Tile.Scrub]: 'scrub', [Tile.Marsh]: 'marsh', [Tile.Forest]: 'forest',
+};
+/** The four neighbours in tile space, and the edge of this tile each one shares. */
+const BLEND_SIDES: [number, number, 'nw' | 'ne' | 'se' | 'sw'][] = [[-1, 0, 'nw'], [0, -1, 'ne'], [1, 0, 'se'], [0, 1, 'sw']];
 
 /** How long a tree takes to go over. */
 const FALL_SECONDS = 1.15;
@@ -205,10 +222,14 @@ export class EmergeScene {
     this.backdrop.height = this.bounds.maxY - this.bounds.minY + pad * 2;
   }
   private groundLayer = new Container();
+  /** The tile grid, for planning: one stroked diamond per tile, at its height. */
+  private gridLayer = new Graphics();
   private waterLayer = new Container();
   private objectLayer = new Container();
   private fxLayer = new Container();
   private lightsRoot = new Container();
+  /** Everything that is the picture, under the grade; the HUD sits beside it, ungraded. */
+  private sceneRoot = new Container();
   private hudRoot = new Container();
   private weatherLayer = new Container();
   private ambient = new Sprite(Texture.WHITE);
@@ -243,6 +264,19 @@ export class EmergeScene {
   private maxZoom = 2.4;
   private time = 0;
   private bubbleTimer = 0;
+  /** The look: bloom, grade, vignette, over the whole frame. */
+  private grade: GradeFilter | null = null;
+  private effectsOn = true;
+  /** Turn the frame's grade and bloom on or off. */
+  setEffects(on: boolean) {
+    this.effectsOn = on;
+    if (!this.app.renderer) return;
+    if (on && !this.grade) this.grade = new GradeFilter();
+    this.sceneRoot.filters = on && this.grade ? [this.grade] : [];
+  }
+  /** Photo mode: no panels to keep clear of, so bubbles go anywhere on screen. */
+  private photo = false;
+  setPhoto(on: boolean) { this.photo = on; }
   private beat = 0;
   private cullTimer = 0;
   /** The view the last cull was computed for, so an unmoved camera is not re-culled. */
@@ -277,6 +311,7 @@ export class EmergeScene {
     host.appendChild(this.app.canvas);
     this.app.canvas.style.display = 'block';
     this.app.canvas.style.imageRendering = 'pixelated';
+    this.setEffects(this.effectsOn);
     this.app.canvas.style.touchAction = 'none';
     this.app.canvas.style.cursor = 'grab';
 
@@ -290,7 +325,11 @@ export class EmergeScene {
     this.vignette.texture = this.assets.get('fx.vignette');
     this.vignette.blendMode = 'multiply';
     this.vignette.alpha = 0.5;
-    this.app.stage.addChild(this.worldRoot, this.vignette, this.ambient, this.lightsRoot, this.weatherLayer, this.hudRoot);
+    // The picture and the words over it are two things: the frame's grade
+    // goes on the picture, and the speech bubbles and badges stay crisp
+    // on top of it. Players said the dialogue had become hard to read.
+    this.sceneRoot.addChild(this.worldRoot, this.vignette, this.ambient, this.lightsRoot, this.weatherLayer);
+    this.app.stage.addChild(this.sceneRoot, this.hudRoot);
     // Distant forest behind everything, so the diamond edge of the tile field
     // never shows as empty space at the corners of the viewport.
     this.backdrop = new TilingSprite({ texture: backdropTexture() });
@@ -298,7 +337,8 @@ export class EmergeScene {
     // The distant land belongs to the same biome as the map: an unbroken green
     // forest ringing a desert made the plot look like a diorama on a lawn.
     this.backdrop.tint = BACKDROP_TINT[this.world.biome];
-    this.worldRoot.addChild(this.backdrop, this.groundLayer, this.waterLayer, this.objectLayer, this.fxLayer);
+    this.worldRoot.addChild(this.backdrop, this.groundLayer, this.gridLayer, this.waterLayer, this.objectLayer, this.fxLayer);
+    this.gridLayer.visible = false;
     this.objectLayer.sortableChildren = true;
     this.lightsRoot.blendMode = 'add';
 
@@ -306,7 +346,7 @@ export class EmergeScene {
     this.ambient.alpha = 0;
     this.seasonWash.blendMode = 'multiply';
     this.seasonWash.alpha = 0;
-    this.app.stage.addChildAt(this.seasonWash, this.app.stage.children.indexOf(this.ambient));
+    this.sceneRoot.addChildAt(this.seasonWash, this.sceneRoot.children.indexOf(this.ambient));
 
     this.buildTerrain();
     this.buildProps();
@@ -369,12 +409,41 @@ export class EmergeScene {
         }
 
         const key = art.variants ? `${art.key}.${map.variants[i]}` : art.key;
+        // A raised tile is drawn a step up, which leaves the ground it rose
+        // from open wherever no cliff face covers it: the backdrop showed
+        // through as a dark diamond. The same tile, darker, fills the gap.
+        if (step > 0) {
+          const foot = tileToScreen(tx + map.t0, ty + map.t0, 0);
+          const base = new Sprite(assets.get(key));
+          base.position.set(foot.x - TILE_W / 2, foot.y);
+          base.tint = 0x8a8478;
+          this.groundLayer.addChild(base);
+        }
         const sprite = new Sprite(assets.get(key));
         sprite.position.set(pos.x - TILE_W / 2, pos.y);
         sprite.tint = groundTint(map.tone[i]);
         this.groundLayer.addChild(sprite);
+
+        // The neighbours that outrank this ground spill over its edges.
+        const rank = BLEND_RANK[kind];
+        if (rank !== undefined) {
+          for (const [dx, dy, edge] of BLEND_SIDES) {
+            const nx = tx + dx, ny = ty + dy;
+            if (nx < 0 || ny < 0 || nx >= map.grid || ny >= map.grid) continue;
+            const ni = ny * map.grid + nx;
+            const nk = map.tiles[ni] as Tile;
+            const nr = BLEND_RANK[nk];
+            if (nr === undefined || nr <= rank || map.steps[ni] !== step) continue;
+            const over = new Sprite(assets.get(`tile.blend.${BLEND_KEY[nk]}.${edge}`));
+            over.position.set(pos.x - TILE_W / 2, pos.y);
+            over.tint = groundTint(map.tone[ni]);
+            this.groundLayer.addChild(over);
+          }
+        }
       }
     }
+
+    this.buildGrid();
 
     for (const { tx, ty } of map.waterfalls) {
       const pos = tileToScreen(tx + map.t0, ty + map.t0, 1);
@@ -397,6 +466,41 @@ export class EmergeScene {
    * each edge — whatever the angle and however long the water. It sits in the
    * water layer, over the river and under everything that walks across it.
    */
+  /**
+   * The planning grid: every tile's diamond, drawn at the tile's own height
+   * so the lines sit on raised ground rather than under it, and the edge of
+   * the buildable ground a shade brighter. Built with the terrain and shown
+   * or hidden as the player likes.
+   */
+  private buildGrid() {
+    const { map } = this;
+    const g = this.gridLayer;
+    g.clear();
+    for (let ty = 0; ty < map.grid; ty++) {
+      for (let tx = 0; tx < map.grid; tx++) {
+        const i = ty * map.grid + tx;
+        if (map.tiles[i] === Tile.Water) continue;
+        const step = map.steps[i];
+        const top = tileToScreen(tx + map.t0, ty + map.t0, step);
+        g.moveTo(top.x, top.y);
+        g.lineTo(top.x + TILE_W / 2, top.y + TILE_H / 2);
+        g.lineTo(top.x, top.y + TILE_H);
+        g.lineTo(top.x - TILE_W / 2, top.y + TILE_H / 2);
+        g.closePath();
+      }
+    }
+    g.stroke({ width: 1, color: 0xf3ecd2, alpha: 0.3, pixelLine: true });
+    // The edge of what can be built on.
+    const b = buildBounds(this.world);
+    const corner = (wx: number, wy: number) => worldToScreen(wx, wy, this.map.heightAt(wx, wy));
+    const c0 = corner(b.x0, b.y0), c1 = corner(b.x1, b.y0), c2 = corner(b.x1, b.y1), c3 = corner(b.x0, b.y1);
+    g.moveTo(c0.x, c0.y).lineTo(c1.x, c1.y).lineTo(c2.x, c2.y).lineTo(c3.x, c3.y).closePath();
+    g.stroke({ width: 1, color: 0xf0d05e, alpha: 0.65, pixelLine: true });
+  }
+
+  /** Show or hide the planning grid. */
+  setGrid(on: boolean) { this.gridLayer.visible = on; }
+
   private buildBridges() {
     const cos0 = Math.cos, sin0 = Math.sin;
     for (const bridge of this.world.layout.bridges) {
@@ -768,9 +872,10 @@ export class EmergeScene {
       const label = new Text({
         text: '',
         style: {
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 12,
-          fill: 0x22331f, wordWrap: true, wordWrapWidth: 150, lineHeight: 15,
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 13, fontWeight: '600',
+          fill: 0x1a2616, wordWrap: true, wordWrapWidth: 176, lineHeight: 17,
         },
+        resolution: 2,
       });
       label.position.set(9, 7);
       root.addChild(bg, label);
@@ -877,6 +982,11 @@ export class EmergeScene {
     this.camera.x -= dx / this.camera.zoom;
     this.camera.y -= dy / this.camera.zoom;
     this.applyCamera();
+  }
+
+  /** Set the zoom outright, keeping the centre of the screen where it is. */
+  zoomTo(zoom: number) {
+    this.zoomBy(zoom / (this.camera.zoom || 1));
   }
 
   zoomBy(factor: number, anchorX?: number, anchorY?: number) {
@@ -1105,8 +1215,8 @@ export class EmergeScene {
     const bw = Math.ceil(bubble.label.width) + 18;
     const bh = Math.ceil(bubble.label.height) + 14;
     bubble.bg.clear();
-    bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf1f3e4, alpha: 0.95 });
-    bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf1f3e4, alpha: 0.95 });
+    bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf6f4e6, alpha: 1 }).stroke({ width: 1.5, color: 0x2a3a24, alpha: 0.55 });
+    bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf6f4e6, alpha: 1 });
   }
 
   private setHover(target: PickTarget) {
@@ -1143,6 +1253,35 @@ export class EmergeScene {
   }
 
   /** Every building sprite the scene holds, for the trial build's diagnostics. */
+  /** What ground lies under a screen point, for the trials: tile kind, art variant, tint. */
+  probe(sx: number, sy: number) {
+    const scene = this.screenToScene(sx, sy);
+    const t = screenToTile(scene.x, scene.y);
+    const tx = Math.floor(t.x) - this.map.t0, ty = Math.floor(t.y) - this.map.t0;
+    if (tx < 0 || ty < 0 || tx >= this.map.grid || ty >= this.map.grid) return null;
+    const i = ty * this.map.grid + tx;
+    return { tx, ty, kind: this.map.tiles[i], variant: this.map.variants[i], tone: this.map.tone[i], step: this.map.steps[i], cliff: this.map.cliffs[i] };
+  }
+
+  /** Sprites by name as PNG data URLs, for the art contact sheet in the trials. */
+  dump(names: string[]): [string, string | null][] {
+    return names.map((name) => {
+      if (name.startsWith('building.')) this.assets.ensureBuilding(name.slice('building.'.length).replace(/\.lit$/, ''));
+      return [name, this.assets.dataUrl(name)];
+    });
+  }
+
+  /** Where a world point sits on the screen, for the trials. */
+  screenPoint(wx: number, wy: number) {
+    const s = worldToScreen(wx, wy, this.map.heightAt(wx, wy));
+    return this.sceneToScreen(s.x, s.y);
+  }
+
+  /** The speech bubbles as they stand, for the trials. */
+  bubbleInfo() {
+    return this.bubbles.map((b) => ({ id: b.citizenId, text: b.text, visible: b.root.visible, x: Math.round(b.root.x), y: Math.round(b.root.y), w: Math.round(b.root.width), h: Math.round(b.root.height), life: +b.life.toFixed(1) }));
+  }
+
   spriteInfo() {
     return [...this.buildings.values()].map((v) => ({
       id: v.building.id, type: v.building.type, artKey: v.artKey,
@@ -1319,7 +1458,7 @@ export class EmergeScene {
     // new deck, a new road, new ground opened on the far shore. Repaint the
     // ground when that happens, and only then — it is a few tens of
     // milliseconds and it happens once every several game weeks.
-    const shape = `${this.world.layout.bridges.length}:${this.world.layout.nodes.length}`;
+    const shape = `${this.world.layout.bridges.length}:${this.world.layout.nodes.length}:${(this.world.dug ?? []).length}`;
     if (shape !== this.layoutShape) {
       this.layoutShape = shape;
       this.rebuildGround();
@@ -1405,7 +1544,7 @@ export class EmergeScene {
         view.badgeText.text = String(occupants);
         const anchor = this.sceneToScreen(view.base.x, view.base.y - view.base.height * view.base.anchor.y - 12);
         view.badge.position.set(anchor.x, anchor.y);
-        view.badge.visible = this.camera.zoom > 0.6;
+        view.badge.visible = this.camera.zoom > 0.6 && !this.photo;
       } else {
         view.badge.visible = false;
       }
@@ -1780,6 +1919,7 @@ export class EmergeScene {
     }
     for (const glow of this.lampGlows) glow.alpha = night * 0.6;
     this.nightAmount = night;
+    if (this.grade) this.grade.night = night;
   }
   private nightAmount = 0;
 
@@ -1938,12 +2078,32 @@ export class EmergeScene {
     // lines of every conversation in the settlement were being spoken and never
     // drawn: the pair appeared to say one thing each and stop. Anyone
     // mid-conversation has their bubble refreshed every frame instead.
-    for (const bubble of this.bubbles) {
-      if (!bubble.citizenId) continue;
-      const spoken = spokenLine(this.world, bubble.citizenId);
-      if (spoken && spoken.text !== bubble.text) {
-        bubble.text = spoken.text;
-        bubble.label.text = spoken.text;
+    //
+    // And the bubble follows the turn, not the person. Refreshing the
+    // speaker's bubble was not enough: when the other one answered, the
+    // answer went to a citizen who held no bubble and was never drawn, while
+    // the first line sat stale over the first speaker. Each exchange now owns
+    // one bubble that hops to whoever is speaking, taking a bubble from a
+    // bystander if it has to, so a conversation reads as one.
+    const inTalk = new Set<string>();
+    for (const talk of this.world.conversations) { inTalk.add(talk.a); inTalk.add(talk.b); }
+    for (const talk of this.world.conversations) {
+      const speaker = talk.index % 2 === 0 ? talk.a : talk.b;
+      const listener = speaker === talk.a ? talk.b : talk.a;
+      const citizen = this.world.citizens.find((c) => c.id === speaker);
+      if (!citizen || !this.citizens.has(speaker)) continue;
+      const line = speechFor(this.world, citizen, this.beat);
+      if (!line) continue;
+      let bubble = this.bubbles.find((b) => b.citizenId === speaker) ?? this.bubbles.find((b) => b.citizenId === listener);
+      if (!bubble) {
+        const spare = this.bubbles.filter((b) => !b.citizenId || !inTalk.has(b.citizenId)).sort((p, q) => (p.citizenId ? p.life : -1) - (q.citizenId ? q.life : -1));
+        bubble = spare[0];
+      }
+      if (!bubble) continue;
+      if (bubble.citizenId !== speaker || bubble.text !== line) {
+        bubble.citizenId = speaker;
+        bubble.text = line;
+        bubble.label.text = line;
         bubble.life = BUBBLE_ROTATE;
         this.layoutBubble(bubble);
       }
@@ -1979,8 +2139,9 @@ export class EmergeScene {
 
       bubble.root.position.set(Math.round(x), Math.round(y));
       // Hide rather than let a bubble slide under the side panels or off screen.
-      const clearOfPanels = x > 24 && x + bw < w - 296;
-      bubble.root.visible = clearOfPanels && y > 96 && y < h - 190 && this.camera.zoom > 0.55;
+      const clearOfPanels = this.photo ? x > 4 && x + bw < w - 4 : x > 24 && x + bw < w - 296;
+      const clearOfBars = this.photo ? y > 4 && y < h - 4 : y > 96 && y < h - 190;
+      bubble.root.visible = clearOfPanels && clearOfBars && this.camera.zoom > 0.55;
       bubble.life -= dt;
     }
   }
@@ -2388,8 +2549,9 @@ export class EmergeScene {
    * cursor, snapped to the tile grid and tinted by whether the ground will take
    * it, and clicking commits. Escape or `cancelPlacement()` backs out.
    */
-  startPlacement(type: string, onPlace: (x: number, y: number) => void) {
+  startPlacement(type: string, onPlace: (x: number, y: number) => void, ignoreId?: string) {
     this.cancelPlacement();
+    this.placementIgnore = ignoreId;
     const artKey = buildingArtKey(type, 'ghost', 1, eraOf(this.world));
     this.assets.ensureBuilding(artKey);
     const meta = this.assets.buildingMeta.get(artKey);
@@ -2464,6 +2626,40 @@ export class EmergeScene {
     window.addEventListener('keydown', this.onPlacementKey);
   }
 
+  /** Arm the cursor for taking a bridge down: the next tap on a deck removes it. */
+  /** The pond tools: dig where the ring is green, or fill a pond the player dug. */
+  startWaterTool(type: 'Dig' | 'Fill', onPick: (x: number, y: number) => void) {
+    this.cancelPlacement();
+    const ring = new Sprite(this.assets.get('fx.select'));
+    ring.anchor.set(0.5, 0.5);
+    ring.alpha = 0.8;
+    ring.scale.set(type === 'Dig' ? 2.4 : 1.6);
+    ring.zIndex = 1e6;
+    this.objectLayer.addChild(ring);
+    this.ghost = ring;
+    this.placement = { type, onPlace: (x, y) => onPick(x, y) };
+    this.app.canvas.style.cursor = 'crosshair';
+    this.app.canvas.addEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.addEventListener('pointerup', this.onPlacementCommit);
+    window.addEventListener('keydown', this.onPlacementKey);
+  }
+
+  startUnbridging(onPick: (x: number, y: number) => void) {
+    this.cancelPlacement();
+    const ring = new Sprite(this.assets.get('fx.select'));
+    ring.anchor.set(0.5, 0.5);
+    ring.alpha = 0.8;
+    ring.scale.set(1.6);
+    ring.zIndex = 1e6;
+    this.objectLayer.addChild(ring);
+    this.ghost = ring;
+    this.placement = { type: 'Unbridge', onPlace: (x, y) => onPick(x, y) };
+    this.app.canvas.style.cursor = 'crosshair';
+    this.app.canvas.addEventListener('pointermove', this.onPlacementMove);
+    this.app.canvas.addEventListener('pointerup', this.onPlacementCommit);
+    window.addEventListener('keydown', this.onPlacementKey);
+  }
+
   /** How many standing trees a clearing at this spot would take. */
   standingTreesNear(x: number, y: number) {
     return this.trees.filter((t) => t.state === 'standing' && (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS).length;
@@ -2497,9 +2693,18 @@ export class EmergeScene {
     // whether there is one under it.
     this.placementValid = this.placement?.type === 'Clear trees'
       ? this.standingTreesNear(wx, wy) > 0
+      // A crossing can be pointed at from the water itself or from either
+      // bank; the simulation says where the deck goes and refuses out loud.
       : this.placement?.type === 'Bridge'
-        ? this.map.tileAt(wx, wy) !== Tile.Water && this.map.tileAt(wx, wy) !== Tile.WaterShore
-        : this.canBuildAt(wx, wy);
+        ? true
+        // Taking one down: the ring is green over a deck and red elsewhere.
+        : this.placement?.type === 'Unbridge'
+          ? bridgeAt(this.world, wx, wy) !== null
+          : this.placement?.type === 'Dig'
+            ? digProblem(this.world, wx, wy) === null
+            : this.placement?.type === 'Fill'
+              ? dugAt(this.world, wx, wy) !== null
+              : this.canBuildAt(wx, wy);
     const height = this.map.heightAt(wx, wy);
     const pos = worldToScreen(wx, wy, height);
     this.ghost.position.set(pos.x, pos.y);
@@ -2525,13 +2730,20 @@ export class EmergeScene {
     if (e.key === 'Escape') this.cancelPlacement();
   };
 
-  /** Ground has to be dry, clear of other buildings and off the roads. */
+  /**
+   * Whether the building would be accepted here: the simulation's own rule,
+   * footprint and walking gap and all, so the cursor never says yes to a
+   * spot the placement then refuses. It used to keep a rule of its own
+   * (eight units between centres) that was looser than the real one for
+   * anything bigger than a house, and a player who demolished a building
+   * and pointed at the same ground saw green and got nothing.
+   */
   canBuildAt(wx: number, wy: number) {
-    const tile = this.map.tileAt(wx, wy);
-    if (tile === Tile.Water || tile === Tile.WaterShore) return false;
-    if (tile === Tile.Path || tile === Tile.Plaza) return false;
-    return !this.world.buildings.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < 64);
+    const type = this.placement?.type ?? 'House';
+    return placementProblem(this.world, type, wx, wy, this.placementIgnore) === null;
   }
+  /** A building being moved is not in its own way. */
+  private placementIgnore: string | undefined;
 
   /** Tooltip text for the currently hovered thing. */
   describe(target: PickTarget): { title: string; lines: string[] } | null {
@@ -2547,7 +2759,9 @@ export class EmergeScene {
     }
     const b = this.world.buildings.find((x) => x.id === target.id);
     if (!b) return null;
-    return { title: b.type, lines: [b.workers.length ? `${b.workers.length} inside` : 'Quiet right now'] };
+    // The age's form, as the card names it: a township's smithy is not a
+    // blacksmith on the tip and a smithy on the card.
+    return { title: formName(b.type, b.era ?? 1), lines: [b.workers.length ? `${b.workers.length} inside` : 'Quiet right now'] };
   }
 
   destroy() {

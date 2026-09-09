@@ -1,7 +1,9 @@
 'use client';
-import { CITY_LEVELS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
-import { BRIDGE_GOLD, FESTIVAL_GOLD_PER_HEAD, HAZARD_SHARE, HOUSE_ROOM, HOUSE_ROOM_PER_LEVEL } from '@/lib/simulation';
+import React from 'react';
+import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling } from '@/lib/world/eras';
+import { formNames } from '@/lib/world/forms';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { UPKEEP_EMPTY_SHARE, BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
 import { UPDATES } from '@/lib/updates';
 
@@ -28,12 +30,12 @@ import {
 } from '@/lib/chain/vault';
 import { DIG_COST_EMERGE } from '@/lib/chain/gacha';
 import {
-  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL,
+  ARROW_WOOD, BAIT_GOLD, BUILD_COSTS, BUILD_MATERIALS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, ROD_WOOD, HAZARD_DEFENCE, HAZARD_LABELS, JOBS, LEDGER_LABELS, MAX_BUILDING_LEVEL, formOf, formPosts, LINEAGE_TYPES,
   MOVE_SHARE, OUTPUT_PER_LEVEL, RESOURCE_LABELS, STEWARDSHIP_DAILY_CAP, UPGRADE_STEPS,
   UPKEEP_PER_LEVEL, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, maintenanceCost, wageEffort,
   type HazardKind, type Resource,
 } from '@/lib/simulation';
-import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { MAX_GIFT_GOLD, MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { BrandLine } from './Brand';
 import { LanguageSwitch } from './LanguageSwitch';
@@ -111,7 +113,7 @@ const INCOME: [keyof typeof LEDGER_LABELS, string][] = [
 const SPENDING: [keyof typeof LEDGER_LABELS, string][] = [
   ['wages', 'Everyone who works is paid, every day. It is the largest line in most settlements.'],
   ['imports', 'Buying what the town cannot make for itself, at the world market\u2019s price.'],
-  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market.`],
+  ['upkeep', `Every building costs something to keep standing, from ${maintenanceCost('House')} Gold a day for a house to ${maintenanceCost('Market')} for the market — more in each later age, more for each improvement, and more again in a town whose people are well off and expect a well-kept place. A workplace costs what its crew makes it cost: full when its trade's posts are full, and a ${Math.round(UPKEEP_EMPTY_SHARE * 100)}% standing charge when nobody works there at all. Houses, stores and the market are nobody's workplace and cost what they always did.`],
   ['building', 'What you raise, in Gold and in materials out of the yard.'],
   ['works', 'Bridges to land nobody can walk to, and the roads that follow.'],
   ['vault', 'The other half of the vault door: Gold leaving the treasury when you take a deposit back out.'],
@@ -158,7 +160,7 @@ const CIVIC_BUILDINGS = [
 
 /** What a plot's status figures mean, and what actually moves them. */
 const STATUS = [
-  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and when word gets round: a well-run plot with a spare roof draws settlers on the road, and a cafe, a school, a clinic and improved houses draw more — up to three a day. It falls in a hard winter or a bad hazard.',
+  ['Population', 'Everyone alive here, children included. It grows when people are fed, housed and content enough to start families, and when word gets round: a well-run plot with a spare roof draws settlers on the road, and a cafe, a school, a clinic and improved houses draw more — up to three a day. It falls in a hard winter or a bad hazard. Since v2.7 it is bounded by beds and posts: a family has a child and a newcomer is taken only while there is a bed and a post to spare. Every child counts in full against the beds — they need one tonight — but only for the share of a post they have grown into, so a workplace raised today is not held empty for a toddler who cannot work for another month. After five days of more adults than posts, or more people than beds, somebody takes the road every day or so until they match. A founding handful of eight never leaves.',
     'Build houses before you build anything else, and improve them: an improved house sleeps more. Nobody moves to a town with no spare roof, however good it is.'],
   ['Happiness', 'The average of six things each person carries: how fed, how rested, how sociable, how well clothed, how purposeful and how warm they are.',
     'The quickest lever is wages. After that: a tavern and benches for company, clothing in the stores, and firewood through the winter.'],
@@ -195,6 +197,7 @@ const SECTIONS = [
   ['costs', 'What things cost'],
   ['earning', 'Earning $EMERGE'],
   ['economy', 'The settlement\u2019s own money'],
+  ['exchange', 'Trading with other players'],
   ['vault', 'Deposits and withdrawals'],
   ['buildings', 'Buildings'],
   ['eras', 'Eras'],
@@ -243,7 +246,7 @@ export default function Wiki() {
           </figure>
           <ol className="wiki-steps">
             <li>
-              <b>Connect a wallet.</b> MetaMask or Trust Wallet, on {ACTIVE_CHAIN.label}
+              <b>Connect a wallet.</b> MetaMask, Trust Wallet or Binance Wallet, on {ACTIVE_CHAIN.label}
               {ACTIVE_CHAIN.chainId ? ` (chain ${ACTIVE_CHAIN.chainId})` : ''}. If you have more
               than one wallet installed, pick the one you mean — the game will ask rather than
               guess.
@@ -409,7 +412,10 @@ export default function Wiki() {
             is being run. Attention is <em>yours</em>, not the plot&rsquo;s: with two or more plots
             you can only have one open, so acting on any of them keeps every plot you own attended,
             and the ones you are not looking at go on earning at the shape you left them in. The
-            vault judges it the same way, from your presence anywhere in the game.
+            vault judges it the same way, from your presence anywhere in the game. What it is
+            <em>not</em> is something happening to your plot while you are elsewhere: an order
+            filling on the exchange, or a gift arriving from a visitor, does not refresh it.
+            Placing the order was attention; the exchange filling it hours later is the exchange.
           </p>
           <table className="wiki-table">
             <thead>
@@ -438,6 +444,35 @@ export default function Wiki() {
             money buys past it. That is deliberate: the cap is what stops the game being a machine
             for turning capital into tokens.
           </p>
+          <h3>The day&rsquo;s budget, and your share of it</h3>
+          <p>
+            Those ceilings are what one wallet may take. There is a second limit above them: the
+            vault pays out only so much stewardship in a day across <em>everybody</em>, and that
+            budget starts again at midnight UTC. The Bank shows the figure and how much of it is
+            left.
+          </p>
+          <p>
+            When what everybody is judged to earn fits inside the budget, it does not bind at all
+            and each wallet is simply paid what it is judged. When it does not fit, the day is
+            <b> divided in proportion</b>: a wallet judged a tenth of the total is paid a tenth of
+            the budget. <b>Your share waits for you all day and nobody else can take it</b>, so
+            there is nothing to be gained by being awake at any particular hour.
+          </p>
+          <p>
+            What divides the day is <b>what every wallet could claim</b> — not how many of them
+            happen to be playing at that moment. It has to be, or the hour you live in would decide
+            your income: attention decays while you sleep, so if the divisor counted only the people
+            currently awake, whoever was up at midnight UTC would split the budget among a small
+            number and take oversized shares, and the far side of the world would wake to an empty
+            pot. Modelled on twenty wallets with half asleep, that was an early riser taking
+            769,230 against a late riser&rsquo;s 230,770, with half the late risers paid nothing.
+            Dividing by what everyone could claim, both take 500,000.
+          </p>
+          <p>
+            Attention still decides <em>your own</em> figure — a plot you never look at earns
+            little, as it should. It just no longer decides anybody else&rsquo;s.
+          </p>
+
           <h3>Earning without land: hired hands</h3>
           <p>
             You do not need a plot to earn, only a job. An owner can open one on their plot; a
@@ -485,29 +520,98 @@ export default function Wiki() {
 
           <h3>City levels</h3>
           <p>
-            Since v2.0 the ceiling runs on what the plot has become, not only on its era. Every
-            plot has a <b>city level</b>, one to ten, read from the people living there and the
-            buildings standing. Size earns the next level; Gold pays for the public works that
-            confirm it. The CITY card in the Bank shows the level, what the next asks, and the
-            button. A plot&rsquo;s daily ceiling runs from <b>{n(PLOT_CEILING_MIN)}</b> at level
-            one to <b>{n(PLOT_CEILING_MAX)}</b> at level ten, times the era, so a level-ten city in
-            the AI era can earn up to {n(plotCeiling(10, 5))} a day and a fresh claim earns a
-            fraction of it. Growing what you have is worth more than claiming another plot.
+            The ceiling runs on what the plot has become, not only on its era. Every plot has a
+            <b> city level</b>, one to ten, read from the people living there and the buildings
+            standing. Size earns the next level; Gold pays for the public works that confirm it.
+            The CITY card in the Bank shows the level, what the next asks, and the button.
+          </p>
+          <p>
+            Each era has its own ten levels. Advancing puts the city back to level one <i>of the
+            new era</i>, where the ten rungs ahead are a bigger city than the ten behind — but the
+            two are one ladder of {LADDER_RUNGS}, and the reward runs up that ladder rather than
+            up the level number. So level one of the township pays a little <i>more</i> than level
+            ten of the settlement: the level resets and the earning never does. A plot&rsquo;s
+            daily ceiling runs from <b>{n(PLOT_CEILING_MIN)}</b> on the first rung to
+            <b> {n(PLOT_CEILING_MAX)}</b> on the last, and a fresh claim earns a fraction of it.
+            Growing what you have is worth more than claiming another plot.
+          </p>
+          <p>
+            Each era&rsquo;s tenth level asks for the size that the gate out of that era asks for,
+            and its first level is the size that got the plot in — so being ready for level ten and
+            being ready to advance are the same thing.
           </p>
           <table className="wiki-table">
-            <thead><tr><th>Level</th><th>People</th><th>Buildings</th><th>Public works</th><th>Ceiling (era 1)</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Level</th>
+                {ERAS.map((e) => <th key={e.id} colSpan={2}>{e.name}</th>)}
+              </tr>
+              <tr>
+                <th />
+                {ERAS.map((e) => <React.Fragment key={e.id}><th>People</th><th>Ceiling</th></React.Fragment>)}
+              </tr>
+            </thead>
             <tbody>
-              {CITY_LEVELS.map((row) => (
+              {cityLevels(1).map((row) => (
                 <tr key={row.level}>
                   <td>{row.level}</td>
-                  <td className="num">{row.people}</td>
-                  <td className="num">{row.buildings}</td>
-                  <td className="num">{row.works ? `${n(row.works)} Gold` : '—'}</td>
-                  <td className="num">{n(plotCeiling(row.level, 1))}</td>
+                  {ERAS.map((e) => (
+                    <React.Fragment key={e.id}>
+                      <td className="num">{cityLevelSpec(row.level, e.id).people}</td>
+                      <td className="num">{n(plotCeiling(row.level, e.id))}</td>
+                    </React.Fragment>
+                  ))}
                 </tr>
               ))}
             </tbody>
           </table>
+          <h3>What a town may hold</h3>
+          <p>
+            A treasury has a top, and it climbs with every level and every age. It is printed
+            beside the Gold itself &mdash; <b>{n(240_000)} / {n(treasuryCap(8, 1))}</b> &mdash; so
+            the answer to &ldquo;how much can I keep?&rdquo; is on the screen rather than
+            something to work out. A fresh claim holds {n(treasuryCap(1, 1))}; a level-ten city in
+            the AI era holds {n(treasuryCap(10, 5))}.
+          </p>
+          <p>
+            A full treasury turns income away; it never has Gold taken off it. Nothing you have
+            earned is removed, and the settlement says so in the feed when it has been happening.
+            Spend it, or raise the city a level and it holds more. Every era&rsquo;s smallest
+            treasury is several times its dearest public works, so the ceiling can never stand
+            between you and the next level.
+          </p>
+          <p>
+            A town that was <i>already</i> above its ceiling when the ceiling arrived is left
+            alone: it keeps earning, and nothing is turned away. The rule stops a town climbing
+            past a ceiling it is under, and never stops one that is already above. Spend back
+            under it and it applies from then on — which is also why it cannot be worked
+            around: a town beneath the ceiling is stopped exactly at it and never past, so the
+            only way to be above is to have been above when it arrived.
+          </p>
+          <p className="wiki-note">
+            This replaced the carrying cost on idle Gold. Both were there to stop a hoard so large
+            that Gold stops being a decision, and the charge did work &mdash; but it worked out of
+            sight, as a daily subtraction you had to go looking for. A ceiling you can read at a
+            glance does the same job, and only one of the two should exist.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Age</th><th>Holds at level 1</th><th>At level 10</th></tr></thead>
+            <tbody>
+              {ERAS.map((e) => (
+                <tr key={e.id}>
+                  <td>{e.name}</td>
+                  <td className="num">{n(treasuryCap(1, e.id))}</td>
+                  <td className="num">{n(treasuryCap(10, e.id))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="wiki-note">
+            Buildings and the Gold each level&rsquo;s public works cost rise with the era too: the
+            settlement&rsquo;s tenth level asks {cityLevelSpec(10, 1).buildings} buildings and
+            {' '}{n(cityLevelSpec(10, 1).works)} Gold, the AI era&rsquo;s asks
+            {' '}{cityLevelSpec(10, 5).buildings} and {n(cityLevelSpec(10, 5).works)}.
+          </p>
           <p className="wiki-note">
             The payout route reads the level from the copy of your world the registry holds, the
             same way it reads the era, so the ceiling cannot be reached by editing a save. A city
@@ -681,6 +785,115 @@ export default function Wiki() {
         </section>
 
         {/* ---------------------------------------------------------- */}
+        <section id="exchange">
+          <h2>Trading with other players</h2>
+          <p>
+            The world market above is the game&rsquo;s own: it sets one price for each good
+            everywhere and your storekeeper buys and sells at it whether you are watching or not.
+            The <b>exchange</b> is the other thing entirely &mdash; a board where players put things
+            up for each other at whatever price they like, and nobody has to take it.
+          </p>
+          <p>
+            Two things trade on it, and they are paid for in different money.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>What</th><th>Paid in</th><th>Where the money goes</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Goods, out of your store</td>
+                <td>Gold</td>
+                <td className="muted">Out of the buyer&rsquo;s treasury and into the seller&rsquo;s, less the burn.</td>
+              </tr>
+              <tr>
+                <td>Gold, out of your treasury</td>
+                <td>{TOKEN.ticker}</td>
+                <td className="muted">Wallet to wallet. The vault is not in the middle of it and mints nothing.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>What it costs to trade</h3>
+          <table className="wiki-table">
+            <thead><tr><th>On</th><th>Burned</th><th>Out of whose end</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Any trade, the Gold side</td>
+                <td className="num">{Math.round(TRADE_FEE * 100)}%</td>
+                <td className="muted">The buyer of Gold receives {Math.round((1 - TRADE_FEE) * 100)}% of the lot; the seller of goods is paid {Math.round((1 - TRADE_FEE) * 100)}% of the price.</td>
+              </tr>
+              <tr>
+                <td>A Gold lot, the {TOKEN.ticker} side</td>
+                <td className="num">{Math.round(GOLD_SALE_BURN_RATE * 100)}%</td>
+                <td className="muted">The seller&rsquo;s. A lot listed at twenty a Gold costs the buyer exactly twenty; nineteen reaches the seller and one is destroyed.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            So the price on the board is the price the buyer pays, which is what makes the
+            {' '}<Link href="/markets">markets page</Link> honest: the rate it shows is a rate
+            somebody really paid rather than a rate before fees. A seller who wants twenty net
+            lists at twenty-one, and everybody can see that they have.
+          </p>
+          <p>
+            Both burns are real. The Gold leaves the game; the {TOKEN.ticker} leaves the supply.
+            Round-tripping Gold in and out of the exchange costs about
+            {' '}{Math.round((TRADE_FEE + GOLD_SALE_BURN_RATE) * 100)}%, which is deliberate: the
+            exchange is for trading with people, not for churning.
+          </p>
+
+          <h3>Listing something</h3>
+          <ul>
+            <li>
+              <b>What you list leaves you at once.</b> The goods come off your shelves and the Gold
+              comes out of your treasury the moment the order goes up, and come back in full if you
+              take it down. An order cannot promise what your store does not hold.
+            </li>
+            <li>
+              <b>Listed Gold is still yours, and still counts.</b> It has left the treasury, so you
+              cannot spend it while it stands there &mdash; but it is not gone, and it counts
+              against your settlement&rsquo;s Gold ceiling exactly as if it were in the treasury.
+              Listing a lot makes no room to earn more. The purse says how much of your Gold is
+              standing in orders, and the Bank tells the three apart: what you hold, what you can
+              spend, and what is listed.
+            </li>
+            <li>
+              <b>A Gold lot is {MIN_GOLD_LOT.toLocaleString()} Gold or more</b>, and never more than the treasury in your
+              plot&rsquo;s last published copy &mdash; the server checks it against that copy, not
+              against the browser&rsquo;s word. Goods go up to {MAX_GOODS_LOT.toLocaleString()} a lot.
+            </li>
+            <li>
+              <b>Gold is delivered to a plot.</b> You need land of your own for the Gold to arrive
+              in, which is also why Gold bought here cannot become tokens: it lands in a treasury
+              and the only door out of the game is the vault, which pays out what was put in.
+            </li>
+          </ul>
+
+          <h3>What happens when you buy Gold</h3>
+          <p>
+            The lot is held first, so anything that would refuse the trade refuses it before a
+            penny moves. Then your wallet pays the seller and burns its share &mdash; two signatures,
+            because wallet to wallet means there is no contract in the middle to divide one payment.
+            Then the receipts are handed in and the Gold is delivered.
+          </p>
+          <p>
+            If the last step is the one that fails, nothing is lost. Both receipts are written down
+            on the exchange&rsquo;s books before it is asked for anything, and the purchase settles
+            itself afterwards &mdash; from another device, or simply from opening the exchange
+            again. A payment that has been made and not yet settled is shown to you in the panel
+            rather than left to be discovered.
+          </p>
+
+          <h3>Land</h3>
+          <p>
+            Plots are sold on the world map rather than the exchange, and also wallet to wallet:
+            the buyer pays the owner directly and the registry takes {Math.round(RESALE_FEE_RATE * 100)}% into the vault.
+            A plot carries its settlement with it &mdash; the people, the buildings and the level all
+            change hands. Every asking price and every completed sale is on the
+            {' '}<Link href="/markets">markets page</Link>.
+          </p>
+        </section>
+
+        {/* ---------------------------------------------------------- */}
         <section id="vault">
           <h2>Deposits and withdrawals</h2>
           <figure className="wiki-figure">
@@ -741,9 +954,11 @@ export default function Wiki() {
             more per era it was raised in: a modern block costs more to keep than a cabin.
           </p>
           <p>
-            <b>A house sleeps as many people as it has room for</b>: {HOUSE_ROOM} beds at
-            level one, {HOUSE_ROOM + HOUSE_ROOM_PER_LEVEL} at level two, {HOUSE_ROOM + 2 * HOUSE_ROOM_PER_LEVEL} at
-            level three, which is what improving a house is for; the house&rsquo;s card says
+            <b>A house sleeps as many people as it has room for, and its age decides how many</b>:
+            a settlement cabin has {formOf('House', 1).beds} beds, a township townhouse {formOf('House', 2).beds},
+            an industrial terrace {formOf('House', 3).beds}, a modern apartment block {formOf('House', 4).beds},
+            and an AI-age habitat tower {formOf('House', 5).beds}. Every improvement adds {HOUSE_ROOM_PER_LEVEL} more
+            on top of that, which is what improving a house is for; the house&rsquo;s card says
             who sleeps there against the beds. Families share a roof when there is room,
             the largest family first, so a newcomer who came alone does not take a whole house for
             one bed. The feed says who moved in where.
@@ -772,6 +987,16 @@ export default function Wiki() {
             jobs you are missing once there are thirty of them.
           </p>
           <p>
+            The settlement staffs itself. Every morning anyone whose own trade has no post for
+            them &mdash; more hands than furrows, or a workplace pulled down under them &mdash;
+            walks into a post standing empty somewhere else, a dark building first and then
+            whichever trade is shortest, least-skilled first so the masters stay where they are.
+            Nobody is taken out of a post to do it, so filling one place never empties another.
+            You should never see idle hands and open posts in the same town: if the panel says
+            people are without work, the town is genuinely short of workplaces, and the answer is
+            to build one.
+          </p>
+          <p>
             <b>Training</b> is the lever. Retrain one person into any trade that has a workplace,
             or fill every open post in a trade at once with the people who can best be spared: the
             unemployed first, then anyone in a trade with more hands than posts, then the least
@@ -779,6 +1004,23 @@ export default function Wiki() {
             effect at once, gives the trainee a head start in skill (doubled by a School), and
             holds them to the trade for forty days against the settlement&rsquo;s own daily
             reshuffling. After that they are the settlement&rsquo;s to move again.
+          </p>
+          <p>
+            <b>Notables</b> keep the civic buildings, from the township on: a teacher for the
+            school, a physician for the clinic or hospital, a banker, a researcher for the
+            laboratory or research campus, an administrator for the town hall. Without one the
+            building runs at three quarters; with one at full strength and more, by how good they
+            are: competent, accomplished or renowned. They turn up in town on their own for the
+            buildings that stand unkept, stay three days, are engaged for a fee and kept on a
+            salary from the treasury, and leave after three days unpaid. The Notables tab lists
+            who is in town and who is engaged; a building&rsquo;s card says who keeps it.
+          </p>
+          <p>
+            <b>Trade titles</b> follow the plot&rsquo;s age. A farmer in a settlement is a farm
+            worker in a township, an agricultural mechanic in the industrial age, an agricultural
+            technician in the modern age and an agriculture engineer in the AI age, and so for
+            every trade. The post and the person are the same; the title changes with the age on
+            its own.
           </p>
 
           <h3>The trades</h3>
@@ -891,6 +1133,23 @@ export default function Wiki() {
             rather than standing idle, so a town that has run its woodcutters down still gets its
             crossing. One crossing at a time.
           </p>
+          <p>
+            A crossing can come down too. Once the plot has a bridge, the same card carries{' '}
+            <b>Take a crossing down</b>: tap the deck and it is gone, with{' '}
+            <b>{UNBRIDGE_WOOD_PER_UNIT * 2} timber a unit</b> of its length back in the yard, the road
+            across the water cut, and anybody on it stepped off at the nearer bank. The only crossing
+            to an island with buildings on it is refused until they are pulled down or another
+            crossing stands, so nothing is ever stranded.
+          </p>
+          <h3>Ponds and channels</h3>
+          <p>
+            The Build panel&rsquo;s <b>Pond</b> tool digs water where you tap, for{' '}
+            <b>{DIG_GOLD} Gold</b> a dig, on open ground clear of the square, the buildings and the
+            bridges. Dig beside a pond and the two join into a channel; keep going and you have a
+            river. Fishers cast into it, people walk round it, a road that ran through it is cut,
+            and an island it makes is bridged like any other. A pond you dug can be filled in
+            again for <b>{FILL_GOLD} Gold</b>. Natural water stays where it is.
+          </p>
           <h3>Clearing trees</h3>
           <p>
             The Build panel carries a tool for the wood: tap the ground with it and every standing
@@ -911,8 +1170,11 @@ export default function Wiki() {
           </p>
           <p>
             <b>Improve</b> spends Gold and materials to take a building up a level, to a maximum of{' '}
-            <b>{MAX_BUILDING_LEVEL}</b>. The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
-            of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, in Gold and in
+            <b>{MAX_BUILDING_LEVEL}</b> in a settlement or a township, {formOf('House', 3).cap} in the industrial and modern ages
+            and {formOf('House', 5).cap} in the AI age. A building keeps whatever level it reached
+            when the plot advanced, and the advance rebuilds it into the new age&rsquo;s form (see Eras). The first step costs {Math.round(UPGRADE_STEPS[0] * 100)}%
+            of the original price, the second {Math.round(UPGRADE_STEPS[1] * 100)}%, and each step after
+            more again, in Gold and in
             timber and stone both — so the top level is a decision, not a formality. Each level adds
             about <b>{Math.round(OUTPUT_PER_LEVEL * 100)}% to what the building produces</b> and{' '}
             <b>{Math.round(UPKEEP_PER_LEVEL * 100)}% to its upkeep</b>. It does not hold more workers — and
@@ -933,18 +1195,18 @@ export default function Wiki() {
         <section id="eras">
           <h2>Eras</h2>
           <p>
-            Every plot begins in the <b>Settlement</b> era: timber and thatch, hand tools, dirt
+            Every plot begins in the <b>Settlement</b> era: log cabins under shakes and thatch, hand tools, dirt
             lanes, everybody on foot. When it has earned it, the owner can advance it one era at a
             time. There are five, and all of them are built.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Era</th><th>Days</th><th>What it asks</th><th>What arrives</th></tr></thead>
             <tbody>
-              <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts.</td></tr>
-              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 buildings, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Stone and tile, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
-              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 buildings, a Lab and a Library, 300 iron ore, the plot expanded</td><td>Brick and iron, setts with rails, rail travel, a steamboat, smog; Factory, Foundry, Railway Station, Telegraph, Gasworks</td></tr>
-              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 buildings, a Hospital and a Stadium, the plot expanded</td><td>Concrete and glass, tarmac, cars and bikes, a motorboat; Hospital, Stadium, Supermarket, Office, Bus Depot, Power Plant</td></tr>
-              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 buildings, a Research Campus and a Power Plant, the plot expanded, stewardship above 0.7</td><td>White composite and light, pale roads, pods, a hydrofoil; Data Centre, Research Campus, Vertical Farm, Pod Hub, Drone Port</td></tr>
+              <tr><td>Settlement</td><td className="num">&mdash;</td><td>&mdash;</td><td>Where every plot starts: log cabins notched at the corners, shake and thatch roofs, plank lodges for the halls.</td></tr>
+              <tr><td>Township</td><td className="num">60</td><td>40 people, 30 in buildings by age, a Town Hall, a Bank, a School and a Jail, 20,000 Gold in the treasury, no ruins standing</td><td>Timber-framed homes on two floors under fired tile, halls in dressed stone under slate, cobbled streets, carts, the ferry; Chapel, Guildhall, Brewery, Printer, Stables, Harbour</td></tr>
+              <tr><td>Industrial</td><td className="num">90</td><td>70 people, 50 in buildings by age, a Lab and a Library, 300 iron ore, the plot expanded</td><td>Brick and iron, setts with rails, rail travel, a steamboat, smog; Factory, Foundry, Railway Station, Telegraph, Gasworks</td></tr>
+              <tr><td>Modern</td><td className="num">120</td><td>110 people, 75 in buildings by age, a Factory and a Railway Station, the plot expanded</td><td>Concrete and glass, tarmac, cars and bikes, a motorboat; Hospital, Stadium, Supermarket, Office, Bus Depot, Power Plant</td></tr>
+              <tr><td>AI</td><td className="num">150</td><td>160 people, 100 in buildings by age, a Hospital and a Power Plant, the plot expanded, stewardship above 0.7</td><td>White composite and light, pale roads, pods, a hydrofoil; Data Centre, Research Campus, Vertical Farm, Pod Hub, Drone Port</td></tr>
             </tbody>
           </table>
           <p>
@@ -956,11 +1218,41 @@ export default function Wiki() {
             copy it holds, so nothing on your own device can be edited into an era. The era is
             recorded against the plot and follows it to any device and to a buyer.
           </p>
+          <h3>What an age changes</h3>
+          <p>
+            Since v2.7 an age is a new town, not a longer shelf. Every building has a <b>form</b> for
+            each era &mdash; its own name, its own look, its own room, its own output and, for the
+            trades whose goods change, its own recipe &mdash; and the moment the plot advances,
+            <b>every building is rebuilt into the next form</b> and <b>pairs of the same kind
+            become one</b>, nearest first: two cabins are one townhouse with the beds of both, two
+            farms one estate farm with the posts of both. Families and workers move with their
+            building, and the land the second of each pair stood on is open again. The merge
+            happens on an advance only: a plot already in its age when a build arrives takes the
+            age&rsquo;s forms where it stands and keeps every building it has.
+          </p>
+          <table className="wiki-table">
+            <thead><tr><th>Kind</th><th>Settlement</th><th>Township</th><th>Industrial</th><th>Modern</th><th>AI</th></tr></thead>
+            <tbody>
+              {LINEAGE_TYPES.map((type) => (
+                <tr key={type}><td>{type}</td>{formNames(type).map((name, i) => <td key={i}>{name}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+          <ul>
+            <li><b>Room doubles with every age.</b> A cabin sleeps {formOf('House', 1).beds}, a townhouse {formOf('House', 2).beds}, a terrace {formOf('House', 3).beds}, an apartment block {formOf('House', 4).beds}, a habitat tower {formOf('House', 5).beds}, plus two a level. A farm takes {formPosts('Farm', 1)} hands, an estate farm {formPosts('Farm', 2)}, a mechanised farm {formPosts('Farm', 3)}, an agri complex {formPosts('Farm', 4)}, an agri-tower {formPosts('Farm', 5)}. Because the rebuild halves the count, a plot keeps its beds and its posts through an advance; every building raised afterwards holds twice what the last age&rsquo;s did on the same ground.</li>
+            <li><b>Every pair of hands makes more</b>: {Math.round((formOf('Farm', 2).output - 1) * 100)}% more in a township, {Math.round((formOf('Farm', 3).output - 1) * 100)}% in the industrial age, {Math.round((formOf('Farm', 4).output - 1) * 100)}% in the modern, {Math.round((formOf('Farm', 5).output - 1) * 100)}% in the AI age, on top of skill, improvements and methods.</li>
+            <li><b>New goods.</b> From the industrial age the bakery&rsquo;s form, the cannery, puts up <b>meals</b> from flour and vegetables beside its bread, and a meal feeds better than a loaf; the food plant and the synth kitchen make nothing else. The blacksmith&rsquo;s form, the ironworks, pours <b>steel</b> beside its tools, and the machine works and the fabricator pour more. An estate farm keeps a flock and adds a little wool. Both new goods trade on the market like everything else.</li>
+            <li><b>Bigger buildings cost more</b>: a township form costs {formOf('Farm', 2).cost}&times; the settlement&rsquo;s in Gold and materials, an industrial one {formOf('Farm', 3).cost}&times;, a modern one {formOf('Farm', 4).cost}&times;, an AI one {formOf('Farm', 5).cost}&times;, with upkeep rising more slowly ({formOf('Farm', 2).upkeep}&times; to {formOf('Farm', 5).upkeep}&times;), so a merged town is a little cheaper to keep than the crowded one it was.</li>
+            <li><b>The improvement cap is the age&rsquo;s</b>: {formOf('House', 1).cap} in a settlement, {formOf('House', 2).cap} from the township through the modern age, {formOf('House', 5).cap} in the AI age. A building keeps its level through a rebuild.</li>
+            <li><b>The city level and the era gates count homes and workplaces by age.</b> A township home or workplace counts two settlement ones, an industrial four, a modern eight, an AI sixteen; a chapel or a factory is one building in any age. So a rebuilt town is at least the size it was, and a smaller, better city is not a lower one.</li>
+            <li><b>Ten fresh levels, and a higher ceiling on every one of them.</b> The city goes back to level one of the new age, and that first level already earns more than the last level of the age before it. The ten ahead reach higher than the ten behind could.</li>
+            <li>The age&rsquo;s own buildings open, and the Build panel opens on them; earlier ages are a tab away, raised in the current age&rsquo;s form.</li>
+          </ul>
           <h3>What a township changes</h3>
           <ul>
-            <li><b>The look.</b> Buildings raised or improved after the step are stone with tiled roofs; the ones you already had keep their timber until you improve them, so an old stone chapel in the middle of a modern town is the right picture. Dirt lanes become cobbles. People wear wool coats and hats.</li>
-            <li><b>Carts.</b> A Stables puts every working adult on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them.</li>
-            <li><b>The ferry.</b> A Harbour puts a boat on every channel. People cross open water on it where there is no bridge, and every island counts as reachable, so a settlement hemmed in by water can spread to all of its land. Bridges stay, and the roads still run over them. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
+            <li><b>The look.</b> Every building is rebuilt in stone with tiled roofs the moment the plot advances, in its township form. Dirt lanes become cobbles. People wear wool coats and hats.</li>
+            <li><b>Carts.</b> A Stables puts the well-off on a cart while they are on the move, four tenths faster than walking. The cart is drawn under them. Transport is a luxury in every age: each morning everybody is ranked by their purse, the top slice are well off, and only they ride. The class shows on the person&rsquo;s card.</li>
+            <li><b>The ferry.</b> A Harbour puts boats on the water for the well-off, who cross anywhere in a boat of their own. Everybody else needs a bridge, and a workplace on an island still has to be bridged to count as reachable, so the settlement builds crossings as it did before. If the Harbour is ruined, anyone out on the water swims for the bank.</li>
             <li><b>Six buildings.</b> Chapel (company and purpose), Guildhall (learning), Brewery (company), Printer (purpose and learning), Stables, Harbour. They cost Gold, timber and stone like everything else and appear on their shelves in the Build panel once the plot is a township.</li>
           </ul>
           <h3>The later eras</h3>
@@ -971,7 +1263,7 @@ export default function Wiki() {
             with it. Buildings already standing keep their look until you improve them.
           </p>
           <ul>
-            <li><b>Rides.</b> A Railway Station puts working adults on the rails, faster than carts. A Bus Depot puts them in cars, a third of them on bikes. A Pod Hub puts everybody in autonomous pods, fastest of all. Each ride is drawn under the person, and a town that loses its newest transport falls back to the one before.</li>
+            <li><b>Rides.</b> A Railway Station puts the well-off on the rails, faster than carts. A Bus Depot puts them in cars, a third of them on bikes. A Pod Hub puts them in autonomous pods, fastest of all. Everybody else walks, in every age. Each ride is drawn under the person, and a town that loses its newest transport falls back to the one before.</li>
             <li><b>Boats.</b> The Harbour&rsquo;s ferry becomes a steamboat, then a motorboat, then a hydrofoil.</li>
             <li><b>Smog.</b> An industrial town without a Gasworks lives under smog, a slow drain on everybody&rsquo;s happiness. A Gasworks clears it, and the modern era leaves it behind.</li>
             <li><b>Industry.</b> Factory, Foundry, Power Plant and Research Campus each add to what every trade produces, on top of the Lab.</li>
@@ -996,6 +1288,13 @@ export default function Wiki() {
             you are given — each is measured from the people who live there, and each has something
             you can actually do about it.
           </p>
+          <p className="wiki-note">
+            For a clean picture of the place, the <b>◉</b> button beside the clock, or <b>P</b>, is
+            photo mode: the whole interface goes, including the crew badges over the buildings, and
+            only a faint pill in the corner remains. <b>P</b>, <b>Esc</b> or the pill brings it
+            back. Beside it, <b>⌗</b> or <b>G</b> lays a planning grid over the ground, and{' '}
+            <b>✧</b> or <b>V</b> turns the frame&rsquo;s bloom, warmth and vignette off and on.
+          </p>
           <table className="wiki-table">
             <thead><tr><th>Figure</th><th>What it is</th><th>How to move it</th></tr></thead>
             <tbody>
@@ -1017,6 +1316,23 @@ export default function Wiki() {
             Everybody carries all six needs separately, and you can read any one person&rsquo;s by
             tapping them. A settlement whose average happiness is fine can still contain somebody
             cold, friendless and about to change trade.
+          </p>
+          <h3>What people say</h3>
+          <p>
+            Everybody has a <b>temperament</b> — warm, blunt, a dreamer, a worrier, a joker, proud,
+            quiet, curious, a grumbler or steady — and it is on their card, under their trade. It
+            decides how they answer: a warm person hearing that you went hungry asks you round for
+            supper, a blunt one tells you the market shuts at dusk. A conversation between two
+            people is composed for those two: the opening knows what they are to each other (a
+            spouse, kin, a friend, someone they have met before, a stranger, a rival), the subject
+            is something one of them has a real reason to raise, the reply is in the listener&rsquo;s
+            own voice, and the parting says where they are off to. People <b>remember what happens
+            to them</b> — a night gone hungry, going unpaid, sleeping rough, a fight they saw, a new
+            friend, setting up house, a child, arriving, mastering a trade, jail, sickness, a
+            festival, a falling-out, a loss — and it is what they raise and what they ask each other
+            about; the card lists it under <b>Lately</b>. They also remember what they last talked
+            about with each person, and pick it up next time. Tap somebody and follow them for an
+            evening: the talk in the square is the settlement telling you how it is going.
           </p>
         </section>
 
@@ -1049,10 +1365,12 @@ export default function Wiki() {
             burning the blighted rows, a night watch, sandbags along the bank, shoring up the
             walls, storm crews, a quarantine. The price scales with how bad it is and how much
             town there is to save, and each does exactly what the panel says. Buildings a disaster
-            wrecks are <b>ruins</b> &mdash; out of use, smoking, a heap of stone &mdash; until you
-            rebuild them from the building card for about six tenths of the Gold and materials
-            they cost new. Damage short of a ruin the carpenters patch on their own, two timber a
-            day.
+            wrecks are <b>ruins</b> &mdash; out of use, smoking, a heap of stone &mdash; until
+            they are rebuilt for about six tenths of the Gold and materials they cost new. The
+            settlement does that itself, one a morning, homes first and then the buildings that
+            feed it, whenever the treasury holds twice the cost and the yard has the timber and
+            stone; you can rebuild from the building card straight away instead of waiting.
+            Damage short of a ruin the carpenters patch on their own, two timber a day.
           </p>
           <table className="wiki-table">
             <thead><tr><th>Trouble</th><th>What brings it</th><th>What answers it</th></tr></thead>
@@ -1172,6 +1490,35 @@ export default function Wiki() {
         </section>
 
         {/* ---------------------------------------------------------- */}
+        <section id="casino">
+          <h2>The casino</h2>
+          <p>
+            A door on the action bar with two games of chance: a <b>coin flip</b> that pays 1.9 to 1
+            and <b>three cups</b> that pay 2.7 to 1. Stakes are in Gold, from <b>100</b> a play (from{' '}
+            <b>500</b> when the prize is {TOKEN.ticker}), up to 5,000 (2,500 for {TOKEN.ticker}). The draw is
+            made in the vault, never in your browser. Choose the prize before you play: <b>Gold</b> into
+            the treasury, or <b>{TOKEN.ticker}</b> &mdash; 2 per Gold staked on the coin, 3 on the cups &mdash;
+            which lands as credit the Bank pays out under the same daily room, withdrawal count and burn
+            share as stewardship. No wallet wins more than 15,000 {TOKEN.ticker} a day at the tables.
+          </p>
+          <p>
+            Three plays a day are free, from midnight UTC. A pass of five more is about $5, paid in{' '}
+            {TOKEN.ticker} into the vault (burned and kept like every charge) or in ETH, of which 30% goes
+            to the development wallet and the rest stays in the vault. The house keeps its edge on every
+            game; it is entertainment, not income.
+          </p>
+          <p>
+            <b>The GLD table</b> is the same two games staked in {TOKEN.ticker} instead of Gold, from{' '}
+            <b>5,000</b> to <b>100,000</b> a play, outside the daily plays. The stake goes into the vault
+            before the draw. Lose, and it is burned, kept and pooled like every other charge. Win, and the
+            vault swaps your winnings &mdash; the stake at the game&rsquo;s odds &mdash; for GLD through the
+            router and sends the GLD straight to your wallet; what the swap returns is what the market
+            gives at that moment. A wallet wins at most 500,000 {TOKEN.ticker} worth a day before the
+            swap, and the table as a whole 3,000,000. When the chain is slow the win waits in the casino
+            and is sent on the next try.
+          </p>
+        </section>
+
         <section id="together">
           <h2>Other players</h2>
           <figure className="wiki-figure">
@@ -1299,6 +1646,7 @@ export default function Wiki() {
 
         <footer className="wiki-foot">
           <Link href="/" className="wiki-back">Back to the game</Link>
+          <Link href="/markets" className="wiki-back">Every price, live</Link>
           <p className="muted small">
             Every figure on this page is read from the code that enforces it, so it cannot drift
             from what the game actually does.

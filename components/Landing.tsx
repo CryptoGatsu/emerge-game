@@ -22,6 +22,7 @@ import { onChainClaimsLive } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT } from '@/lib/chain/vault';
 import { VERSION } from '@/lib/version';
 import TokenStats from './TokenStats';
+import LiveLedger from './LiveLedger';
 import { WalletPicker, useWallet } from './WalletPicker';
 import { LanguageSwitch } from './LanguageSwitch';
 import { t, useLocale } from '@/lib/i18n';
@@ -29,6 +30,7 @@ import { UPDATES, UPDATES_ZH } from '@/lib/updates';
 
 /** Where to find the project outside the game. */
 export const X_URL = 'https://x.com/emergerh';
+export const DISCORD_URL = 'https://discord.gg/X2nzKeSnfN';
 export const SITE_DOMAIN = 'emergerh.world';
 
 /**
@@ -202,14 +204,18 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
                 </p>
               </>
             )}
-            <a className="gate-guide" href="/wiki">
-              {t('Read the guide first')} &rarr;
-            </a>
+            {/* Two ways in for somebody who is not ready to connect anything:
+                what the game is, and what everything in it costs. */}
+            <div className="gate-links">
+              <a className="gate-guide" href="/wiki">{t('Read the guide first')} &rarr;</a>
+              <a className="gate-guide" href="/markets">{t('See every price')} &rarr;</a>
+            </div>
           </div>
         </section>
 
         <ContractAddress />
         <TokenStats />
+        <LiveLedger />
 
         <section className="notes">
           {notesFor(onChainClaimsLive()).map((note) => (
@@ -226,9 +232,13 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
           <div className="foot-links">
             <a href="/wiki">{t('Guide')}</a>
             <span aria-hidden>·</span>
+            <a href="/markets">{t('Markets')}</a>
+            <span aria-hidden>·</span>
             <span className="foot-version">v{VERSION}</span>
             <span aria-hidden>·</span>
             <a href={X_URL} target="_blank" rel="noreferrer noopener">@emergerh</a>
+            <span aria-hidden>·</span>
+            <a href={DISCORD_URL} target="_blank" rel="noreferrer noopener">Discord</a>
             <span aria-hidden>·</span>
             <span>{SITE_DOMAIN}</span>
             <span aria-hidden>·</span>

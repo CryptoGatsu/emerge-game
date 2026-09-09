@@ -224,8 +224,10 @@ button {
   padding: 5px 11px 5px 7px;
   border-radius: 999px;
   border: 1px solid rgba(8, 20, 14, 0.65);
-  background: rgba(8, 20, 14, 0.72);
-  backdrop-filter: blur(4px);
+  /* Opaque enough to read without a backdrop blur: a blur behind every
+     marker made the browser re-sample the map under each of them on every
+     hover, and the world map lagged for it. */
+  background: rgba(8, 20, 14, 0.88);
   color: var(--cream);
   text-align: left;
   white-space: nowrap;
@@ -378,6 +380,13 @@ button {
 .claim-button:hover:not(:disabled) { background: rgba(184, 231, 86, 0.28); }
 .claim-button:disabled { opacity: 0.6; cursor: progress; }
 .land-claim .muted.small { display: block; margin-top: 12px; line-height: 1.55; }
+.land-claim .on-account { margin-top: 6px; color: var(--gold); }
+.survey-note { margin: 6px 0 0; max-width: 420px; font-size: 12px; line-height: 1.5; text-align: right; }
+.land-claim .redeem { margin-top: 14px; }
+.land-claim .redeem summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.land-claim .redeem-row { display: flex; gap: 8px; margin-top: 8px; }
+.land-claim .redeem-row input { flex: 1; min-width: 0; font-size: 12px; padding: 7px 10px; }
+.land-claim .redeem-row button { flex: none; }
 
 @media (max-width: 1080px) {
   .land-head { grid-template-columns: 1fr; grid-template-areas: 'brand' 'intro' 'side'; }
@@ -1054,7 +1063,21 @@ button {
 .purse-cell em { font-style: normal; font-size: 8px; letter-spacing: 1.6px; color: var(--muted); }
 .purse-cell b { font-size: 15px; line-height: 1.1; }
 .purse-cell i { font-style: normal; font-size: 8.5px; color: var(--muted); }
+/* A full treasury is turning income away, which is worth noticing without
+   being an alarm: the town is fine, it just has nothing to do with the Gold. */
+.purse-cell.gold.full b { color: var(--warn, #d08a3a); }
+.purse-cell.gold.full i { color: var(--warn, #d08a3a); opacity: .85; }
 .purse-cell.gold b { color: var(--gold); }
+/* Gold standing in an order, said beside the purse rather than left to look
+   like Gold that went missing. */
+.purse-cell.gold u { display: block; margin-top: 1px; font-size: 9px; letter-spacing: .04em; text-decoration: none; color: var(--muted); }
+/* Held, spendable, listed — the three figures a player asked to be able to tell apart. */
+.bank-purse { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 10px 0 4px; align-items: start; }
+.bank-purse div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--panel-edge-soft); border-radius: 8px; min-width: 0; }
+.bank-purse span { font-size: 9px; letter-spacing: .1em; color: var(--muted); }
+.bank-purse b { font-size: 15px; color: var(--cream); }
+.bank-purse b i { font-style: normal; font-size: 11px; color: var(--muted); }
+.bank-purse .listed b { color: var(--gold); }
 .purse-cell.emerge b { color: var(--emerald); }
 .purse-cell.wallet b { color: var(--cream); font-size: 13px; }
 @media (max-width: 760px) {
@@ -1238,6 +1261,8 @@ button.fold:hover { color: var(--emerald); }
 .build-card h3 { margin: 0; font-size: 15px; color: var(--cream); }
 .build-card p { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; min-height: 34px; }
 .build-cost { display: flex; justify-content: space-between; align-items: baseline; margin-top: 3px; }
+/* The room a form holds: beds for a home, posts for a workplace. */
+.build-room { margin: 2px 0 0; font-size: 11px; color: var(--gold); letter-spacing: 0.03em; }
 .build-cost b { color: var(--gold); font-size: 13px; }
 .build-cost small { font-size: 10px; color: var(--muted); }
 .build-card button {
@@ -1250,6 +1275,10 @@ button.fold:hover { color: var(--emerald); }
   font-size: 11.5px;
   letter-spacing: 1px;
 }
+/* Two actions on one card stack; on a phone the pair takes the button's cell
+   together, since two buttons each claiming the cell sat on top of each other. */
+.build-actions { display: flex; flex-direction: column; gap: 6px; }
+.build-actions button { width: 100%; }
 .build-card button:hover:not(:disabled) { background: rgba(184, 231, 86, 0.2); }
 .build-card button:disabled { color: var(--muted); border-color: var(--panel-edge-soft); background: none; cursor: not-allowed; }
 
@@ -1396,6 +1425,9 @@ button.fold:hover { color: var(--emerald); }
 .wallet-box small { line-height: 1.5; }
 .wallet-ok { font-size: 14px; color: var(--emerald); }
 .wallet-options { display: flex; flex-wrap: wrap; gap: 7px; }
+.wallet-open a { color: var(--emerald); text-decoration: underline; }
+.wallet-why summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.wallet-why code { font-size: 11px; word-break: break-all; }
 .wallet-option {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 13px;
@@ -1419,6 +1451,15 @@ button.fold:hover { color: var(--emerald); }
 .vault-line { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; padding: 3px 0; }
 .vault-line span { color: var(--muted); }
 .vault-line b { color: var(--cream); }
+.judged-card { margin: 8px 0 4px; padding: 8px 10px; border: 1px solid rgba(225, 210, 78, 0.28); border-radius: 8px; background: rgba(28, 24, 4, 0.35); }
+.judged-card > .vault-line:first-child b { color: var(--gold); }
+.judged-card .judged-plot span { font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
+.judged-card p { margin: 6px 0 0; }
+.being-traits { margin: -2px 0 4px; font-style: italic; letter-spacing: 0.02em; }
+.being-lately { margin: 6px 0 2px; font-size: 12px; }
+.being-lately ul { margin: 2px 0 0; padding-left: 14px; color: var(--cream); }
+.being-lately li { margin: 1px 0; }
+.being-talk { font-size: 12px; }
 .vault-line.burn b { color: #e0785f; }
 .vault-card button {
   width: 100%;
@@ -1846,6 +1887,7 @@ button.fold:hover { color: var(--emerald); }
   transform: translateX(-50%);
   z-index: 26;
   display: flex; align-items: baseline; gap: 10px;
+  max-width: min(760px, calc(100vw - 40px));
   padding: 9px 15px;
   border-radius: 999px;
   border: 1px solid rgba(225, 210, 78, 0.5);
@@ -1857,7 +1899,7 @@ button.fold:hover { color: var(--emerald); }
 .visiting-bar > * { min-width: 0; }
 .visiting-bar .eyebrow { color: var(--gold); flex: none; }
 .visiting-bar b { font-size: 13px; color: var(--cream); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.visiting-bar em { font-style: normal; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.visiting-bar em { font-style: normal; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visiting-bar button { flex: none; padding: 4px 12px; border-radius: 999px; font-size: 11px; }
 
 .notices {
@@ -2246,6 +2288,8 @@ button.fold:hover { color: var(--emerald); }
   .build-cost small { font-size: 9.5px; }
   .build-materials { grid-area: mats; margin-top: 4px; }
   .build-card button { grid-area: place; margin-top: 4px; padding: 7px 16px; font-size: 12px; }
+  .build-actions { grid-area: place; }
+  .build-actions button { grid-area: auto; margin-top: 0; }
   /* The two tools carry a long blurb and a wide price; side by side on a
      phone the blurb was squeezed into a column four words wide. The price
      goes under the blurb instead, next to its button. */
@@ -2537,6 +2581,9 @@ button.fold:hover { color: var(--emerald); }
   text-decoration: none;
 }
 .gate-guide:hover { text-decoration: underline; }
+/* The guide and the markets, side by side: one says what the game is,
+   the other what everything in it costs, and neither needs a wallet. */
+.gate-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 22px; margin-top: 2px; }
 
 /* Where the market panel's prices come from — one line, above the figures,
    because "is this number mine or everybody's?" is the first thing worth
@@ -2714,6 +2761,10 @@ button.fold:hover { color: var(--emerald); }
 
 /* The market sold something. Gold, like everything else to do with takings. */
 .notice.sale b { color: var(--gold); }
+.notice.win b { color: var(--gold); }
+.notice.win { border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+/* The world map scrolls, so its cards pin to the screen rather than the page. */
+.world-map .notices { position: fixed; }
 
 /* How many people are in the game, beside how many beings are in this world.
    Dimmer than the settlement's own count: it is context, not a reading. */
@@ -3021,6 +3072,23 @@ button.fold:hover { color: var(--emerald); }
 @media (max-width: 780px) { .hud .hud-lang { top: 56px; } .landing-lang { top: 10px; right: 10px; } }
 
 /* ---- world count and resale ---- */
+.soft-stake { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px 18px; align-items: center; margin: 0 0 14px; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--panel-edge-soft); background: rgba(255, 255, 255, 0.03); }
+.soft-stake .eyebrow { display: block; margin-bottom: 4px; }
+.soft-stake-text p { margin: 0; line-height: 1.5; }
+/* Auto-fit rather than a fixed three: on a phone three columns of a panel
+   are ninety pixels each, which is narrower than the words in them. They
+   wrap to two, then one, and stop stretching to the tallest. */
+.soft-stake-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; align-items: start; }
+.soft-stake-figures div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; min-width: 0; }
+.soft-stake-figures span { font-size: 9.5px; letter-spacing: 0.08em; color: var(--muted); }
+/* A figure may wrap between its number and its unit, never inside the number. */
+.soft-stake-figures b { font-size: 14px; color: var(--cream); overflow-wrap: normal; }
+.soft-stake-hint { grid-column: 1 / -1; margin: 0; line-height: 1.5; }
+.soft-stake-actions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.soft-stake-actions button { padding: 8px 14px; border-radius: 9px; border: 1px solid var(--emerald); background: rgba(184, 231, 86, 0.12); color: var(--emerald); font: inherit; font-size: 12px; cursor: pointer; }
+.soft-stake-actions button:disabled { opacity: 0.5; cursor: default; }
+.soft-stake-note { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 760px) { .soft-stake { grid-template-columns: 1fr; } }
 .world-count { display: flex; justify-content: center; gap: 22px; margin: 6px 0 12px; font-size: 13px; color: #9db89a; letter-spacing: 0.02em; }
 .world-count b { color: #e6f5c8; font-size: 15px; margin-right: 4px; }
 .region-pin .sale-tag, .region-pin .settled-tag { font-style: normal; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: 5px; padding: 1px 5px; border-radius: 999px; }
@@ -3040,6 +3108,10 @@ button.fold:hover { color: var(--emerald); }
 .build-shelves { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
 .build-shelves button { padding: 6px 11px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--panel-edge-soft); }
 .build-shelves button.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); background: rgba(184, 231, 86, 0.08); }
+.build-ages { margin-bottom: 4px; }
+.build-ages button.later { opacity: 0.55; }
+.build-ages button.on { color: var(--gold); border-color: rgba(225, 210, 78, 0.45); background: rgba(225, 210, 78, 0.08); }
+.build-age-note { margin: 0 0 6px; }
 .build-card.later-era { opacity: 0.55; }
 .era-lock { font-style: normal; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; background: rgba(95, 214, 200, 0.18); color: #5fd6c8; vertical-align: middle; }
 .visiting-bar.at-work .eyebrow { color: var(--emerald); }
@@ -3133,6 +3205,18 @@ button.fold:hover { color: var(--emerald); }
 .people-filter button, .build-shelves button { font: inherit; font-size: 11.5px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--panel-edge-soft); background: none; color: var(--muted); cursor: pointer; }
 .people-filter button.on, .build-shelves button.on { color: var(--cream); border-color: var(--emerald); background: rgba(184, 231, 86, 0.12); }
 .people-rows { display: flex; flex-direction: column; gap: 4px; max-height: 52vh; overflow: auto; padding-right: 4px; }
+.notables h4 { margin: 12px 0 6px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.people-row.notable-row { grid-template-columns: 1.1fr 1.1fr 1.6fr 1.5fr auto; }
+.people-row.exchange-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) auto; }
+.exchange-what, .exchange-price { display: grid; gap: 2px; min-width: 0; }
+.exchange-buy { display: flex; gap: 6px; align-items: center; }
+.exchange-buy input { width: 84px; }
+.exchange h4 { margin: 10px 0 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.exchange-sell { display: grid; gap: 10px; max-width: 420px; }
+.exchange-sell label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.exchange-kind { display: flex; gap: 6px; }
+.exchange-kind button.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); }
+@media (max-width: 720px) { .people-row.exchange-row { grid-template-columns: 1fr; } }
 .people-row { display: grid; grid-template-columns: 1.3fr 0.5fr 1fr 1fr 1.4fr auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--panel-edge-soft); border-radius: 8px; font-size: 12px; }
 .people-row b { color: var(--cream); font-weight: 600; }
 .people-row.idle { border-color: rgba(230, 120, 90, 0.5); }
@@ -3159,7 +3243,10 @@ button.fold:hover { color: var(--emerald); }
 .boon-row span { grid-column: 1; }
 .boon-row button { grid-row: 1 / span 2; grid-column: 2; margin: 0; white-space: nowrap; }
 
-.flywheel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+/* Two where there is room, one where there is not — and never stretched to
+   the tallest card, so a figure beside a longer one is not a tall box
+   with a number at the top of it. */
+.flywheel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; align-items: start; }
 .flywheel-grid div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }
 .flywheel-grid span { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); }
 .flywheel-grid b { font-size: 16px; color: var(--cream); }
@@ -3173,7 +3260,8 @@ button.fold:hover { color: var(--emerald); }
 .arena-bet-row.token label span { color: var(--gold, #f0d05e); }
 
 .dividend-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.flywheel-grid em { font-size: 10px; }
+.flywheel-grid em { font-size: 10px; line-height: 1.45; }
+.flywheel-hint { margin: 8px 0 0; line-height: 1.5; }
 
 
 /* ---- the first day ---- */
@@ -3197,6 +3285,25 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 .leaders-list > p { margin: 0; text-align: center; }
 .leader-row { display: grid; grid-template-columns: 28px 22px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; text-align: left; padding: 8px 12px; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 12px; background: rgba(1, 10, 6, 0.55); color: #e6f5c8; font: inherit; cursor: pointer; min-height: 46px; }
 .leader-row:hover { border-color: rgba(184, 231, 86, 0.45); }
+.land-market { margin: -4px 0 12px; display: grid; justify-items: center; gap: 8px; }
+.land-list { width: 100%; max-width: 860px; display: grid; gap: 6px; }
+.land-list > p { margin: 0; text-align: center; }
+.land-sort { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
+.land-sort button.on { color: var(--emerald); border-color: rgba(184, 231, 86, 0.4); }
+.land-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) auto auto; gap: 10px 14px; align-items: center; text-align: left; padding: 9px 12px; border: 1px solid rgba(184, 231, 86, 0.18); border-radius: 12px; background: rgba(1, 10, 6, 0.55); color: #e6f5c8; }
+.land-row.mine { border-color: rgba(240, 208, 94, 0.6); }
+.land-who { display: grid; gap: 2px; min-width: 0; }
+.land-who b, .land-who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.land-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.land-stats > span { display: grid; line-height: 1.2; }
+.land-stats > span > b { font-size: 13px; }
+.land-stats > span > small { font-size: 10.5px; color: var(--muted); }
+.land-price { display: grid; text-align: right; gap: 2px; }
+.land-price b { font-size: 14px; white-space: nowrap; }
+.land-price small { max-width: 180px; }
+.land-actions { display: flex; flex-direction: column; gap: 6px; }
+.land-actions .claim-button.small { padding: 6px 10px; font-size: 11px; }
+@media (max-width: 720px) { .land-row { grid-template-columns: 1fr 1fr; } .land-price { text-align: left; } .land-actions { flex-direction: row; } }
 .leader-row.mine { border-color: rgba(240, 208, 94, 0.6); }
 .leader-row .rank { font-size: 14px; color: #f0d05e; text-align: center; }
 .leader-row .glyph { color: #b8e756; text-align: center; }
@@ -3224,3 +3331,168 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
   .wiki-nav a { min-height: 36px; display: inline-flex; align-items: center; }
   .overlay-panel button:not(.panel-close) { min-height: 34px; }
 }
+
+/* ---- the gates ---- */
+.gates-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid rgba(184, 231, 86, 0.22); border-radius: 12px; background: rgba(1, 10, 6, 0.4); }
+.gates-card.closed { border-color: rgba(217, 122, 90, 0.45); }
+.gates-card .eyebrow { display: block; font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
+.gates-card b { display: block; font-size: 14px; color: var(--cream); margin: 2px 0; }
+.gates-card small { display: block; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.gates-card > button { flex: none; font: inherit; font-size: 12px; padding: 8px 14px; border-radius: 9px; border: 1px solid rgba(184, 231, 86, 0.45); background: rgba(184, 231, 86, 0.12); color: #e6f5c8; cursor: pointer; min-height: 36px; }
+.gates-card > button:hover { background: rgba(184, 231, 86, 0.2); }
+.demolish.dismiss { margin-top: 10px; }
+@media (max-width: 780px) { .gates-card { flex-direction: column; align-items: stretch; } }
+
+/* ---- keep in store ---- */
+.market-keep { grid-column: 1 / -1; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--panel-edge-soft); }
+.market-keep > div { flex: 1 1 auto; min-width: 0; }
+.market-keep small { display: block; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.market-keep form { display: flex; gap: 6px; align-items: center; flex: none; }
+.market-keep input { width: 84px; font: inherit; font-size: 13px; padding: 7px 8px; border-radius: 8px; border: 1px solid rgba(184, 231, 86, 0.3); background: rgba(1, 10, 6, 0.55); color: var(--cream); min-height: 36px; }
+.market-keep button { font: inherit; font-size: 12px; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(184, 231, 86, 0.45); background: rgba(184, 231, 86, 0.12); color: #e6f5c8; cursor: pointer; min-height: 36px; }
+@media (max-width: 780px) { .market-keep { flex-direction: column; align-items: stretch; } }
+
+/* Photo mode: everything gone but a pill in the corner that fades to a trace. */
+.photo-exit {
+  position: fixed; right: 14px; bottom: 14px; z-index: 40;
+  padding: 7px 12px; border-radius: 999px; border: 1px solid rgba(240, 236, 220, 0.35);
+  background: rgba(14, 22, 14, 0.62); color: var(--cream); font: inherit; font-size: 12px; letter-spacing: 0.02em;
+  cursor: pointer; opacity: 1; animation: photo-fade 5s ease forwards;
+}
+.photo-exit:hover, .photo-exit:focus-visible { opacity: 1; animation: none; }
+@keyframes photo-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0.22; } }
+
+/* The live ledger under the token chart: three figures that count up. */
+.live-ledger {
+  margin: 14px auto 0; max-width: 720px; padding: 16px 20px 14px;
+  border: 1px solid var(--panel-edge-soft); border-radius: 14px;
+  background: linear-gradient(180deg, rgba(10, 24, 15, 0.9), rgba(6, 15, 10, 0.9));
+}
+.ledger-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.ledger-head h3 { margin: 0; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--cream); }
+.ledger-live { color: #e2574a; font-size: 10px; animation: ledger-pulse 2.4s ease-in-out infinite; }
+@keyframes ledger-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+.ledger-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ledger-figure { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--panel-edge-soft); background: rgba(255, 255, 255, 0.03); min-width: 0; }
+.ledger-label { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.ledger-value { font-size: 22px; color: var(--gold); font-variant-numeric: tabular-nums; line-height: 1.1; word-break: break-all; }
+.ledger-value small { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+.ledger-note { font-size: 11px; color: var(--muted); }
+@media (max-width: 640px) { .ledger-figures { grid-template-columns: 1fr; } .ledger-value { font-size: 20px; } }
+/* One quiet row under the figures on how the casino's tables have done. */
+.ledger-tables { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: start; gap: 6px 12px; margin-top: 10px; padding: 8px 14px 9px; border-radius: 10px; border: 1px dashed var(--panel-edge-soft); font-size: 11px; color: var(--muted); }
+.ledger-tables-head { grid-column: 1 / -1; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.ledger-stat { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.2; }
+.ledger-stat b { color: var(--gold); font-variant-numeric: tabular-nums; font-size: 13px; overflow-wrap: anywhere; }
+.ledger-stat b small { font-size: 9.5px; color: var(--muted); letter-spacing: 0.04em; white-space: nowrap; }
+@media (max-width: 900px) { .ledger-tables { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .ledger-tables { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* The casino. */
+.casino-top { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.casino-stat b small { font-size: 10px; color: var(--muted); letter-spacing: 0.04em; }
+.casino-stat button.link { background: none; border: 0; padding: 0; color: var(--gold); font: inherit; font-size: 10.5px; cursor: pointer; text-decoration: underline; }
+.casino-gld-note { margin: 0; }
+.casino-result .gld-status a { color: var(--gold); }
+@media (max-width: 640px) { .casino-top { grid-template-columns: 1fr; } }
+.casino-stat { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.03); }
+.casino-stat span { font-size: 9.5px; letter-spacing: 1.5px; color: var(--muted); }
+.casino-stat b { color: var(--gold); font-size: 14px; }
+.casino-stat small { font-size: 10.5px; color: var(--muted); }
+.casino-games { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.casino-games button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.03); color: var(--cream); text-align: left; }
+.casino-games button small { font-size: 10.5px; color: var(--muted); }
+.casino-games button.sel { border-color: var(--emerald); background: rgba(184, 231, 86, 0.1); }
+.casino-table { padding: 14px; border-radius: 12px; border: 1px solid var(--panel-edge-soft); background: radial-gradient(ellipse at 50% 30%, rgba(40, 90, 50, 0.55), rgba(8, 22, 14, 0.7)); text-align: center; margin-bottom: 12px; }
+.casino-coin { position: relative; width: 84px; height: 84px; margin: 6px auto 12px; transform-style: preserve-3d; transition: transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.casino-coin .face { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 30px; color: #5a4310; backface-visibility: hidden; border: 4px solid #b98a2a; box-shadow: inset 0 0 0 3px #f0d05e, 0 6px 12px rgba(0,0,0,0.4); background: radial-gradient(circle at 35% 30%, #ffe89a, #e0b53d 60%, #b98a2a); }
+.casino-coin .face.tails { transform: rotateY(180deg); background: radial-gradient(circle at 35% 30%, #f5d67a, #caa034 60%, #a37a22); }
+.casino-coin.spinning { animation: casino-coin-spin 0.45s linear infinite; }
+.casino-coin.heads { transform: rotateY(0deg); }
+.casino-coin.tails { transform: rotateY(180deg); }
+@keyframes casino-coin-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+.casino-cups { display: flex; justify-content: center; gap: 22px; margin: 8px auto 12px; }
+.casino-cups .cup { position: relative; width: 64px; height: 72px; background: none; border: none; padding: 0; cursor: pointer; }
+.casino-cups .cup-body { position: absolute; left: 6px; right: 6px; top: 4px; bottom: 10px; border-radius: 10px 10px 4px 4px; background: linear-gradient(180deg, #b4402e, #7a2a1c); box-shadow: inset 0 -6px 0 rgba(0,0,0,0.25), 0 6px 10px rgba(0,0,0,0.4); transition: transform 0.45s ease; }
+.casino-cups .cup.picked .cup-body { outline: 2px solid var(--emerald); outline-offset: 2px; }
+.casino-cups .cup-coin { position: absolute; left: 50%; bottom: 8px; width: 22px; height: 12px; margin-left: -11px; border-radius: 50%; background: #f0d05e; box-shadow: 0 0 8px #f0d05e; opacity: 0; transition: opacity 0.2s 0.25s; }
+.casino-cups .cup.lifted .cup-body { transform: translateY(-34px); }
+.casino-cups .cup.lifted .cup-coin { opacity: 1; }
+.casino-cups.spinning .cup { animation: casino-cup-shuffle 0.5s ease-in-out infinite alternate; }
+.casino-cups.spinning .cup:nth-child(2) { animation-delay: 0.16s; }
+.casino-cups.spinning .cup:nth-child(3) { animation-delay: 0.32s; }
+@keyframes casino-cup-shuffle { from { transform: translateX(-14px); } to { transform: translateX(14px); } }
+.casino-picks { display: flex; justify-content: center; gap: 8px; }
+.casino-picks button, .casino-prize button, .casino-quick button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.04); color: var(--cream); font-size: 11.5px; }
+.casino-picks button.sel, .casino-prize button.sel { border-color: var(--emerald); background: rgba(184, 231, 86, 0.14); color: var(--emerald); }
+.casino-result { margin: 12px 0 0; font-size: 13px; color: var(--cream); }
+.casino-result.won { color: var(--gold); }
+.casino-result small { display: block; color: var(--muted); font-size: 10.5px; }
+.casino-bet { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.casino-bet label { display: flex; flex-direction: column; gap: 4px; }
+.casino-bet label span { font-size: 9.5px; letter-spacing: 1.5px; color: var(--muted); }
+.casino-bet input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--panel-edge); background: rgba(0,0,0,0.25); color: var(--cream); font: inherit; font-size: 14px; }
+.casino-quick, .casino-prize { display: flex; gap: 6px; flex-wrap: wrap; }
+.casino-odds { margin: 0; font-size: 11.5px; color: var(--gold); }
+.casino-play { padding: 11px 16px; border-radius: 10px; border: 1px solid var(--emerald); background: rgba(184, 231, 86, 0.16); color: var(--emerald); font-size: 13px; letter-spacing: 1.5px; }
+.casino-play:disabled { opacity: 0.45; cursor: default; }
+.casino-message { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: rgba(226, 87, 74, 0.12); border: 1px solid rgba(226, 87, 74, 0.35); color: var(--cream); font-size: 12px; }
+.casino-pass { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--panel-edge-soft); margin-bottom: 8px; }
+.casino-pass h4 { margin: 0 0 2px; font-size: 12.5px; color: var(--cream); }
+.casino-pass p { margin: 0; max-width: 420px; }
+.casino-buy { display: flex; gap: 8px; }
+.casino-buy button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--panel-edge); background: rgba(240, 208, 94, 0.1); color: var(--gold); font-size: 12px; white-space: nowrap; }
+.casino-buy button:disabled { opacity: 0.5; }
+.casino-fine { margin: 0; }
+@media (max-width: 640px) { .casino-top, .casino-games { grid-template-columns: 1fr; } .casino-cups { gap: 12px; } }
+
+/* A transaction hash is one unbreakable word: shortened, linked, and never allowed past the card. */
+.tx-line { overflow-wrap: anywhere; word-break: break-all; min-width: 0; }
+.tx-line a { color: var(--emerald); text-decoration: none; border-bottom: 1px dotted rgba(184, 231, 86, 0.5); }
+
+.casino-buy-block { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.casino-passes { display: flex; gap: 4px; }
+.casino-passes button { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.04); color: var(--muted); font-size: 10.5px; }
+.casino-passes button.sel { border-color: var(--gold); color: var(--gold); background: rgba(240, 208, 94, 0.1); }
+
+/* One settled trade, in the exchange's History tab. */
+/*
+ * One settled trade.
+ *
+ * Laid out as a wrapping row rather than a grid: the panel is narrow, the
+ * figures are long ("1,000 Gold", "5 $EMERGE each"), and fixed columns pushed
+ * them into each other so a value broke across two lines and overlapped its
+ * neighbour. Each figure now keeps to one line and takes the width it needs,
+ * and what you came away with drops to its own line when there is no room.
+ */
+.people-row.exchange-past { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; }
+.exchange-past > b { flex: 0 0 auto; min-width: 3.4rem; }
+.exchange-past-what { color: var(--cream); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.exchange-past-price { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.exchange-past-got { flex: 1 1 12rem; min-width: 0; font-variant-numeric: tabular-nums; }
+.exchange-past-who { flex: 1 1 100%; opacity: 0.7; }
+@media (max-width: 480px) {
+  .exchange-past-got { flex: 1 1 100%; }
+}
+
+/* One payment the exchange is still settling, under the notice. */
+.exchange-waiting { display: block; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
+
+/* --- The markets page ------------------------------------------------ */
+/* The rate cards: three figures that answer three different questions, so
+   they read as one row on a desktop and stack honestly on a phone. */
+.markets-rate {
+  display: grid; gap: 12px; margin: 14px 0 6px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.markets-figure {
+  border: 1px solid var(--line, #2a3330); border-radius: 10px; padding: 12px 14px;
+  background: var(--card, rgba(255, 255, 255, .02));
+}
+.markets-figure em { font-style: normal; font-size: 9px; letter-spacing: 1.8px; color: var(--muted); display: block; }
+.markets-figure b { display: block; font-size: 26px; line-height: 1.25; margin: 2px 0 4px; }
+.markets-figure span { font-size: 11.5px; color: var(--muted); line-height: 1.45; display: block; }
+/* Every table here can outgrow a phone; each scrolls in its own right rather
+   than pushing the page sideways. */
+.markets .wiki-table { display: block; overflow-x: auto; max-width: 100%; }
+.markets h3 { margin-top: 22px; }

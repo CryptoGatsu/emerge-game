@@ -1,4 +1,5 @@
 'use client';
+import { DISMISS_GOLD } from '@/lib/simulation';
 import { FirstDay, type FirstGo, type FirstStep } from './FirstDay';
 import { EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
 
@@ -43,6 +44,8 @@ interface HudProps {
   onRenameCitizen: (id: string, name: string) => void;
   /** Pull a building down for half its materials. */
   onDemolish: (id: string) => void;
+  /** Send somebody away for a few days' pay. */
+  onDismiss: (id: string) => void;
   /** Raise a ruin again, for Gold and materials. */
   onRebuild: (id: string) => void;
   /** Spend Gold against a hazard. */
@@ -50,10 +53,19 @@ interface HudProps {
   /** Which building the player is placing, if any. */
   movingBuilding: string | null;
   onUpgradeBuilding: (id: string) => void;
+  onUpgradeAll: (type: string) => void;
   onMoveBuilding: (id: string | null) => void;
   onClearSelection: () => void;
   onZoom: (factor: number) => void;
   onResetView: () => void;
+  /** Hide the whole interface for a clean screenshot. */
+  onPhoto: () => void;
+  /** The planning grid, and its toggle. */
+  grid: boolean;
+  onGrid: () => void;
+  /** The frame's grade and bloom, and its toggle. */
+  effects: boolean;
+  onEffects: () => void;
   onMinimapJump: (u: number, v: number) => void;
   drawMinimap: (canvas: HTMLCanvasElement) => void;
   onCancelBuild: () => void;
@@ -62,7 +74,7 @@ interface HudProps {
   /** People playing Emerge anywhere, or null when the relay has not said. */
   online: number | null;
   /** Set when this is somebody else's settlement, being looked at. */
-  visiting: { worldName: string; ownerName: string; owner: string; at: number; hand?: boolean } | null;
+  visiting: { worldName: string; ownerName: string; owner: string; at: number; hand?: boolean; unpublished?: boolean } | null;
   /** Stop visiting and go back to the world map. */
   onEndVisit: () => void;
   /** The first-day card, while there is one to show. */
@@ -150,6 +162,9 @@ function Minimap({ draw, onJump }: { draw: (c: HTMLCanvasElement) => void; onJum
 }
 
 /** Tooltip that follows the cursor without re-rendering React on every move. */
+/** An age's name in the middle of a sentence: lower-cased, unless it is an acronym. */
+const soft = (name: string) => (name === name.toUpperCase() ? name : name.toLowerCase());
+
 function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -170,12 +185,13 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
   );
 }
 
-function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onRebuild, onUpgrade, onMove }: {
+function BeingCard({ focus, following, player, readOnly, treasury, moving, onClear, onFocus, onToggleFollow, onRenameCitizen, onDemolish, onDismiss, onRebuild, onUpgrade, onUpgradeAll, onMove }: {
   focus: Focus; following: string | null; player: PlayerRecord;
   /** True on somebody else's world: you can look and follow, not change. */
   readOnly: boolean;
   onClear: () => void; onFocus: (t: PickTarget) => void; onToggleFollow: () => void;
   onRenameCitizen: (id: string, name: string) => void;
+  onDismiss: (id: string) => void;
   onDemolish: (id: string) => void;
   onRebuild: (id: string) => void;
   /** What the settlement has to spend, so the buttons can refuse honestly. */
@@ -183,6 +199,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
   /** The building the player is currently placing, if any. */
   moving: string | null;
   onUpgrade: (id: string) => void;
+  onUpgradeAll: (type: string) => void;
   onMove: (id: string | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -202,11 +219,27 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
             {focus.ruined && <p className="ruined-line">{t('Wrecked. Nobody can use it until it is rebuilt.')}</p>}
             {!focus.ruined && focus.damage > 0 && <p className="muted small">{t('{n}% damaged. The carpenters are patching it.', { n: focus.damage })}</p>}
             <p>{focus.production ? t('Producing · {what}', { what: tx(focus.production) }) : focus.occupants ? t('{n} inside', { n: focus.occupants }) : t('Quiet right now')}</p>
+            {focus.crew && (
+              <p className="muted small">
+                {focus.crew.posted === 0
+                  ? t('Nobody is posted here. Train somebody to the trade on the People panel.')
+                  : t('{n} of {posts} posts filled', { n: focus.crew.posted, posts: focus.crew.posts })}
+                {focus.crew.over > 0 && ` · ${t('{n} more carry the trade with no post to fill', { n: focus.crew.over })}`}
+              </p>
+            )}
+            {focus.keeper && ('name' in focus.keeper
+              ? <p className="muted small keeper-line">{t('Kept by {name}, {tier} {role}.', { name: focus.keeper.name, tier: tx(focus.keeper.tier), role: tx(focus.keeper.role).toLowerCase() })}</p>
+              : <p className="muted small keeper-line">{t('No {role} keeps it: it runs at {base}%. Engage one on the People panel.', { role: tx(focus.keeper.wants).toLowerCase(), base: focus.keeper.base })}</p>)}
+            {focus.idle && <p className="muted small idle-line">{tx(focus.idle)}</p>}
             {/* What it has been improved to, and what that is costing every
                 day — the second half matters, because upkeep is what makes
                 improving everything a decision rather than a free win. */}
             <p className="muted small building-level">
               {t('Level {level} of {max} · {upkeep} Gold a day to keep', { level: focus.level, max: focus.maxLevel, upkeep: focus.upkeep })}
+              {/* A workplace with empty posts is charged less, so the card says
+                  what it would cost full rather than leaving the figure looking
+                  wrong against the guide's table. */}
+              {focus.upkeepFull > focus.upkeep && ` · ${t('{n} with its posts full', { n: focus.upkeepFull })}`}
             </p>
             {focus.beds && (
               <p className="muted small building-level building-beds">
@@ -262,7 +295,11 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
                 </em>
               </button>
             ) : (
-              <span className="muted small">{t('As good as it gets.')}</span>
+              <span className="muted small">
+                {focus.cap.next
+                  ? t('Level {n} is the most a {era} can raise. The {next} opens one more.', { n: focus.maxLevel, era: soft(tx(focus.cap.era)), next: soft(tx(focus.cap.next)) })
+                  : t('As good as it gets.')}
+              </span>
             )}
             <button
               className={moving === focus.id ? 'shift armed' : 'shift'}
@@ -270,6 +307,23 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
               onClick={() => onMove(moving === focus.id ? null : focus.id)}
             >
               {moving === focus.id ? t('Tap the ground') : t('Move · {gold} Gold', { gold: focus.moveGold })}
+            </button>
+          </div>
+        )}
+        {focus.upgradeAll && !readOnly && !focus.ruined && (
+          <div className="building-work improve-all">
+            <button
+              className="improve"
+              disabled={focus.upgradeAll.affordable === 0}
+              onClick={() => onUpgradeAll(focus.buildingType)}
+            >
+              {focus.upgradeAll.affordable >= focus.upgradeAll.count
+                ? t('Improve every {type} · {n} for {gold} Gold', { type: tn(focus.kindName).toLowerCase(), n: focus.upgradeAll.count, gold: focus.upgradeAll.gold.toLocaleString() })
+                : t('Improve {n} of {total} {type}s · as far as the treasury goes', { n: focus.upgradeAll.affordable, total: focus.upgradeAll.count, type: tn(focus.kindName).toLowerCase() })}
+              <em>
+                {t('{wood} timber · {stone} stone', { wood: focus.upgradeAll.wood, stone: focus.upgradeAll.stone })}
+                {focus.upgradeAll.affordable === 0 ? t(' — not yet') : t(' · one level each, cheapest first')}
+              </em>
             </button>
           </div>
         )}
@@ -322,6 +376,7 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
           </h2>
           <div className="being-handle">{focus.handle}</div>
           <p className="muted">{tj(focus.job)} · {t('age {age}', { age: focus.age })} · {t('{family} family', { family: focus.family })}</p>
+          {focus.traits.length > 0 && <p className="muted small being-traits">{focus.traits.map((w) => tx(w)).join(', ')}</p>}
           {/* What they are worth at the work, which is the difference between
               a settlement of strangers and one that has been running a while. */}
           {focus.skill && (
@@ -378,12 +433,39 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
         </button>
       </div>
       {focus.project && <div className="being-note">{t('Working on {project}', { project: tx(focus.project) })}</div>}
+      {focus.lately.length > 0 && (
+        <div className="being-lately">
+          <span className="muted">{t('Lately')}</span>
+          <ul>{focus.lately.map((line, i) => <li key={i}>{tx(line)}</li>)}</ul>
+        </div>
+      )}
+      {focus.lastTalk && (
+        <div className="being-note being-talk">
+          {focus.lastTalk.daysAgo <= 0
+            ? t('Talked with {name} today about {topic}.', { name: focus.lastTalk.name, topic: tx(focus.lastTalk.topic) })
+            : t('Talked with {name} {n} days ago about {topic}.', { name: focus.lastTalk.name, n: focus.lastTalk.daysAgo, topic: tx(focus.lastTalk.topic) })}
+        </div>
+      )}
       {focus.friends.length > 0 && (
         <div className="being-people">
           <span className="muted">{t('Friends')}</span>
           {focus.friends.map((f) => (
             <button key={f.id} className="person-chip" onClick={() => onFocus({ kind: 'citizen', id: f.id })}>{f.name}</button>
           ))}
+        </div>
+      )}
+      {!readOnly && focus.age >= 16 && (
+        <div className="demolish dismiss">
+          <button
+            className={confirming === focus.id ? 'danger armed' : 'danger'}
+            onClick={() => {
+              if (confirming === focus.id) { onDismiss(focus.id); setConfirming(null); }
+              else setConfirming(focus.id);
+            }}
+          >
+            {confirming === focus.id ? t('Send them away — tap again') : t('Send away · {gold} Gold', { gold: DISMISS_GOLD })}
+          </button>
+          <span className="muted small">{t('They leave on the road with a few days’ pay. Their bed and their post are free the same day.')}</span>
         </div>
       )}
     </section>
@@ -689,9 +771,16 @@ function Purse({ view, player, visiting, onPanel }: {
           <b>—</b>
         </span>
       ) : (
-        <span className="purse-cell gold">
+        <span className={`purse-cell gold${view.treasury + view.frozen >= view.goldCap ? ' full' : ''}`}>
           <em>{t('GOLD')}</em>
-          <b>{Math.floor(view.treasury).toLocaleString()}</b>
+          {/* What it holds of what it may hold: the answer to "how much can I
+              keep?" belongs next to the Gold, not in a guide.
+              The big figure is what can be spent. Gold standing in an order is
+              still the town's and still counts against the ceiling, so it is
+              said here rather than left to look like Gold that went missing —
+              which is exactly what players took it for. */}
+          <b>{Math.floor(view.treasury).toLocaleString()}<i> / {view.goldCap.toLocaleString()}</i></b>
+          {view.frozen > 0 && <u>{t('+{n} listed', { n: view.frozen.toLocaleString() })}</u>}
         </span>
       )}
       <span className="purse-cell emerge">
@@ -740,8 +829,11 @@ const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; shor
   { key: 'build', icon: '⚒', label: 'BUILD', short: 'BUILD', blurb: 'Places and resources' },
   { key: 'people', icon: '☺', label: 'PEOPLE', short: 'PEOPLE', blurb: 'Trades, posts and training' },
   { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
+  { key: 'land', icon: '⌂', label: 'LAND', short: 'LAND', blurb: 'Plots for sale' },
+  { key: 'exchange', icon: '⇄', label: 'TRADE', short: 'TRADE', blurb: 'Buy and sell with other players' },
   { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
   { key: 'arena', icon: '⚔', label: 'ARENA', short: 'ARENA', blurb: 'Duels and betting' },
+  { key: 'casino', icon: '⚄', label: 'CASINO', short: 'CASINO', blurb: 'Coin, cups, Gold or $EMERGE' },
   { key: 'gacha', icon: '⛏', label: 'PROSPECT', short: 'DIG', blurb: 'Send a party out' },
   { key: 'connect', icon: '◈', label: 'ON-CHAIN', short: 'CHAIN', blurb: 'Plot, wallet and vault' },
 ];
@@ -834,6 +926,15 @@ export function Hud(props: HudProps) {
           >
             {props.sound ? '♪' : '♪̸'}
           </button>
+          <button className={props.grid ? 'sel' : ''} onClick={props.onGrid} title={t('Show a tile grid over the ground, for planning (G)')} aria-label={t('Grid')}>
+            ⌗
+          </button>
+          <button className={props.effects ? 'sel' : ''} onClick={props.onEffects} title={t('The look: bloom, warmth and vignette over the frame (V)')} aria-label={t('Look')}>
+            ✧
+          </button>
+          <button onClick={props.onPhoto} title={t('Photo mode: hide the interface for a clean screenshot (P)')} aria-label={t('Photo mode')}>
+            ◉
+          </button>
         </div>
         <DangerBanner view={view} onFight={props.onFight} readOnly={!!props.visiting} />
         <Purse view={view} player={props.player} visiting={!!props.visiting} onPanel={props.onPanel} />
@@ -864,7 +965,9 @@ export function Hud(props: HudProps) {
             {props.visiting.ownerName?.trim() ? props.visiting.ownerName : shortAddress(props.visiting.owner)}
             {' · '}{props.visiting.hand
               ? t('hired hand · about {n} {ticker}/day', { n: Math.round(view.stewardship.dailyYield * HAND_SHARE).toLocaleString(), ticker: TOKEN.ticker })
-              : sinceWhen(props.visiting.at)}
+              : props.visiting.unpublished
+                ? t('never published · grown from its seed, running on its own')
+                : sinceWhen(props.visiting.at)}
           </em>
           <button className="ghost" onClick={props.onEndVisit}>{t('Leave')}</button>
         </div>
@@ -915,10 +1018,12 @@ export function Hud(props: HudProps) {
               onToggleFollow={props.onToggleFollow}
               onRenameCitizen={props.onRenameCitizen}
               onDemolish={props.onDemolish}
+              onDismiss={props.onDismiss}
               onRebuild={props.onRebuild}
               treasury={view.treasury}
               moving={props.movingBuilding}
               onUpgrade={props.onUpgradeBuilding}
+              onUpgradeAll={props.onUpgradeAll}
               onMove={props.onMoveBuilding}
             />
           )
@@ -989,7 +1094,13 @@ export function Hud(props: HudProps) {
             {placing === 'Clear trees'
               ? <>{t('Clearing trees')} — {compact ? t('tap the wood to fell everything within reach.') : t('click the wood to fell everything within reach, Esc to cancel.')}</>
               : placing === 'Bridge'
-                ? <>{t('Bridge')} — {compact ? t('tap land across the water to stake out a crossing.') : t('click land across the water to stake out a crossing, Esc to cancel.')}</>
+                ? <>{t('Bridge')} — {compact ? t('tap the water you want bridged, or the land across it.') : t('click the water you want bridged, or the land across it; Esc to cancel.')}</>
+              : placing === 'Unbridge'
+                ? <>{t('Take a crossing down')} — {compact ? t('tap the deck you want taken down.') : t('click the deck you want taken down; Esc to cancel.')}</>
+              : placing === 'Dig'
+                ? <>{t('Dig a pond')} — {compact ? t('tap open ground where the ring is green.') : t('click open ground where the ring is green; Esc to cancel.')}</>
+              : placing === 'Fill'
+                ? <>{t('Fill a pond in')} — {compact ? t('tap a pond you dug.') : t('click a pond you dug; Esc to cancel.')}</>
                 : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
           </span>
           <button onClick={props.onCancelBuild}>{t('Cancel')}</button>

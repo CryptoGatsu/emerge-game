@@ -26,7 +26,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { defaultWorldName } from '@/lib/simulation';
 import {
   CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, chartRoom, claimOf, drawPlotPreview,
-  drawRegionMap, inspectPlot, islandsFor, marketPlots, withoutClaim,
+  drawRegionMap, inspectPlot, islandsFor, marketPlots, withoutClaim, chartOfSeed,
   type ClaimedWorld, type PlayerRecord, type Plot,
 } from '@/lib/world/plots';
 import { worldCapacity } from '@/lib/world/charts';
@@ -35,15 +35,19 @@ import {
   type PlotOwnership,
 } from '@/lib/chain/emerge';
 import {
-  allOnChainPlots, claimOnChain, onChainClaimsLive, plotExplorerUrl, registryPrice,
+  allOnChainPlots, onChainClaimsLive, plotExplorerUrl, openSeaUrl, marketLive, marketApproved, approveMarket, approveMarketSpend, marketAllowance, buyOnChain, mined, marketListing,
 } from '@/lib/chain/registry';
 import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, HAND_DAILY_CEILING, HAND_MIN_EMERGE, HAND_SHARE } from '@/lib/chain/vault';
 import { pay, settleBurn, spend } from '@/lib/chain/spend';
 import {
-  buyPlot, fetchClaims, placeOffer, priceFor, reservePlot, surveyPlot, takePlot, withdrawOffer,
+  buyPlot, fetchClaims, followPlot, placeOffer, priceFor, quotePlot, redeemPayment, reservePlot, surveyPlot, takePlot, withdrawOffer,
   type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader,
 } from '@/lib/net/registry';
+import { keepReceipt, dropReceipt, resumeReceipts, redeemFallback, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { WalletPicker, useWallet } from './WalletPicker';
+import { LandMarket } from './LandMarket';
+import SoftStake from './SoftStake';
+import { GldWinNotices } from './Notices';
 import { music } from '@/lib/audio/music';
 import { eraName } from '@/lib/world/eras';
 import { BrandLine } from './Brand';
@@ -78,18 +82,34 @@ function useChainOwner(seed: number | null) {
  * registry to ask, which is the same number the contract is configured to
  * produce.
  */
-function useChainPrice(seed: number | null, fallback: number) {
+/**
+ * What the selected plot costs, and what the wallet has on account toward it.
+ *
+ * The contract's number where there is a contract; the registry's otherwise,
+ * asked each time the selection or the wallet changes. This bundle's own
+ * number is only the figure shown until the answer comes, because a bundle
+ * built before a repricing showed — and charged — the old price.
+ */
+function useChainPrice(seed: number | null, fallback: number, owner: string | null, tick: number) {
   const [price, setPrice] = useState(fallback);
+  const [credit, setCredit] = useState(0);
+  const [survey, setSurvey] = useState(PROSPECT_COST_EMERGE);
   useEffect(() => {
     setPrice(fallback);
-    if (seed === null || !onChainClaimsLive()) return;
     let live = true;
-    registryPrice(seed).then((quoted) => {
-      if (live && quoted !== null && quoted > 0) setPrice(quoted);
-    });
+    if (owner) {
+      quotePlot({ owner, seed }).then((q) => {
+        if (!live || !q.ok) return;
+        if (q.quote.price !== null && q.quote.price > 0) setPrice(q.quote.price);
+        setCredit(q.quote.credit);
+        setSurvey(q.quote.survey);
+      });
+    } else {
+      setCredit(0);
+    }
     return () => { live = false; };
-  }, [seed, fallback]);
-  return price;
+  }, [seed, fallback, owner, tick]);
+  return { price, credit, survey };
 }
 
 /**
@@ -123,9 +143,31 @@ const CLAIMS_POLL = 12_000;
  * and a poll survives a serverless deployment where a socket does not.
  */
 function useAllClaims() {
-  const [claims, setClaims] = useState<Claim[]>([]);
-  const [finds, setFinds] = useState<Find[]>([]);
+  const [claims, setClaimsRaw] = useState<Claim[]>([]);
+  const [finds, setFindsRaw] = useState<Find[]>([]);
   const [shared, setShared] = useState(true);
+  // A poll that returns the same land re-rendered the whole map, markers,
+  // labels and layout pass included, every twelve seconds. Only a change gets
+  // through.
+  const lastClaims = useRef(''), lastFinds = useRef('');
+  const setClaims = useCallback((next: Claim[] | ((prev: Claim[]) => Claim[])) => {
+    setClaimsRaw((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      const key = JSON.stringify(value);
+      if (key === lastClaims.current) return prev;
+      lastClaims.current = key;
+      return value;
+    });
+  }, []);
+  const setFinds = useCallback((next: Find[] | ((prev: Find[]) => Find[])) => {
+    setFindsRaw((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      const key = JSON.stringify(value);
+      if (key === lastFinds.current) return prev;
+      lastFinds.current = key;
+      return value;
+    });
+  }, []);
   useEffect(() => {
     let live = true;
     const tick = async () => {
@@ -151,14 +193,20 @@ function useAllClaims() {
       const bySeed = new Map(result.claims.map((c) => [c.seed, c]));
       for (const plot of chain) {
         const cached = bySeed.get(plot.seed);
+        // The row's own record of the plot — its era, its expansion, its
+        // cover — stays; only who holds it is the chain's to say. A holder
+        // the row does not know is shown by address until the sync names them.
+        const moved = !cached || cached.owner.toLowerCase() !== plot.owner;
         bySeed.set(plot.seed, {
+          ...(cached ?? {}),
           seed: plot.seed,
           region: cached?.region ?? t('Plot {seed}', { seed: plot.seed }),
-          worldName: plot.worldName || cached?.worldName || 'Emerge',
+          worldName: cached?.worldName || 'Emerge',
           owner: plot.owner,
-          ownerName: cached?.ownerName ?? '',
+          ownerName: moved ? shortAddress(plot.owner) : cached.ownerName,
           price: cached?.price ?? 0,
           at: cached?.at ?? 0,
+          ...(moved ? { forSale: undefined, offers: undefined, hiring: undefined, hand: undefined } : {}),
         });
       }
       setClaims([...bySeed.values()]);
@@ -199,9 +247,11 @@ const MAX_MARKER_NUDGE = 0.09;
 /** Below this map width, in pixels, there is no room to lay names out at all. */
 const LABELS_NEED_WIDTH = 560;
 
-function RegionMap({ plots, selected, chart, owned, taken, banners, claimedEverywhere, onSelect }: {
+function RegionMap({ plots, selected, chart, owned, taken, banners, names, claimedEverywhere, onSelect }: {
   /** Which emblem each plot flies, by seed, mine and theirs alike. */
   banners: Map<number, string>;
+  /** What each claimed world is called, by seed, from the claim rows — the name its owner gave it. */
+  names: Map<number, string>;
   plots: Plot[];
   selected: Plot | null;
   chart: number;
@@ -488,7 +538,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, claimedEvery
             <span className="pin-label">
               <b>
                 {(() => { const flown = banners.get(plot.seed); return flown && isEmblem(flown) ? <i className="banner-glyph" title={EMBLEM_NAME[flown]}>{EMBLEM_GLYPH[flown]}</i> : null; })()}
-                {plot.region}
+                {names.get(plot.seed) ?? plot.region}
                 {mine && <i className="yours">{t('yours')}</i>}
                 {theirs && !theirs.forSale && !(theirs.hiring && !theirs.hand) && <i className="settled-tag">{t('settled')}</i>}
                 {theirs && !!theirs.forSale && <i className="sale-tag">{t('for sale')}</i>}
@@ -554,7 +604,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, claimedEvery
   );
 }
 
-export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect }: {
+export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome, onDisconnect, focusSeed = null, onFocused }: {
   player: PlayerRecord;
   onPlayer: (record: PlayerRecord) => void;
   onEnter: (world: ClaimedWorld) => void;
@@ -562,6 +612,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   onVisit: (seed: number) => Promise<string | null>;
   /** Back to the front page. */
   onHome: () => void;
+  /** A plot to open the map on, from the land list inside a world, and the call that says it has been shown. */
+  focusSeed?: number | null;
+  onFocused?: () => void;
   /** Let go of the wallet, staying on the map as a spectator. */
   onDisconnect: () => void;
 }) {
@@ -571,6 +624,10 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   const { wallet } = useWallet();
   const [claiming, setClaiming] = useState(false);
   const [surveying, setSurveying] = useState(false);
+  // What the survey is doing, under its own button: the aside's notice sits
+  // in a sheet a phone keeps closed, and a player watching the button saw
+  // "Surveying…" and nothing else.
+  const [surveyNote, setSurveyNote] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // On a phone the map and the claim panel cannot both be on screen, so the
   // panel becomes a sheet that the map opens.
@@ -585,12 +642,66 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     [finds],
   );
   const plots = useMemo(() => marketPlots(player, chart, discovered), [player, chart, discovered]);
+  /** Put a plot on screen wherever it is: its chart, selected, the sheet open on a phone. */
+  const showPlot = useCallback((seed: number) => {
+    const where = chartOfSeed(seed, player, discovered);
+    if (where !== null) setChart(where);
+    setSelectedSeed(seed);
+    setSheetOpen(true);
+  }, [player, discovered]);
+  // Shown once, then handed back: a focus that stayed set snapped the map
+  // back to the plot on every player update.
+  const showPlotRef = useRef(showPlot); showPlotRef.current = showPlot;
+  const onFocusedRef = useRef(onFocused); onFocusedRef.current = onFocused;
+  useEffect(() => { if (focusSeed !== null) { showPlotRef.current(focusSeed); onFocusedRef.current?.(); } }, [focusSeed]);
   const room = useMemo(() => chartRoom(player, chart, discovered), [player, chart, discovered]);
   const selected: Plot | null = plots.find((p) => p.seed === selectedSeed) ?? plots[0] ?? null;
   const registry = useChainOwner(selected?.seed ?? null);
   // What the claim will actually cost: the contract's number where there is a
   // contract, and the game's own otherwise.
-  const price = useChainPrice(selected?.seed ?? null, selected?.price ?? 0);
+  // Bumped after anything is paid or redeemed, so the quote is asked again.
+  const [quoteTick, setQuoteTick] = useState(0);
+  const requote = useCallback(() => setQuoteTick((n) => n + 1), []);
+  const { price, credit, survey: surveyCost } = useChainPrice(selected?.seed ?? null, selected?.price ?? 0, wallet.address ?? null, quoteTick);
+  // What the wallet actually has to pay, with the account drawn down first.
+  const owed = Math.max(0, price - credit);
+  const surveyOwed = Math.max(0, surveyCost - credit);
+  const [receipt, setReceipt] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+  /*
+   * Receipts this browser kept from purchases the registry never confirmed —
+   * a survey, a claim, a resale fee — are redeemed on account when the map
+   * opens, without anybody typing a hash into the box below.
+   */
+  useEffect(() => {
+    const owner = wallet.address;
+    if (!owner) return;
+    let live = true;
+    void resumeReceipts(owner, {
+      /*
+       * A resale fee whose purchase never finished is handed back to the
+       * purchase, with the seller's transfer, so the land arrives rather than
+       * the fee merely coming back; a fee paid for a purchase the seller's
+       * transfer never followed is redeemed on account.
+       */
+      'resale-fee': async (r) => {
+        const transferTx = typeof r.payload?.transferTx === 'string' ? r.payload.transferTx : '';
+        if (!transferTx) return redeemFallback(owner)(r);
+        const moved = await buyPlot({ seed: r.seed, owner, ownerName: String(r.payload?.ownerName ?? ''), transferTx, feeTx: r.txHash });
+        if (moved.ok) {
+          setClaims((held) => (held.some((c) => c.seed === r.seed) ? held.map((c) => (c.seed === r.seed ? moved.claim : c)) : [...held, moved.claim]));
+          return { done: true, note: t('The land you paid for earlier is yours: {name}.', { name: moved.claim.worldName }) };
+        }
+        if (moved.settling) return { done: false };
+        return { done: SETTLED_ANSWER.test(moved.reason), note: SETTLED_ANSWER.test(moved.reason) ? moved.reason : undefined };
+      },
+    }, redeemFallback(owner), ['survey', 'claim', 'resale-fee']).then((said) => {
+      if (!live || !said.length) return;
+      setNotice(said.map((x) => x.note).join(' '));
+      requote();
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [wallet.address, requote]);
   const explorer = selected ? plotExplorerUrl(selected.seed) : null;
   /*
    * Land this wallet holds according to the registry, whatever this browser
@@ -703,26 +814,37 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       setNotice(t('Connect a wallet first. Land you survey is recorded against your address.'));
       return;
     }
-    if (player.ledger.balance < PROSPECT_COST_EMERGE) {
-      setNotice(t('Prospecting costs {cost} {ticker}.', { cost: PROSPECT_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker }));
-      return;
-    }
     setSurveying(true);
     setNotice(null);
+    setSurveyNote(t('Asking the registry what a survey costs today. If your wallet asks you to sign in, sign it.'));
 
     /*
-     * Pay first, then ask for the land.
+     * Ask the price, pay it, then ask for the land.
      *
-     * The server will not survey anything without a burn it has read off the
-     * chain, so the order has to be this way round — and it means a dismissed
-     * wallet prompt costs the player nothing and gets them nothing, rather than
-     * getting them land they did not pay for.
+     * The price comes from the registry, not this bundle: a page open across
+     * a repricing paid the old number and had it refused. What is on account
+     * is drawn first, so a refused payment from before pays for this one.
+     * The server will not survey anything without a payment it has read off
+     * the chain, so paying comes before asking — and a dismissed wallet prompt
+     * costs the player nothing and gets them nothing.
      */
-    const paid = await spend(player.ledger, PROSPECT_COST_EMERGE, wallet.address);
-    if (!paid.ok) { setSurveying(false); setNotice(paid.refused); return; }
+    const quoted = await quotePlot({ owner: wallet.address });
+    if (!quoted.ok) { setSurveying(false); setSurveyNote(tx(quoted.reason)); return; }
+    const toPay = Math.max(0, quoted.quote.survey - quoted.quote.credit);
+    if (player.ledger.balance < toPay) {
+      setSurveying(false);
+      setSurveyNote(t('Prospecting costs {cost} {ticker}.', { cost: toPay.toLocaleString(), ticker: TOKEN.ticker }));
+      return;
+    }
+    setSurveyNote(toPay > 0
+      ? t('Paying {cost} {ticker}. Confirm it in your wallet.', { cost: toPay.toLocaleString(), ticker: TOKEN.ticker })
+      : t('Paid from your account: {credit} {ticker} on account covers the {cost}.', { credit: quoted.quote.credit.toLocaleString(), cost: quoted.quote.survey.toLocaleString(), ticker: TOKEN.ticker }));
+    const paid = await spend(player.ledger, toPay, wallet.address);
+    if (!paid.ok) { setSurveying(false); setSurveyNote(paid.refused); return; }
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'survey', txHash: paid.txHash, address: wallet.address, seed: 0, payload: { chart } });
 
-    setNotice(t('Payment sent. Waiting for the chain to settle it…'));
+    setSurveyNote(toPay > 0 ? t('Payment sent. Waiting for the chain to settle it…') : t('Asking the registry for land…'));
     const result = await whileSettling(() => surveyPlot({
       chart,
       capacity: chartCapacity(chart),
@@ -731,14 +853,20 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       burnTx: paid.txHash ?? undefined,
     }));
     setSurveying(false);
+    requote();
     if (!result.ok) {
-      // The tokens are gone and the land is not. Say so plainly rather than
-      // leaving somebody to work it out from a balance.
-      setNotice(paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the land never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : `${result.reason} ${t('Sail to another chart to find new land.')}`);
+      // The registry says what became of the payment: banked against the
+      // wallet when it fell short, given back on account when the chart was
+      // out of land, or — a reply lost, a chain still settling — kept here
+      // and redeemed the next time the map opens.
+      const settled = SETTLED_ANSWER.test(result.reason);
+      if (paid.txHash && settled) dropReceipt(paid.txHash);
+      setSurveyNote(paid.txHash && !settled
+        ? `${tx(result.reason)} ${t('Your payment {tx}… is kept in this browser and is redeemed on account the next time you open the map. Nothing more will be charged for it.', { tx: paid.txHash.slice(0, 10) })}`
+        : paid.txHash ? tx(result.reason) : `${tx(result.reason)} ${t('Sail to another chart to find new land.')}`);
       return;
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
 
     const { find } = result;
     const found = inspectPlot(find.seed, find.slot, find.chart);
@@ -750,8 +878,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     });
     setSelectedSeed(find.seed);
     setSheetOpen(true);
-    setNotice(t('Surveyed {region} on {island} — {biome}. Everyone can see it now.', { region: found.region, island: found.island, biome: tn(found.biomeLabel).toLowerCase() }));
-  }, [player, chart, onPlayer, wallet.address, setFinds]);
+    setSurveyNote(t('Surveyed {region} on {island} — {biome}. Everyone can see it now.', { region: found.region, island: found.island, biome: tn(found.biomeLabel).toLowerCase() }));
+  }, [player, chart, onPlayer, wallet.address, setFinds, requote]);
 
   const sail = useCallback((delta: number) => {
     setChart((c) => (c + delta + CHART_COUNT) % CHART_COUNT);
@@ -792,47 +920,14 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       setNotice(t('Connect a wallet first. A plot belongs to an address, and so does everything you earn on it.'));
       return;
     }
-    if (player.ledger.balance < price) {
-      setNotice(t('{region} costs {price} {ticker}.', { region: selected.region, price: price.toLocaleString(), ticker: TOKEN.ticker }));
+    if (player.ledger.balance < owed) {
+      setNotice(t('{region} costs {price} {ticker}.', { region: selected.region, price: owed.toLocaleString(), ticker: TOKEN.ticker }));
       return;
     }
 
     setClaiming(true);
     setNotice(null);
     const worldName = name.trim() || defaultWorldName(selected.seed);
-
-    if (onChainClaimsLive()) {
-      setNotice(t('Approve the spend, then confirm the claim. Two signatures, and the second one is the title.'));
-      const minted = await claimOnChain(wallet.address, selected.seed, worldName);
-      setClaiming(false);
-      if (!minted.ok) { setNotice(minted.message); return; }
-
-      const charged = minted.price ?? price;
-      onPlayer({ ...player, ledger: await settleBurn(player.ledger, charged, wallet.address) });
-
-      // Cache it in the relay so the map, chat and visitor list have a name and
-      // a date to show. The chain already holds the title, so a relay that
-      // refuses this changes nothing about who owns the land.
-      await takePlot({
-        seed: selected.seed,
-        region: selected.region,
-        worldName,
-        owner: wallet.address,
-        ownerName: player.name,
-        price: charged,
-      });
-
-      onEnter({
-        seed: selected.seed,
-        name: worldName,
-        region: selected.region,
-        price: charged,
-        claimedAt: Date.now(),
-        owner: wallet.address,
-        txHash: minted.txHash,
-      });
-      return;
-    }
 
     /*
      * Hold the plot, pay for it, then claim it with the receipt.
@@ -853,14 +948,24 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       setNotice(reserved.reason);
       return;
     }
+    // The registry's price and the wallet's account, as of this moment: the
+    // payment is checked against exactly these.
+    const due = reserved.price ?? price;
+    const toPay = Math.max(0, due - (reserved.credit ?? credit));
+    if (player.ledger.balance < toPay) {
+      setClaiming(false);
+      setNotice(t('{region} costs {price} {ticker}.', { region: selected.region, price: toPay.toLocaleString(), ticker: TOKEN.ticker }));
+      return;
+    }
 
-    const paid = await spend(player.ledger, price, wallet.address);
+    const paid = await spend(player.ledger, toPay, wallet.address);
     if (!paid.ok) {
       setClaiming(false);
       setNotice(paid.refused ?? t('Not enough {ticker} to claim {region}.', { ticker: TOKEN.ticker, region: selected.region }));
       return;
     }
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'claim', txHash: paid.txHash, address: wallet.address, seed: selected.seed });
 
     setNotice(t('Payment sent. Waiting for the chain to settle it…'));
     const registered = await whileSettling(() => takePlot({
@@ -869,14 +974,17 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       worldName,
       owner: wallet.address!,
       ownerName: player.name,
-      price,
+      price: due,
       burnTx: paid.txHash ?? undefined,
     }));
     setClaiming(false);
+    requote();
 
     if (!registered.ok) {
-      setNotice(paid.txHash
-        ? `${registered.reason} ${t('Your payment {tx}… went through — keep it, and tell us if the land never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+      const settled = SETTLED_ANSWER.test(registered.reason);
+      if (paid.txHash && settled) dropReceipt(paid.txHash);
+      setNotice(paid.txHash && !settled
+        ? `${registered.reason} ${t('Your payment {tx}… is kept in this browser and is redeemed on account the next time you open the map. Nothing more will be charged for it.', { tx: paid.txHash.slice(0, 10) })}`
         : registered.reason);
       // Show the land as theirs straight away rather than making the player
       // wait for the next poll to understand why they were refused.
@@ -886,16 +994,35 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       return;
     }
 
+    if (paid.txHash) dropReceipt(paid.txHash);
     onEnter({
       seed: selected.seed,
       name: worldName,
       region: selected.region,
-      price,
+      price: due,
       claimedAt: Date.now(),
       owner: wallet.address,
       txHash: paid.txHash,
     });
-  }, [name, selected, price, wallet.address, onEnter, onPlayer, player, takenByOthers, mineBySeed, setClaims]);
+  }, [name, selected, price, owed, credit, wallet.address, onEnter, onPlayer, player, takenByOthers, mineBySeed, setClaims, requote]);
+
+  /** A receipt for a payment that bought nothing goes on account. */
+  const redeem = useCallback(async () => {
+    if (!wallet.address) return;
+    const hash = receipt.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+      setNotice(t('Paste the full transaction hash: 0x followed by 64 characters.'));
+      return;
+    }
+    setRedeeming(true);
+    setNotice(t('Checking the payment on chain…'));
+    const result = await whileSettling(() => redeemPayment({ owner: wallet.address!, burnTx: hash }));
+    setRedeeming(false);
+    requote();
+    if (!result.ok) { setNotice(result.reason); return; }
+    setReceipt('');
+    setNotice(t('Banked {n} {ticker}. You have {credit} {ticker} on account; it pays for your next survey or claim.', { n: result.banked.toLocaleString(), credit: result.credit.toLocaleString(), ticker: TOKEN.ticker }));
+  }, [wallet.address, receipt, requote]);
 
   /**
    * Buy a plot its owner has put up for sale.
@@ -916,6 +1043,38 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
       return;
     }
     setBuying(true);
+    /*
+     * Where plots are tokens the sale settles on the market contract in one
+     * transaction: the price goes to the seller and the royalty to the
+     * holders' pool, and the plot moves to the buyer's wallet. Nothing is
+     * paid before the chain has agreed to all of it, so nothing can be
+     * stranded. The registry then follows the chain.
+     */
+    if (marketLive()) {
+      const me = wallet.address;
+      const onChain = await marketListing(listing.seed);
+      if (!onChain || !onChain.live) { setBuying(false); setNotice(t('That plot is not listed on the market right now. The seller may have taken it down.')); return; }
+      const price = onChain.price;
+      if (player.ledger.balance < price) { setBuying(false); setNotice(t('{region} costs {price} {ticker}.', { region: listing.region, price: price.toLocaleString(), ticker: TOKEN.ticker })); return; }
+      if ((await marketAllowance(me)) < price) {
+        setNotice(t('First, let the market take the price: one signature.'));
+        const allowed = await approveMarketSpend(me, price);
+        if (!allowed.ok) { setBuying(false); setNotice(allowed.message); return; }
+        if ((await mined(allowed.txHash)) === 'reverted') { setBuying(false); setNotice(t('The chain refused the approval.')); return; }
+      }
+      setNotice(t('Now the purchase: {price} {ticker} to {who}, and the plot to you.', { price: price.toLocaleString(), ticker: TOKEN.ticker, who: listing.ownerName || shortAddress(listing.owner) }));
+      const bought = await buyOnChain(me, listing.seed, price);
+      if (!bought.ok) { setBuying(false); setNotice(bought.message); return; }
+      const state = await mined(bought.txHash);
+      if (state === 'reverted') { setBuying(false); setNotice(t('The chain refused the purchase: the plot may have sold to somebody else first.')); return; }
+      // The chain has it; the registry follows.
+      const followed = await followPlot(listing.seed, me);
+      setBuying(false);
+      if (!followed.ok) { setNotice(t('Bought on chain ({tx}…). The registry will pick it up within a few minutes.', { tx: bought.txHash.slice(0, 10) })); return; }
+      setClaims((held) => held.map((c) => (c.seed === listing.seed ? followed.claim : c)));
+      onEnter({ seed: listing.seed, name: followed.claim.worldName, region: followed.claim.region, price, claimedAt: Date.now(), owner: me, txHash: bought.txHash });
+      return;
+    }
     setNotice(configured
       ? t('Paying {who} directly. Sign the transfer to their wallet.', { who: listing.ownerName || shortAddress(listing.owner) })
       : t('Paying {who}…', { who: listing.ownerName || shortAddress(listing.owner) }));
@@ -923,8 +1082,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     const fee = resaleFee(askPrice);
     const feePaid = await spend(player.ledger, fee, wallet.address);
     if (!feePaid.ok) { setBuying(false); setNotice(feePaid.refused); return; }
+    if (feePaid.txHash) keepReceipt({ kind: 'resale-fee', txHash: feePaid.txHash, address: wallet.address, seed: listing.seed });
     const paid = await pay(feePaid.ledger, askPrice, wallet.address, listing.owner);
     if (!paid.ok) { setBuying(false); onPlayer({ ...player, ledger: feePaid.ledger }); setNotice(paid.refused); return; }
+    // The fee's receipt now carries the seller's transfer, so handing it in again is the purchase again, not a refund.
+    if (feePaid.txHash) keepReceipt({ kind: 'resale-fee', txHash: feePaid.txHash, address: wallet.address, seed: listing.seed, payload: { transferTx: paid.txHash ?? '', ownerName: player.name } });
     onPlayer({ ...player, ledger: paid.ledger });
     setNotice(t('Payment sent. Waiting for the chain to settle it…'));
     const moved = await whileSettling(() => buyPlot({
@@ -936,11 +1098,13 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     }));
     setBuying(false);
     if (!moved.ok) {
-      setNotice(paid.txHash
-        ? `${moved.reason} ${t('Your payment {tx}… went through — keep it, and tell us if the land never arrives.', { tx: paid.txHash.slice(0, 10) })}`
+      if (feePaid.txHash && SETTLED_ANSWER.test(moved.reason)) dropReceipt(feePaid.txHash);
+      setNotice(paid.txHash && !SETTLED_ANSWER.test(moved.reason)
+        ? `${moved.reason} ${t('Your payment {tx}… is kept in this browser and the purchase is finished the next time the map opens. Nothing more will be charged for it.', { tx: paid.txHash.slice(0, 10) })}`
         : moved.reason);
       return;
     }
+    if (feePaid.txHash) dropReceipt(feePaid.txHash);
     setClaims((held) => held.map((c) => (c.seed === listing.seed ? moved.claim : c)));
     onEnter({
       seed: listing.seed,
@@ -1032,6 +1196,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
 
   return (
     <main className="world-map">
+      <GldWinNotices address={wallet.address ?? null} />
       <div className="land-inner">
         <header className="land-head">
           <BrandLine />
@@ -1059,7 +1224,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
             <button
               className="ghost prospect"
               onClick={prospect}
-              disabled={surveying || !wallet.address || player.ledger.balance < PROSPECT_COST_EMERGE || room.free === 0}
+              disabled={surveying || !wallet.address || player.ledger.balance < surveyOwed || room.free === 0}
             >
               {surveying
                 ? t('Surveying…')
@@ -1067,8 +1232,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                   ? t('This chart is fully surveyed')
                   : !wallet.address
                     ? t('Connect a wallet to survey')
-                    : t('Prospect new land · {cost} {ticker}', { cost: PROSPECT_COST_EMERGE.toLocaleString(), ticker: TOKEN.ticker })}
+                    : surveyOwed === 0 && credit > 0
+                      ? t('Prospect new land · paid from your account')
+                      : t('Prospect new land · {cost} {ticker}', { cost: surveyOwed.toLocaleString(), ticker: TOKEN.ticker })}
             </button>
+            {surveyNote && <p className="warn survey-note">{surveyNote}</p>}
           </div>
         </header>
 
@@ -1092,12 +1260,16 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
           <span><b>{claimedTotal.toLocaleString()}</b> {t('of {total} plots claimed', { total: worldTotal.toLocaleString() })}</span>
           <span><b>{Math.max(0, worldTotal - claimedTotal).toLocaleString()}</b> {t('left to claim')}</span>
         </div>
+        {/* The soft stake needs a wallet, not land: a holder without a plot
+            can register it here, on the first screen they see. */}
+        <SoftStake address={wallet.address} balance={player.ledger.balance} hasLand={ownedSeeds.size > 0} />
         <Leaderboard me={wallet.address} onVisit={onVisit} onPick={(seed) => setSelectedSeed(seed)} />
+        <LandMarket me={wallet.address} onVisit={onVisit} onShow={showPlot} />
 
         <div className="land-body">
           <RegionMap
             plots={plots} selected={selected} chart={chart} owned={ownedSeeds}
-            taken={takenByOthers} banners={new Map(allClaims.filter((c) => c.banner).map((c) => [c.seed, c.banner as string]))} claimedEverywhere={allClaims.length} onSelect={choose}
+            taken={takenByOthers} banners={new Map(allClaims.filter((c) => c.banner).map((c) => [c.seed, c.banner as string]))} names={new Map(allClaims.filter((c) => c.worldName).map((c) => [c.seed, c.worldName]))} claimedEverywhere={allClaims.length} onSelect={choose}
           />
 
           {!selected ? (
@@ -1126,7 +1298,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
             {/* The registry decides, not this browser's memory. A stale local
                 claim on land somebody else now holds must read as theirs. */}
             <span className="eyebrow">{heldByOther ? (buyable !== null ? t('FOR SALE') : t('SETTLED')) : mine ? t('YOUR WORLD') : t('CLAIM')}</span>
-            <h2>{heldByOther ? heldByOther.worldName : mine ? mine.name : selected.region}</h2>
+            <h2>{heldByOther ? heldByOther.worldName : mine ? (allClaims.find((c) => c.seed === selected.seed)?.worldName || mine.name) : selected.region}</h2>
             <div className="plot-traits">
               <span className={`biome-tag ${selected.biome}`}>{tn(selected.biomeLabel)}</span>
               <span>{selected.island}</span>
@@ -1153,7 +1325,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                 </button>
                 {!!heldByOther.forSale && (
                   <p className="muted small">
-                    {t('Up for sale at {price} {ticker}. The price goes to {who}’s wallet, not to the burn address, and the settlement comes with the land.', { price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })}
+                    {onChainClaimsLive()
+                      ? t('Up for sale at {price} {ticker} on the land market. The price goes to {who}’s wallet less the holders’ share, the plot moves to yours in the same transaction, and the settlement comes with the land.', { price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })
+                      : t('Up for sale at {price} {ticker}. The price goes to {who}’s wallet, not to the burn address, and the settlement comes with the land.', { price: heldByOther.forSale.toLocaleString(), ticker: TOKEN.ticker, who: heldByOther.ownerName || shortAddress(heldByOther.owner) })}
                   </p>
                 )}
                 {/* Work: the plot is hiring, or you already work here. Only for
@@ -1188,7 +1362,19 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                   </div>
                 )}
                 {/* Offers: yours, and the fact of the others'. Any plot can be
-                    offered for, listed or not; the owner decides. */}
+                    offered for, listed or not; the owner decides. Where plots
+                    are tokens an offer is made on OpenSea, and the box gives
+                    way to the link. */}
+                {onChainClaimsLive() ? (
+                  <div className="offer-box">
+                    <span className="eyebrow">{t('OFFERS')}</span>
+                    <p className="muted small">
+                      {openSeaUrl(heldByOther.seed)
+                        ? <>{t('The plot is a token: make an offer on')} <a href={openSeaUrl(heldByOther.seed)!} target="_blank" rel="noreferrer noopener">OpenSea</a>{t(', or buy it from the land market when its holder lists it.')}</>
+                        : t('The plot is a token: buy it from the land market when its holder lists it.')}
+                    </p>
+                  </div>
+                ) : (
                 <div className="offer-box">
                   <span className="eyebrow">{t('OFFERS')}</span>
                   {otherOffers.length > 0 && (
@@ -1243,6 +1429,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                     {t('An offer holds nothing back: if the owner accepts, the plot is held for you at that price for two days and you pay their wallet directly, as for any sale.')}
                   </p>
                 </div>
+                )}
               </div>
             )}
             {registry?.onChain && registry.owner && !mine && !heldByOther && (
@@ -1253,11 +1440,18 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
             {/* The title itself, for anybody who would rather check than be
                 told. It is an ordinary ERC-721 token whose id is this plot's
                 seed, so an explorer can read it without going through us. */}
-            {onChainClaimsLive() && explorer && (
+            {onChainClaimsLive() && (mine || heldByOther) && (
               <p className="muted small">
-                <a href={explorer} target="_blank" rel="noreferrer noopener">
-                  {t('Verify this plot on {chain}', { chain: ACTIVE_CHAIN.label })}
-                </a>{' '}— {t('token #{seed} of the Emerge Land registry.', { seed: selected.seed })}
+                {t('Token #{seed} of Emerge Land.', { seed: selected.seed })}{' '}
+                {openSeaUrl(selected.seed) && (
+                  <a href={openSeaUrl(selected.seed)!} target="_blank" rel="noreferrer noopener">{t('View on OpenSea')}</a>
+                )}
+                {openSeaUrl(selected.seed) && explorer && ' · '}
+                {explorer && (
+                  <a href={explorer} target="_blank" rel="noreferrer noopener">
+                    {t('Verify on {chain}', { chain: ACTIVE_CHAIN.label })}
+                  </a>
+                )}
               </p>
             )}
             {!registryShared && !mine && (
@@ -1291,6 +1485,11 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
               <b>{(mine ? mine.price : buyable !== null ? buyable : price).toLocaleString()}</b>
               <em>{TOKEN.ticker}</em>
             </div>
+            {!mine && !heldByOther && credit > 0 && (
+              <p className="muted small on-account">
+                {t('{credit} {ticker} on account from payments the registry banked; this claim takes {pay} from your wallet.', { credit: credit.toLocaleString(), pay: owed.toLocaleString(), ticker: TOKEN.ticker })}
+              </p>
+            )}
 
             <div className="claim-wallet"><WalletPicker compact /></div>
 
@@ -1300,7 +1499,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
               disabled={
                 claiming || visiting || buying
                 || (!mine && !heldByOther && !wallet.address)
-                || (!mine && !heldByOther && player.ledger.balance < price)
+                || (!mine && !heldByOther && player.ledger.balance < owed)
                 || (buyable !== null && (!wallet.address || player.ledger.balance < buyable))
               }
             >
@@ -1314,9 +1513,9 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                     ? t('Enter {world}', { world: mine.name })
                     : !wallet.address
                       ? t('Connect a wallet to claim land')
-                      : player.ledger.balance < price
+                      : player.ledger.balance < owed
                         ? t('Not enough {ticker}', { ticker: TOKEN.ticker })
-                        : t('Claim {region} · {price} {ticker}', { region: selected.region, price: price.toLocaleString(), ticker: TOKEN.ticker })}
+                        : t('Claim {region} · {price} {ticker}', { region: selected.region, price: owed.toLocaleString(), ticker: TOKEN.ticker })}
             </button>
             {!wallet.address && !mine && !heldByOther && (
               <p className="muted small">
@@ -1386,7 +1585,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                 </div>
                 <p className="muted small">
                   {onChainClaimsLive()
-                    ? t('A plot is an ordinary ERC-721 token, so it sells anywhere that handles them — wallet to wallet, or on any marketplace on {chain}. A listing here is a note to yourself until this game carries a marketplace of its own.', { chain: ACTIVE_CHAIN.label })
+                    ? t('Everybody sees these on the map, and the price is written on the land market contract: a buyer pays it in {ticker}, the plot moves to their wallet in the same transaction, and a share of every sale goes back to the people who hold land. A plot is an ordinary ERC-721 token, so it also sells on OpenSea or wallet to wallet. Take a listing down from the On-Chain panel inside the world.', { ticker: TOKEN.ticker })
                     : t('Everybody sees these on the map. A buyer pays your wallet directly in {ticker} — nothing is burned — and the plot and its settlement move to them. Take a listing down from the On-Chain panel inside the world.', { ticker: TOKEN.ticker })}
                 </p>
               </>
@@ -1394,7 +1593,7 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
 
             {onChainClaimsLive() ? (
               <p className="muted small">
-                {t('This is real ownership. The price above is read from the land contract, so it is the price the transaction enforces; claiming mints token #{seed} of the Emerge Land registry to your address and burns what it cost inside the same transaction. Nobody, this game included, can move a plot out of the wallet holding it.', { seed: selected.seed })}
+                {t('This is real ownership. Claiming destroys the {ticker} it costs, and the plot is then minted to your wallet as token #{seed} of Emerge Land: an ERC-721 you can see in any wallet, sell on OpenSea or the land market, and that nobody, this game included, can move out of the wallet holding it. The settlement goes with the token.', { ticker: TOKEN.ticker, seed: selected.seed })}
               </p>
             ) : configured ? (
               <p className="muted small">
@@ -1404,6 +1603,23 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
               <p className="muted small">
                 {t('This build talks to {chain} (chain {id}), but the {ticker} contract is not deployed there yet, so claims are recorded in the shared registry rather than on chain and you start with a local development allocation of {allocation} {ticker}. Neither is a token transfer.', { chain: ACTIVE_CHAIN.label, id: ACTIVE_CHAIN.chainId ?? '', ticker: TOKEN.ticker, allocation: LOCAL_TEST_ALLOCATION.toLocaleString() })}
               </p>
+            )}
+            {configured && wallet.address && (
+              <details className="redeem">
+                <summary>{t('Paid and got nothing? Redeem the payment')}</summary>
+                <p className="muted small">
+                  {t('Paste the transaction hash of a payment the game refused — from your wallet\'s activity — and the registry banks it against your wallet. Whatever is on account pays for your next survey or claim.')}
+                </p>
+                <div className="redeem-row">
+                  <input
+                    value={receipt}
+                    placeholder="0x…"
+                    spellCheck={false}
+                    onChange={(e) => setReceipt(e.target.value)}
+                  />
+                  <button className="ghost" onClick={redeem} disabled={redeeming || !receipt.trim()}>{redeeming ? t('Checking…') : t('Redeem')}</button>
+                </div>
+              </details>
             )}
             {notice && <p className="warn">{tx(notice)}</p>}
           </aside>

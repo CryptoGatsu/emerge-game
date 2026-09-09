@@ -33,6 +33,7 @@
  * at; a gift applied there would vanish with the visit.
  */
 
+import { noteLandSale } from './tape';
 import { MAX_GIFT_GOLD, serverKey } from '../limits';
 import { HOME_CHART_INDEX, HOME_CHART_RESERVED, chartCapacity } from '../world/charts';
 import {
@@ -311,6 +312,15 @@ export async function markBanner(seed: number, owner: string, emblem: string): P
   return row;
 }
 
+/** The owner renamed the world: the map and the leaderboard show the claim's name, so it follows. */
+export async function renameClaim(seed: number, owner: string, worldName: string): Promise<Claim | null> {
+  const existing = await claimOf(seed);
+  if (!existing || existing.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  const row: Claim = { ...existing, worldName };
+  await hset(CLAIMS, String(seed), JSON.stringify(row));
+  return row;
+}
+
 export type CoverKind = 'charter' | 'insurance' | 'builders';
 export const COVER_KEY: Record<CoverKind, 'charterUntil' | 'insuredUntil' | 'buildersUntil'> = { charter: 'charterUntil', insurance: 'insuredUntil', builders: 'buildersUntil' };
 export async function markCover(seed: number, owner: string, kind: CoverKind, days: number): Promise<{ claim: Claim; until: number } | null> {
@@ -481,6 +491,15 @@ export async function transferClaim(seed: number, buyer: string, buyerName: stri
   if (world) {
     await publishWorld({ ...world, owner: row.owner, ownerName: buyerName }).catch(() => {});
   }
+
+  // What the plot actually went for, onto the public tape. Nothing recorded a
+  // completed sale before this, so asking prices were the only figures anybody
+  // had — which say what sellers hope for and nothing about what land is worth.
+  await noteLandSale({
+    at: Date.now(), seed, region: row.region, worldName: row.worldName, price: due,
+    sellerName: existing.ownerName ?? '', buyerName: buyerName.slice(0, 32),
+    era: row.era ?? 1, level: world?.level ?? null,
+  });
 
   // The seller's record stops carrying it.
   try {
@@ -736,6 +755,8 @@ export interface PublishedWorld {
   /** The city level and stewardship score the server read off the copy when it was published. */
   level?: number;
   score?: number;
+  /** Buildings standing, read off the copy the same way. */
+  buildings?: number;
   /** The saved world, exactly as the owner's browser keeps it. */
   snapshot: unknown;
 }

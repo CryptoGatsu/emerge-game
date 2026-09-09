@@ -7,11 +7,13 @@
  * frame. Nothing here feeds back into the simulation.
  */
 
+import { formName } from './world/forms';
 import {
-  JOB_LABELS, SKILL_TITLES, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
+  SKILL_TITLES, tradeTitle, eraOf, buildingOf, plannedDay, skillDays, skillLevel, spokenLine, talkingWith,
   type Citizen, type WorkingJob, type World,
 } from './simulation';
 import { tx } from './i18n';
+import { episodeLine } from './dialogue';
 
 type Line = string;
 
@@ -153,6 +155,15 @@ function speechLine(world: World, c: Citizen, beat: number): string | null {
     return BY_MASTERY[(c.hash + beat) % BY_MASTERY.length];
   }
 
+  // Something that happened to them lately is on their mind, in their own
+  // words, and it comes out before the errand does — a person who slept in
+  // the open says so before they say where they are walking.
+  const lately = (c.recent ?? []).filter((e) => world.day - e.day <= 2);
+  if (lately.length && roll < 16) {
+    const e = lately[(c.hash + beat) % lately.length];
+    return episodeLine(e, world.day);
+  }
+
   // What they are actually doing, before anything generic. A line that names
   // where this person is walking and why is worth a dozen that could belong to
   // anybody: "Off to the bakery — flour to drop in" tells the player something
@@ -181,7 +192,7 @@ function plannedLine(world: World, c: Citizen): string | null {
   if (c.activity === 'walking' && heading) {
     const place = heading.type === 'House'
       ? (world.families.find((f) => f.homeId === heading.id)?.name ?? '') + ' house'
-      : `the ${heading.type.toLowerCase()}`;
+      : `the ${formName(heading.type, heading.era ?? 1).toLowerCase()}`;
     switch (c.phase) {
       case 'working': return `Off to ${place}. ${plan.work}`;
       case 'eating': return `Going to ${place} for something to eat.`;
@@ -247,8 +258,8 @@ function statusText(c: Citizen, world?: World): string {
       const level = skillLevel(days);
       // A master at their bench is not the same sight as an apprentice at it.
       return level >= 5
-        ? `${SKILL_TITLES[level]} ${JOB_LABELS[c.job].toLowerCase()} at work`
-        : `${JOB_LABELS[c.job]} at work`;
+        ? `${SKILL_TITLES[level]} ${tradeTitle(c.job, world ? eraOf(world) : 1).toLowerCase()} at work`
+        : `${tradeTitle(c.job, world ? eraOf(world) : 1)} at work`;
     }
     case 'walking': return 'On the way somewhere';
     case 'trading': return 'Socialising';

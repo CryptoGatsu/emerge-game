@@ -41,13 +41,15 @@
  */
 
 import { NextResponse } from 'next/server';
+import { forgetLandMarket } from '@/lib/server/landMarket';
 import {
   allClaims, allFinds, answerOffer, attendJob, claimOf, dropReservation, holdsReservation, listClaim, markEra, markExpanded, placeOffer,
   priceFor, quitJob, registryShared, releaseClaim, reservePlot, setHiring, survey, takeClaim, takeJob, transferClaim,
   withdrawOffer,
-  type Claim, type CoverKind, markCover } from '@/lib/server/registry';
-import { spendBurn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
-import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
+  type Claim, type CoverKind, markCover, renameClaim } from '@/lib/server/registry';
+import { bankCredit, creditBack, creditOf, settleCharge, spendBurn, spentOn, verifyBurn, verifyTransfer } from '@/lib/server/burns';
+import { buildId } from '@/lib/server/build';
+import { TOKEN, tokenBalance, tokenLive } from '@/lib/chain/emerge';
 import { ADVANCE_COST_EMERGE, EXPAND_COST_EMERGE, HAND_MIN_EMERGE, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, type BoonKind } from '@/lib/chain/vault';
 import { readWorld } from '@/lib/server/registry';
 import { worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -55,7 +57,8 @@ import { eraGate, eraOf } from '@/lib/simulation';
 import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS } from '@/lib/world/eras';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
-import { ownerOnChain, registryConfigured, judgedLevel } from '@/lib/server/land';
+import { registryConfigured, judgedLevel } from '@/lib/server/land';
+import { background, flushMints, holderOnChain, holdsPlot, marketBoard, nftLive, queueMint, syncOwners } from '@/lib/server/nft';
 import { presenceDays, markBanner } from '@/lib/server/registry';
 import { isEmblem } from '@/lib/world/emblems';
 import { advanceCost, charterCost } from '@/lib/world/eras';
@@ -70,6 +73,7 @@ import { noteCharge } from '@/lib/server/treasury';
  */
 const bookDev = async (cost: number) => { if (!tokenLive()) await noteCharge(cost).catch(() => {}); };
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
+import { operator } from '@/lib/server/operator';
 import { incrWindow } from '@/lib/server/kv';
 import { serverKey } from '@/lib/limits';
 
@@ -91,6 +95,49 @@ const clean = (value: string, limit: number) =>
     .trim()
     .slice(0, limit);
 
+/**
+ * Settle a charge against a payment and the wallet's account.
+ *
+ * The response to send when it could not be settled, else what was paid.
+ * `202` is "real but not settled yet, ask again"; `409` a payment already
+ * spent; `402` anything else, including a payment that fell short — which is
+ * banked, and the message says so.
+ */
+/** What a settled charge was paid with, so a refusal after it can give it back. */
+type Charged = { whole: number; fromCredit: number; tx?: string; again?: boolean };
+async function charge(owner: string, burnTx: string, due: number, purpose: string): Promise<NextResponse | Charged> {
+  const paid = await settleCharge(owner, burnTx, due, purpose);
+  // What the step cost, not what the receipt carried: anything over the
+  // price is already on account as the receipt's rest, and a refusal must
+  // not give that part back twice.
+  if (paid.ok) return { whole: Math.min(paid.whole, due), fromCredit: paid.fromCredit, tx: paid.tx, again: paid.again };
+  const status = paid.retry ? 202 : paid.used ? 409 : 402;
+  return NextResponse.json({ error: paid.reason, retry: paid.retry, banked: paid.banked, credit: paid.credit, short: paid.short }, { status });
+}
+
+/**
+ * Give a charge back on account when the thing it paid for could not be
+ * delivered, and say so in the reply.
+ *
+ * Only for refusals a retry cannot cure — the plot taken by somebody else,
+ * the chart surveyed out, the plot not this wallet's any more. A store that
+ * merely blinked is not one of those: the receipt stays spent on the step and
+ * the browser hands it in again.
+ */
+async function refused(owner: string, purpose: string, paid: Charged, error: string, status: number, extra: Record<string, unknown> = {}): Promise<NextResponse> {
+  const back = Math.floor(paid.whole + paid.fromCredit);
+  const key = paid.tx ?? `${purpose}:${Date.now()}`;
+  let credited = false;
+  if (back > 0) credited = await creditBack(owner, key, back).catch(() => false);
+  const credit = credited ? await creditOf(owner).catch(() => null) : null;
+  return NextResponse.json({
+    error: credited
+      ? `${error} The ${back.toLocaleString()} ${TOKEN.ticker} you paid is on account — ${(credit ?? back).toLocaleString()} in all — and pays for the next thing you buy.`
+      : error,
+    refunded: credited ? back : 0, credit, ...extra,
+  }, { status });
+}
+
 export async function GET() {
   try {
     const [claims, finds] = await Promise.all([allClaims(), allFinds()]);
@@ -105,10 +152,14 @@ export async function GET() {
 export async function POST(request: Request) {
   let body: {
     seed?: number; region?: string; worldName?: string; owner?: string;
-    ownerName?: string; price?: number; release?: boolean;
+    ownerName?: string; price?: number; release?: boolean; follow?: boolean;
     survey?: boolean; chart?: number; capacity?: number;
     /** Hold a plot while its buyer pays, before any money moves. */
     reserve?: boolean;
+    /** Today's prices, from this build, and what the wallet has on account. Asked before anything is paid. */
+    quote?: boolean;
+    /** Put a payment the game refused on account: `burnTx` is the receipt. */
+    redeem?: boolean;
     /** The transaction that burned the price. Checked against the chain. */
     burnTx?: string;
     /** Put the plot up for sale at `price`, or with null take it down. */
@@ -122,6 +173,8 @@ export async function POST(request: Request) {
     /** The owner answers a bidder's offer. */
     answer?: 'accept' | 'decline';
     bidder?: string;
+    /** The world's new name, from its owner. */
+    rename?: string;
     /** Expand the plot, once; `burnTx` paid for it where the token is live. */
     expand?: boolean;
     /** Advance the plot to `era`; `burnTx` paid for it where the token is live. */
@@ -160,8 +213,47 @@ export async function POST(request: Request) {
    * development build, and refusing there would make the game unplayable
    * locally for no gain. Anywhere that can pay people can also check this.
    */
-  if (sessionsAvailable() && !holdsAddress(request, owner)) {
+  if (sessionsAvailable() && !holdsAddress(request, owner) && !operator(request)) {
     return NextResponse.json({ error: 'Sign in with this wallet first.', needsSession: true }, { status: 401 });
+  }
+
+  /*
+   * Today's prices, from the build that will check the payment.
+   *
+   * A page pays what its own bundle says a thing costs, and a page left open
+   * across a deployment said an older number: 120,000 for a survey that had
+   * become 240,000, 224,000 for a plot that had become 672,000. The vault took
+   * the payment and the registry refused it as short, five times on one
+   * wallet. So the client asks here first and pays what it is told, and the
+   * build stamp comes with the answer so a page can tell it is behind.
+   */
+  if (body.quote) {
+    const seed = Number(body.seed);
+    const price = Number.isInteger(seed) && seed > 0 && seed <= 1e12 ? priceOfSeed(seed) : null;
+    const credit = tokenLive() ? await creditOf(owner).catch(() => 0) : 0;
+    return NextResponse.json({ survey: PROSPECT_COST_EMERGE, price, credit, build: buildId() });
+  }
+
+  /*
+   * A receipt for a payment that bought nothing.
+   *
+   * Real, from this wallet, settled, and not yet spent on anything: it goes
+   * on account, and the account pays for the next survey or claim.
+   */
+  if (body.redeem) {
+    if (!tokenLive()) {
+      return NextResponse.json({ error: `There is no ${TOKEN.ticker} contract here, so there are no payments to redeem.` }, { status: 409 });
+    }
+    const burnTx = String(body.burnTx ?? '');
+    const paid = await verifyBurn(burnTx, owner, 1);
+    if (!paid.ok) {
+      return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
+    }
+    const banked = await bankCredit(owner, burnTx, paid.whole);
+    if (!banked.banked) {
+      return NextResponse.json({ error: 'That payment has already been used.', credit: banked.credit }, { status: 409 });
+    }
+    return NextResponse.json({ banked: paid.whole, credit: banked.credit });
   }
 
   /*
@@ -178,7 +270,10 @@ export async function POST(request: Request) {
     try {
       const held = await reservePlot(seed, owner);
       if (!held.ok) return NextResponse.json({ error: held.reason }, { status: 409 });
-      return NextResponse.json({ reserved: true, seconds: held.seconds });
+      // The price the payment will be checked against, and what is already
+      // on account toward it: the client pays the difference, not its own idea.
+      const credit = tokenLive() ? await creditOf(owner).catch(() => 0) : 0;
+      return NextResponse.json({ reserved: true, seconds: held.seconds, price: priceOfSeed(seed), credit, build: buildId() });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
@@ -211,15 +306,11 @@ export async function POST(request: Request) {
      * Without this a script with a wallet could survey every chart in the game
      * to exhaustion for nothing, and land is finite.
      */
+    let surveyPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
-      const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, PROSPECT_COST_EMERGE);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `survey:${chart}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, String(body.burnTx ?? ''), PROSPECT_COST_EMERGE, `survey:${chart}`);
+      if (paid instanceof NextResponse) return paid;
+      surveyPaid = paid;
     }
 
     try {
@@ -229,7 +320,9 @@ export async function POST(request: Request) {
         owner,
         clean(String(body.ownerName ?? ''), MAX_NAME),
       );
-      if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
+      // A chart with nothing left to find is a refusal no retry cures: the
+      // payment goes back on account rather than buying nothing.
+      if (!result.ok) return refused(owner, `survey:${chart}`, surveyPaid, result.reason, 409);
       return NextResponse.json({ find: result.find, shared: registryShared() });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -246,9 +339,20 @@ export async function POST(request: Request) {
    * pay, and an accepted one reserves the plot for them at that price for a
    * while. The payment happens the same way as any sale, wallet to wallet.
    */
+  // The world's name lives on the claim row too: the map and the leaderboard
+  // read it from there, and a rename that stayed in the browser left the old
+  // name on every other screen.
+  if (typeof body.rename === 'string') {
+    const name = clean(body.rename, MAX_NAME);
+    if (!name) return NextResponse.json({ error: 'A world needs a name.' }, { status: 400 });
+    const row = await renameClaim(seed, owner, name);
+    if (!row) return NextResponse.json({ error: 'That plot is not yours to rename.' }, { status: 403 });
+    return NextResponse.json({ claim: row });
+  }
+
   if (body.offer || body.withdrawOffer) {
     if (registryConfigured()) {
-      return NextResponse.json({ error: 'A plot on the land contract changes hands as a token.' }, { status: 409 });
+      return NextResponse.json({ error: 'A plot is a token now: make an offer on OpenSea, or buy it from the land market when its holder lists it.' }, { status: 409 });
     }
     try {
       if (body.withdrawOffer) {
@@ -281,23 +385,19 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     if (claim.expandedAt) return NextResponse.json({ claim, already: true });
+    let expandPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
-      const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, EXPAND_COST_EMERGE);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `expand:${seed}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, String(body.burnTx ?? ''), EXPAND_COST_EMERGE, `expand:${seed}`);
+      if (paid instanceof NextResponse) return paid;
+      expandPaid = paid;
     }
     try {
       const result = await markExpanded(seed, owner);
-      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      if (!result) return refused(owner, `expand:${seed}`, expandPaid, 'That plot is not yours.', 409);
       return NextResponse.json({ claim: result.claim, already: result.already });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -321,26 +421,26 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
+    // Asked before the charge, not after it: a banner with no emblem chosen
+    // used to be refused with the payment already taken.
+    if (kind === 'banner' && !isEmblem(body.emblem)) return NextResponse.json({ error: 'Choose an emblem.' }, { status: 400 });
+    let boonPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, cost);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `boon:${kind}:${seed}:${burnTx}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, burnTx, cost, `boon:${kind}:${seed}:${burnTx}`);
+      if (paid instanceof NextResponse) return paid;
+      boonPaid = paid;
     }
     await bookDev(cost);
     // A banner is recorded on the row, so the world map flies it.
     if (kind === 'banner') {
-      if (!isEmblem(body.emblem)) return NextResponse.json({ error: 'Choose an emblem.' }, { status: 400 });
       try {
-        const flown = await markBanner(seed, owner, body.emblem);
-        return NextResponse.json({ ok: true, boon: kind, claim: flown ?? claim });
+        const flown = await markBanner(seed, owner, body.emblem as string);
+        if (!flown) return refused(owner, `boon:${kind}:${seed}`, boonPaid, 'That plot is not yours.', 409);
+        return NextResponse.json({ ok: true, boon: kind, claim: flown });
       } catch {
         return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
       }
@@ -365,7 +465,7 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     // A charter costs four days of the plot's own ceiling, at the level the
@@ -380,20 +480,17 @@ export async function POST(request: Request) {
       const days = await presenceDays(owner).catch(() => 0);
       price = Math.max(CHARTER_COST_EMERGE, charterCost(judgedLevel(world, days), claim.era ?? 1));
     }
+    let coverPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, price);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `${kind}:${seed}:${burnTx}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, burnTx, price, `${kind}:${seed}:${burnTx}`);
+      if (paid instanceof NextResponse) return paid;
+      coverPaid = paid;
     }
     await bookDev(price);
     try {
       const result = await markCover(seed, owner, kind, span);
-      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      if (!result) return refused(owner, `${kind}:${seed}`, coverPaid, 'That plot is not yours.', 409);
       return NextResponse.json({ claim: result.claim, until: result.until });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -417,13 +514,35 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     const held = claim.era ?? 1;
     if (era <= held) return NextResponse.json({ claim, already: true });
     if (era !== held + 1) return NextResponse.json({ error: 'One era at a time.' }, { status: 400 });
     if (era > OPEN_ERA) return NextResponse.json({ error: 'That era is not built yet.' }, { status: 409 });
+    /*
+     * The team putting a step right by hand.
+     *
+     * A player paid for the era and it never arrived — the chain slow to
+     * confirm past the browser's patience, the connection gone between the
+     * wallet and here, or the write failing after the payment was taken. The
+     * gate and the charge are the operator's judgement; ownership is still
+     * the registry's. The receipt, when given, is marked spent on this step
+     * so it cannot also be redeemed on account afterwards. It is not booked
+     * as income here: the receipt is the operator's word, not the chain's.
+     */
+    if (operator(request)) {
+      const burnTx = String(body.burnTx ?? '').trim();
+      if (burnTx) await spendBurn(burnTx, `era:${seed}:${era}`).catch(() => false);
+      try {
+        const result = await markEra(seed, owner, era);
+        if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+        return NextResponse.json({ claim: result.claim, already: result.already, byOperator: true });
+      } catch {
+        return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
+      }
+    }
     const published = await readWorld(seed);
     const world = published ? worldFromSave(published.snapshot as SavedWorld, seed, claim.worldName) : null;
     if (!world) return NextResponse.json({ error: 'Publish the world first, then advance it.' }, { status: 409 });
@@ -440,19 +559,15 @@ export async function POST(request: Request) {
         gate: { days: gate.days, checks: gate.checks },
       }, { status: 409 });
     }
+    let eraPaid: Charged = { whole: 0, fromCredit: 0 };
     if (tokenLive()) {
-      const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, advanceCost(era));
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `era:${seed}:${era}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, String(body.burnTx ?? ''), advanceCost(era), `era:${seed}:${era}`);
+      if (paid instanceof NextResponse) return paid;
+      eraPaid = paid;
     }
     try {
       const result = await markEra(seed, owner, era);
-      if (!result) return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      if (!result) return refused(owner, `era:${seed}:${era}`, eraPaid, 'That plot is not yours.', 409);
       return NextResponse.json({ claim: result.claim, already: result.already });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -469,19 +584,16 @@ export async function POST(request: Request) {
    */
   if (body.hire !== undefined) {
     // Opening a job costs a hiring fee, paid like any charge.
+    let hirePaid: Charged = { whole: 0, fromCredit: 0 };
     if (body.hire === true && tokenLive()) {
       const burnTx = String(body.burnTx ?? '');
-      const paid = await verifyBurn(burnTx, owner, HIRE_FEE_EMERGE);
-      if (!paid.ok) {
-        return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(burnTx, `hire:${seed}:${burnTx}`, paid.whole))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-      }
+      const paid = await charge(owner, burnTx, HIRE_FEE_EMERGE, `hire:${seed}:${burnTx}`);
+      if (paid instanceof NextResponse) return paid;
+      hirePaid = paid;
     }
     try {
       const row = await setHiring(seed, owner, body.hire === true);
-      return row ? NextResponse.json({ claim: row }) : NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
+      return row ? NextResponse.json({ claim: row }) : refused(owner, `hire:${seed}`, hirePaid, 'That plot is not yours.', 409);
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
@@ -540,13 +652,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Name a price in whole tokens.' }, { status: 400 });
     }
     if (registryConfigured()) {
-      return NextResponse.json({
-        error: 'A plot on the land contract is an ERC-721 token: sell it wallet to wallet, or on any marketplace.',
-      }, { status: 409 });
+      /*
+       * The listing lives on the market contract; the row mirrors it so the
+       * map shows the price. What is written is what the chain says, never
+       * what the body asked for — a row cannot advertise a price the market
+       * will not enforce.
+       */
+      try {
+        const listed = (await marketBoard()).find((l) => l.seed === seed && l.seller === owner.toLowerCase() && l.live);
+        const row = await listClaim(seed, owner, listed ? listed.price : null);
+        if (!row) return NextResponse.json({ error: 'That plot is not yours to list.' }, { status: 409 });
+        await forgetLandMarket();
+        return NextResponse.json({ claim: row, onChain: !!listed });
+      } catch {
+        return NextResponse.json({ error: 'The chain is not reachable.' }, { status: 502 });
+      }
     }
     try {
       const row = await listClaim(seed, owner, price === null ? null : Math.round(price));
       if (!row) return NextResponse.json({ error: 'That plot is not yours to list.' }, { status: 409 });
+      // The public board is built from every claim and cached for a minute.
+      // Listing or delisting changes what it should say, so drop it rather
+      // than advertise a stale price for the next sixty seconds.
+      await forgetLandMarket();
       return NextResponse.json({ claim: row });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
@@ -565,7 +693,7 @@ export async function POST(request: Request) {
   if (body.buy) {
     if (registryConfigured()) {
       return NextResponse.json({
-        error: 'A plot on the land contract changes hands as a token, not through the registry.',
+        error: 'A plot is a token now: it is bought on the land market or on OpenSea, and the registry follows the chain.',
       }, { status: 409 });
     }
     let listed: Claim | null;
@@ -585,35 +713,78 @@ export async function POST(request: Request) {
     if (due === null) {
       return NextResponse.json({ error: 'That plot is not for sale.' }, { status: 409 });
     }
+    /*
+     * Both receipts are checked before either is spent, and the row moves
+     * before either is spent too.
+     *
+     * The transfer used to be spent first and the fee settled second, so a fee
+     * the chain had not confirmed yet answered "ask again" and every later
+     * attempt was refused as already used — the buyer had paid the seller and
+     * had no plot, which is the exact shape of the Gold-purchase bug this
+     * exchange was rebuilt once to prevent. Now: verify both; move the row;
+     * spend both. A receipt already spent on this very resale, with the row
+     * already the buyer's, answers with the row — a reply lost on the way
+     * back is asked for again, not paid for again.
+     */
+    let feePaid: Charged = { whole: 0, fromCredit: 0 };
+    const transferTx = String(body.transferTx ?? '');
     if (tokenLive()) {
-      const transferTx = String(body.transferTx ?? '');
       const paid = await verifyTransfer(transferTx, owner, listed.owner, due);
       if (!paid.ok) {
         return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
       }
-      if (!(await spendBurn(transferTx, `resale:${seed}`))) {
-        return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
+      if (await spentOn(transferTx, `resale:${seed}`)) {
+        const now = await claimOf(seed).catch(() => null);
+        if (now && now.owner.toLowerCase() === owner.toLowerCase()) return NextResponse.json({ claim: now, price: due, seller: listed.owner, already: true });
       }
       // The registry's fee, into the vault, from the buyer.
-      const feeTx = String(body.feeTx ?? '');
-      const fee = await verifyBurn(feeTx, owner, resaleFee(due));
-      if (!fee.ok) {
-        return NextResponse.json({ error: `The registry fee: ${fee.reason}`, retry: fee.retry }, { status: fee.retry ? 202 : 402 });
-      }
-      if (!(await spendBurn(feeTx, `resale-fee:${seed}`, fee.whole))) {
-        return NextResponse.json({ error: 'That fee has already been used.' }, { status: 409 });
-      }
+      const fee = await charge(owner, String(body.feeTx ?? ''), resaleFee(due), `resale-fee:${seed}`);
+      if (fee instanceof NextResponse) return fee;
+      feePaid = fee;
     }
     try {
       const moved = await transferClaim(seed, owner, clean(String(body.ownerName ?? ''), MAX_NAME));
-      if (!moved.ok) return NextResponse.json({ error: moved.reason }, { status: 409 });
+      if (!moved.ok) return refused(owner, `resale-fee:${seed}`, feePaid, moved.reason, 409);
+      if (tokenLive() && transferTx) await spendBurn(transferTx, `resale:${seed}`).catch(() => false);
+      // A plot that has just sold must not go on being advertised.
+      await forgetLandMarket();
       return NextResponse.json({ claim: moved.claim, price: moved.price, seller: moved.seller });
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
   }
 
+  /*
+   * Follow the chain for one plot: after a purchase on the market or on
+   * OpenSea, so the buyer's map shows it as theirs now. Anybody may ask; the
+   * answer is only ever what the chain says.
+   */
+  if (body.follow) {
+    if (!nftLive()) return NextResponse.json({ error: 'Plots are not tokens on this build.' }, { status: 409 });
+    try {
+      const holder = await holderOnChain(seed);
+      const row = await claimOf(seed);
+      if (holder && (!row || row.owner.toLowerCase() !== holder)) await syncOwners();
+      const now = await claimOf(seed);
+      if (!now) return NextResponse.json({ error: 'Nobody holds that plot on chain.' }, { status: 404 });
+      return NextResponse.json({ claim: now, holder });
+    } catch {
+      return NextResponse.json({ error: 'Could not reach the chain.' }, { status: 503 });
+    }
+  }
+
   if (body.release) {
+    if (registryConfigured()) {
+      // The token is the title: it has to be burnt by its holder before the
+      // row goes, or the chain would still say the plot is theirs while the
+      // map offered it to everybody.
+      try {
+        const holder = await holderOnChain(seed);
+        if (holder !== null) return NextResponse.json({ error: 'Burn the plot\u2019s token from your wallet first; the registry follows once the chain says it is gone.', released: false }, { status: 409 });
+      } catch {
+        return NextResponse.json({ error: 'Could not reach the chain to check that plot. Try again.' }, { status: 503 });
+      }
+    }
     try {
       const released = await releaseClaim(seed, owner);
       if (released) await dropReservation(seed).catch(() => {});
@@ -634,16 +805,11 @@ export async function POST(request: Request) {
   if (registryConfigured()) {
     let onChain: string | null;
     try {
-      onChain = await ownerOnChain(seed);
+      onChain = await holderOnChain(seed);
     } catch {
       return NextResponse.json({ error: 'Could not reach the chain to check that plot. Try again.' }, { status: 503 });
     }
-    if (onChain === null) {
-      return NextResponse.json({
-        error: 'That plot is not claimed on chain yet. Claim it in the land contract first.',
-      }, { status: 409 });
-    }
-    if (onChain !== owner.toLowerCase()) {
+    if (onChain !== null && onChain !== owner.toLowerCase()) {
       return NextResponse.json({ error: 'The chain says somebody else holds that plot.' }, { status: 409 });
     }
   }
@@ -660,22 +826,17 @@ export async function POST(request: Request) {
    * Skipped where a land contract exists, because there the claim *is* the
    * payment and the `ownerOf` check above already proves it happened.
    */
-  if (!registryConfigured() && tokenLive()) {
+  let plotPaid: Charged = { whole: 0, fromCredit: 0 };
+  if (tokenLive()) {
     if (!(await holdsReservation(seed, owner))) {
       return NextResponse.json({
         error: 'That plot is not held for you. Open it again to start over.',
       }, { status: 409 });
     }
-    const burnTx = String(body.burnTx ?? '');
-    const due = priceOfSeed(seed);
-    const paid = await verifyBurn(burnTx, owner, due);
-    if (!paid.ok) {
-      return NextResponse.json({ error: paid.reason, retry: paid.retry }, { status: paid.retry ? 202 : 402 });
-    }
-    // Claim the payment before the plot, so one burn cannot buy two.
-    if (!(await spendBurn(burnTx, `plot:${seed}`, paid.whole))) {
-      return NextResponse.json({ error: 'That payment has already been used.' }, { status: 409 });
-    }
+    // Settled before the plot is written, so one payment cannot buy two.
+    const paid = await charge(owner, String(body.burnTx ?? ''), priceOfSeed(seed), `plot:${seed}`);
+    if (paid instanceof NextResponse) return paid;
+    plotPaid = paid;
   }
 
   const claim: Claim = {
@@ -695,11 +856,18 @@ export async function POST(request: Request) {
   try {
     const result = await takeClaim(claim);
     if (result.ok) await dropReservation(seed).catch(() => {});
+    // The title follows the sale: minted to the buyer by the vault, queued so
+    // a slow chain never costs them the claim, and sent now when it can be.
+    if (result.ok && nftLive()) {
+      await queueMint(seed, owner).catch(() => {});
+      background(() => flushMints());
+    }
     if (!result.ok) {
-      return NextResponse.json({
-        error: `${result.taken.region} already belongs to somebody else.`,
+      // Somebody else's now. The payment goes back on account: it bought
+      // nothing, and the next plot this wallet claims is paid from it.
+      return refused(owner, `plot:${seed}`, plotPaid, `${result.taken.region} already belongs to somebody else.`, 409, {
         taken: result.taken,
-      }, { status: 409 });
+      });
     }
     return NextResponse.json({ claim: result.claim, shared: registryShared() });
   } catch {

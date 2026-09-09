@@ -37,23 +37,70 @@
  */
 
 import { NextResponse } from 'next/server';
-import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor } from '@/lib/server/payouts';
+import { MAX_PAYOUT_EMERGE, recordPayout, payoutsFor, updatePayout, type Payout } from '@/lib/server/payouts';
 import {
-  MIN_PAYOUT_EMERGE, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
-  settlementFor, takePayoutSlot,
+  MIN_PAYOUT_EMERGE, dailyEmissionBudget, debitPrincipal, emissionRoom, principalOf, releaseEmission, reserveEmission,
+  chargePlots, refundPlots,
+  settlementFor, takePayoutSlot, untilUtcMidnight, utcDay, casinoCreditOf, takeCasinoCredit,
 } from '@/lib/server/accounts';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
-import { sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
+import { receiptOf, sendFromVault, vaultAddress, vaultCanSign, vaultHealth } from '@/lib/server/signer';
 import { registryShared } from '@/lib/server/registry';
 import { TOKEN, VAULT_ADDRESS, tokenLive } from '@/lib/chain/emerge';
-import { handCheck, landCheck, judgedFor, handCeilingFor } from '@/lib/server/land';
+import { handCheck, landCheck, judgedFor, judgedTotal, handCeilingFor, type Judged } from '@/lib/server/land';
 import { noteHold } from '@/lib/server/treasury';
-import { DAILY_EARN_CEILING, HAND_DAILY_CEILING } from '@/lib/chain/vault';
+import { DAILY_EARN_CEILING, HAND_DAILY_CEILING, fairShare } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
+// A payout waits for its receipt before answering, so the request needs
+// longer than the default.
+export const maxDuration = 60;
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const MAX_NAME = 32;
+
+/**
+ * Settle transfers that were sent and not seen mined at the time.
+ *
+ * The chain has had a while by now. A receipt that succeeded marks the row
+ * confirmed; one that reverted marks it failed and gives back what was
+ * debited — the day's emission, or the principal — so the player can take it
+ * out again, and the Bank puts it back in the in-game balance when it reads
+ * the row. A hash the chain has never seen, an hour on, was dropped.
+ */
+/**
+ * The wallet's share of today's vault, alongside what it is judged, when the
+ * day is being shared out — null when everybody's judgement fits the day.
+ */
+async function shareFor(judgedYield: number): Promise<{ share: number | null; demand: number | null }> {
+  const demand = await judgedTotal().catch(() => null);
+  if (!demand || demand.total <= dailyEmissionBudget()) return { share: null, demand: demand?.total ?? null };
+  return { share: fairShare(dailyEmissionBudget(), judgedYield, demand.total), demand: demand.total };
+}
+
+/** What a share that is collected says, with the figures that make it. */
+function shareCollected(share: number, demand: number): string {
+  return `Today the vault pays ${dailyEmissionBudget().toLocaleString()} $EMERGE across everybody, and ${demand.toLocaleString()} is judged in all, so your share is ${share.toLocaleString()} and it is collected. The day turns in ${untilUtcMidnight()}.`;
+}
+
+async function confirmPayouts(address: string, rows: Payout[]): Promise<Payout[]> {
+  const out: Payout[] = [];
+  for (const row of rows) {
+    if (row.confirmed !== false || row.failed) { out.push(row); continue; }
+    const status = await receiptOf(row.txHash);
+    // Still in flight, or the chain could not be asked: leave it be. A hash
+    // the chain has never seen an hour on was dropped before it was mined.
+    if (status === 'pending' || (status === 'missing' && Date.now() - row.at < 3_600_000)) { out.push(row); continue; }
+    const next: Payout = status === 'success' ? { ...row, confirmed: true } : { ...row, confirmed: true, failed: true };
+    if (next.failed) {
+      if (row.kind === 'principal') await debitPrincipal(address, -row.gross).catch(() => {});
+      else if (new Date(row.at).toISOString().slice(0, 10) === utcDay()) await releaseEmission(address, row.gross).catch(() => {});
+    }
+    await updatePayout(next).catch(() => {});
+    out.push(next);
+  }
+  return out;
+}
 
 const clean = (value: string, limit: number) =>
   value
@@ -70,14 +117,33 @@ export async function GET(request: Request) {
     return NextResponse.json({ payouts: [], automatic: vaultCanSign(), shared: registryShared() });
   }
   try {
-    const [payouts, principal, land] = await Promise.all([
-      payoutsFor(address), principalOf(address), landCheck(address),
-    ]);
+    const [booked, land] = await Promise.all([payoutsFor(address), landCheck(address)]);
+    const payouts = await confirmPayouts(address, booked);
+    const principal = await principalOf(address);
     // A wallet with no land may still be a hired hand, with a hand's ceiling.
     const hand = land === 'none' ? await handCheck(address) : 'none';
-    const room = await emissionRoom(address, hand === 'hand' ? HAND_DAILY_CEILING : DAILY_EARN_CEILING);
+    /*
+     * The room is measured against the same ceiling the withdrawal will be:
+     * what the vault judges the plots earn today, for land; a hand's ceiling
+     * for a hand. Measured against the game's flat maximum it told a player
+     * they could collect what the vault was about to refuse.
+     */
+    let judged: Judged | null = null;
+    let ceiling = hand === 'hand' ? HAND_DAILY_CEILING : DAILY_EARN_CEILING;
+    let share: number | null = null, demand: number | null = null;
+    if (land === 'holds') {
+      judged = await judgedFor(address);
+      ceiling = judged.yield;
+      ({ share, demand } = await shareFor(judged.yield));
+    }
+    // Winnings from the tables sit on top of whatever the land or the job pays.
+    const casino = await casinoCreditOf(address);
+    if (land !== 'holds' && hand !== 'hand') ceiling = 0;
+    ceiling += casino;
+    if (share !== null) share += casino;
+    const room = await emissionRoom(address, ceiling, share, demand);
     return NextResponse.json({
-      payouts, principal, room,
+      payouts, principal, room, judged, casino,
       // Whether stewardship can be collected at all, and if not, why — so the
       // Bank can say so before somebody presses the button.
       land,
@@ -150,7 +216,7 @@ export async function POST(request: Request) {
   }
 
   // Ours, from the amount asked for — never from figures the client sent.
-  const money = settlementFor(kind, asked);
+  let money = settlementFor(kind, asked);
   if (money.gross < MIN_PAYOUT_EMERGE) {
     return NextResponse.json({
       error: `The smallest withdrawal is ${MIN_PAYOUT_EMERGE.toLocaleString()} $EMERGE.`,
@@ -182,11 +248,15 @@ export async function POST(request: Request) {
    * a successful one, so the slot is not given back.
    */
   let ceiling = DAILY_EARN_CEILING;
+  let share: number | null = null, demand: number | null = null;
+  /** The plots this payout is earned from, and what each may still be paid today. */
+  let judgedPlots: { seed: number; ceiling: number }[] = [];
+  const casino = kind === 'earnings' ? await casinoCreditOf(address) : 0;
   if (kind === 'earnings') {
     const land = await landCheck(address);
     // No land, but a job: a hired hand is paid up to a hand's ceiling.
     const hand = land === 'none' ? await handCheck(address) : 'none';
-    if (hand === 'hand') ceiling = Math.min(HAND_DAILY_CEILING, await handCeilingFor(address));
+    if (hand === 'hand') ceiling = Math.min(HAND_DAILY_CEILING, await handCeilingFor(address)) + casino;
     else if (hand === 'unreachable') {
       return NextResponse.json({ error: 'We could not read this wallet\u2019s balance to confirm your job. Nothing was taken — try again in a minute.', land }, { status: 403 });
     } else if (land === 'holds') {
@@ -195,12 +265,18 @@ export async function POST(request: Request) {
       // world, times the attention the heartbeats show. The client's figure
       // is paid only up to this.
       const judged = await judgedFor(address);
-      ceiling = judged.yield;
+      judgedPlots = judged.plots.map((p) => ({ seed: p.seed, ceiling: p.ceiling }));
+      ceiling = judged.yield + casino;
+      ({ share, demand } = await shareFor(judged.yield));
+      if (share !== null) share += casino;
       if (ceiling < 1) {
         return NextResponse.json({
           error: 'Nothing is judged earned yet: publish your world by opening it, and keep it well run and attended. Nothing was taken.', land, judged,
         }, { status: 403 });
       }
+    } else if (casino > 0 && land === 'none') {
+      // No land and no job, but winnings from the tables: those are paid.
+      ceiling = casino;
     } else {
       // Same refusal in every case — the difference is what the player is told,
       // because "you hold no land" is false for two of the three.
@@ -223,10 +299,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const slot = await takePayoutSlot(address);
-  if (!slot.ok) return NextResponse.json({ error: slot.reason }, { status: 429 });
-
   let give: () => Promise<void>;
+  /** When the Bank's figure had moved on and less was sent than asked. */
+  let note: string | null = null;
 
   if (kind === 'principal') {
     /*
@@ -243,24 +318,121 @@ export async function POST(request: Request) {
     }
     give = async () => { await debitPrincipal(address, -money.gross); };
   } else {
-    if (!(await reserveEmission(address, money.gross, ceiling))) {
-      const room = await emissionRoom(address, ceiling);
+    /*
+     * The figure the Bank showed is a moving target: the judged yield
+     * accrues and attention slides between the read and the request, so a
+     * player asking for exactly what the Bank said could be refused by a
+     * few tokens, again and again. Asked for more than the day has room for,
+     * the vault pays the room and says so, as long as that clears the floor.
+     */
+    const room = await emissionRoom(address, ceiling, share, demand);
+    const most = Math.floor(Math.min(room.left, room.globalLeft));
+    if (money.gross > most) {
+      if (most < MIN_PAYOUT_EMERGE) {
+        return NextResponse.json({
+          error: room.left <= 0 && share !== null && demand !== null && share < ceiling
+            ? shareCollected(share, demand)
+            : room.left <= 0
+              ? `Today's ${ceiling.toLocaleString()} $EMERGE is collected. The day turns in ${untilUtcMidnight()}.`
+              : room.globalLeft <= 0
+                ? `The vault has paid today's ${dailyEmissionBudget().toLocaleString()} $EMERGE across everybody. The day turns in ${untilUtcMidnight()}.`
+                : `You can collect ${room.left.toLocaleString()} more $EMERGE today, which is under the ${MIN_PAYOUT_EMERGE.toLocaleString()} floor. The day turns in ${untilUtcMidnight()}.`,
+        }, { status: 429 });
+      }
+      money = settlementFor('earnings', most);
+      note = `The Bank's figure had moved on: ${most.toLocaleString()} $EMERGE was collectable, and that is what was sent.`;
+    }
+    if (!(await reserveEmission(address, money.gross, ceiling, share))) {
+      const again = await emissionRoom(address, ceiling, share, demand);
       return NextResponse.json({
-        error: room.globalLeft <= 0
-          ? 'The vault has paid out everything it will today. Try again tomorrow.'
-          : `You can collect ${room.left.toLocaleString()} more $EMERGE today.`,
+        error: again.left <= 0 && share !== null && demand !== null && share < ceiling
+          ? shareCollected(share, demand)
+          : again.globalLeft <= 0
+            ? `The vault has paid today's ${dailyEmissionBudget().toLocaleString()} $EMERGE across everybody. The day turns in ${untilUtcMidnight()}.`
+            : `You can collect ${again.left.toLocaleString()} more $EMERGE today.`,
       }, { status: 429 });
     }
-    give = () => releaseEmission(address, money.gross);
+    /*
+     * And against the land that earned it.
+     *
+     * The wallet's day alone was walkable: a plot handed to a fresh wallet
+     * met an empty counter, so the same land could be paid over and over for
+     * as many wallets as somebody made. A player found that and reported it.
+     * The plot's day is the plot's, so a transfer moves who is paid and never
+     * how much this land has already paid today.
+     */
+    const fromLand = Math.max(0, money.gross - casino);
+    const charged = judgedPlots.length && fromLand > 0
+      ? await chargePlots(judgedPlots.map((p) => ({ seed: p.seed, cap: p.ceiling })), fromLand).catch(() => null)
+      : [];
+    if (!charged) {
+      await releaseEmission(address, money.gross).catch(() => {});
+      return NextResponse.json({
+        error: `Today's earning is collected on the land this would be paid from. The day turns in ${untilUtcMidnight()}.`,
+      }, { status: 429 });
+    }
+    give = async () => { await releaseEmission(address, money.gross); await refundPlots(charged); };
   }
 
-  const sent = await sendFromVault(address, money.net);
+  /*
+   * The daily count is taken last, once the vault is actually about to
+   * sign. It used to be taken before the room was checked, so every refusal
+   * for room — and a player asking for the Bank's exact figure could collect
+   * eighteen of those in a row — spent one of the day's slots, and a player
+   * with six withdrawals on the ledger was told they had made twenty-four.
+   */
+  /*
+   * From here to the send, anything that throws has to give the reservation
+   * back. It is held against both the wallet's day and the vault's, and a
+   * reservation nobody releases is a day's room that stays spent until
+   * midnight — for everybody, since the vault's day is shared. A store that
+   * blinks for one request should not close the vault for the rest of the day.
+   */
+  let slot: { ok: boolean; reason?: string };
+  try {
+    slot = await takePayoutSlot(address);
+  } catch {
+    await give().catch(() => {});
+    return NextResponse.json({ error: 'The vault could not be reached. Nothing has been taken from your balance.' }, { status: 502 });
+  }
+  if (!slot.ok) {
+    await give().catch(() => {});
+    return NextResponse.json({ error: slot.reason }, { status: 429 });
+  }
+
+  let sent: Awaited<ReturnType<typeof sendFromVault>>;
+  try {
+    sent = await sendFromVault(address, money.net);
+  } catch {
+    await give().catch(() => {});
+    return NextResponse.json({ error: 'The transfer could not be sent. Nothing has been taken from your balance.' }, { status: 502 });
+  }
   if (!sent.ok) {
+    if (sent.maybeSent && sent.txHash) {
+      /*
+       * Signed and handed to the chain, answer lost. Not given back: if the
+       * chain has it, giving the reservation back is how the same day's
+       * room pays out twice. Written down unconfirmed instead, and the next
+       * look at the Bank settles it — a hash the chain never saw, an hour
+       * on, is marked failed and the reservation returned then.
+       */
+      if (money.burned > 0) await noteHold(money.burned).catch(() => {});
+      const payout = await recordPayout({
+        address, name: clean(String(body.name ?? ''), MAX_NAME),
+        seed: Number.isInteger(Number(body.seed)) ? Number(body.seed) : 0,
+        worldName: clean(String(body.worldName ?? ''), MAX_NAME),
+        kind, gold: kind === 'principal' ? asked : 0, gross: money.gross, burned: money.burned, net: money.net,
+        txHash: sent.txHash, confirmed: false,
+      }).catch(() => null);
+      return NextResponse.json({ error: sent.problem, payout, txHash: sent.txHash, pending: true }, { status: 202 });
+    }
     // Put it back. A refusal must cost nothing.
     await give().catch(() => {});
     return NextResponse.json({ error: sent.problem }, { status: 502 });
   }
 
+  // Casino credit is spent first, so a win does not linger as room for ever.
+  if (kind === 'earnings' && casino > 0) await takeCasinoCredit(address, money.gross).catch(() => {});
   // The held share stayed in the vault; half of it is owed to the burn address.
   if (money.burned > 0) await noteHold(money.burned).catch(() => {});
   const payout = await recordPayout({
@@ -274,7 +446,8 @@ export async function POST(request: Request) {
     burned: money.burned,
     net: money.net,
     txHash: sent.txHash,
+    confirmed: sent.confirmed,
   });
 
-  return NextResponse.json({ payout, txHash: sent.txHash });
+  return NextResponse.json({ payout, txHash: sent.txHash, note });
 }

@@ -8,3 +8,9 @@ node_modules/
 .env
 .env.local
 .env*.local
+
+# Contract build artifacts and rehearsal output: compiled locally, never committed.
+contracts/test/*.json
+contracts/test/node_modules/
+contracts/rehearsal/deployed.json
+contracts/rehearsal/*.png

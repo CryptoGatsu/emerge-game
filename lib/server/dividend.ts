@@ -81,8 +81,25 @@ export function shareOut(units: bigint, weights: Map<string, number>): Map<strin
 
 /* ---------------- soft stake ---------------- */
 
-export async function registerStake(who: string): Promise<boolean> {
-  return hsetnx(STAKERS, who.toLowerCase(), String(Date.now()));
+export async function registerStake(who: string, now = Date.now()): Promise<boolean> {
+  const first = await hsetnx(STAKERS, who.toLowerCase(), String(now));
+  // Sampled the moment it registers, so the card shows a figure straight
+  // away rather than a blank until the next morning's cron — and so a wallet
+  // registered on a Sunday afternoon is in that week's book at all.
+  if (first) await sampleOne(who, now).catch(() => {});
+  return first;
+}
+/** One staker's balance now, folded into the week's lowest. Null when the chain could not be read. */
+export async function sampleOne(who: string, now = Date.now()): Promise<number | null> {
+  if (!tokenLive()) return null;
+  const held = await tokenBalance(who);
+  if (held === null) return null;
+  const epoch = epochOf(now);
+  const me = who.toLowerCase();
+  const prior = await hget(MIN(epoch), me);
+  const low = prior === null ? held : Math.min(Number(prior), held);
+  await hset(MIN(epoch), me, String(Math.floor(low)));
+  return Math.floor(low);
 }
 export async function stakers(): Promise<string[]> {
   return Object.keys(await hgetall(STAKERS));
@@ -90,15 +107,9 @@ export async function stakers(): Promise<string[]> {
 /** Read every staker's balance and keep the week's lowest. Meant to run daily. */
 export async function sampleBalances(now = Date.now()): Promise<number> {
   if (!tokenLive()) return 0;
-  const epoch = epochOf(now);
   let sampled = 0;
   for (const who of await stakers()) {
-    const held = await tokenBalance(who);
-    if (held === null) continue;
-    const prior = await hget(MIN(epoch), who);
-    const low = prior === null ? held : Math.min(Number(prior), held);
-    await hset(MIN(epoch), who, String(Math.floor(low)));
-    sampled += 1;
+    if ((await sampleOne(who, now)) !== null) sampled += 1;
   }
   return sampled;
 }
@@ -170,18 +181,31 @@ export async function settleEpoch(epoch = previousEpoch()): Promise<Settlement |
     let txHash: string | null = null;
     let gldUnits: bigint;
     let problem: string | undefined;
+    /*
+     * The pool is taken before anything is sent, and given back on a
+     * refusal — never decremented after the sends. A settlement that died
+     * between the swap and the decrement (a function timing out on a slow
+     * chain) used to leave the whole pool standing, and the next run sent the
+     * development share again and swapped the rest again. What is in flight
+     * is written down so an operator can see it.
+     */
+    await incrBy(DIVIDEND_POOL, -pool);
+    await setValue(`${SETTLED}:${epoch}:in-flight`, JSON.stringify({ pool, dev, rest, at: Date.now() }), 7 * 86_400);
     if (live) {
       const devTo = process.env.EMERGE_DEV_ADDRESS ?? '';
       if (/^0x[0-9a-fA-F]{40}$/.test(devTo)) {
         const sent = await sendFromVault(devTo, dev);
-        if (!sent.ok) return { skipped: `The development share could not be sent: ${sent.problem}` };
+        if (!sent.ok && !sent.maybeSent) {
+          await incrBy(DIVIDEND_POOL, pool);
+          return { skipped: `The development share could not be sent: ${sent.problem}` };
+        }
       } else {
         await incrBy(DEV_OWED, dev);
       }
       const swap = await swapForGld(rest);
       if (!swap.ok) {
-        // The dev share went; the pool keeps the rest for another try.
-        await incrBy(DIVIDEND_POOL, -dev);
+        // The dev share went; the rest goes back to the pool for another try.
+        await incrBy(DIVIDEND_POOL, rest);
         return { skipped: `The swap failed: ${swap.problem}` };
       }
       txHash = swap.txHash;
@@ -193,7 +217,6 @@ export async function settleEpoch(epoch = previousEpoch()): Promise<Settlement |
       gldUnits = BigInt(rest);
       problem = 'simulated: no live token, units are $EMERGE';
     }
-    await incrBy(DIVIDEND_POOL, -pool);
     const landUnits = (gldUnits * BigInt(Math.round((DIVIDEND_LAND_SHARE / (DIVIDEND_LAND_SHARE + DIVIDEND_STAKE_SHARE)) * 1000))) / 1000n;
     const stakeUnits = gldUnits - landUnits;
     const [land, stake] = await Promise.all([landWeights(epoch), stakeWeights(epoch)]);
@@ -210,6 +233,7 @@ export async function settleEpoch(epoch = previousEpoch()): Promise<Settlement |
       landHolders: landOut.size, stakers: stakeOut.size, txHash, simulated: !live, problem,
     };
     await setValue(`${SETTLED}:${epoch}`, JSON.stringify(record), 400 * 86_400);
+    await setValue(`${SETTLED}:${epoch}:in-flight`, '', 1).catch(() => {});
     await push(EPOCHS, JSON.stringify(record), 60);
     return record;
   } finally {
@@ -290,9 +314,20 @@ export async function claimGld(who: string): Promise<Claimed> {
     const live = tokenLive() && vaultCanSign();
     let txHash: string | null = null;
     if (live) {
-      const sent = await sendTokenFromVault(GLD_ADDRESS, me, units);
-      if (!sent.ok) { await hset(CLAIMS, me, String(units)); return { ok: false, reason: sent.problem }; }
-      txHash = sent.txHash;
+      // A send that throws, not only one that refuses, puts the claim back:
+      // zeroed first and never restored was GLD gone for good.
+      let sent: Awaited<ReturnType<typeof sendTokenFromVault>>;
+      try {
+        sent = await sendTokenFromVault(GLD_ADDRESS, me, units);
+      } catch {
+        await hset(CLAIMS, me, String(units));
+        return { ok: false, reason: 'The GLD could not be sent. Nothing has been taken; try again in a moment.' };
+      }
+      // Refused outright: the claim goes back. Signed and handed to the chain
+      // with the reply lost: it is treated as sent, with its hash, because
+      // giving the claim back is how the same GLD goes out twice.
+      if (!sent.ok && !(sent.maybeSent && sent.txHash)) { await hset(CLAIMS, me, String(units)); return { ok: false, reason: sent.problem }; }
+      txHash = sent.txHash ?? null;
     }
     let paid: Standing['paid'] = [];
     try { paid = JSON.parse((await hget(PAID, me)) ?? '[]') as Standing['paid']; } catch { paid = []; }

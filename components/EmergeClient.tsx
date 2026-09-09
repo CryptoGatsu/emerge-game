@@ -22,13 +22,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt,
+  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, frozenGold, fundTreasury, setFrozenGold, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
-  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding,
-  type World, clearTrees, trainCitizen, trainTrade, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield } from '@/lib/simulation';
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
+  type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, escrowGoods, receiveDelivery, type WorkingJob,
+  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
-import { GOODWILL, claimGoodwill, markGoodwill } from '@/lib/world/grants';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
 import { snapshot, type Snapshot } from '@/lib/hud';
 import { EmergeScene, type PickTarget } from '@/lib/render/scene';
@@ -40,18 +39,22 @@ import {
 import {
   ATTEND_INTERVAL, GIFT_POLL, HAND_PRESENT_MS, HEARTBEAT_INTERVAL, attendJob, collectGifts, departWorld, fetchClaims, fetchWorld,
   heartbeat, publishWorld, releasePlot, sendGift, visitorId, listPlot as listPlotOnRegistry, expandPlot as expandOnRegistry, advancePlot as advanceOnRegistry,
-  coverPlot, boonPlot,
+  coverPlot, boonPlot, renamePlot, pendingEra, rememberEra, type PendingEra, setHiring as setHiringOnRegistry,
 } from '@/lib/net/registry';
+import { keepReceipt, dropReceipt, resumeReceipts, redeemFallback, SETTLED_ANSWER } from '@/lib/net/receipts';
+import { buyGold, buyGoods, cancelOrder, collectDeliveries, fetchExchange, finishPending, listOrder, resumePending } from '@/lib/net/exchange';
+import type { ExchangeActions } from './Exchange';
 import { fetchMarket, syncMarket } from '@/lib/net/market';
 import { publishName } from '@/lib/net/names';
+import Casino from './Casino';
 import { disconnectWallet, useWallet } from './WalletPicker';
 import { Notices, chatNoticesOn, setChatNotices, useNotices } from './Notices';
 import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost, earnRoom } from '@/lib/chain/vault';
-import { tokenBalance } from '@/lib/chain/emerge';
-import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
+import { TOKEN, tokenBalance, tokenLive } from '@/lib/chain/emerge';
+import { approveMarket, burnPlotOnChain, cancelOnChain, listOnChain, marketApproved, marketLive, mined, onChainClaimsLive } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
@@ -118,6 +121,8 @@ const HUD_INTERVAL = 180;
  * kilobytes rather than a field update.
  */
 const PUBLISH_INTERVAL = 45_000;
+/** How often an open world asks whether a later copy of it has been published elsewhere. */
+const RECONCILE_INTERVAL = 60_000;
 
 /**
  * How often the wallet's real token balance is re-read, in milliseconds.
@@ -192,22 +197,15 @@ export interface Visit {
   at: number;
   save: SavedWorld;
   /**
+   * The owner has never published, so this is the plot grown from its seed at
+   * the age the registry has it, not a place they built. Said on the banner.
+   */
+  unpublished?: boolean;
+  /**
    * This player is the plot's hired hand. The visit then pays: a share of what
    * the settlement's stewardship comes to while they have it open.
    */
   hand?: boolean;
-}
-
-/**
- * Hand a settlement the goodwill Gold, once, if it has not had it.
- *
- * Called wherever a world of the player's own is opened — on first mount and
- * on switching plots — and never on a visit, because a visitor's copy of
- * somebody else's settlement is not a settlement to pay anything into.
- */
-function makeGood(world: World) {
-  const gold = claimGoodwill(world);
-  if (gold > 0) fundTreasury(world, gold, `${gold.toLocaleString()} Gold arrived: ${GOODWILL.reason}`);
 }
 
 export default function EmergeClient() {
@@ -246,6 +244,17 @@ export default function EmergeClient() {
     try {
       if (window.sessionStorage.getItem(SPECTATOR_KEY) === '1') { setSpectator(true); setEntered(true); }
     } catch { /* no storage */ }
+    // `?plot=<seed>` is the token's external link on OpenSea and in wallets:
+    // it opens the world map on that plot, as the land list inside a world
+    // does — as a spectator until a wallet connects, so nobody is stopped at
+    // the front page on the way to look at a plot.
+    try {
+      const seed = Number(new URLSearchParams(window.location.search).get('plot'));
+      if (Number.isInteger(seed) && seed > 0 && seed <= 1e12) {
+        try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }
+        setMapFocus(seed); setSpectator(true); setEntered(true);
+      }
+    } catch { /* no URL to read */ }
   }, []);
   const spectate = useCallback(() => {
     try { window.sessionStorage.setItem(SPECTATOR_KEY, '1'); } catch { /* no storage */ }
@@ -286,6 +295,9 @@ export default function EmergeClient() {
    * browsing session's chosen name and surveyed plots are carried across once
    * into an empty wallet record rather than being thrown away.
    */
+  // Which wallet's server copy this browser has read, if any.
+  const remoteReadRef = useRef<string | null>(null);
+  const [remoteRead, setRemoteRead] = useState<string | null>(null);
   useEffect(() => {
     const record = address ? adoptRecord(address) : loadPlayer();
     // Write the opening record straight back. `loadPlayer` invents a name for
@@ -299,25 +311,37 @@ export default function EmergeClient() {
     // wrote it last. Merged rather than adopted, so a plot bought here and a
     // name chosen there both survive.
     let live = true;
-    void (async () => {
+    remoteReadRef.current = null;
+    setRemoteRead(null);
+    // Until the server's copy has been read, nothing is pushed: a browser
+    // that has not read yet knows nothing, and what it would push is an
+    // empty record. Tried again every so often until it succeeds, since the
+    // first attempt usually runs before the wallet has signed in.
+    const read = async () => {
       const remote = await fetchPlayerRecord(address);
-      if (!live || !remote) return;
+      if (!live) return;
+      if (!remote) { window.setTimeout(() => { if (live) void read(); }, 15_000); return; }
+      remoteReadRef.current = address;
+      setRemoteRead(address);
+      if (!remote.record) return;
       setPlayer((prev) => {
-        const merged = mergeRecords(prev ?? record, remote);
+        const merged = mergeRecords(prev ?? record, remote.record!);
         savePlayer(merged, address);
         return merged;
       });
-    })();
+    };
+    void read();
     return () => { live = false; };
   }, [address]);
 
-  // Whatever the record becomes, the server gets it a moment later. Debounced,
-  // because the yield timer touches it several times a minute.
+  // Whatever the record becomes, the server gets it a moment later — once the
+  // server's own copy has been read and merged in. Debounced, because the
+  // yield timer touches it several times a minute.
   useEffect(() => {
-    if (!address || !player) return;
+    if (!address || !player || remoteRead !== address) return;
     const timer = window.setTimeout(() => { void pushPlayerRecord(address, player); }, 2500);
     return () => window.clearTimeout(timer);
-  }, [address, player]);
+  }, [address, player, remoteRead]);
 
   const addressRef = useRef<string | null>(address);
   addressRef.current = address;
@@ -444,7 +468,25 @@ export default function EmergeClient() {
    * successful visit and be a different place entirely.
    */
   const goVisit = useCallback(async (seed: number): Promise<string | null> => {
-    const { world, reason } = await fetchWorld(seed);
+    const { world: published, claim: unpublished, reason } = await fetchWorld(seed);
+    /*
+     * A claimed plot whose owner has never published is still somebody's
+     * place, and anybody may look at it: the land is grown from its seed at
+     * the age and size the registry records, and it runs while it is watched.
+     * The banner says it is unpublished, so nobody mistakes it for what the
+     * owner built. Before this a visitor was simply turned away, with a
+     * sentence that suggested a settlement went dark when its owner did.
+     */
+    let world = published;
+    if (!world && unpublished) {
+      const grown = createWorld(seed, unpublished.worldName);
+      if (unpublished.era > 1) { grown.day += 1; grown.eraSince = 1; setEra(grown, unpublished.era); }
+      if (unpublished.expanded) expandPlot(grown);
+      world = {
+        seed, owner: unpublished.owner, ownerName: unpublished.ownerName, worldName: unpublished.worldName,
+        day: grown.day, population: grown.citizens.length, at: unpublished.at, snapshot: snapshotOf(grown),
+      };
+    }
     if (!world) return reason ?? 'That world is not published yet.';
     const save = world.snapshot as SavedWorld;
     if (!worldFromSave(save, seed, world.worldName)) {
@@ -459,12 +501,13 @@ export default function EmergeClient() {
     setVisit({
       seed,
       worldName: world.worldName,
-      region: world.worldName,
+      region: unpublished?.region ?? world.worldName,
       owner: world.owner,
       ownerName: world.ownerName,
       at: world.at,
       save,
       hand,
+      unpublished: !published,
     });
     return null;
   }, []);
@@ -482,6 +525,15 @@ export default function EmergeClient() {
     setClaimed(null);
   }, []);
 
+  /** The plot the world map should open on, set from the land list inside a world. */
+  const [mapFocus, setMapFocus] = useState<number | null>(null);
+  const openMapAt = useCallback((seed: number) => {
+    setMapFocus(seed);
+    setVisit(null);
+    clearClaimedWorld();
+    setClaimed(null);
+  }, []);
+
   /**
    * Give a plot up for good. The land goes back on the market.
    *
@@ -491,11 +543,15 @@ export default function EmergeClient() {
    * saying the plot is theirs, and the next person to claim it would pay and be
    * reverted.
    */
-  const release = useCallback((seed: number) => {
+  const release = useCallback(async (seed: number) => {
     if (addressRef.current && onChainClaimsLive()) {
-      // The signature is the release. Everything below is bookkeeping that
-      // follows it, so a refused signature must leave the plot alone.
-      void releaseOnChain(addressRef.current, seed);
+      // The signature is the release: the token is burned by its holder, and
+      // only once the chain has it does the row follow. A refused signature
+      // leaves the plot exactly where it was.
+      const burned = await burnPlotOnChain(addressRef.current, seed);
+      if (!burned.ok) return burned.message;
+      const state = await mined(burned.txHash);
+      if (state === 'reverted') return t('The chain refused the burn, so the plot is still yours.');
     }
     clearClaimedWorld();
     clearWorld(seed);
@@ -509,6 +565,7 @@ export default function EmergeClient() {
       return next;
     });
     setClaimed(null);
+    return null;
   }, []);
 
   /*
@@ -550,6 +607,7 @@ export default function EmergeClient() {
           onPlayer={updatePlayer}
           onEarn={earn}
           onVisit={goVisit}
+          onOpenMap={openMapAt}
         />
       )}
       {/* A visit is its own scene. Keying it on the seed means walking from one
@@ -576,17 +634,18 @@ export default function EmergeClient() {
           onPlayer={updatePlayer}
           onEarn={visit.hand ? earnAsHand : () => 0}
           onVisit={goVisit}
+          onOpenMap={openMapAt}
         />
       )}
       {wantsLanding && <Landing onEnter={() => setEntered(true)} onSpectate={spectate} />}
       {claimed === null && !visit && !wantsLanding && (
-        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} />
+        <PlotSelect player={player} onPlayer={updatePlayer} onEnter={enter} onVisit={goVisit} onHome={goHome} onDisconnect={disconnectHere} focusSeed={mapFocus} onFocused={() => setMapFocus(null)} />
       )}
     </>
   );
 }
 
-function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRename, onPlayer, onEarn, onVisit }: {
+function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRename, onPlayer, onEarn, onVisit, onOpenMap }: {
   claimed: ClaimedWorld;
   player: PlayerRecord;
   /** True while the world map is open over the top of a running world. */
@@ -594,8 +653,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   /** Set when this is somebody else's settlement, being looked at. */
   visit?: Visit | null;
   onLeave: () => void;
+  /** Leave for the world map with a plot on screen. */
+  onOpenMap: (seed: number) => void;
   /** Give this plot up entirely, rather than merely stepping out of it. */
-  onRelease: () => void;
+  onRelease: () => Promise<string | null> | void;
   onRename: (world: ClaimedWorld) => void;
   onPlayer: (record: PlayerRecord) => void;
   /** Credit stewardship yield the simulation has accrued. */
@@ -642,7 +703,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     worldRef.current = visit
       ? worldFromSave(visit.save, visit.seed, visit.worldName) ?? createWorld(visit.seed, visit.worldName)
       : loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
-    if (!visit) makeGood(worldRef.current);
     // A hand arriving is attention: their shift starts at full rate and
     // slides the same way an owner's does, so a tab left open all week
     // earns a hand about what it would earn an owner — very little.
@@ -805,7 +865,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const scene = sceneRef.current;
     if (!scene) return;
     const next = loadWorld(claimed.seed, claimed.name) ?? createWorld(claimed.seed, claimed.name);
-    makeGood(next);
     worldRef.current = next;
     setSelected(null);
     setFollowing(null);
@@ -854,6 +913,16 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    */
   const firstKey = `emerge:firstday:${wallet.address?.toLowerCase() ?? 'guest'}`;
   const [firstDay, setFirstDay] = useState<FirstDayRecord | null>(null);
+  /** Photo mode: the interface hidden for a clean screenshot. */
+  const [photo, setPhoto] = useState(false);
+  /** The frame's grade and bloom, remembered on this device; on unless turned off. */
+  const [fx, setFx] = useState(true);
+  useEffect(() => { try { setFx(localStorage.getItem('emerge.fx') !== '0'); } catch { /* no storage */ } }, []);
+  useEffect(() => { try { localStorage.setItem('emerge.fx', fx ? '1' : '0'); } catch { /* no storage */ } sceneRef.current?.setEffects(fx); }, [fx]);
+  /** The planning grid over the ground, remembered on this device. */
+  const [grid, setGrid] = useState(false);
+  useEffect(() => { try { setGrid(localStorage.getItem('emerge.grid') === '1'); } catch { /* no storage */ } }, []);
+  useEffect(() => { try { localStorage.setItem('emerge.grid', grid ? '1' : '0'); } catch { /* no storage */ } sceneRef.current?.setGrid(grid); }, [grid]);
   useEffect(() => {
     if (visit) { setFirstDay(null); return; }
     setFirstDay(readFirstDay(firstKey));
@@ -971,6 +1040,25 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         sceneRef.current?.reset(world);
         setView(snapshot(world, null));
       }
+      // A town the first build of 2.7 folded in half while it was already in
+      // its age gets its buildings back. The registry's row says when the age
+      // was reached: one reached after the fold began advanced for real, and
+      // its merge stands.
+      if (world && row && (world.formed ?? 1) >= 2 && !world.restoredForms && (row.eraAt ?? 0) < FOLD_CUTOFF) {
+        const back = restoreFoldedForms(world);
+        saveWorld(world);
+        if (back > 0) {
+          sceneRef.current?.reset(world);
+          setView(snapshot(world, null));
+          announce({
+            id: `restored-${seed}`,
+            kind: 'sync',
+            title: t('Your buildings are back'),
+            body: t('{n} buildings the age rebuild had folded away were raised again at no cost.', { n: back }),
+            lifetime: 20_000,
+          });
+        }
+      }
       // A charter or insurance bought on another device.
       if (world && row?.charterUntil && (world.charterUntil ?? 0) < row.charterUntil) { setCover(world, 'charter', row.charterUntil); saveWorld(world); }
       if (world && row?.insuredUntil && (world.insuredUntil ?? 0) < row.insuredUntil) { setCover(world, 'insurance', row.insuredUntil); saveWorld(world); }
@@ -1082,9 +1170,6 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // their settlement jumped has the answer in front of them.
     console.info(`Emerge: the published copy of ${remote.name} is on day ${remote.day}; this browser has day ${local.day}.${ahead ? ' Continuing from the published copy.' : ''}`);
     if (!ahead) return;
-    // A world that was published was opened by a client that made good on
-    // it, whether or not it wrote that down: it is not owed the grant again.
-    markGoodwill(remote);
     worldRef.current = remote;
     selectedRef.current = null;
     setSelected(null);
@@ -1111,7 +1196,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     void reconcile();
     const back = () => { if (document.visibilityState === 'visible') void reconcileRef.current(); };
     document.addEventListener('visibilitychange', back);
-    return () => { document.removeEventListener('visibilitychange', back); };
+    /*
+     * And on a timer, because a window that never goes away never asked again.
+     *
+     * The read used to happen on opening the world and on the tab coming back
+     * into view, which covers a phone — it is hidden the moment you put it
+     * down — and misses a desktop entirely: a browser left open on a monitor
+     * is never hidden, so it sat on the copy it opened with while the same
+     * player built on their phone, and never showed a minute of it. A player
+     * reported exactly that. Asking once a minute costs one small read and
+     * means two devices converge on their own.
+     */
+    const timer = window.setInterval(() => { void reconcileRef.current(); }, RECONCILE_INTERVAL);
+    return () => {
+      document.removeEventListener('visibilitychange', back);
+      window.clearInterval(timer);
+    };
   }, [reconcile, spectating]);
 
   /*
@@ -1166,6 +1266,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     };
   }, [claimed.seed, wallet.address, player.name, spectating]);
 
+  /** What a player is told when a payment is kept for handing in again. */
+  const keptLine = (hash: string) =>
+    t('Your payment {tx}… is kept in this browser and will be handed in again the next time you press this or open the world. Nothing more will be charged for it.', { tx: hash.slice(0, 10) });
+
   /**
    * Burn $EMERGE to put Gold in the treasury of the world being visited.
    *
@@ -1181,6 +1285,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!paid.ok) return paid.refused;
     // The tokens are already gone; keep the receipt so the server can check it.
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'gift', txHash: paid.txHash, address: wallet.address, seed: visit.seed, payload: { gold, fromName: player.name } });
 
     /*
      * The registry verifies the burn against the chain, and the first ask
@@ -1198,10 +1303,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       });
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} Your payment ${paid.txHash.slice(0, 10)}… went through — keep it, and tell us if the Gold never lands.`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     return null;
   }, [visit, wallet.address, player, onPlayer]);
 
@@ -1326,12 +1431,46 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         setSelected({ kind: 'building', id: building.id });
         markFirst('house');
       } else {
-        // Refused — the feed says why. Too close to a neighbour, or on the water.
+        // Refused: say why, here, not only in the feed.
         soundRef.current?.tick('deny');
+        const why = placementProblem(world, type, x, y) ?? t('The yard is short of materials for it.');
+        announce({ id: `build-${Date.now()}`, kind: 'sync', title: t('Not built'), body: tx(why), lifetime: 8_000 });
       }
       setView(snapshot(world, selectedRef.current));
     });
   }, [markFirst]);
+
+  /** Send somebody away for a few days' pay. */
+  const dismissFor = useCallback((id: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = dismissCitizen(world, id);
+    if (!result.ok) {
+      soundRef.current?.tick('deny');
+      announce({ id: `dismiss-${Date.now()}`, kind: 'sync', title: t('They stay'), body: tx(result.message), lifetime: 8_000 });
+      return;
+    }
+    setSelected(null);
+    sceneRef.current?.syncBuildings();
+    soundRef.current?.tick('select');
+    setView(snapshot(world, null));
+  }, []);
+
+  /** Set the stock the market keeps of a good. */
+  const keepFor = useCallback((resource: string, amount: number) => {
+    const world = worldRef.current;
+    if (!world) return;
+    setKeep(world, resource as Resource, amount);
+    setView(snapshot(world, selectedRef.current));
+  }, []);
+
+  /** Open or close the gates to newcomers. */
+  const gatesFor = useCallback((closed: boolean) => {
+    const world = worldRef.current;
+    if (!world) return;
+    setGates(world, closed);
+    setView(snapshot(world, selectedRef.current));
+  }, []);
 
   /** Retrain one person into a trade, for Gold. */
   const trainFor = useCallback((id: string, job: string): string | null => {
@@ -1351,6 +1490,26 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const result = trainTrade(world, job as WorkingJob, count);
     if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
     soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+
+  /** Engage a professional who is in town. */
+  const hireFor = useCallback((id: string): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = hireNotable(world, id);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+  /** Let a professional go. */
+  const dismissNotableFor = useCallback((id: string): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = dismissNotable(world, id);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
     setView(snapshot(world, selectedRef.current));
     return null;
   }, []);
@@ -1401,6 +1560,48 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Arm the cursor for taking a crossing down: the next tap on a deck removes it. */
+  const beginPond = useCallback((mode: 'Dig' | 'Fill') => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    setPanel(null);
+    setPlacing(mode);
+    scene.startWaterTool(mode, (x, y) => {
+      setPlacing(null);
+      const result = mode === 'Dig' ? digWater(world, x, y) : fillWater(world, x, y);
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `pond-${Date.now()}`, kind: 'sync', title: t('Nothing dug'), body: tx(result.message), lifetime: 8_000 });
+      } else {
+        soundRef.current?.cue('hammer');
+        announce({ id: `pond-${Date.now()}`, kind: 'sync', title: mode === 'Dig' ? t('Pond dug') : t('Pond filled'), body: tx(result.message), lifetime: 6_000 });
+      }
+      setView(snapshot(world, selectedRef.current));
+    });
+  }, [announce]);
+
+  const beginUnbridge = useCallback(() => {
+    const world = worldRef.current;
+    const scene = sceneRef.current;
+    if (!world || !scene) return;
+    setPanel(null);
+    setPlacing('Unbridge');
+    scene.startUnbridging((x, y) => {
+      setPlacing(null);
+      const result = removeBridge(world, x, y);
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `unbridge-${Date.now()}`, kind: 'sync', title: t('Still standing'), body: tx(result.message), lifetime: 8_000 });
+      } else {
+        soundRef.current?.cue('hammer');
+        announce({ id: `unbridge-${Date.now()}`, kind: 'sync', title: t('Crossing removed'), body: tx(result.message), lifetime: 6_000 });
+      }
+      setView(snapshot(world, selectedRef.current));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Pull a building down. Half the materials come back; the Gold does not. */
   const demolish = useCallback((id: string) => {
     const world = worldRef.current;
@@ -1443,7 +1644,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; sprites: () => unknown; select: (id: string) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; bubbles: () => unknown; digOk: (x: number, y: number) => unknown; centre: (x: number, y: number, zoom: number) => void; screenPoint: (x: number, y: number) => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1456,11 +1657,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       spot: () => sceneRef.current?.spot ?? null,
       music: () => music.playing,
       // Put the camera on a citizen, close, for a screenshot of what they ride.
-      focus: (id: string, zoom = 2.4) => { sceneRef.current?.focus({ kind: 'citizen', id }); sceneRef.current?.zoomBy(zoom); },
+      focus: (id: string, zoom = 2.4) => {
+        const kind = worldRef.current?.citizens.some((c) => c.id === id) ? 'citizen' : 'building';
+        sceneRef.current?.focus({ kind, id });
+        sceneRef.current?.zoomTo(zoom);
+      },
       art: (key: string) => sceneRef.current?.artInfo(key) ?? null,
+      dump: (names: string[]) => sceneRef.current?.dump(names) ?? null,
+      probe: (x: number, y: number) => sceneRef.current?.probe(x, y) ?? null,
       sprites: () => sceneRef.current?.spriteInfo() ?? null,
+      bubbles: () => sceneRef.current?.bubbleInfo() ?? null,
+      digOk: (x: number, y: number) => (worldRef.current ? digProblem(worldRef.current, x, y) : 'no world'),
+      centre: (x: number, y: number, zoom: number) => sceneRef.current?.centreOn(x, y, zoom),
+      screenPoint: (x: number, y: number) => sceneRef.current?.screenPoint(x, y) ?? null,
       // Open a building's card, as a tap on it would.
       select: (id: string) => { setSelected({ kind: 'building', id }); },
+      pick: (id: string) => { setSelected({ kind: 'citizen', id }); },
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;
@@ -1541,11 +1753,15 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     scene.startPlacement(building.type, (x, y) => {
       setMovingBuilding(null);
       const result = moveBuilding(world, id, x, y);
-      if (!result.ok) { soundRef.current?.tick('deny'); return; }
+      if (!result.ok) {
+        soundRef.current?.tick('deny');
+        announce({ id: `move-${Date.now()}`, kind: 'sync', title: t('Not moved'), body: tx(result.message), lifetime: 8_000 });
+        return;
+      }
       scene.syncBuildings();
       soundRef.current?.cue('hammer');
       setView(snapshot(world, selectedRef.current));
-    });
+    }, id);
   }, []);
 
   /** Spend Gold and materials to make a building better at its job. */
@@ -1556,6 +1772,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!result.ok) { soundRef.current?.tick('deny'); return; }
     sceneRef.current?.syncBuildings();
     soundRef.current?.cue('anvil');
+    setView(snapshot(world, selectedRef.current));
+  }, []);
+
+  /** Improve every building of a type at once, as far as the treasury and the yard go. */
+  const improveAll = useCallback((type: string) => {
+    const world = worldRef.current;
+    if (!world) return;
+    const result = upgradeAllOfType(world, type);
+    if (!result.ok) {
+      soundRef.current?.tick('deny');
+      announce({ id: `improve-all-${Date.now()}`, kind: 'sync', title: t('Not improved'), body: tx(result.message), lifetime: 8_000 });
+      return;
+    }
+    sceneRef.current?.syncBuildings();
+    soundRef.current?.cue('anvil');
+    announce({ id: `improve-all-${Date.now()}`, kind: 'sync', title: t('Improved'), body: tx(result.message), lifetime: 8_000 });
     setView(snapshot(world, selectedRef.current));
   }, []);
 
@@ -1587,7 +1819,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       if (!live || !world || !gifts.length) return;
       const arrived: { fromName: string; gold: number }[] = [];
       for (const g of gifts) {
-        fundTreasury(world, g.gold, `Gift from ${g.fromName || 'a visitor'}`);
+        // Somebody else's generosity is not the owner attending their plot.
+        fundTreasury(world, g.gold, `Gift from ${g.fromName || 'a visitor'}`, false);
         arrived.push(g);
       }
       for (const g of arrived) {
@@ -1612,11 +1845,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, RENAME_COST_EMERGE, wallet.address);
     if (!paid.ok) return;
     renameWorld(world, next);
-    // The name belongs to the token, not to this browser, so where there is a
-    // token it is written there too and travels with the plot.
-    if (wallet.address && onChainClaimsLive()) {
-      void renameOnChain(wallet.address, claimed.seed, world.name);
-    }
+    // The claim row carries the name: the world map, the leaderboard and the
+    // token's metadata all read it from there, so it travels with the plot.
+    if (wallet.address) void renamePlot(claimed.seed, wallet.address, world.name);
     onPlayer({ ...player, ledger: paid.ledger });
     onRename({ ...claimed, name: world.name });
     refresh();
@@ -1638,6 +1869,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, EXPAND_COST_EMERGE, wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'expand', txHash: paid.txHash, address: wallet.address, seed: claimed.seed });
     let result = await expandOnRegistry(claimed.seed, wallet.address, paid.txHash ?? undefined);
     // The chain takes a moment to show the burn; the registry says so, and is asked again.
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
@@ -1645,10 +1877,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       result = await expandOnRegistry(claimed.seed, wallet.address, paid.txHash ?? undefined);
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the expansion never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     expandPlot(world);
     saveWorld(world);
     // The land itself grew: the ground, the water and the camera's limits are
@@ -1682,16 +1914,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, cost, wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'cover', txHash: paid.txHash, address: wallet.address, seed: claimed.seed, payload: { kind } });
     let result = await coverPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
       result = await coverPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined);
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     setCover(world, kind, result.until);
     saveWorld(world);
     refresh();
@@ -1713,16 +1946,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, BOON_COST_EMERGE[kind], wallet.address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
+    if (paid.txHash) keepReceipt({ kind: 'boon', txHash: paid.txHash, address: wallet.address, seed: claimed.seed, payload: { kind, emblem } });
     let result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined, emblem);
     for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
       result = await boonPlot(claimed.seed, wallet.address, kind, paid.txHash ?? undefined, emblem);
     }
     if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if it never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
+      if (paid.txHash && SETTLED_ANSWER.test(result.reason)) dropReceipt(paid.txHash);
+      return paid.txHash && !SETTLED_ANSWER.test(result.reason) ? `${tx(result.reason)} ${keptLine(paid.txHash)}` : tx(result.reason);
     }
+    if (paid.txHash) dropReceipt(paid.txHash);
     const done = applyBoon(world, kind, emblem);
     if (!done.ok) return done.message;
     saveWorld(world);
@@ -1737,10 +1971,22 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   /**
    * Advance the plot to the next era.
    *
-   * The world is published first, because the registry judges the gate on
-   * the published copy and not on this browser's word; then paid; then
-   * recorded; and only then does this world change. A refusal at any step
-   * leaves it as it was, and a dismissed wallet prompt costs nothing.
+   * In order: a receipt kept from an earlier attempt is handed in before
+   * anything else; the world is published, because the registry judges the
+   * gate on the published copy and not on this browser's word; the registry
+   * is asked without a payment, which is where a refusal costs nothing and
+   * where anything already on account pays; then paid; then handed in; and
+   * only then does this world change.
+   *
+   * A payment that has left the wallet is kept in this browser until the
+   * registry has accepted it. It used to be shown once, ten characters of
+   * it, in a toast that said keep it and tell us — and the button paid again
+   * the next time it was pressed. A player whose chain was slow to confirm
+   * past the button's patience, or whose connection dropped between the
+   * wallet and the registry, paid a million $EMERGE and stayed a settlement,
+   * and reported exactly that. The receipt is handed in again first now, on
+   * the next press or the next time the world opens, and the registry takes
+   * the same receipt for the same step as often as it is offered.
    */
   const advanceFor = useCallback(async (): Promise<string | null> => {
     const world = worldRef.current;
@@ -1748,47 +1994,95 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const gate = eraGate(world);
     if (!gate.next) return t('This is as far as the eras go, for now.');
     if (!gate.open) return t('The {era} era is not built yet. It is coming.', { era: gate.next.name });
-    if (!gate.ready) return t('The settlement has not earned the next era yet.');
     if (!wallet.address) return t('Connect a wallet to advance the plot.');
+    const address = wallet.address;
+    const next = gate.next;
+    const target = next.id;
+    const seed = claimed.seed;
+
+    const arrived = () => {
+      if (!advanceEra(world)) setEra(world, target);
+      saveWorld(world);
+      // Publish again with the era on it, so another device reading the
+      // published copy opens a township rather than waiting for the claims
+      // poll to catch it up.
+      void publishWorld({
+        seed, owner: address, ownerName: player.name, worldName: world.name,
+        day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
+      });
+      selectedRef.current = null;
+      setSelected(null);
+      sceneRef.current?.reset(world);
+      refresh();
+      announce({
+        id: `era-${seed}-${target}`,
+        kind: 'claim',
+        title: t('A new era'),
+        body: t('{name} is a {era} now. {arrives}', { name: world.name, era: next.name.toLowerCase(), arrives: tx(next.arrives) }),
+        lifetime: 16_000,
+      });
+    };
+    // Ask, and keep asking while the chain is still settling the payment: a
+    // minute, which three confirmations on a slow block can need.
+    const handIn = async (burnTx?: string) => {
+      let result = await advanceOnRegistry(seed, address, target, burnTx);
+      for (let i = 1; i < 24 && !result.ok && result.settling; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        result = await advanceOnRegistry(seed, address, target, burnTx);
+      }
+      return result;
+    };
+    const keptNote = (hash: string) =>
+      t('Your payment {tx}… is kept in this browser and will be handed in again the next time you press this or open the world. Nothing more will be charged for it.', { tx: hash.slice(0, 10) });
+
+    // 1. A receipt kept from before is handed in before anything is paid.
+    const kept = pendingEra(address, seed);
+    if (kept) {
+      const again = await handIn(kept.txHash);
+      if (again.ok) { rememberEra(null, kept); arrived(); return null; }
+      // A receipt the chain says bought nothing, or that was spent on
+      // something else, will not be accepted tomorrow either: let it go, and
+      // say so rather than paying again on top of it.
+      if (again.used || /failed on chain|not a transaction hash|different wallet/i.test(again.reason)) {
+        rememberEra(null, kept);
+        return `${tx(again.reason)} ${t('The earlier payment {tx}… could not be handed in, and nothing was paid today.', { tx: kept.txHash.slice(0, 10) })}`;
+      }
+      return `${tx(again.reason)} ${keptNote(kept.txHash)}`;
+    }
+    if (!gate.ready) return t('The settlement has not earned the next era yet.');
+
+    // 2. Publish, so the registry judges the step on today's copy.
     const put = await publishWorld({
-      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
+      seed, owner: address, ownerName: player.name, worldName: world.name,
       day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
     });
-    if (!put.ok && !put.behind) return t('The world could not be published, and the registry judges the step on the published copy. Try again in a moment.');
-    const target = gate.next.id;
-    const paid = await spend(player.ledger, advanceCost(target), wallet.address);
+    if (!put.ok && !put.behind) {
+      // Say why. "Try again in a moment" sent a player whose world was too
+      // large for the relay back to the same button for days.
+      return `${t('The world could not be published, and the registry judges the step on the published copy.')} ${put.error ? tx(put.error) : t('Try again in a moment.')}`;
+    }
+
+    // 3. Ask without paying. A refusal here — the published copy short of the
+    //    gate, a plot that is not this wallet's — costs nothing; and what is
+    //    already on account pays before the wallet is asked for anything.
+    if (tokenLive()) {
+      const dry = await handIn();
+      if (dry.ok) { arrived(); return null; }
+      if (!dry.needsPayment) return tx(dry.reason);
+    }
+
+    // 4. Pay, keep the receipt, hand it in.
+    const paid = await spend(player.ledger, advanceCost(target), address);
     if (!paid.ok) return paid.refused;
     onPlayer({ ...player, ledger: paid.ledger });
-    let result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
-    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 2_500));
-      result = await advanceOnRegistry(claimed.seed, wallet.address, target, paid.txHash ?? undefined);
-    }
-    if (!result.ok) {
-      return paid.txHash
-        ? `${result.reason} ${t('Your payment {tx}… was accepted by the chain — keep it, and tell us if the era never arrives.', { tx: paid.txHash.slice(0, 10) })}`
-        : result.reason;
-    }
-    if (!advanceEra(world)) setEra(world, target);
-    saveWorld(world);
-    // Publish again with the era on it, so another device reading the
-    // published copy opens a township rather than waiting for the claims
-    // poll to catch it up.
-    void publishWorld({
-      seed: claimed.seed, owner: wallet.address, ownerName: player.name, worldName: world.name,
-      day: world.day, hour: world.hour, population: world.population, snapshot: snapshotOf(world),
-    });
-    selectedRef.current = null;
-    setSelected(null);
-    sceneRef.current?.reset(world);
-    refresh();
-    announce({
-      id: `era-${claimed.seed}-${target}`,
-      kind: 'claim',
-      title: t('A new era'),
-      body: t('{name} is a {era} now. {arrives}', { name: world.name, era: gate.next.name.toLowerCase(), arrives: tx(gate.next.arrives) }),
-      lifetime: 16_000,
-    });
+    const receipt: PendingEra | null = paid.txHash
+      ? { seed, era: target, txHash: paid.txHash, address: address.toLowerCase(), at: Date.now() }
+      : null;
+    if (receipt) rememberEra(receipt);
+    const result = await handIn(paid.txHash ?? undefined);
+    if (!result.ok) return receipt ? `${tx(result.reason)} ${keptNote(receipt.txHash)}` : tx(result.reason);
+    if (receipt) rememberEra(null, receipt);
+    arrived();
     return null;
     // `announce` is stable for the life of the world.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1861,6 +2155,20 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * one is a stake going out. Both are booked under the arena, where the Bank
    * shows them.
    */
+  /** Gold at the casino: a negative delta stakes, a positive one pays. */
+  const goldAtCasino = useCallback((delta: number, note: string) => {
+    const world = worldRef.current;
+    if (!world || spectating) return false;
+    if (delta < 0) {
+      const ok = casinoStake(world, -delta, note);
+      if (ok) refresh();
+      return ok;
+    }
+    casinoPayout(world, delta, note);
+    refresh();
+    return true;
+  }, [refresh, spectating]);
+
   const stakeAtArena = useCallback((gold: number, on: string) => {
     const world = worldRef.current;
     // Never on a visit: the treasury in front of a visitor is not theirs, and
@@ -1877,6 +2185,216 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   }, [refresh, spectating]);
 
   /** Move Gold in or out of the treasury and persist the vault ledger. */
+  /*
+   * The exchange.
+   *
+   * The world in front of you pays first and is refunded on a refusal, so the
+   * server is never asked to sell what the store does not hold. Deliveries
+   * owed to this world are collected on entry and every minute after, once
+   * each by id.
+   */
+  /*
+   * Take a delivery in, then save, then tell the server to forget it.
+   *
+   * The world is written to disk every fifteen seconds, and `collect` deletes
+   * the server's record at once — so a tab closed in between lost Gold the
+   * server no longer owed. Saving first closes that window: if anything fails
+   * after this point the delivery is still owed and arrives on the next poll.
+   * The live world is read here rather than captured by the caller, because a
+   * Gold purchase can spend a minute on the chain and the world may have been
+   * reopened underneath it.
+   */
+  const takeDeliveries = useCallback((list: { id: string }[]) => {
+    const world = worldRef.current;
+    if (!world || !wallet.address) return false;
+    const taken: string[] = [];
+    let changed = false;
+    for (const d of list) {
+      if (receiveDelivery(world, d as Parameters<typeof receiveDelivery>[1])) changed = true;
+      taken.push(d.id);
+    }
+    if (changed) saveWorld(world);
+    if (taken.length) void collectDeliveries(wallet.address, claimed.seed, taken);
+    return changed;
+  }, [wallet.address, claimed.seed]);
+
+  const exchangeActions = useMemo<ExchangeActions>(() => ({
+    list: async (kind, qty, unitPrice, resource) => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      if (kind === 'resource') {
+        if (!resource || !escrowGoods(world, resource, qty)) return t('The store does not hold that many.');
+      } else if (!drawFromTreasury(world, qty, `${qty.toLocaleString()} Gold put up on the exchange.`)) {
+        return t('The treasury cannot cover that lot.');
+      }
+      const r = await listOrder(wallet.address, player.name, claimed.seed, kind, qty, unitPrice, resource);
+      if (!r.ok) {
+        if (kind === 'resource' && resource) world.resources[resource] += qty;
+        else fundTreasury(world, qty, 'Gold back: the exchange refused the order.');
+        refresh();
+        return tx(r.reason);
+      }
+      // Said at once rather than at the next poll: a player who has just
+      // watched the Gold leave the treasury should not wait a minute to be
+      // told where it went. The poll reads the book and corrects this.
+      if (kind === 'gold') setFrozenGold(world, frozenGold(world) + qty);
+      saveWorld(world);
+      refresh();
+      return null;
+    },
+    buy: async (order, qty) => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      if (order.kind === 'resource') {
+        const total = qty * order.unitPrice;
+        if (!drawFromTreasury(world, total, `${total.toLocaleString()} Gold paid on the exchange for ${qty.toLocaleString()} ${order.resource}.`)) return t('The treasury cannot cover that.');
+        const r = await buyGoods(wallet.address, player.name, claimed.seed, order.id, qty);
+        if (!r.ok) { fundTreasury(world, total, 'Gold back: the trade was refused.'); refresh(); return tx(r.reason); }
+        takeDeliveries([r.delivery]);
+        refresh();
+        return null;
+      }
+      const r = await buyGold(player.ledger, wallet.address, player.name, claimed.seed, order, qty);
+      if (!r.ok) return tx(r.reason);
+      onPlayer({ ...player, ledger: r.ledger });
+      takeDeliveries([r.delivery]);
+      refresh();
+      return null;
+    },
+    cancel: async (id) => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      const r = await cancelOrder(wallet.address, claimed.seed, id);
+      if (!r.ok) return tx(r.reason);
+      // What comes back goes to the world it came out of. Another plot's
+      // refund waits there for that world to open; crediting it here would
+      // pay it twice.
+      // The lot is no longer standing, wherever it goes back to.
+      if (r.delivery && r.delivery.kind === 'gold' && r.seed === claimed.seed) {
+        setFrozenGold(world, frozenGold(world) - r.delivery.amount);
+        saveWorld(world);
+      }
+      if (r.seed !== claimed.seed) { refresh(); return t('Taken down. What was unsold goes back to the plot it came from, the next time that world is open.'); }
+      if (r.delivery) takeDeliveries([r.delivery]);
+      refresh();
+      return null;
+    },
+    finish: async () => {
+      const world = worldRef.current;
+      if (!world || !wallet.address) return t('Connect a wallet to trade.');
+      const { settled, reason } = await finishPending(wallet.address, player.name);
+      takeDeliveries(settled.map((x) => x.delivery));
+      if (settled.length) refresh();
+      return reason ? tx(reason) : settled.length ? null : t('Nothing was waiting to be finished.');
+    },
+  }), [wallet.address, player, claimed.seed, onPlayer, refresh, takeDeliveries]);
+  const nameRef = useRef(player.name);
+  nameRef.current = player.name;
+  const advanceForRef = useRef(advanceFor);
+  advanceForRef.current = advanceFor;
+  useEffect(() => {
+    if (!wallet.address || visit) return;
+    const address = wallet.address;
+    let live = true;
+    let eraResumed = false;
+    let receiptsResumed = false;
+    const tick = async () => {
+      // A purchase whose chain payment settled after the buyer's window closed
+      // is handed in here, without anybody pressing anything.
+      const done = await resumePending(address, nameRef.current).catch(() => []);
+      // And a payment for an era that never arrived, once per opening: the
+      // receipt is in this browser, and handing it in costs nothing more.
+      if (live && !eraResumed && pendingEra(address, claimed.seed)) {
+        eraResumed = true;
+        const said = await advanceForRef.current().catch(() => null);
+        if (live && said) {
+          announce({ id: `era-kept-${claimed.seed}`, kind: 'claim', title: t('A payment kept from before'), body: said, lifetime: 20_000 });
+        }
+      }
+      /*
+       * And every other receipt this browser kept — an expansion, a charter,
+       * a boon, a gift, a job opened — handed in to its own step, which
+       * takes the same receipt as often as it is offered; or, for one with
+       * no step to take it back, redeemed on account.
+       */
+      if (live && !receiptsResumed) {
+        receiptsResumed = true;
+        const said = await resumeReceipts(address, {
+          expand: async (r) => {
+            const res = await expandOnRegistry(r.seed, address, r.txHash);
+            if (!res.ok) return { done: SETTLED_ANSWER.test(res.reason) };
+            const w = worldRef.current;
+            if (w && r.seed === claimed.seed && !w.expanded) { expandPlot(w); saveWorld(w); selectedRef.current = null; setSelected(null); sceneRef.current?.reset(w); refresh(); }
+            return { done: true, note: t('An expansion paid for earlier has arrived.') };
+          },
+          boon: async (r) => {
+            const kind = String(r.payload?.kind ?? '') as BoonKind;
+            const emblem = typeof r.payload?.emblem === 'string' ? r.payload.emblem : undefined;
+            if (!kind || !BOON_COST_EMERGE[kind]) return { done: true };
+            const res = await boonPlot(r.seed, address, kind, r.txHash, emblem);
+            if (!res.ok) return { done: SETTLED_ANSWER.test(res.reason) };
+            const w = worldRef.current;
+            if (w && r.seed === claimed.seed) {
+              const applied = applyBoon(w, kind, emblem);
+              if (applied.ok) { saveWorld(w); if (kind === 'restore') sceneRef.current?.reset(w); else sceneRef.current?.syncBuildings(); refresh(); }
+            }
+            return { done: true, note: t('A boon paid for earlier has been delivered.') };
+          },
+          cover: async (r) => {
+            const kind = String(r.payload?.kind ?? '') as CoverKind;
+            if (kind !== 'charter' && kind !== 'insurance' && kind !== 'builders') return { done: true };
+            const res = await coverPlot(r.seed, address, kind, r.txHash);
+            if (!res.ok) return { done: SETTLED_ANSWER.test(res.reason) };
+            const w = worldRef.current;
+            if (w && r.seed === claimed.seed) { setCover(w, kind, res.until); saveWorld(w); refresh(); }
+            return { done: true, note: t('A cover paid for earlier is in force.') };
+          },
+          hire: async (r) => {
+            const res = await setHiringOnRegistry(r.seed, address, true, r.txHash);
+            return res.ok ? { done: true, note: t('The job you paid to open is open.') } : { done: SETTLED_ANSWER.test(res.reason ?? '') };
+          },
+          gift: async (r) => {
+            const gold = Math.floor(Number(r.payload?.gold ?? 0));
+            if (!(gold > 0)) return { done: true };
+            const res = await sendGift({ seed: r.seed, gold, from: address, fromName: String(r.payload?.fromName ?? nameRef.current), burnTx: r.txHash });
+            if (res.ok) return { done: true, note: t('A gift paid for earlier has been sent.') };
+            if (res.settling) return { done: false };
+            if (SETTLED_ANSWER.test(res.reason)) return { done: true };
+            // Refused for good before the payment was taken — the plot given
+            // up since, say. The payment is still whole, so it goes on account.
+            return redeemFallback(address)(r);
+          },
+        }, redeemFallback(address), ['expand', 'boon', 'hire', 'gift', 'cover']).catch(() => []);
+        if (live) {
+          for (const s of said) announce({ id: `receipt-${s.receipt.txHash.slice(0, 12)}`, kind: 'claim', title: t('A payment kept from before'), body: s.note, lifetime: 16_000 });
+        }
+      }
+      const book = await fetchExchange(claimed.seed, address);
+      if (!live) return;
+      /*
+       * What this settlement has standing in Gold orders, read off the book
+       * rather than tallied as orders come and go. The book is the only thing
+       * that knows about a fill, a cancel or a listing made on another device,
+       * so reading it is what keeps the figure from drifting — and it is only
+       * written when the book actually answered, so a failed fetch leaves the
+       * last known figure alone rather than reporting nothing is listed.
+       */
+      const world = worldRef.current;
+      if (book && world) {
+        const mine = book.orders
+          .filter((o) => o.kind === 'gold' && o.seed === claimed.seed && o.seller.toLowerCase() === address.toLowerCase())
+          .reduce((sum, o) => sum + Math.max(0, o.remaining), 0);
+        if (setFrozenGold(world, mine)) { saveWorld(world); refresh(); }
+      }
+      const waiting = [...done.map((d) => d.delivery), ...(book?.owed ?? [])];
+      if (!waiting.length) return;
+      if (takeDeliveries(waiting)) refresh();
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 60_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [wallet.address, claimed.seed, visit, refresh, takeDeliveries]);
+
   const vault = useCallback((ledger: VaultLedger, goldDelta: number, note: string) => {
     const world = worldRef.current;
     if (!world) return;
@@ -1897,8 +2415,34 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!wallet.address) return;
     void (async () => {
       const asked = price !== null && price > 0 ? Math.round(price) : null;
+      /*
+       * Where plots are tokens the listing lives on the market contract: the
+       * plot stays in the seller's wallet, the market is approved to move it
+       * once, and the price is written on chain. The registry row mirrors
+       * what the chain says, so the map shows it — nothing else.
+       */
+      if (marketLive()) {
+        const me = wallet.address!;
+        const tell = (body: string) => announce({ id: `list-${claimed.seed}`, kind: 'claim', title: asked ? t('Listing') : t('Taking it down'), body, lifetime: 14_000 });
+        if (asked) {
+          if (!(await marketApproved(me))) {
+            tell(t('First, let the market move the plot when it sells: one signature, once.'));
+            const approved = await approveMarket(me);
+            if (!approved.ok) { tell(approved.message); return; }
+            if ((await mined(approved.txHash)) === 'reverted') { tell(t('The chain refused the approval.')); return; }
+          }
+          const listed = await listOnChain(me, claimed.seed, asked);
+          if (!listed.ok) { tell(listed.message); return; }
+          if ((await mined(listed.txHash)) === 'reverted') { tell(t('The chain refused the listing.')); return; }
+          tell(t('Listed on chain at {price} {ticker}. Anybody can buy it from the world map; the plot stays in your wallet until it sells.', { price: asked.toLocaleString(), ticker: TOKEN.ticker }));
+        } else {
+          const cancelled = await cancelOnChain(me, claimed.seed);
+          if (!cancelled.ok) { tell(cancelled.message); return; }
+          if ((await mined(cancelled.txHash)) === 'reverted') { tell(t('The chain refused that.')); return; }
+        }
+      }
       const result = await listPlotOnRegistry(claimed.seed, wallet.address!, asked);
-      if (!result.ok) return;
+      if (!result.ok && !marketLive()) return;
       const listings = player.listings.filter((l) => l.seed !== claimed.seed);
       if (asked) listings.push({ seed: claimed.seed, region: claimed.region, price: asked, listedAt: Date.now() });
       onPlayer({ ...player, listings });
@@ -1914,14 +2458,21 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
    * Keyboard
    * -------------------------------------------------------------- */
 
+  useEffect(() => { sceneRef.current?.setPhoto(photo); }, [photo]);
+  useEffect(() => { if (ready) sceneRef.current?.setGrid(grid); }, [ready, grid]);
+  useEffect(() => { if (ready) sceneRef.current?.setEffects(fx); }, [ready, fx]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === 'Space') { e.preventDefault(); setPaused((p) => !p); }
       else if (e.key === '1') setSpeed(1);
       else if (e.key === '2') setSpeed(2);
       else if (e.key === 'f' || e.key === 'F') toggleFollow();
-      else if (e.key === 'Escape') { setPanel(null); cancelBuild(); setSelected(null); }
+      else if (e.key === 'p' || e.key === 'P') setPhoto((v) => !v);
+      else if (e.key === 'g' || e.key === 'G') setGrid((v) => !v);
+      else if (e.key === 'v' || e.key === 'V') setFx((v) => !v);
+      else if (e.key === 'Escape') { setPhoto(false); setPanel(null); cancelBuild(); setSelected(null); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1941,9 +2492,20 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         </div>
       )}
 
-      {ready && view && (
+      {ready && photo && (
+        <button className="photo-exit" onClick={() => setPhoto(false)} title={t('Back to the interface (P or Esc)')}>
+          {t('Exit photo mode')}
+        </button>
+      )}
+
+      {ready && view && !photo && (
         <>
           <Hud
+            onPhoto={() => setPhoto(true)}
+            grid={grid}
+            onGrid={() => setGrid((v) => !v)}
+            effects={fx}
+            onEffects={() => setFx((v) => !v)}
             view={view}
             paused={paused}
             speed={speed}
@@ -1955,6 +2517,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             player={player}
             onRenameCitizen={renameCitizenFor}
             onDemolish={demolish}
+            onDismiss={dismissFor}
             onRebuild={rebuild}
             onFight={fight}
             hover={hoverInfo}
@@ -1972,6 +2535,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onCancelBuild={cancelBuild}
             movingBuilding={movingBuilding}
             onUpgradeBuilding={improveBuilding}
+            onUpgradeAll={improveAll}
             onMoveBuilding={moveBuildingTo}
             watching={watching}
             online={online}
@@ -1990,13 +2554,29 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             } : null}
             onFirstDayGo={(go) => {
               if (go === 'person') {
-                const someone = worldRef.current?.citizens.find((c) => !c.inside) ?? worldRef.current?.citizens[0];
+                // Somebody with a trade, out where they can be seen: the step
+                // says everyone here has a trade, so show one who does.
+                const people = worldRef.current?.citizens ?? [];
+                const someone = people.find((c) => !c.inside && c.age >= 16 && c.job !== 'unemployed')
+                  ?? people.find((c) => c.age >= 16) ?? people[0];
                 if (someone) focusOn({ kind: 'citizen', id: someone.id });
               } else setPanel(go);
             }}
             onFirstDayDismiss={() => markFirst('dismissed')}
           />
           <Notices notices={notices} onDismiss={dismiss} />
+          {panel === 'casino' && (
+            <Casino
+              address={wallet.address}
+              treasury={view.treasury}
+              ledger={player.ledger}
+              onLedger={(ledger) => onPlayer({ ...player, ledger })}
+              onGold={goldAtCasino}
+              onCue={(kind) => { if (kind === 'win') soundRef.current?.cue('hammer'); else if (kind === 'lose') soundRef.current?.tick('deny'); else soundRef.current?.tick('deny'); }}
+              onClose={() => setPanel(null)}
+              spectating={!!spectating}
+            />
+          )}
           {panel === 'arena' && (
             <Arena
               world={spectating ? null : worldRef.current}
@@ -2021,8 +2601,17 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onBuild={beginBuild}
             onTrain={trainFor}
             onTrainTrade={trainTradeFor}
+            onHire={hireFor}
+            onDismissNotable={dismissNotableFor}
+            onGates={gatesFor}
+            onOpenMap={onOpenMap}
+            onExchange={exchangeActions}
+            onKeep={keepFor}
             onClearTrees={beginClear}
             onBridge={beginBridge}
+            onUnbridge={beginUnbridge}
+            onPond={() => beginPond('Dig')}
+            onFillPond={() => beginPond('Fill')}
             onRaiseCity={raiseCityFor}
             onFestival={festivalFor}
             onCover={coverFor}
@@ -2032,8 +2621,9 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onAdvance={advanceFor}
             onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}
-            onRelease={onRelease}
+            onRelease={() => { void (async () => { const problem = await onRelease(); if (problem) announce({ id: `release-${claimed.seed}`, kind: 'claim', title: t('Not given up'), body: problem, lifetime: 12_000 }); })(); }}
             onVault={vault}
+            onNotice={(title, body, kind) => announce({ id: `bank-${Date.now()}`, kind: kind ?? 'sync', title, body, lifetime: 12_000 })}
             onWages={setWages}
             onList={listPlot}
             onPlayer={onPlayer}

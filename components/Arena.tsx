@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_STAKE, MAX_STAKE_PER_DAY, MAX_TOKEN_STAKE, MAX_TOKEN_STAKE_PER_DAY, HOUSE_EDGE, offered, payout, refuse, refuseToken } from '@/lib/arena/betting';
 import { enterFighter, fetchArena, placeTokenBet, type ArenaState, type Bout, type Fighter } from '@/lib/net/arena';
 import { pay } from '@/lib/chain/spend';
+import { keepReceipt, dropReceipt, resumeReceipts, redeemFallback, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { credit, type VaultLedger } from '@/lib/chain/vault';
 import { VAULT_ADDRESS, TOKEN, tokenLive } from '@/lib/chain/emerge';
 import { skillDays, skillLevel, vigourOf, type Citizen, type World, type WorkingJob } from '@/lib/simulation';
@@ -122,11 +123,36 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
       const next = await fetchArena();
       if (live && next) setState(next);
     };
+    /*
+     * A stake paid into the vault for a bet the book never took — the chain
+     * slow, the reply lost — is placed again here; on a bout that has since
+     * closed it is redeemed on account instead, so a stake is never simply
+     * gone.
+     */
+    if (address) {
+      const owner = address;
+      void resumeReceipts(owner, {
+        bet: async (r) => {
+          const boutId = Number(r.payload?.boutId), stake = Number(r.payload?.stake);
+          const side = r.payload?.side === 'blue' ? 'blue' : 'red';
+          if (!Number.isFinite(boutId) || !(stake > 0)) return { done: true };
+          const res = await placeTokenBet(owner, boutId, side, stake, r.txHash);
+          if (res.ok) return { done: true, note: t('A stake kept from before is on the bout.') };
+          if (/not open|closed/i.test(res.error)) return redeemFallback(owner)(r);
+          return { done: SETTLED_ANSWER.test(res.error) };
+        },
+      }, redeemFallback(owner), ['bet']).then((said) => {
+        if (live && said.length) setNotice(said.map((x) => x.note).join(' '));
+        if (live) void read();
+      }).catch(() => {});
+    }
     void read();
     const poll = window.setInterval(() => { void read(); }, POLL);
     const beat = window.setInterval(() => setTick(Date.now()), 250);
     return () => { live = false; window.clearInterval(poll); window.clearInterval(beat); };
-  }, []);
+    // `address` is the one input; the rest are stable for the life of the panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address]);
 
   const bout = state?.bout ?? null;
   const skew = state?.skew ?? 0;
@@ -226,13 +252,21 @@ export default function Arena({ world, seed, worldName, playerName, address, tre
     const paid = await pay(ledger, amount, address, VAULT_ADDRESS);
     if (!paid.ok) { setPlacing(false); setNotice(paid.refused); return; }
     onLedger(paid.ledger);
+    if (paid.txHash) keepReceipt({ kind: 'bet', txHash: paid.txHash, address, seed: 0, payload: { boutId: bout.id, side: on, stake: amount } });
     let result = await placeTokenBet(address, bout.id, on, amount, paid.txHash);
-    for (let i = 1; i < 10 && !result.ok && result.settling; i++) {
+    for (let i = 1; i < 24 && !result.ok && result.settling; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2_500));
       result = await placeTokenBet(address, bout.id, on, amount, paid.txHash);
     }
     setPlacing(false);
-    if (!result.ok) { setNotice(result.error); return; }
+    if (!result.ok) {
+      if (paid.txHash && SETTLED_ANSWER.test(result.error)) dropReceipt(paid.txHash);
+      setNotice(paid.txHash && !SETTLED_ANSWER.test(result.error)
+        ? `${result.error} ${t('Your stake {tx}… is kept in this browser and is placed again the next time you open the arena; if the bout has closed by then it goes on account.', { tx: paid.txHash.slice(0, 10) })}`
+        : result.error);
+      return;
+    }
+    if (paid.txHash) dropReceipt(paid.txHash);
     tokenStakedToday.current += amount;
     onCue('coin');
     const who = on === 'red' ? bout.red.name : bout.blue.name;

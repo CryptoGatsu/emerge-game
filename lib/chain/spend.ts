@@ -37,6 +37,52 @@ export interface SpendResult {
  * A refusal must cost nothing: callers apply the returned ledger only when
  * `ok`, and a wallet prompt the player dismisses is a refusal like any other.
  */
+/*
+ * Which build this page is.
+ *
+ * Stamped into the page by the build that served it and remembered here by
+ * the update notice on mount. Before any real payment the page asks the
+ * server which build is answering, and a page that is behind does not pay:
+ * its prices are the old build's, and a payment at an old price is a payment
+ * the registry has to bank rather than accept. The notice offered a reload
+ * and a "later"; later was five payments on one wallet.
+ */
+let pageBuild: string | null = null;
+
+/** The update notice tells this module which build the page is. */
+export function rememberBuild(build: string) {
+  pageBuild = build || null;
+}
+
+/** For tests: what the page believes it is. */
+export function pageBuildId(): string | null {
+  return pageBuild;
+}
+
+export const STALE_BUILD = 'This page is on an older build of the game, so its prices may be out of date. Reload the page and try again — your land and your balance are safe.';
+export const BUILD_UNKNOWN = 'Could not reach the game to confirm this page is current. Nothing was paid. Check your connection and try again.';
+
+/**
+ * Whether this page may pay: it is the build the server is running, or
+ * neither side is stamped. A page that cannot ask does not pay.
+ */
+export async function buildIsCurrent(): Promise<{ ok: true } | { ok: false; refused: string }> {
+  if (!pageBuild || pageBuild === 'local') return { ok: true };
+  try {
+    const response = await fetch('/api/version', { cache: 'no-store' });
+    if (!response.ok) return { ok: false, refused: BUILD_UNKNOWN };
+    const json = (await response.json()) as { build?: string };
+    const now = typeof json.build === 'string' ? json.build : '';
+    if (!now || now === 'local' || now === pageBuild) return { ok: true };
+    // The notice shows itself the moment it hears this, rather than on its
+    // next five-minute poll.
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('emerge:check-build'));
+    return { ok: false, refused: STALE_BUILD };
+  } catch {
+    return { ok: false, refused: BUILD_UNKNOWN };
+  }
+}
+
 export async function spend(
   ledger: VaultLedger,
   cost: number,
@@ -68,6 +114,8 @@ export async function spend(
       txHash: null,
     };
   }
+  const current = await buildIsCurrent();
+  if (!current.ok) return { ok: false, ledger, refused: current.refused, txHash: null };
 
   // Into the vault where there is one: most to burn, a share to pay withdrawals.
   const burn = vaultLive()
@@ -116,6 +164,8 @@ export async function pay(
     return { ok: true, ledger: { ...ledger, balance: ledger.balance - cost }, refused: null, txHash: null };
   }
   if (!from) return { ok: false, ledger, refused: 'Connect a wallet to pay.', txHash: null };
+  const current = await buildIsCurrent();
+  if (!current.ok) return { ok: false, ledger, refused: current.refused, txHash: null };
   if (ledger.balance < cost) {
     return {
       ok: false, ledger, txHash: null,

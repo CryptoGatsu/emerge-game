@@ -36,11 +36,13 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /**
  * The largest snapshot accepted.
  *
- * A large settlement saves at about 55KB; this leaves headroom for one that
- * has been played for months without letting a caller push arbitrary bulk into
- * the store.
+ * A settlement of two hundred people and a hundred buildings, played for
+ * months, saves at around 300KB now that the save is trimmed; the old limit
+ * of 400KB turned one such world away, and a world that cannot be published
+ * cannot advance an era. This leaves room for a world twice that size
+ * without letting a caller push arbitrary bulk into the store.
  */
-const MAX_SNAPSHOT = 400_000;
+const MAX_SNAPSHOT = 1_000_000;
 
 export async function GET(request: Request) {
   const seed = Number(new URL(request.url).searchParams.get('seed'));
@@ -50,9 +52,26 @@ export async function GET(request: Request) {
   try {
     const world = await readWorld(seed);
     if (!world) {
+      /*
+       * Nothing published, but the plot may still be somebody's. A visitor used
+       * to be turned away with "nobody has opened this world lately", which
+       * read as though a settlement went dark when its owner did — and a
+       * spectator could not look at a claimed plot at all until its owner
+       * came back and published. The claim row is enough for the client to
+       * grow the plot from its seed at the age the registry has it, so the
+       * visit goes ahead and says plainly that the owner has not published.
+       */
+      const claim = await claimOf(seed);
+      if (!claim) {
+        return NextResponse.json({ world: null, reason: 'Nobody has claimed this plot yet, so there is nothing to show.' });
+      }
       return NextResponse.json({
         world: null,
-        reason: 'Nobody has opened this world lately, so there is nothing to show yet.',
+        claim: {
+          seed: claim.seed, owner: claim.owner, ownerName: claim.ownerName, worldName: claim.worldName,
+          region: claim.region, at: claim.at, era: claim.era ?? 1, expanded: !!claim.expandedAt,
+        },
+        reason: 'Its owner has not published this settlement yet.',
       });
     }
     return NextResponse.json({ world });
@@ -138,7 +157,7 @@ export async function POST(request: Request) {
 
   const encoded = JSON.stringify(body.snapshot);
   if (encoded.length > MAX_SNAPSHOT) {
-    return NextResponse.json({ error: 'That world is too large to publish.' }, { status: 413 });
+    return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, and the relay takes ${Math.round(MAX_SNAPSHOT / 1024)}KB.` }, { status: 413 });
   }
 
   // Where the settlement is, read from the world itself rather than from
@@ -170,16 +189,20 @@ export async function POST(request: Request) {
 
     // The level and the score, read here off the copy rather than taken from
     // the client, so the leaderboard ranks what was actually published.
-    let level: number | undefined, score: number | undefined;
+    let level: number | undefined, score: number | undefined, buildings: number | undefined;
     try {
       const world = worldFromSave(body.snapshot as SavedWorld, seed, String(body.worldName ?? claim.worldName ?? ''));
-      if (world) { level = cityLevel(world); score = Math.round(stewardshipScore(world) * 1000) / 1000; }
+      if (world) {
+        level = cityLevel(world); score = Math.round(stewardshipScore(world) * 1000) / 1000;
+        buildings = world.buildings.filter((b) => b.active && !b.ruined).length;
+      }
     } catch { /* the headline goes without them */ }
 
     await publishWorld({
       seed,
       level,
       score,
+      buildings,
       owner: owner.toLowerCase(),
       ownerName: String(body.ownerName ?? claim.ownerName ?? '').slice(0, 32),
       worldName: String(body.worldName ?? claim.worldName ?? '').slice(0, 32),
@@ -189,8 +212,9 @@ export async function POST(request: Request) {
       at: Date.now(),
       snapshot: body.snapshot,
     });
-    return NextResponse.json({ published: true });
-  } catch {
-    return NextResponse.json({ error: 'The world store is not reachable.' }, { status: 502 });
+    return NextResponse.json({ published: true, bytes: encoded.length });
+  } catch (error) {
+    const why = error instanceof Error && error.message ? error.message.slice(0, 120) : '';
+    return NextResponse.json({ error: why ? `The world store refused the copy: ${why}` : 'The world store is not reachable.' }, { status: 502 });
   }
 }

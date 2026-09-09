@@ -11,8 +11,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind } from '@/lib/simulation';
-import { eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, NOTABLE_BASE, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
+/** The kinds that employ somebody, for the room line on a build card. */
+const WORKPLACE_TYPES = new Set(Object.values(JOBS).map((j) => j.building));
+import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
 import type { Snapshot } from '@/lib/hud';
 import {
   ACTIVE_CHAIN, TOKEN, VAULT_ADDRESS, shortAddress, tokenActions, tokenLive,
@@ -26,8 +28,8 @@ import {
   advanceCost, charterCost, HIRE_FEE_EMERGE,
 } from '@/lib/chain/vault';
 import { EMBLEMS, EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
-import { claimDividend, fetchDividend, registerSoftStake, type DividendStanding } from '@/lib/net/dividend';
-import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
+import { claimDividend, fetchDividend, registerSoftStake, stakeWords, type DividendStanding } from '@/lib/net/dividend';
+import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, LEVEL_PRESENCE_DAYS, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
 import { spend as spendEmerge } from '@/lib/chain/spend';
 import { Sparkline } from './Sparkline';
 import {
@@ -37,15 +39,19 @@ import {
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchNames } from '@/lib/net/names';
 import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
-import { fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
-import { onChainClaimsLive } from '@/lib/chain/registry';
-import { MAX_GIFT_GOLD } from '@/lib/limits';
+import { keepReceipt, dropReceipt, SETTLED_ANSWER } from '@/lib/net/receipts';
+import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
+import { marketLive, onChainClaimsLive, openSeaUrl, plotExplorerUrl } from '@/lib/chain/registry';
+import { ROYALTY_PERCENT } from '@/lib/chain/plots';
+import { untilUtcMidnight, MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
-import { WalletPicker, useWallet } from './WalletPicker';
+import { WalletPicker, useWallet, currentWallet } from './WalletPicker';
+import { LandMarket } from './LandMarket';
+import { ExchangePanel, type ExchangeActions } from './Exchange';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
 import { GuideZh } from './GuideZh';
 
-export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | null;
+export type PanelKey = 'market' | 'bank' | 'build' | 'people' | 'guide' | 'chat' | 'gacha' | 'gift' | 'connect' | 'arena' | 'casino' | 'land' | 'exchange' | null;
 
 interface PanelsProps {
   panel: PanelKey;
@@ -58,10 +64,22 @@ interface PanelsProps {
   onTrain: (id: string, job: string) => string | null;
   /** Fill open posts in a trade by retraining the people who can best be spared. Returns a refusal, or null. */
   onTrainTrade: (job: string, count: number) => string | null;
+  /** Engage a professional who is in town, or let one go. Returns a refusal, or null. */
+  onHire: (id: string) => string | null;
+  onDismissNotable: (id: string) => string | null;
+  /** Open or close the gates to newcomers. */
+  onGates: (closed: boolean) => void;
+  /** Set the stock the market must keep of a good. */
+  onKeep: (resource: string, amount: number) => void;
   /** Arm the clearing cursor. */
   onClearTrees: () => void;
   /** Arm the bridge cursor. */
   onBridge: () => void;
+  /** Arm the cursor for taking a crossing down. */
+  onUnbridge: () => void;
+  /** Dig a pond, or fill one the player dug. */
+  onPond: () => void;
+  onFillPond: () => void;
   /** Pay the public works for the next city level; the refusal, or null. */
   onRaiseCity: () => string | null;
   /** Hold a festival; the refusal, or null. */
@@ -81,6 +99,8 @@ interface PanelsProps {
   onRelease: () => void;
   /** Move Gold in or out of the treasury and record it against the player. */
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  /** Say something on screen, where a line at the foot of a panel would be missed. */
+  onNotice?: (title: string, body: string, kind?: 'sync' | 'danger') => void;
   /** What the settlement pays its people, as a multiple of the going rate. */
   onWages: (rate: number) => void;
   /** List this plot for resale at a price, or pass null to withdraw it. */
@@ -94,6 +114,10 @@ interface PanelsProps {
   onDig: () => Promise<{ prize: Prize; story: string } | string>;
   /** Travel to somebody else's settlement. Resolves to a refusal, or null. */
   onVisit: (seed: number) => Promise<string | null>;
+  /** Leave for the world map with this plot on screen: the buying lives there. */
+  onOpenMap: (seed: number) => void;
+  /** The exchange: list, buy, take down. Each returns a refusal, or null. */
+  onExchange: ExchangeActions;
   /** True when this is somebody else's world, being looked at. */
   spectating: boolean;
   /** Whose world it is, when spectating. */
@@ -189,10 +213,11 @@ function Shell({ title, subtitle, onClose, children, wide }: {
   );
 }
 
-function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void }) {
+function MarketPanel({ view, onClose, onKeep }: { view: Snapshot; onClose: () => void; onKeep: (resource: string, amount: number) => void }) {
   useLocale();
   const [focus, setFocus] = useState(view.market[0]?.key ?? 'wheat');
   const row = view.market.find((m) => m.key === focus) ?? view.market[0];
+  const [keepDraft, setKeepDraft] = useState<string | null>(null);
   const store = (key: string) => Math.floor(view.resources.find((r) => r.key === key)?.amount ?? 0);
   // Where the prices come from. The panel has always been called the world
   // market; now it is one, and it should say so rather than leaving a player to
@@ -255,6 +280,17 @@ function MarketPanel({ view, onClose }: { view: Snapshot; onClose: () => void })
                 {row.quote.trend >= 0 ? '+' : ''}{row.quote.trend.toFixed(3)}
               </b>
             </div>
+          </div>
+          <div className="market-keep">
+            <div>
+              <span className="eyebrow">{t('KEEP IN STORE')}</span>
+              <small>{t('The market never sells below this. It does not buy up to it. Sells above {n} now.', { n: row.floor })}</small>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); onKeep(row.key, Number(keepDraft ?? row.keep)); setKeepDraft(null); }}>
+              <input type="number" min={0} max={5000} step={10} value={keepDraft ?? String(row.keep)} onChange={(e) => setKeepDraft(e.target.value)} aria-label={t('KEEP IN STORE')} />
+              <button type="submit">{t('Set')}</button>
+              {row.keep > 0 && <button type="button" className="ghost" onClick={() => { onKeep(row.key, 0); setKeepDraft(null); }}>{t('Clear')}</button>}
+            </form>
           </div>
         </div>
       )}
@@ -1364,10 +1400,11 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
   );
 }
 
-function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, onRaiseCity, onFestival }: {
+function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice, onWages, onRaiseCity, onFestival }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
   onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
+  onNotice?: (title: string, body: string, kind?: 'sync' | 'danger') => void;
   onWages: (rate: number) => void;
   onRaiseCity: () => string | null;
   onFestival: () => string | null;
@@ -1395,7 +1432,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
     setDividendBusy(false);
     if (!r.ok) { setDividendNote(r.error); return; }
     setDividend(r.standing);
-    setDividendNote(t('Registered. Your lowest balance each week counts, from the next daily sample.'));
+    setDividendNote(r.standing.lowBalance === null
+      ? t('Registered. Your lowest balance each week counts, from the next daily sample.')
+      : t('Registered, and sampled now: {n} {ticker}. The lowest balance sampled each week is the stake.', { n: r.standing.lowBalance.toLocaleString(), ticker: TOKEN.ticker }));
   };
   const claimNow = async () => {
     if (!wallet.address) return;
@@ -1410,7 +1449,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [claimAmount, setClaimAmount] = useState('');
   const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | null>(null);
+  const [claimNote, setClaimNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'deposit' | 'withdraw' | 'collect' | 'recover' | null>(null);
+  const [recoverHash, setRecoverHash] = useState('');
   const [history, setHistory] = useState<PayoutHistory | null>(null);
   const ledger = player.ledger;
   const steward = view.stewardship;
@@ -1453,6 +1494,49 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
     ? Math.floor(history.principal / EMERGE_PER_GOLD)
     : Math.floor(ledger.principalGold);
 
+  /** What the vault will still pay today, or null before the server has said. */
+  const collectable = history?.room ? Math.min(history.room.left, history.room.globalLeft) : null;
+  /**
+   * What Collect asks for when the field is blank: what is earned, up to
+   * what the vault says is left today. With nothing left it asks for the lot
+   * so the vault's refusal says why, rather than "enter an amount".
+   */
+  const defaultClaim = collectable && collectable > 0
+    ? Math.min(Math.floor(ledger.earnedEmerge), collectable)
+    : Math.floor(ledger.earnedEmerge);
+
+  /*
+   * A transfer the chain rejected after it was booked.
+   *
+   * The server has already given the day's room or the principal back; this
+   * gives the in-game balance back, once per row, and says so out loud — a
+   * player who watched their balance drop and nothing arrive is owed both.
+   */
+  const ledgerRef = useRef(ledger);
+  ledgerRef.current = ledger;
+  useEffect(() => {
+    if (!history) return;
+    const current = ledgerRef.current;
+    const done = new Set(current.refunded ?? []);
+    const failed = history.payouts.filter((p) => p.failed && !done.has(p.id));
+    if (!failed.length) return;
+    let next: VaultLedger = { ...current, refunded: [...(current.refunded ?? []), ...failed.map((p) => p.id)] };
+    let gold = 0, emerge = 0;
+    for (const p of failed) {
+      next = {
+        ...next,
+        withdrawnEmerge: Math.max(0, next.withdrawnEmerge - p.net),
+        vaultBurn: Math.max(0, next.vaultBurn - p.burned),
+      };
+      if (p.kind === 'earnings') { next = { ...next, earnedEmerge: next.earnedEmerge + p.gross }; emerge += p.gross; }
+      else { next = { ...next, principalGold: next.principalGold + p.gold }; gold += p.gold; }
+    }
+    const said = t('The chain rejected a transfer of {n} {ticker} after it was booked. Nothing arrived, so it has been put back: {e} {ticker} to your earnings and {g} Gold of principal.', { n: failed.reduce((s, p) => s + p.net, 0).toLocaleString(), ticker: TOKEN.ticker, e: emerge.toLocaleString(), g: gold.toLocaleString() });
+    onVault(next, gold, said);
+    onNotice?.(t('Returned to your balance'), said, 'danger');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history]);
+
   const depositGold = Math.floor((Number(depositAmount) || 0) / EMERGE_PER_GOLD * 100) / 100;
   const quote = quoteWithdraw(Math.floor(Number(withdrawAmount) || 0));
 
@@ -1468,22 +1552,42 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
 
   const netYesterday = view.earnedYesterday - view.spentYesterday;
 
+  /** A deposit the vault holds but the game has no record of: credited from its receipt. */
+  const doRecover = async () => {
+    if (!who.address) return;
+    const hash = recoverHash.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) { setMessage(t('Paste the full transaction hash: 0x followed by 64 characters.')); return; }
+    setBusy('recover');
+    setMessage(t('Checking the deposit on chain…'));
+    const result = await creditDeposit(who.address, hash);
+    setBusy(null);
+    if (!result.ok) { setMessage(tx(result.reason)); return; }
+    setRecoverHash('');
+    const gold = Math.floor(result.credited / EMERGE_PER_GOLD * 100) / 100;
+    setMessage(t('Credited: {n} {ticker} of deposit, {gold} Gold. Your principal stands at {p} {ticker}.', { n: result.credited.toLocaleString(), gold, p: result.principal.toLocaleString(), ticker: TOKEN.ticker }));
+    void refreshHistory();
+  };
+
   const doWithdraw = async () => {
     setBusy('withdraw');
     const result = await withdraw(ledger, Math.floor(Number(withdrawAmount) || 0), view.treasury, who);
     setBusy(null);
     setMessage(result.message);
+    onNotice?.(result.ok ? t('Withdrawn') : t('Not withdrawn'), tx(result.message), result.ok ? 'sync' : 'danger');
     if (!result.ok) return;
     onVault(result.ledger, -quote.gold, t('{gold} Gold of principal was withdrawn to {ticker}.', { gold: quote.gold, ticker: TOKEN.ticker }));
     void refreshHistory();
   };
 
   const doClaim = async () => {
-    const amount = Math.floor(Number(claimAmount) || 0) || Math.floor(ledger.earnedEmerge);
+    // Left blank, the amount is what can actually be collected: what is
+    // earned, up to what the vault says is left today.
+    const amount = Math.floor(Number(claimAmount) || 0) || defaultClaim;
     setBusy('collect');
     const result = await claimEarnings(ledger, amount, who);
     setBusy(null);
-    setMessage(result.message);
+    setClaimNote(result.message);
+    onNotice?.(result.ok ? t('Collected') : t('Not collected'), tx(result.message), result.ok ? 'sync' : 'danger');
     if (!result.ok) return;
     // Collecting earnings does not touch the treasury: the settlement's Gold is
     // the settlement's, and what the player earned is for their work.
@@ -1494,6 +1598,16 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
   return (
     <Shell title={t('Bank')} subtitle={t('Gold circulates between the treasury, workers, households and the market.')} onClose={onClose} wide>
       <div className="bank-balance">{Math.floor(view.treasury).toLocaleString()} <small>{t('GOLD')}</small></div>
+      {/* Held, spendable, and standing in orders. A player asked for exactly
+          this, and was right to: Gold listed on the exchange had left the
+          balance with nothing anywhere saying it was still theirs, so it read
+          as Gold that had gone missing. It counts against the ceiling too,
+          which is why the ceiling is quoted against what is held. */}
+      <div className="bank-purse">
+        <div><span>{t('HELD')}</span><b>{(Math.floor(view.treasury) + view.frozen).toLocaleString()}<i> / {view.goldCap.toLocaleString()}</i></b></div>
+        <div><span>{t('SPENDABLE')}</span><b>{Math.floor(view.treasury).toLocaleString()}</b></div>
+        <div className={view.frozen > 0 ? 'listed' : ''}><span>{t('LISTED ON THE EXCHANGE')}</span><b>{view.frozen.toLocaleString()}</b></div>
+      </div>
       <div className="bank-grid">
         <div><span>{t('HOUSEHOLD WEALTH')}</span><b>{Math.floor(view.householdWealth).toLocaleString()}</b></div>
         <div><span>{t('WAGES PER DAY')}</span><b>{Math.floor(view.dailyWages).toLocaleString()}</b></div>
@@ -1565,7 +1679,9 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
           <b>{earning ? steward.dailyYield.toLocaleString() : t('nothing')}</b>
           <em>
             {earning
-              ? t('{ticker} a real day, of {cap} possible', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })
+              ? history?.judged
+                ? t('{ticker} a real day on this plot, as it sees itself. The vault’s own judgement is under Collect.', { ticker: TOKEN.ticker })
+                : t('{ticker} a real day, of {cap} possible', { ticker: TOKEN.ticker, cap: steward.cap.toLocaleString() })
               : t('beyond your first {n} plots', { n: EARNING_PLOT_LIMIT })}
           </em>
         </div>
@@ -1597,19 +1713,32 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
         <span className="eyebrow">{t('DIVIDENDS')}</span>
         <h3>{t('Paid in GLD, every week')}</h3>
         <p className="muted small">
-          {t('{pct}% of every charge goes into a pool. Each Monday the vault sends {dev}% of it to development, swaps the rest into GLD, and books the GLD to holders: {land}% to land, weighted by the level each plot is judged at and the days you were present; {stake}% to soft stakes, weighted by the lowest {ticker} balance held through the week, from {min} up. Nothing is locked; selling mid-week forfeits the week. Claim it here whenever you like.', { pct: Math.round(CHARGE_DIVIDEND_SHARE * 100), dev: Math.round(DIVIDEND_DEV_SHARE * 100), land: Math.round(DIVIDEND_LAND_SHARE * 100), stake: Math.round(DIVIDEND_STAKE_SHARE * 100), ticker: TOKEN.ticker, min: STAKE_MIN_EMERGE.toLocaleString() })}
+          {t('{pct}% of every charge goes into a pool. Each Monday the vault sends {dev}% of it to development, swaps the rest into GLD, and books the GLD to holders: {land}% to land, weighted by the level each plot is judged at and the days you were present; {stake}% to soft stakes, weighted by the lowest {ticker} balance held through the week, from {min} up. Both weights are the week\u2019s own and start again each Monday, so they read low on a Monday and full by Sunday. Nothing is locked; selling mid-week forfeits the week. Claim it here whenever you like.', { pct: Math.round(CHARGE_DIVIDEND_SHARE * 100), dev: Math.round(DIVIDEND_DEV_SHARE * 100), land: Math.round(DIVIDEND_LAND_SHARE * 100), stake: Math.round(DIVIDEND_STAKE_SHARE * 100), ticker: TOKEN.ticker, min: STAKE_MIN_EMERGE.toLocaleString() })}
         </p>
         {dividend && (
           <div className="flywheel-grid">
             <div><span>{t('THIS WEEK’S POOL')}</span><b>{dividend.pool.toLocaleString()} {TOKEN.ticker}</b></div>
-            <div><span>{t('YOUR LAND WEIGHT')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present', { n: dividend.presentDays })}</em></div>
-            <div><span>{t('YOUR SOFT STAKE')}</span><b>{dividend.registered ? (dividend.lowBalance === null ? t('registered') : dividend.lowBalance.toLocaleString()) : t('not registered')}</b></div>
+            {/*
+              * Said as a figure that is still being earned. It is the week's,
+              * and every week starts again on Monday — so a player who saw 3.4
+              * on Sunday and 0.4 on Monday read it as something taken from
+              * them, when it is the same standing beginning again.
+              */}
+            <div><span>{t('YOUR LAND WEIGHT THIS WEEK')}</span><b>{dividend.landWeight.toLocaleString()}</b><em className="muted small">{t('{n} of 7 days present · it grows with every day you play, and starts again on Monday', { n: dividend.presentDays })}</em></div>
+            <div><span>{t('YOUR SOFT STAKE')}</span><b>{tx(stakeWords(dividend, STAKE_MIN_EMERGE, TOKEN.ticker).figure)}</b></div>
             <div><span>{t('GLD TO CLAIM')}</span><b>{gld(dividend.claimable)}</b></div>
           </div>
         )}
+        {/* The soft stake's explanation, under the figures rather than wedged
+            into one of them: it is a paragraph, and a paragraph in a quarter
+            of a card draws as a column of single words. */}
+        {dividend && <p className="muted small flywheel-hint">{tx(stakeWords(dividend, STAKE_MIN_EMERGE, TOKEN.ticker).note)}</p>}
         <div className="dividend-actions">
           {dividend && !dividend.registered && (
             <button onClick={() => void stakeNow()} disabled={dividendBusy || !wallet.address}>{wallet.address ? t('Register a soft stake') : t('Connect a wallet first')}</button>
+          )}
+          {dividend && dividend.registered && (
+            <span className="muted small">{t('Soft stake registered · once per wallet, and it stays registered')}</span>
           )}
           <button onClick={() => void claimNow()} disabled={dividendBusy || !wallet.address || !dividend || dividend.claimable === '0'}>{t('Claim GLD')}</button>
         </div>
@@ -1621,9 +1750,12 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
 
       <div className="connect-card city-card">
         <span className="eyebrow">{t('CITY LEVEL')}</span>
-        <h3>{t('Level {n} of {max}', { n: city.level, max: MAX_CITY_LEVEL })}</h3>
+        <h3>{t('{era} · level {n} of {max}', { era: tn(eraName(view.era.id)), n: city.level, max: MAX_CITY_LEVEL })}</h3>
         <p className="muted small">
-          {t('What the plot can earn runs on its level: a fresh claim earns a fraction of a city, and a level {max} city in the last era earns up to {top} {ticker} a day. Size earns the next level; Gold pays for it. This is where the treasury goes.', { max: MAX_CITY_LEVEL, top: plotCeiling(MAX_CITY_LEVEL, 5).toLocaleString(), ticker: TOKEN.ticker })}
+          {t('Every age has its own ten levels, and what the plot earns climbs through all fifty of them. Entering a new age puts the level back to one and the earning a little higher, never lower, so nothing you built is lost. Size earns the next level; Gold pays for it. This is where the treasury goes.')}
+        </p>
+        <p className="muted small">
+          {t('This level earns up to {here} {ticker} a day; the last level of the last age earns {top}.', { here: plotCeiling(city.level, view.era.id).toLocaleString(), top: plotCeiling(MAX_CITY_LEVEL, 5).toLocaleString(), ticker: TOKEN.ticker })}
         </p>
         {city.next ? (
           <>
@@ -1639,7 +1771,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
             </button>
           </>
         ) : (
-          <p className="muted small">{t('The city is at the top level.')}</p>
+          <p className="muted small">{t('The city is at the top level of its age. The next ten levels are on the other side of the era gate.')}</p>
         )}
         {cityNote && <p className="muted small">{cityNote}</p>}
         <div className="city-festival">
@@ -1689,8 +1821,8 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
                   href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/tx/${row.txHash}`}
                   target="_blank"
                   rel="noreferrer noopener"
-                >{t('sent')}</a>
-              ) : <em>{t('sent')}</em>}
+                >{row.failed ? t('rejected by the chain') : row.confirmed === false ? t('sending') : t('sent')}</a>
+              ) : <em>{row.failed ? t('rejected by the chain') : row.confirmed === false ? t('sending') : t('sent')}</em>}
             </div>
           ))}
         </div>
@@ -1703,16 +1835,86 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
           <input
             value={claimAmount}
             inputMode="numeric"
-            placeholder={String(Math.floor(ledger.earnedEmerge))}
+            placeholder={String(defaultClaim)}
             onChange={(e) => setClaimAmount(e.target.value.replace(/[^0-9]/g, ''))}
           />
         </label>
-        <div className="vault-line"><span>{t('Available')}</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
+        {/*
+          * Whose figure this is, said on the line itself.
+          *
+          * The balance is the wallet's, earned across every plot it holds,
+          * and the Bank is read inside one plot — so a player who claimed a
+          * second plot yesterday saw their whole wallet's earnings sitting in
+          * the new town's Bank and reported it as land inheriting earnings
+          * from other land. Nothing was inherited and nothing was payable
+          * twice; the label was simply not saying what it counted. It says it
+          * now, with this plot's own share beside it.
+          */}
+        <div className="vault-line"><span>{t('Available, this wallet across all its plots')}</span><b>{Math.floor(ledger.earnedEmerge).toLocaleString()} {TOKEN.ticker}</b></div>
+        <div className="vault-line"><span>{t('Of that, earned by this plot')}</span><b>{Math.floor(steward.lifetime).toLocaleString()} {TOKEN.ticker}</b></div>
         <div className="vault-line burn"><span>{t('Burn')}</span><b>{Math.round(WITHDRAW_BURN_RATE * 100)}%</b></div>
-        {history?.room && (
+        {history?.room && collectable !== null && (
           <div className="vault-line">
             <span>{t('Collectable today')}</span>
-            <b>{Math.min(history.room.left, history.room.globalLeft).toLocaleString()} {TOKEN.ticker}</b>
+            <b>{collectable.toLocaleString()} {TOKEN.ticker}</b>
+          </div>
+        )}
+        {/*
+          * Nought collectable is the question a player asks in the same
+          * breath, and the two reasons are nothing alike: their own day is
+          * collected, or the vault's payouts for this hour are taken. Said
+          * here rather than only in the refusal, so nobody has to press a
+          * button to find out why the number is nought.
+          */}
+        {history?.room && collectable === 0 && (
+          <p className="muted small">
+            {/* How long is left, not just that the day turns at midnight UTC. A
+                player whose own midnight had passed asked why nothing had
+                reset; theirs had, the vault's had not, and "at midnight UTC"
+                does not answer that for somebody eight hours ahead of it. */}
+            {history.room.left <= 0 && typeof history.room.share === 'number' && typeof history.room.demand === 'number' && typeof history.room.budget === 'number'
+              ? t('Today the vault pays {budget} {ticker} across everybody and {demand} is judged in all, so your share is {share}, and it is collected. The day turns in {when}, at midnight UTC.', { budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), share: history.room.share.toLocaleString(), ticker: TOKEN.ticker, when: untilUtcMidnight() })
+              : history.room.left <= 0
+                ? t('Today’s judgement is collected. What the plots earn from here goes to tomorrow, which begins in {when}, at midnight UTC.', { when: untilUtcMidnight() })
+                : t('The vault has paid today’s {budget} {ticker} across everybody. The day turns in {when}, at midnight UTC.', { budget: (history.room.budget ?? 0).toLocaleString(), ticker: TOKEN.ticker, when: untilUtcMidnight() })}
+          </p>
+        )}
+        {/*
+          * When the day is being shared out, the share is the figure that
+          * bounds the collectable, and it is smaller than the judgement above.
+          * Said here, so the gap between the two numbers has its reason.
+          */}
+        {history?.room && collectable !== null && collectable > 0 && typeof history.room.share === 'number' && typeof history.room.demand === 'number' && typeof history.room.budget === 'number' && (
+          <p className="muted small">
+            {t('Your share of today’s vault: {share} of {budget} {ticker}, with {demand} judged across everybody. It waits for you all day; nobody else can take it.', { share: history.room.share.toLocaleString(), budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), ticker: TOKEN.ticker })}
+          </p>
+        )}
+        {history?.judged && (
+          <div className="judged-card">
+            <div className="vault-line">
+              <span>{t('Judged by the vault today')}</span>
+              <b>{history.judged.yield.toLocaleString()} {TOKEN.ticker}</b>
+            </div>
+            <p className="muted small">
+              {t('This is what the vault pays for the day, across all your earning plots together — not each. It judges every plot itself: its ceiling from the level it is paid at, times how well it is run, times your attention. A plot is paid at its city level or one level per {d} days you have been present, whichever is lower; you have been present {n} days. Your own screen counts its plot at full city level, which is why it can show more.', { d: LEVEL_PRESENCE_DAYS, n: history.judged.days })}
+            </p>
+            {history.judged.plots.map((p) => (
+              <div className="vault-line judged-plot" key={p.seed}>
+                <span>
+                  {p.name || `#${p.seed}`}
+                  {' · '}{t('level {n}', { n: p.level })}
+                  {p.reported > p.level ? ` (${t('city level {n}', { n: p.reported })})` : ''}
+                  {' · '}{t('{pct}% run', { pct: Math.round(p.score * 100) })}
+                  {' · '}{t('{pct}% attended', { pct: Math.round(p.attention * 100) })}
+                </span>
+                <b>{p.yield.toLocaleString()}</b>
+              </div>
+            ))}
+            {history.judged.plots.some((p) => p.reported > p.level) && (
+              <p className="muted small">
+                {t('The next paid level comes after {n} more days present. Open any of your plots each day to count it.', { n: Math.max(1, LEVEL_PRESENCE_DAYS - (history.judged.days % LEVEL_PRESENCE_DAYS)) })}
+              </p>
+            )}
           </div>
         )}
         {history?.hand && (
@@ -1732,6 +1934,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
         <button onClick={doClaim} disabled={busy !== null || ledger.earnedEmerge < 1}>
           {busy === 'collect' ? t('Sending…') : liveToken() ? t('Collect to wallet') : t('Collect')}
         </button>
+        {claimNote && <p className="warn">{tx(claimNote)}</p>}
       </div>
 
       <h4>{t('{ticker} vault', { ticker: TOKEN.ticker })}</h4>
@@ -1755,6 +1958,18 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
           >
             {busy === 'deposit' ? t('Signing…') : t('Deposit')}
           </button>
+          {liveToken() && who.address && (
+            <details className="redeem">
+              <summary>{t('Deposited and the Gold never came, or is gone? Recover the deposit')}</summary>
+              <p className="muted small">
+                {t('Paste the transaction hash of a deposit to the vault, from your wallet\'s activity. The vault checks it on chain and credits the Gold it bought; a deposit already credited is refused, so this is safe to try.')}
+              </p>
+              <div className="redeem-row">
+                <input value={recoverHash} placeholder="0x…" spellCheck={false} onChange={(e) => setRecoverHash(e.target.value)} />
+                <button className="ghost" disabled={busy !== null || !recoverHash.trim()} onClick={() => void doRecover()}>{busy === 'recover' ? t('Checking…') : t('Recover')}</button>
+              </div>
+            </details>
+          )}
         </div>
 
         <div className="vault-card">
@@ -1813,25 +2028,39 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onWages, 
  * button to fill the open ones with the people who can best be spared.
  * Buildings: every workplace with its crew and its posts, ruins flagged.
  */
-function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
+function PeoplePanel({ view, onClose, onTrain, onTrainTrade, onGates, onHire, onDismissNotable }: {
   view: Snapshot; onClose: () => void; onTrain: (id: string, job: string) => string | null; onTrainTrade: (job: string, count: number) => string | null;
+  onGates: (closed: boolean) => void; onHire: (id: string) => string | null; onDismissNotable: (id: string) => string | null;
 }) {
   useLocale();
   const { roster } = view;
-  const [tab, setTab] = useState<'people' | 'trades' | 'buildings'>('people');
+  const [tab, setTab] = useState<'people' | 'trades' | 'buildings' | 'notables'>('people');
   const [filter, setFilter] = useState<string>('all');
   const [retraining, setRetraining] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const trades = roster.trades;
-  const shown = roster.people.filter((p) => filter === 'all' ? true : filter === 'unemployed' ? p.job === 'unemployed' : p.job === filter);
+  const shown = roster.people.filter((p) => filter === 'all' ? true : filter === 'unemployed' ? p.job === 'unemployed' || p.idle : p.job === filter);
   const canPay = (n: number) => view.treasury >= roster.trainCost * n;
   const act = (fn: () => string | null) => { const why = fn(); setNote(why); if (!why) setRetraining(null); };
   return (
     <Shell title={t('PEOPLE')} subtitle={t('{n} adults · {u} without work · {o} open posts', { n: roster.people.length, u: roster.unemployed, o: roster.openPosts })} onClose={onClose} wide>
+      <div className={`gates-card ${view.gates.closed ? 'closed' : ''}`}>
+        <div>
+          <span className="eyebrow">{t('ARRIVALS')}</span>
+          <b>{view.gates.closed ? t('The gates are closed') : t('The gates are open')}</b>
+          <small>
+            {view.gates.closed
+              ? t('Nobody new is taken in. Open them when there is work to come to.')
+              : t('Newcomers come while there is a spare bed, food in store and a post to fill. {n} open now.', { n: view.gates.openPosts })}
+          </small>
+        </div>
+        <button onClick={() => onGates(!view.gates.closed)}>{view.gates.closed ? t('Open the gates') : t('Close the gates')}</button>
+      </div>
       <div className="build-shelves">
         <button className={tab === 'people' ? 'on' : ''} onClick={() => setTab('people')}>{t('People')}</button>
         <button className={tab === 'trades' ? 'on' : ''} onClick={() => setTab('trades')}>{t('Trades')}</button>
         <button className={tab === 'buildings' ? 'on' : ''} onClick={() => setTab('buildings')}>{t('Buildings')}</button>
+        <button className={tab === 'notables' ? 'on' : ''} onClick={() => setTab('notables')}>{t('Notables')}{view.talent.offers.length > 0 && <span className="people-open"> · {view.talent.offers.length}</span>}</button>
       </div>
       <p className="muted small">
         {t('Training costs {n} Gold a head and takes effect at once; a trained person holds their trade for {d} days against the settlement\u2019s own reshuffling, and starts with a head start in skill.', { n: roster.trainCost, d: TRAIN_HOLD_DAYS })}
@@ -1850,10 +2079,10 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
           </div>
           <div className="people-rows">
             {shown.map((p) => (
-              <div key={p.id} className={`people-row ${p.job === 'unemployed' ? 'idle' : ''}`}>
+              <div key={p.id} className={`people-row ${p.job === 'unemployed' || p.idle ? 'idle' : ''}`}>
                 <b>{p.name}</b>
                 <span className="muted">{t('{n} yrs', { n: p.age })}</span>
-                <span className="people-trade">{tn(p.jobLabel)}{p.trained && <i title={t('Trained')}>✦</i>}</span>
+                <span className="people-trade">{tn(p.jobLabel)}{p.trained && <i title={t('Trained')}>✦</i>}{p.idle && <small className="people-open"> · {t('no post')}</small>}</span>
                 <span className="muted">{p.skill ? tx(p.skill.title) : t('no trade')}</span>
                 <span className="muted">{p.workplace ? (p.at ? t('at the {b}', { b: tn(p.at).toLowerCase() }) : t('works at a {b}', { b: tn(p.workplace).toLowerCase() })) : t('nowhere to work')}</span>
                 {retraining === p.id ? (
@@ -1894,21 +2123,60 @@ function PeoplePanel({ view, onClose, onTrain, onTrainTrade }: {
         <div className="people-rows">
           {roster.buildings.map((b) => (
             <div key={b.id} className={`people-row ${b.ruined ? 'idle' : b.posts !== null && b.crew < b.posts ? 'short' : ''}`}>
-              <b>{tn(b.type)}</b>
+              <b>{tn(b.name)}</b>
               <span className="muted">{t('level {n}', { n: b.level })}</span>
               <span className="people-trade">{b.trade ? tn(b.trade) : t('civic')}</span>
               <span className={b.ruined ? 'people-open' : 'muted'}>{b.ruined ? t('ruin') : b.posts !== null ? t('{c} of {p} at their posts', { c: b.crew, p: b.posts }) : t('{c} inside', { c: b.crew })}</span>
+              {b.over > 0 && <span className="people-open">{t('{n} over', { n: b.over })}</span>}
               <span className="muted">{tn(eraName(b.era))}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === 'notables' && (
+        <div className="notables">
+          {!view.talent.open ? (
+            <p className="muted small">{t('Professionals come to a {era}. Advance the plot and they will start turning up for its school, clinic, bank, laboratory and town hall.', { era: tn(view.talent.fromEra) })}</p>
+          ) : (
+            <>
+              <p className="muted small">{t('From the {era}, a school, a clinic, a bank, a laboratory and a town hall run at {base}% without a professional to keep them, and at full strength and more with one. Professionals turn up on their own, stay a few days, and are engaged for a fee and kept on a salary.', { era: tn(view.talent.fromEra), base: Math.round(NOTABLE_BASE * 100) })}</p>
+              <h4>{t('Engaged')}</h4>
+              {view.talent.hired.length === 0 && <p className="muted small">{t('Nobody yet.')}</p>}
+              <div className="people-rows">
+                {view.talent.hired.map((h) => (
+                  <div key={h.id} className="people-row notable-row">
+                    <b>{h.name}</b>
+                    <span className="people-trade">{tx(h.tierWord)} {tx(h.roleLabel).toLowerCase()}</span>
+                    <span className="muted">{t('keeps the {building} at {full}%', { building: tn(h.building), full: h.full })}</span>
+                    <span className="muted">{t('{n} Gold a day · {d} days in the post', { n: h.salary, d: h.days })}</span>
+                    <button onClick={() => act(() => onDismissNotable(h.id))}>{t('Let go')}</button>
+                  </div>
+                ))}
+              </div>
+              <h4>{t('In town')}</h4>
+              {view.talent.offers.length === 0 && <p className="muted small">{t('Nobody is offering today. Somebody turns up most days for the civic buildings the town has standing.')}</p>}
+              <div className="people-rows">
+                {view.talent.offers.map((o) => (
+                  <div key={o.id} className={`people-row notable-row ${o.tier >= 3 ? 'short' : ''}`}>
+                    <b>{o.name}</b>
+                    <span className="people-trade">{tx(o.tierWord)} {tx(o.roleLabel).toLowerCase()}</span>
+                    <span className="muted">{o.post ? t('would keep the {building}: {base}% to {full}%', { building: tn(o.post), base: o.base, full: o.full }) : t('nothing here for them to keep')}</span>
+                    <span className="muted">{t('{fee} Gold to engage · {salary} a day · {d} days left', { fee: o.fee, salary: o.salary, d: o.daysLeft })}</span>
+                    <button disabled={!o.post || view.treasury < o.fee} onClick={() => act(() => onHire(o.id))}>{t('Engage')}</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </Shell>
   );
 }
 
-function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
-  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void;
+function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge, onPond, onFillPond }: {
+  view: Snapshot; onClose: () => void; onBuild: (t: string, c: number) => void; onClearTrees: () => void; onBridge: () => void; onUnbridge: () => void; onPond: () => void; onFillPond: () => void;
 }) {
   const stock = (key: 'wood' | 'stone') => view.resources.find((r) => r.key === key)?.amount ?? 0;
   const wood = stock('wood');
@@ -1917,8 +2185,19 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
   // not shown; a building from a later era is shown greyed with the era's
   // name, so the player can see what advancing would open.
   const [shelf, setShelf] = useState<BuildingCategory | 'All'>('All');
-  const shelves = BUILDING_CATEGORIES.filter((c) => BUILDABLE.some((o) => BUILDING_CATEGORY[o.type] === c));
-  const shown = BUILDABLE.filter((o) => shelf === 'All' || BUILDING_CATEGORY[o.type] === shelf);
+  // The panel opens on everything the plot can raise now, in the age's own
+  // forms, with the age's new buildings first. It used to open on only what
+  // this age introduced, with the houses and farms a township builds every
+  // day filed under the settlement tab — so a player in the township went
+  // back to the settlement for almost every build. Later ages stay as tabs
+  // to look at; earlier ages need none, since everything of theirs is here.
+  const [age, setAge] = useState<number | 'all'>(view.era.id);
+  const ofAge = BUILDABLE
+    .filter((o) => age === 'all' || (age === view.era.id ? (BUILDING_ERA[o.type] ?? 1) <= age : (BUILDING_ERA[o.type] ?? 1) === age))
+    .sort((a, b) => (age === view.era.id ? (BUILDING_ERA[b.type] ?? 1) - (BUILDING_ERA[a.type] ?? 1) : 0));
+  const shelves = BUILDING_CATEGORIES.filter((c) => ofAge.some((o) => BUILDING_CATEGORY[o.type] === c));
+  const onShelf = shelf !== 'All' && shelves.includes(shelf) ? shelf : 'All';
+  const shown = ofAge.filter((o) => onShelf === 'All' || BUILDING_CATEGORY[o.type] === onShelf);
   useLocale();
   return (
     <Shell
@@ -1958,26 +2237,74 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
         <div className="build-card tool">
           <div className="build-icon">🌉</div>
           <h3>{t('Bridge')}</h3>
-          <p>{t('Tap land across the water and the crew stakes out the narrowest sound crossing to it. Timber comes from the yard by the day, and is bought in when the yard is short.')}</p>
+          <p>{t('Tap the water you want bridged, or the land across it, and the crew stakes out the narrowest sound crossing there. Timber comes from the yard by the day, and is bought in when the yard is short.')}</p>
           <div className="build-cost">
             <b>{t('{n} Gold to start', { n: BRIDGE_GOLD.toLocaleString() })}</b>
             <small>{t('+ timber and wages by the day')}</small>
           </div>
-          <button disabled={view.treasury < BRIDGE_GOLD} onClick={onBridge}>
-            {view.treasury < BRIDGE_GOLD ? t('Not enough Gold') : t('Stake out a crossing')}
-          </button>
+          <div className="build-actions">
+            <button disabled={view.treasury < BRIDGE_GOLD} onClick={onBridge}>
+              {view.treasury < BRIDGE_GOLD ? t('Not enough Gold') : t('Stake out a crossing')}
+            </button>
+            {view.bridges > 0 && (
+              <button className="ghost" onClick={onUnbridge} title={t('Tap a deck to take that crossing down. Some of the timber comes back. A crossing that is the only way to buildings on the far bank stays.')}>
+                {t('Take a crossing down')}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="build-card tool">
+          <div className="build-icon">💧</div>
+          <h3>{t('Pond')}</h3>
+          <p>{t('Dig a pond where you tap, on open ground clear of the square, the buildings and the bridges. Dig beside it again and the two join into a channel; fishers cast into it and people walk round it. A pond you dug can be filled in again.')}</p>
+          <div className="build-cost">
+            <b>{t('{n} Gold a dig', { n: DIG_GOLD })}</b>
+            <small>{t('{n} Gold to fill one in', { n: FILL_GOLD })}</small>
+          </div>
+          <div className="build-actions">
+            <button disabled={view.treasury < DIG_GOLD} onClick={onPond}>
+              {view.treasury < DIG_GOLD ? t('Not enough Gold') : t('Dig a pond')}
+            </button>
+            {view.dug > 0 && (
+              <button className="ghost" onClick={onFillPond} title={t('Tap a pond you dug to fill it back in.')}>
+                {t('Fill a pond in')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
+      <div className="build-shelves build-ages">
+        {ERAS.filter((e) => e.id >= view.era.id).map((e) => (
+          <button key={e.id} className={`${age === e.id ? 'on' : ''} ${e.id > view.era.id ? 'later' : ''}`} onClick={() => setAge(e.id)}>
+            {tn(e.name)}{e.id === view.era.id ? ` · ${t('now')}` : ''}
+          </button>
+        ))}
+        <button className={age === 'all' ? 'on' : ''} onClick={() => setAge('all')}>{t('All ages')}</button>
+      </div>
+      <p className="muted small build-age-note">
+        {age === view.era.id
+          ? (view.era.id > 1
+            ? t('Everything you can raise in the {era}, in the age’s own forms, the age’s new buildings first: a {house} holds {beds} beds, a workplace {posts} posts, and each pair of hands makes {pct}% more than in a settlement. Later ages are a tab away to look at.', { era: tn(eraName(view.era.id)).toLowerCase(), house: tn(formName('House', view.era.id)).toLowerCase(), beds: formOf('House', view.era.id).beds ?? 0, posts: formPosts('Farm', view.era.id), pct: Math.round((formOf('Farm', view.era.id).output - 1) * 100) })
+            : t('Where every plot begins. Each age the plot advances rebuilds every building into that age’s form — new name, new look, twice the room — and merges pairs of the same kind into one, so the land opens up again. The age’s own buildings are on the tabs above.'))
+          : age === 'all'
+            ? t('Every building in the game, by shelf.')
+            : typeof age === 'number' && age < view.era.id
+              ? t('An earlier age’s buildings, still yours to raise.')
+              : t('What the {era} will open. The plot advances from the On-Chain panel.', { era: tn(eraName(age as number)).toLowerCase() })}
+      </p>
       <div className="build-shelves">
-        <button className={shelf === 'All' ? 'on' : ''} onClick={() => setShelf('All')}>{t('All')}</button>
+        <button className={onShelf === 'All' ? 'on' : ''} onClick={() => setShelf('All')}>{t('All')}</button>
         {shelves.map((c) => (
-          <button key={c} className={shelf === c ? 'on' : ''} onClick={() => setShelf(c)}>{tn(c)}</button>
+          <button key={c} className={onShelf === c ? 'on' : ''} onClick={() => setShelf(c)}>{tn(c)}</button>
         ))}
       </div>
       <div className="build-grid">
         {shown.map((option) => {
-          const need = buildMaterials(option.type);
-          const price = Math.round(option.cost * (view.cover.builders ? 1 - BUILDERS_DISCOUNT : 1));
+          // The age's form of it: its name, its blurb, and its price, which
+          // grows with the room it holds.
+          const form = formOf(option.type, view.era.id, BUILDING_ERA[option.type] ?? 1);
+          const need = { wood: Math.round(buildMaterials(option.type).wood * form.cost), stone: Math.round(buildMaterials(option.type).stone * form.cost) };
+          const price = Math.round(option.cost * form.cost * (view.cover.builders ? 1 - BUILDERS_DISCOUNT : 1));
           const paid = view.treasury >= price;
           const stocked = wood >= need.wood && stone >= need.stone;
           const minEra = BUILDING_ERA[option.type] ?? 1;
@@ -1988,11 +2315,16 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge }: {
           return (
             <div key={option.type} className={`build-card ${ready ? '' : 'locked'} ${inEra ? '' : 'later-era'} ${one ? 'built' : ''}`}>
               <div className="build-icon">{option.icon}</div>
-              <h3>{tn(option.type)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}{one && <i className="era-lock">{one.ruined ? t('In ruins') : t('Built')}</i>}</h3>
-              <p>{t(option.blurb)}</p>
+              <h3>{tn(form.name)}{!inEra && <i className="era-lock">{tn(eraName(minEra))}</i>}{one && <i className="era-lock">{one.ruined ? t('In ruins') : t('Built')}</i>}</h3>
+              <p>{t(form.blurb || option.blurb)}</p>
+              {(option.type === 'House' || WORKPLACE_TYPES.has(option.type)) && (
+                <p className="build-room">
+                  {option.type === 'House' ? t('{n} beds', { n: form.beds ?? 0 }) : t('{n} posts', { n: formPosts(option.type, view.era.id) })}
+                </p>
+              )}
               <div className="build-cost">
                 <b>{t('{n} Gold', { n: price })}{view.cover.builders && <em className="build-discount"> {t('builders’ price')}</em>}</b>
-                <small>{t('{n}/day upkeep', { n: maintenanceCost(option.type) })}</small>
+                <small>{t('{n}/day upkeep', { n: Math.round(maintenanceCost(option.type) * form.upkeep) })}</small>
               </div>
               <div className="build-materials">
                 <span className={wood >= need.wood ? '' : 'short'}>{t('{n} wood', { n: need.wood })}</span>
@@ -2120,10 +2452,20 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
       if (!paid.ok) { setHiringBusy(false); setHiringNote(paid.refused); return; }
       onPlayer({ ...player, ledger: paid.ledger });
       feeTx = paid.txHash ?? undefined;
+      // Kept until the registry has taken it, and handed in again when the
+      // world next opens if this reply is lost.
+      if (feeTx) keepReceipt({ kind: 'hire', txHash: feeTx, address: wallet.address, seed: claimed.seed });
     }
     const result = await setHiring(claimed.seed, wallet.address, on, feeTx);
     setHiringBusy(false);
-    if (!result.ok || !result.claim) { setHiringNote(result.reason ?? null); return; }
+    if (!result.ok || !result.claim) {
+      if (feeTx && SETTLED_ANSWER.test(result.reason ?? '')) dropReceipt(feeTx);
+      setHiringNote(feeTx && !SETTLED_ANSWER.test(result.reason ?? '')
+        ? `${result.reason ?? ''} ${t('Your payment {tx}… is kept in this browser and will be handed in again the next time you press this or open the world. Nothing more will be charged for it.', { tx: feeTx.slice(0, 10) })}`
+        : (result.reason ?? null));
+      return;
+    }
+    if (feeTx) dropReceipt(feeTx);
     setRow(result.claim);
     setHiringNote(on ? t('The job is open. It shows on the world map for every player without land.') : t('Closed.'));
   };
@@ -2171,11 +2513,31 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
           <p className="muted">
             {t('Claimed for {price} {ticker} · seed {seed} · day {day}', { price: claimed.price.toLocaleString(), ticker: TOKEN.ticker, seed: view.seed, day: view.day })}
           </p>
-          <p className="muted small">
+          <p className="muted small tx-line">
             {claimed.txHash
-              ? t('Settled on chain: {tx}', { tx: claimed.txHash })
+              ? (
+                <>
+                  {t('Settled on chain:')}{' '}
+                  {ACTIVE_CHAIN.explorerUrl
+                    ? (
+                      <a href={`${ACTIVE_CHAIN.explorerUrl.replace(/\/$/, '')}/tx/${claimed.txHash}`} target="_blank" rel="noreferrer noopener" title={claimed.txHash}>
+                        {claimed.txHash.slice(0, 10)}…{claimed.txHash.slice(-6)}
+                      </a>
+                    )
+                    : <span title={claimed.txHash}>{claimed.txHash.slice(0, 10)}…{claimed.txHash.slice(-6)}</span>}
+                </>
+              )
               : t('Recorded in this browser. Not settled on chain yet.')}
           </p>
+          {onChainClaimsLive() && (
+            <p className="muted small tx-line">
+              {t('This plot is token #{seed} of Emerge Land, an ERC-721 in your wallet. It sells on the land market for {ticker} or on OpenSea, the settlement goes with it, and a share of every sale is paid back to everyone who holds land.', { seed: view.seed, ticker: TOKEN.ticker })}
+              {' '}
+              {openSeaUrl(view.seed) && <a href={openSeaUrl(view.seed)!} target="_blank" rel="noreferrer noopener">{t('View on OpenSea')}</a>}
+              {openSeaUrl(view.seed) && plotExplorerUrl(view.seed) && ' · '}
+              {plotExplorerUrl(view.seed) && <a href={plotExplorerUrl(view.seed)!} target="_blank" rel="noreferrer noopener">{t('Verify on {chain}', { chain: ACTIVE_CHAIN.label })}</a>}
+            </p>
+          )}
           <label className="name-field">
             <span>{t('WORLD NAME')}</span>
             <input value={draftName} maxLength={24} onChange={(e) => setDraftName(e.target.value)} />
@@ -2390,7 +2752,9 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
             <>
               <h3>{t('Listed at {price} {ticker}', { price: listing.price.toLocaleString(), ticker: TOKEN.ticker })}</h3>
               <p className="muted small">
-                {t('On the map for every player. A buyer pays your wallet directly in {ticker} — a transfer, not a burn — and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker })}
+                {marketLive()
+                  ? t('Listed on the land market contract. The plot stays in your wallet until it sells; a buyer pays the price in {ticker} in one transaction, {fee}% of it goes to the holders’ dividend pool, and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker, fee: ROYALTY_PERCENT })
+                  : t('On the map for every player. A buyer pays your wallet directly in {ticker} — a transfer, not a burn — and the plot and this settlement move to them the moment the chain settles it.', { ticker: TOKEN.ticker })}
               </p>
               <button onClick={() => onList(null)}>{t('Withdraw listing')}</button>
             </>
@@ -2404,7 +2768,9 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
                 {t('List for sale')}
               </button>
               <p className="muted small">
-                {t('A sale is between you and the buyer: they pay your wallet the asking price in {ticker}, nothing is burned, and they walk into this settlement as you left it.', { ticker: TOKEN.ticker })}
+                {marketLive()
+                  ? t('The plot is a token: listing it takes one signature to let the market move it when it sells, then one to name the price. It stays in your wallet until a buyer pays, on the world map or on OpenSea; {fee}% of every resale goes to the holders’ dividend pool.', { fee: ROYALTY_PERCENT })
+                  : t('A sale is between you and the buyer: they pay your wallet the asking price in {ticker}, nothing is burned, and they walk into this settlement as you left it.', { ticker: TOKEN.ticker })}
               </p>
             </>
           )}
@@ -2444,7 +2810,9 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
           </button>
           {releasing && (
             <p className="muted small">
-              {t('{region} goes back on the market and the {price} {ticker} is not refunded. Your world keeps running until you do.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })}
+              {onChainClaimsLive()
+                ? t('{region} goes back on the market and the {price} {ticker} is not refunded. Your wallet will ask you to burn the plot’s token; the registry follows once the chain has it.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })
+                : t('{region} goes back on the market and the {price} {ticker} is not refunded. Your world keeps running until you do.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })}
             </p>
           )}
         </div>
@@ -2469,8 +2837,8 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onClearTrees, onBridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices }: PanelsProps) {
-  if (panel === 'market') return <MarketPanel view={view} onClose={onClose} />;
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onOpenMap, onExchange, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
+  if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
   }
@@ -2495,7 +2863,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     return (
       <BankPanel
         view={view} claimed={claimed} player={player} earning={earning}
-        onClose={onClose} onVault={onVault} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival}
+        onClose={onClose} onVault={onVault} onNotice={onNotice} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival}
       />
     );
   }
@@ -2503,6 +2871,20 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
   // Everything that changes the settlement is the owner's alone.
   if (spectating && (panel === 'build' || panel === 'people' || panel === 'gacha' || panel === 'connect')) return null;
   if (panel === 'guide') return <GuidePanel view={view} onClose={onClose} />;
+  if (panel === 'exchange') {
+    return (
+      <Shell title={t('TRADE')} subtitle={t('Goods for Gold between settlements, Gold for {ticker} between wallets', { ticker: TOKEN.ticker })} onClose={onClose} wide>
+        <ExchangePanel view={view} seed={claimed.seed} me={currentWallet().address} spectating={spectating} actions={onExchange} />
+      </Shell>
+    );
+  }
+  if (panel === 'land') {
+    return (
+      <Shell title={t('LAND FOR SALE')} subtitle={t('Every plot on the market, with what its owner last published')} onClose={onClose} wide>
+        <LandMarket embedded me={currentWallet().address} onVisit={onVisit} onShow={onOpenMap} />
+      </Shell>
+    );
+  }
   if (panel === 'chat') {
     return (
       <ChatPanel
@@ -2513,8 +2895,8 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     );
   }
   if (panel === 'gacha') return <GachaPanel player={player} onClose={onClose} onDig={onDig} />;
-  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} />;
-  if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} />;
+  if (panel === 'build') return <BuildPanel view={view} onClose={onClose} onBuild={onBuild} onClearTrees={onClearTrees} onBridge={onBridge} onUnbridge={onUnbridge} onPond={onPond} onFillPond={onFillPond} />;
+  if (panel === 'people') return <PeoplePanel view={view} onClose={onClose} onTrain={onTrain} onTrainTrade={onTrainTrade} onGates={onGates} onHire={onHire} onDismissNotable={onDismissNotable} />;
   if (panel === 'connect') {
     return (
       <ConnectPanel

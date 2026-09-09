@@ -12,31 +12,33 @@
  */
 
 export const GROUND = {
-  grassLight: '#4f8f3c',
-  grass: '#3a7030',
-  grassDark: '#2c5826',
-  grassDeep: '#20421f',
-  meadow: '#578f3f',
-  moss: '#2b5a2c',
-  forestFloor: '#213c1e',
-  forestFloorDark: '#172d16',
-  soil: '#4b3823',
-  soilDark: '#372818',
-  soilTilled: '#563f27',
-  sand: '#b3a06a',
-  sandDark: '#8d7c4f',
-  // Paving is cool grey-green cobble now rather than warm gravel: the
-  // reference town is laid in stone, and stone in a forest goes green.
-  stone: '#707a69',
-  stoneDark: '#4f584a',
-  stoneLight: '#8f9986',
-  path: '#5c6754',
-  pathDark: '#444d3f',
-  pathLight: '#788470',
-  plaza: '#5a6553',
-  rock: '#5f665b',
-  rockDark: '#43493f',
-  rockLight: '#7d857a',
+  // Golden-hour ground: saturated warm greens that the sun sits on, not the
+  // blue-black moss of a night forest. Everything below is keyed to the
+  // reference painting: amber light from the upper right, teal water.
+  grassLight: '#8cc650',
+  grass: '#66a63c',
+  grassDark: '#4f8a30',
+  grassDeep: '#3c6c27',
+  meadow: '#93c455',
+  moss: '#4d8f3a',
+  forestFloor: '#3f7a2f',
+  forestFloorDark: '#2f5f25',
+  soil: '#8a6640',
+  soilDark: '#664a2c',
+  soilTilled: '#9a7248',
+  sand: '#dcc58c',
+  sandDark: '#b9a065',
+  // Paving is warm dressed stone, sun-bleached on top and sand between.
+  stone: '#a89b80',
+  stoneDark: '#7a6f58',
+  stoneLight: '#cbbf9f',
+  path: '#b89c6c',
+  pathDark: '#8e7650',
+  pathLight: '#d2b885',
+  plaza: '#b3a284',
+  rock: '#8d8677',
+  rockDark: '#605a4e',
+  rockLight: '#b3ac9c',
   snow: '#d6e1dc',
   // Biome ground. Desert sand runs warmer and lighter than the river banks,
   // fen mud is green-black, and steppe scrub is bleached grass over dust.
@@ -52,28 +54,28 @@ export const GROUND = {
 } as const;
 
 export const WATER = {
-  deep: '#0e3644',
-  mid: '#155869',
-  shallow: '#278594',
-  foam: '#bfe9ec',
-  highlight: '#5dc6cd',
+  deep: '#125260',
+  mid: '#1c7684',
+  shallow: '#2f9aa4',
+  foam: '#eaf9f7',
+  highlight: '#8fe4dc',
 } as const;
 
 export const FOLIAGE = {
-  pineLight: '#3f8a44',
-  pine: '#2a6234',
-  pineDark: '#1a4325',
-  oakLight: '#5aa04a',
-  oak: '#3f7f36',
-  oakDark: '#2a5727',
-  birchLight: '#74b356',
-  birch: '#548f3f',
-  birchDark: '#39652b',
-  bush: '#356b2f',
-  bushLight: '#4f8c3d',
-  trunk: '#4a3524',
-  trunkDark: '#31231a',
-  trunkLight: '#66492f',
+  pineLight: '#7fc251',
+  pine: '#3f8c3c',
+  pineDark: '#245c2b',
+  oakLight: '#9ad65e',
+  oak: '#5aa33e',
+  oakDark: '#35722e',
+  birchLight: '#b0e070',
+  birch: '#6fb04a',
+  birchDark: '#427a33',
+  bush: '#4f9c3c',
+  bushLight: '#84cc56',
+  trunk: '#6a4a2e',
+  trunkDark: '#3e2a1a',
+  trunkLight: '#956a42',
   // The three species the new biomes brought with them.
   palmLight: '#6ea84e',
   palm: '#4f8838',
@@ -97,35 +99,36 @@ export const BLOOM = {
 } as const;
 
 export const BUILD = {
-  // "Plaster" is the light wall: a pale, mossy render over stone rather than
-  // cream. It still reads as the light face against the dark timber.
-  plasterLight: '#98a38e',
-  plaster: '#76806c',
-  plasterDark: '#565f4e',
-  timber: '#4f3a27',
-  timberDark: '#35271a',
-  timberLight: '#6c5138',
-  roofRed: '#7a3f31',
-  roofRedDark: '#562b22',
-  roofRedLight: '#955444',
-  roofGreen: '#2f5a3a',
-  roofGreenDark: '#20402a',
-  roofGreenLight: '#3f7048',
-  roofSlate: '#3a4550',
-  roofSlateDark: '#27303a',
-  roofSlateLight: '#4c5966',
-  roofThatch: '#7f7a46',
-  roofThatchDark: '#5c5830',
-  roofThatchLight: '#9a9558',
-  stoneWall: '#66705f',
-  stoneWallDark: '#4a5245',
-  stoneWallLight: '#828c79',
-  glassDark: '#1d2a30',
+  // Plaster is warm cream, sun-struck on the lit face; timber is a dark,
+  // warm brown; roofs are terracotta, moss-green, blue slate and golden
+  // thatch. Stone walls are pale dressed blocks with sand-coloured mortar.
+  plasterLight: '#f0e2c2',
+  plaster: '#d4c39a',
+  plasterDark: '#a8956c',
+  timber: '#6a4a2e',
+  timberDark: '#3d2917',
+  timberLight: '#8f6a45',
+  roofRed: '#a3493a',
+  roofRedDark: '#6f3027',
+  roofRedLight: '#cd6f55',
+  roofGreen: '#3f7a48',
+  roofGreenDark: '#28542f',
+  roofGreenLight: '#5d9c5c',
+  roofSlate: '#4a5a6c',
+  roofSlateDark: '#303d4c',
+  roofSlateLight: '#6d8093',
+  roofThatch: '#bc9c54',
+  roofThatchDark: '#8a6f36',
+  roofThatchLight: '#e0c47a',
+  stoneWall: '#a09582',
+  stoneWallDark: '#6f6656',
+  stoneWallLight: '#c9bea6',
+  glassDark: '#2c3648',
   glassLit: '#ffcf7a',
   glassLitCore: '#fff0c8',
-  metal: '#4f555c',
-  metalLight: '#7a828c',
-  gold: '#e0b95c',
+  metal: '#55595e',
+  metalLight: '#82898f',
+  gold: '#e6bd5e',
   // Signage. Every shop in the reference wears its name in lit green letters
   // on a dark board, and that is the single strongest style cue there is.
   signBoard: '#101a12',
@@ -137,10 +140,10 @@ export const BUILD = {
   labGlass: '#1e4e52',
   labGlassLit: '#4fd6c8',
   labCore: '#9dfff0',
-  // Growing green mould at the foot of every wall in a damp forest town.
-  moss: '#3f7a3a',
-  mossDark: '#2b5a2b',
-  vine: '#4c8f44',
+  // A little green at the foot of a wall, and a vine on the shaded face.
+  moss: '#5d9c45',
+  mossDark: '#3f7a33',
+  vine: '#5aa64a',
 } as const;
 
 export const UI = {
@@ -251,19 +254,20 @@ export const PEOPLE_AI = {
  */
 export interface AmbientStop { hour: number; color: number; alpha: number }
 export const AMBIENT: AmbientStop[] = [
-  { hour: 0, color: 0x0b2a26, alpha: 0.62 },
-  { hour: 4, color: 0x0e2d2a, alpha: 0.6 },
-  { hour: 6, color: 0x2f4a5a, alpha: 0.4 },
-  { hour: 7.5, color: 0xd9a86a, alpha: 0.16 },
-  // Midday keeps a cool green wash rather than going to white: the reference
-  // is a forest under a canopy, and full sun on it reads as a different game.
-  { hour: 10, color: 0xb9e3c8, alpha: 0.13 },
-  { hour: 14, color: 0xb4e0c6, alpha: 0.12 },
-  { hour: 17, color: 0xe0cf9a, alpha: 0.14 },
-  { hour: 19, color: 0xd4703c, alpha: 0.24 },
-  { hour: 20.5, color: 0x3b4d5f, alpha: 0.44 },
-  { hour: 22, color: 0x12332e, alpha: 0.58 },
-  { hour: 24, color: 0x0b2a26, alpha: 0.62 },
+  { hour: 0, color: 0x0f2740, alpha: 0.6 },
+  { hour: 4, color: 0x122b44, alpha: 0.58 },
+  { hour: 6, color: 0x5a6a90, alpha: 0.36 },
+  { hour: 7.5, color: 0xffc27c, alpha: 0.14 },
+  // The day is the painting's own light: a faint cream so noon stays warm
+  // without washing the colour out.
+  { hour: 10, color: 0xfff1d6, alpha: 0.05 },
+  { hour: 14, color: 0xfff4e0, alpha: 0.04 },
+  { hour: 17, color: 0xffc86e, alpha: 0.16 },
+  { hour: 18.5, color: 0xf7963f, alpha: 0.3 },
+  { hour: 19.5, color: 0xd86a3a, alpha: 0.34 },
+  { hour: 20.5, color: 0x4a4e80, alpha: 0.44 },
+  { hour: 22, color: 0x142c48, alpha: 0.56 },
+  { hour: 24, color: 0x0f2740, alpha: 0.6 },
 ];
 
 /** Weather adds its own wash on top of the time-of-day tint. */

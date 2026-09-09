@@ -111,6 +111,11 @@ export interface VaultLedger {
   principalGold: number;
   /** $EMERGE earned from stewardship and not yet withdrawn. */
   earnedEmerge: number;
+  /**
+   * Payout ids whose failure has been given back to this ledger, so a
+   * transfer the chain rejected is restored once and not on every look.
+   */
+  refunded: string[];
   /** $EMERGE earned from stewardship over all time. */
   lifetimeEarned: number;
   withdrawnEmerge: number;
@@ -244,11 +249,37 @@ export const HIRE_FEE_EMERGE = 10_000;
 /** The registry's fee on a resale, paid by the buyer into the vault. */
 export const RESALE_FEE_RATE = 0.05;
 export const resaleFee = (price: number) => Math.ceil(price * RESALE_FEE_RATE);
+/**
+ * The burn on Gold sold for $EMERGE on the exchange.
+ *
+ * Gold changes hands for tokens wallet to wallet, so the only way a share of
+ * it can be destroyed is for the buyer to send that share somewhere it cannot
+ * come back from rather than to the seller. It comes out of the seller's
+ * proceeds, not on top of the price: a lot listed at twenty a Gold costs the
+ * buyer exactly twenty, so the rate the markets page reads off the book is
+ * the rate somebody actually pays, and the fee falls on the side earning the
+ * tokens. A seller who wants twenty net lists at twenty-one, which is their
+ * decision to make and visible to everyone.
+ *
+ * Both figures come off the same rounded total so the two halves can never
+ * fail to add up to what left the buyer's wallet.
+ */
+export const GOLD_SALE_BURN_RATE = 0.05;
+export const goldSaleSplit = (price: number) => {
+  const whole = Math.max(0, Math.ceil(price));
+  const burned = Math.ceil(whole * GOLD_SALE_BURN_RATE);
+  return { whole, burned, toSeller: Math.max(0, whole - burned) };
+};
 /** Prestige: a monument in the square, and a banner on the world map. */
 export const MONUMENT_COST_EMERGE = 250_000;
 export const BANNER_COST_EMERGE = 100_000;
 export const HAND_SHARE = 0.1;
 export const HAND_DAILY_CEILING = 25_000;
+/**
+ * Present days per paid level. The vault pays a plot at the lower of its
+ * city level and one level per this many UTC days its owner has been seen.
+ */
+export const LEVEL_PRESENCE_DAYS = 3;
 
 /** Today, as a plain date key in the player's own timezone. */
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -258,6 +289,7 @@ export const NEW_LEDGER: VaultLedger = {
   depositedGold: 0,
   principalGold: 0,
   earnedEmerge: 0,
+  refunded: [],
   lifetimeEarned: 0,
   withdrawnEmerge: 0,
   burnedEmerge: 0,
@@ -279,6 +311,7 @@ export function normaliseLedger(ledger: Partial<VaultLedger> | undefined | null)
     // errs toward letting a player take back money they really did put in.
     principalGold: Number.isFinite(ledger?.principalGold) ? Number(ledger!.principalGold) : deposited,
     earnedEmerge: Number(ledger?.earnedEmerge) || 0,
+    refunded: Array.isArray(ledger?.refunded) ? ledger!.refunded.filter((id) => typeof id === 'string').slice(-50) : [],
     lifetimeEarned: Number(ledger?.lifetimeEarned) || 0,
     withdrawnEmerge: Number(ledger?.withdrawnEmerge) || 0,
     burnedEmerge: Number(ledger?.burnedEmerge) || 0,
@@ -601,7 +634,7 @@ export async function withdraw(
   const fresh = await tokenBalance(who.address, config);
   return {
     ok: true, settled: true, txHash: paid.txHash,
-    message: `Sent ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} to your wallet. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned.`,
+    message: `${paid.payout.confirmed === false ? 'Sending' : 'Sent'} ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} to your wallet${paid.payout.confirmed === false ? ' — the chain has it and it lands within a minute' : ''}. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned. The transfer is listed under Paid out.`,
     ledger: {
       ...ledger,
       balance: fresh ?? ledger.balance + paid.payout.net,
@@ -661,11 +694,12 @@ export async function claimEarnings(
   const fresh = await tokenBalance(who.address, config);
   return {
     ok: true, settled: true, txHash: paid.txHash,
-    message: `Sent ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned.`,
+    message: `${paid.payout.confirmed === false ? 'Sending' : 'Sent'} ${paid.payout.net.toLocaleString()} ${TOKEN.ticker} of earnings to your wallet${paid.payout.confirmed === false ? ' — the chain has it and it lands within a minute' : ''}. ${paid.payout.burned.toLocaleString()} stayed in the vault to be burned. The transfer is listed under Paid out.${paid.note ? ` ${paid.note}` : ''}`,
     ledger: {
       ...ledger,
       balance: fresh ?? ledger.balance + paid.payout.net,
-      earnedEmerge: ledger.earnedEmerge - amount,
+      // What the vault actually took, which is less than asked when the day's room had moved.
+      earnedEmerge: ledger.earnedEmerge - Math.min(amount, paid.payout.gross),
       withdrawnEmerge: ledger.withdrawnEmerge + paid.payout.net,
       vaultBurn: ledger.vaultBurn + paid.payout.burned,
     },
@@ -703,4 +737,21 @@ export function charge(ledger: VaultLedger, cost: number): VaultLedger | null {
 /** Credit a sale or refund back to the local balance. */
 export function credit(ledger: VaultLedger, amount: number): VaultLedger {
   return { ...ledger, balance: ledger.balance + amount };
+}
+
+/**
+ * A wallet's share of the vault's day.
+ *
+ * The vault pays at most `budget` in stewardship a day across everybody. When
+ * what everybody is judged to earn fits inside that, each wallet is paid
+ * what it is judged; when it does not, the day is shared out in proportion,
+ * so a wallet judged a tenth of the total is paid a tenth of the budget,
+ * whatever hour it arrives. It used to be first come first served, which
+ * made every day a race to the button and left the player who woke last
+ * with "the vault has paid out everything it will today".
+ */
+export function fairShare(budget: number, mine: number, total: number): number {
+  if (!(mine > 0) || !(budget > 0)) return 0;
+  if (!(total > budget)) return Math.floor(mine);
+  return Math.floor((mine * budget) / total);
 }
