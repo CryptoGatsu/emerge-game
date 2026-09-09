@@ -41,7 +41,7 @@ import { fetchNames } from '@/lib/net/names';
 import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
 import { keepReceipt, dropReceipt, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
-import { onChainClaimsLive } from '@/lib/chain/registry';
+import { onChainClaimsLive, openSeaUrl, plotExplorerUrl } from '@/lib/chain/registry';
 import { untilUtcMidnight, MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
 import { WalletPicker, useWallet, currentWallet } from './WalletPicker';
@@ -2528,6 +2528,15 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
               )
               : t('Recorded in this browser. Not settled on chain yet.')}
           </p>
+          {onChainClaimsLive() && (
+            <p className="muted small tx-line">
+              {t('This plot is token #{seed} of Emerge Land, an ERC-721 in your wallet. It sells on the land market for {ticker} or on OpenSea, the settlement goes with it, and a share of every sale is paid back to everyone who holds land.', { seed: view.seed, ticker: TOKEN.ticker })}
+              {' '}
+              {openSeaUrl(view.seed) && <a href={openSeaUrl(view.seed)!} target="_blank" rel="noreferrer noopener">{t('View on OpenSea')}</a>}
+              {openSeaUrl(view.seed) && plotExplorerUrl(view.seed) && ' · '}
+              {plotExplorerUrl(view.seed) && <a href={plotExplorerUrl(view.seed)!} target="_blank" rel="noreferrer noopener">{t('Verify on {chain}', { chain: ACTIVE_CHAIN.label })}</a>}
+            </p>
+          )}
           <label className="name-field">
             <span>{t('WORLD NAME')}</span>
             <input value={draftName} maxLength={24} onChange={(e) => setDraftName(e.target.value)} />
@@ -2796,7 +2805,9 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
           </button>
           {releasing && (
             <p className="muted small">
-              {t('{region} goes back on the market and the {price} {ticker} is not refunded. Your world keeps running until you do.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })}
+              {onChainClaimsLive()
+                ? t('{region} goes back on the market and the {price} {ticker} is not refunded. Your wallet will ask you to burn the plot’s token; the registry follows once the chain has it.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })
+                : t('{region} goes back on the market and the {price} {ticker} is not refunded. Your world keeps running until you do.', { region: claimed.region, price: claimed.price.toLocaleString(), ticker: TOKEN.ticker })}
             </p>
           )}
         </div>

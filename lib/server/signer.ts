@@ -388,6 +388,45 @@ export async function sendTokenFromVault(tokenAddress: string, to: string, units
   }
 }
 
+/**
+ * Sign an arbitrary call from the vault and broadcast it: minting a plot,
+ * sweeping the royalty receiver. Signed first, broadcast second, like every
+ * other send from here, so a lost reply is a hash to check and never a call
+ * to make twice. Under the nonce lock, so it never races a payout.
+ */
+export async function callFromVault(to: string, data: Hex): Promise<TokenSend> {
+  const key = vaultKey();
+  if (!key) return { ok: false, problem: 'The vault is not configured to sign.' };
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return { ok: false, problem: 'That is not a contract address.' };
+  if (!(await takeLock(NONCE_LOCK, LOCK_SECONDS))) return { ok: false, problem: 'The vault is sending something else. Try again in a moment.' };
+  try {
+    const account = privateKeyToAccount(key);
+    const client = reader();
+    const wallet = createWalletClient({ account, chain: chain(), transport: http(ACTIVE_CHAIN.rpcUrl ?? undefined) });
+    // Simulated first, so a call the contract would refuse is refused here
+    // with its reason rather than broadcast to fail.
+    try {
+      await client.call({ account: account.address, to: to as Hex, data });
+    } catch (error) {
+      return { ok: false, problem: explainRevert(error) };
+    }
+    const nonce = await client.getTransactionCount({ address: account.address, blockTag: 'pending' });
+    const request = await wallet.prepareTransactionRequest({ account, to: to as Hex, data, nonce });
+    const signed = await wallet.signTransaction(request);
+    const txHash = keccak256(signed);
+    try {
+      await client.sendRawTransaction({ serializedTransaction: signed });
+    } catch {
+      return { ok: false, problem: 'The chain did not answer when the call was sent. It is being checked; nothing more will be sent until it is.', maybeSent: true, txHash };
+    }
+    return { ok: true, txHash };
+  } catch (error) {
+    return { ok: false, problem: explainRevert(error) };
+  } finally {
+    await releaseLock(NONCE_LOCK);
+  }
+}
+
 /** Send the chain's own coin from the vault: the development share of an ETH pass. */
 export async function sendNativeFromVault(to: string, wei: bigint): Promise<TokenSend> {
   const key = vaultKey();

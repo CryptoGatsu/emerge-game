@@ -57,7 +57,8 @@ import { eraGate, eraOf } from '@/lib/simulation';
 import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS } from '@/lib/world/eras';
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
-import { ownerOnChain, registryConfigured, judgedLevel } from '@/lib/server/land';
+import { registryConfigured, judgedLevel } from '@/lib/server/land';
+import { flushMints, holderOnChain, holdsPlot, marketBoard, nftLive, queueMint, syncOwners } from '@/lib/server/nft';
 import { presenceDays, markBanner } from '@/lib/server/registry';
 import { isEmblem } from '@/lib/world/emblems';
 import { advanceCost, charterCost } from '@/lib/world/eras';
@@ -151,7 +152,7 @@ export async function GET() {
 export async function POST(request: Request) {
   let body: {
     seed?: number; region?: string; worldName?: string; owner?: string;
-    ownerName?: string; price?: number; release?: boolean;
+    ownerName?: string; price?: number; release?: boolean; follow?: boolean;
     survey?: boolean; chart?: number; capacity?: number;
     /** Hold a plot while its buyer pays, before any money moves. */
     reserve?: boolean;
@@ -351,7 +352,7 @@ export async function POST(request: Request) {
 
   if (body.offer || body.withdrawOffer) {
     if (registryConfigured()) {
-      return NextResponse.json({ error: 'A plot on the land contract changes hands as a token.' }, { status: 409 });
+      return NextResponse.json({ error: 'A plot is a token now: make an offer on OpenSea, or buy it from the land market when its holder lists it.' }, { status: 409 });
     }
     try {
       if (body.withdrawOffer) {
@@ -384,7 +385,7 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     if (claim.expandedAt) return NextResponse.json({ claim, already: true });
@@ -420,7 +421,7 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     // Asked before the charge, not after it: a banner with no emblem chosen
@@ -464,7 +465,7 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     // A charter costs four days of the plot's own ceiling, at the level the
@@ -513,7 +514,7 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'The registry is not reachable.' }, { status: 502 });
     }
-    if (!claim || claim.owner.toLowerCase() !== owner.toLowerCase()) {
+    if (!claim || !(await holdsPlot(claim, owner))) {
       return NextResponse.json({ error: 'That plot is not yours.' }, { status: 409 });
     }
     const held = claim.era ?? 1;
@@ -651,9 +652,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Name a price in whole tokens.' }, { status: 400 });
     }
     if (registryConfigured()) {
-      return NextResponse.json({
-        error: 'A plot on the land contract is an ERC-721 token: sell it wallet to wallet, or on any marketplace.',
-      }, { status: 409 });
+      /*
+       * The listing lives on the market contract; the row mirrors it so the
+       * map shows the price. What is written is what the chain says, never
+       * what the body asked for — a row cannot advertise a price the market
+       * will not enforce.
+       */
+      try {
+        const listed = (await marketBoard()).find((l) => l.seed === seed && l.seller === owner.toLowerCase() && l.live);
+        const row = await listClaim(seed, owner, listed ? listed.price : null);
+        if (!row) return NextResponse.json({ error: 'That plot is not yours to list.' }, { status: 409 });
+        await forgetLandMarket();
+        return NextResponse.json({ claim: row, onChain: !!listed });
+      } catch {
+        return NextResponse.json({ error: 'The chain is not reachable.' }, { status: 502 });
+      }
     }
     try {
       const row = await listClaim(seed, owner, price === null ? null : Math.round(price));
@@ -680,7 +693,7 @@ export async function POST(request: Request) {
   if (body.buy) {
     if (registryConfigured()) {
       return NextResponse.json({
-        error: 'A plot on the land contract changes hands as a token, not through the registry.',
+        error: 'A plot is a token now: it is bought on the land market or on OpenSea, and the registry follows the chain.',
       }, { status: 409 });
     }
     let listed: Claim | null;
@@ -741,7 +754,37 @@ export async function POST(request: Request) {
     }
   }
 
+  /*
+   * Follow the chain for one plot: after a purchase on the market or on
+   * OpenSea, so the buyer's map shows it as theirs now. Anybody may ask; the
+   * answer is only ever what the chain says.
+   */
+  if (body.follow) {
+    if (!nftLive()) return NextResponse.json({ error: 'Plots are not tokens on this build.' }, { status: 409 });
+    try {
+      const holder = await holderOnChain(seed);
+      const row = await claimOf(seed);
+      if (holder && (!row || row.owner.toLowerCase() !== holder)) await syncOwners();
+      const now = await claimOf(seed);
+      if (!now) return NextResponse.json({ error: 'Nobody holds that plot on chain.' }, { status: 404 });
+      return NextResponse.json({ claim: now, holder });
+    } catch {
+      return NextResponse.json({ error: 'Could not reach the chain.' }, { status: 503 });
+    }
+  }
+
   if (body.release) {
+    if (registryConfigured()) {
+      // The token is the title: it has to be burnt by its holder before the
+      // row goes, or the chain would still say the plot is theirs while the
+      // map offered it to everybody.
+      try {
+        const holder = await holderOnChain(seed);
+        if (holder !== null) return NextResponse.json({ error: 'Burn the plot\u2019s token from your wallet first; the registry follows once the chain says it is gone.', released: false }, { status: 409 });
+      } catch {
+        return NextResponse.json({ error: 'Could not reach the chain to check that plot. Try again.' }, { status: 503 });
+      }
+    }
     try {
       const released = await releaseClaim(seed, owner);
       if (released) await dropReservation(seed).catch(() => {});
@@ -762,16 +805,11 @@ export async function POST(request: Request) {
   if (registryConfigured()) {
     let onChain: string | null;
     try {
-      onChain = await ownerOnChain(seed);
+      onChain = await holderOnChain(seed);
     } catch {
       return NextResponse.json({ error: 'Could not reach the chain to check that plot. Try again.' }, { status: 503 });
     }
-    if (onChain === null) {
-      return NextResponse.json({
-        error: 'That plot is not claimed on chain yet. Claim it in the land contract first.',
-      }, { status: 409 });
-    }
-    if (onChain !== owner.toLowerCase()) {
+    if (onChain !== null && onChain !== owner.toLowerCase()) {
       return NextResponse.json({ error: 'The chain says somebody else holds that plot.' }, { status: 409 });
     }
   }
@@ -789,7 +827,7 @@ export async function POST(request: Request) {
    * payment and the `ownerOf` check above already proves it happened.
    */
   let plotPaid: Charged = { whole: 0, fromCredit: 0 };
-  if (!registryConfigured() && tokenLive()) {
+  if (tokenLive()) {
     if (!(await holdsReservation(seed, owner))) {
       return NextResponse.json({
         error: 'That plot is not held for you. Open it again to start over.',
@@ -818,6 +856,12 @@ export async function POST(request: Request) {
   try {
     const result = await takeClaim(claim);
     if (result.ok) await dropReservation(seed).catch(() => {});
+    // The title follows the sale: minted to the buyer by the vault, queued so
+    // a slow chain never costs them the claim, and sent now when it can be.
+    if (result.ok && nftLive()) {
+      await queueMint(seed, owner).catch(() => {});
+      void flushMints().catch(() => {});
+    }
     if (!result.ok) {
       // Somebody else's now. The payment goes back on account: it bought
       // nothing, and the next plot this wallet claims is paid from it.

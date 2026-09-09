@@ -1,13 +1,15 @@
 # Contracts
 
 Everything Emerge needs on chain, what each piece does, and the order to do it
-in. There are two contracts and one wallet, and only one of them is ours.
+in. Four contracts and one wallet; three of the contracts are ours.
 
 | | What | Where it comes from |
 |---|---|---|
 | **$EMERGE** | The token. An ordinary ERC-20. | You deploy it (or already have). |
-| **EmergeLand** | The land registry. An ERC-721 where the token id *is* the plot seed. | `contracts/EmergeLand.sol` |
-| **The vault** | `0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062` — a wallet, not a contract. | Already exists. |
+| **EmergeLand** | The land, as tokens. An ERC-721 where the token id *is* the plot seed, with ERC-2981 royalties and marketplace metadata. | `contracts/EmergeLand.sol` |
+| **EmergeRoyalties** | Where every marketplace pays the plot holders' share of a resale. Swept to the vault and booked into the dividend pool. | `contracts/EmergeRoyalties.sol` |
+| **EmergeMarket** | The in-game land market: plots listed and bought for $EMERGE, the plot moving in the same transaction. | `contracts/EmergeMarket.sol` |
+| **The vault** | `0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062` — a wallet, not a contract. Also the land contract's minter. | Already exists. |
 | **The burn address** | `0x0000000000000000000000000000000000000000` | Nothing to deploy. |
 
 ---
@@ -88,48 +90,62 @@ Two consequences:
 > (`0x000000000000000000000000000000000000dEaD` is the usual one) and every
 > burn goes there instead.
 
-### 2. The land registry
+### 2. The land, as tokens
 
-`contracts/EmergeLand.sol` has no imports, so it compiles in Remix as it stands.
-Constructor:
+Three contracts, none with imports, so each compiles in Remix as it stands.
+Deploy them in this order from the wallet that will own them.
+
+**a. `EmergeRoyalties`** — the royalty receiver.
 
 ```solidity
-constructor(address tokenAddress, address burnTo)
+constructor(address vault)   // 0x282f8A442E50B0dcFeDBE5693d075cb7a66E6062
 ```
 
-- `tokenAddress` — the $EMERGE contract from step 1.
-- `burnTo` — the burn address. The same value you put in
-  `NEXT_PUBLIC_BURN_ADDRESS`, or the zero address if you did not set one.
+**b. `EmergeLand`** — the plots.
 
-It deploys with the game's own pricing already in it:
-
-```
-basePrice   = 180
-priceScale  = 800 × 10¹⁸
-premiums    = valley 190, woodland 120, highland 165, wetland 110, steppe 95,
-              coast 130, desert 85, swamp 100, grassland 175
+```solidity
+constructor(string baseURI, string contractURI, address royaltyReceiver, uint96 royaltyBps)
 ```
 
-so `priceOf(seed) = (180 + premium[biome(seed)]) × 800 $EMERGE`, which is
-212,000 for desert up to 296,000 for a river valley. `biomeOf(seed)` is a
-Solidity port of the game's own `biomeKindFor`, verified to agree with it across
-5,030 seeds.
+- `baseURI` — `https://www.emergerh.world/api/nft/` (the trailing slash matters:
+  `tokenURI(seed)` is this followed by the seed in decimal).
+- `contractURI` — `https://www.emergerh.world/api/nft/collection`.
+- `royaltyReceiver` — the `EmergeRoyalties` address from step a.
+- `royaltyBps` — the holders' share of every resale in basis points. `500` is 5%.
+  The contract refuses anything above `1000` (10%).
 
-> **The one deliberate difference.** The game's in-browser price also adds a
-> component for a plot's population and trade count. That needs the world
-> generator, which cannot run on chain — so the contract prices from the biome
-> alone, and **the game reads the price it displays from the contract** whenever
-> one is deployed. The number on the button is always the number the transaction
-> enforces.
+Then, still from the owner wallet: `setMinter(vault)`, with the vault wallet's
+address, so the game can mint. Nothing else needs setting; the owner keeps
+`setBaseURI`, `setContractURI`, `setRoyalty`, `setMinter`, `refreshMetadata`
+and `refreshAll`.
+
+**c. `EmergeMarket`** — the in-game market.
+
+```solidity
+constructor(address land, address token)   // EmergeLand, $EMERGE
+```
+
+It holds nothing and takes no fee of its own: a sale pays the seller and pays
+the land contract's royalty to the royalty receiver, and that is all.
+
+There is no pricing in any of these. **The game sells land the way it always
+has** — a claim is paid for in $EMERGE, burned and verified against the chain
+by `/api/plots` — and then the plot is minted to the buyer by the vault. One
+price, computed in one place.
 
 ### 3. Point the app at the contracts
 
 ```bash
-NEXT_PUBLIC_EMERGE_TOKEN=0x…      # the ERC-20
-NEXT_PUBLIC_EMERGE_REGISTRY=0x…   # EmergeLand
+NEXT_PUBLIC_EMERGE_TOKEN=0x…        # the ERC-20
+NEXT_PUBLIC_EMERGE_REGISTRY=0x…     # EmergeLand — set, and plots are tokens
+NEXT_PUBLIC_EMERGE_MARKET=0x…       # EmergeMarket — set, and the land market sells on chain
+NEXT_PUBLIC_EMERGE_ROYALTIES=0x…    # EmergeRoyalties — set, and the cron sweeps it
+NEXT_PUBLIC_OPENSEA_CHAIN=…         # OpenSea's slug for the chain, for "View on OpenSea" links; leave unset until OpenSea lists the chain
+NEXT_PUBLIC_SITE_URL=https://www.emergerh.world   # what the token metadata links back to
+EMERGE_ROYALTY_TOKENS=USDG:0x…:6    # optional: other tokens royalties may arrive in, as SYMBOL:address:decimals, comma-separated
 ```
 
-Both are read at build time, so a deployment has to be rebuilt after they
+All are read at build time, so a deployment has to be rebuilt after they
 change. Nothing else needs editing. The vault and burn addresses have working
 defaults and only need setting to change them:
 
@@ -208,37 +224,61 @@ id, and claiming asks for two signatures instead of one.
 
 ## What claiming actually does
 
+Nothing changed for the player: the plot is held for them, the price is burned
+from their wallet, the burn is read off the chain by `/api/plots`, and the row
+is written. Then, where the land contract is deployed:
+
+5. the seed is queued to be minted to the buyer (`lib/server/nft.ts`), and the
+   queue is drained at once and again every quarter hour by the cron;
+6. the vault signs `mint(seed, buyer)` — or `mintBatch` for several — and the
+   token appears in the buyer's wallet.
+
+A claim never waits on the chain and never fails because of it: the mint is
+queued, checked on chain before it goes (a seed already held by its claimant is
+skipped, one held by somebody else is left to the sync), and a batch whose
+reply was lost is kept in flight by its hash until the chain says one way or
+the other. Nothing is minted twice.
+
+## Turning the plots that already exist into tokens
+
+The surprise. Once the three contracts are deployed and the app is rebuilt with
+their addresses, one call mints every plot anybody holds to the wallet that
+holds it:
+
+```bash
+curl -sS -X POST https://www.emergerh.world/api/nft \
+  -H "Authorization: Bearer $CRON_SECRET" -H 'content-type: application/json' \
+  -d '{"airdrop":true}'
 ```
-approve(registry, price)        →  the token contract
-claim(seed, worldName, price)   →  EmergeLand
-```
 
-Two signatures, and the player is told that before the first one. The approval
-is for exactly this claim's price rather than an unlimited allowance: an
-unlimited allowance is a standing permission to drain a wallet, and there is no
-reason to ask for one here.
+It reads the chain once, queues every claim row that has no token, and mints
+in batches of thirty; run it again if it reports batches still waiting. It is
+safe to run any number of times. `GET /api/nft` shows the count of rows, the
+count minted, what is queued and what is in flight.
 
-Inside `claim`, the contract:
+From then on the chain is the title. A plot sold on OpenSea, in the game's
+market or wallet to wallet changes hands there, and `GET /api/nft?sync=1`
+(the cron, every fifteen minutes, or the buyer's own map opening) moves the
+row to the holder — with the era, the expansion, the cover and the banner the
+plot has earned, and without the seller's listing, offers and hired hand. The
+published settlement is re-stamped with the new owner, so the buyer walks
+into the town as the seller left it. A burnt token drops its row, as giving
+the plot up always did.
 
-1. refuses if the seed is already held;
-2. refuses if `price > maxPrice` — so a pricing change between the quote and the
-   signature reverts rather than quietly charging more;
-3. `transferFrom`s the price straight to the burn address, and reverts if that
-   fails;
-4. mints token `seed` to the caller and records the world's name.
+## What the owner of the land contract can and cannot do
 
-There is no moment in that sequence where a player has paid and does not own the
-land.
+**Can:** change the metadata address and the collection metadata; change the
+royalty receiver and the royalty rate, up to 10%; name the minter; ask
+marketplaces to re-read a plot's picture; hand ownership to somebody else.
 
-## What the owner of the registry can and cannot do
+**Cannot:** take a plot, move a plot, mint over a plot somebody holds, or touch
+a single $EMERGE. There is no function for any of it. A plot leaves a wallet
+only when its holder transfers it or burns it.
 
-**Can:** change `basePrice`, `priceScale` and any biome premium; change the burn
-address; hand ownership to somebody else.
-
-**Cannot:** take a plot, move a plot, mint a plot to anybody, or touch a single
-$EMERGE. There is no function for any of it. A plot leaves a wallet only when
-its holder transfers it or calls `release`, which burns the token and puts the
-seed back on the market.
+**The minter can:** mint a seed nobody holds, to anybody. That is the vault
+key, and the only thing minting can do wrong is give a free plot away — which
+is why `/api/plots` only queues a mint against a claim row it has itself
+written against a verified burn.
 
 ---
 
@@ -372,31 +412,40 @@ be taken by another player, and it can be lost if the store is lost. So:
 
 ## Selling a plot to another player
 
-Resale is between the two players; the game takes nothing and burns nothing.
-The seller lists the plot from the On-Chain panel (`POST /api/plots` with
-`list` and a price, in whole tokens), and the listing rides on the claim row so
-every map shows it. The buyer pays the seller's wallet directly — a plain
-ERC-20 `transfer` signed by the buyer — and then `POST /api/plots` with `buy`
-and the transaction hash. The server reads that transaction the same way it
-reads a burn (`verifyTransfer` in `lib/server/burns.ts`): it must have
-succeeded, be settled `EMERGE_DEPOSIT_CONFIRMATIONS` deep, come from the
-buyer, and its `Transfer` logs to the seller's address must add up to at least
-the asking price. The hash is then spent, so one payment cannot buy two plots.
-Only then does the claim row change hands, the published settlement is
-re-stamped with the new owner so the buyer walks into the town as the seller
-left it, and the seller's saved record drops the plot.
+**Where plots are tokens**, a sale is a transaction on `EmergeMarket`:
 
-Offers ride on the same row: `POST /api/plots` with `offer` and a price puts
-a bid on somebody's plot (replacing the bidder's earlier one; at most eight
-per plot, the lowest dropped), `withdrawOffer` takes it back, and the owner
-answers with `answer: 'accept' | 'decline'` and the bidder's address.
-Accepting stamps the offer with a 48-hour hold; while it holds, `buy` from
-that bidder is priced at the offer rather than the public asking price, and
-the transfer is checked against that amount. Nothing is escrowed: an offer is
-a price, not a deposit.
+1. The seller lists from the On-Chain panel. The first time, the wallet asks
+   for `setApprovalForAll(market, true)` on the land contract — one signature,
+   once — and then `list(seed, price)`. The plot stays in the seller's wallet.
+   The registry row mirrors the chain's price so the world map shows it.
+2. The buyer buys from the world map: `approve(market, price)` on $EMERGE if
+   the allowance is short, then `buy(seed, price)`. Inside `buy` the listing
+   is taken down, the royalty goes to `EmergeRoyalties`, the rest goes to the
+   seller, and the plot moves to the buyer — all in one transaction, or none
+   of it. The buyer's map then follows the chain at once.
+3. A listing is only as good as the seller's holding and approval: a plot moved
+   elsewhere, or an approval withdrawn, shows as not live on the board and
+   `buy` refuses it.
 
-Where the land contract is deployed this route refuses: a plot is then an
-ERC-721 token and changes hands as one, wallet to wallet or on any marketplace.
+A plot is also an ordinary ERC-721, so it sells on OpenSea or wallet to wallet
+exactly the same way; the sync brings the row across within the quarter hour.
+Offers through the game are off where plots are tokens: make one on OpenSea.
+
+**Where they are not** (no land contract deployed), resale is the older
+wallet-to-wallet flow: the seller lists, the buyer pays the seller directly and
+the 5% fee to the vault, and `/api/plots` with `buy` verifies both transfers
+and moves the row.
+
+## Royalties, back to the holders
+
+Every resale pays the land contract's royalty (ERC-2981) to `EmergeRoyalties`,
+whichever marketplace settled it and whatever it was priced in. The cron
+sweeps the receiver every quarter hour: $EMERGE goes to the vault and straight
+into the holders' dividend pool, so the next weekly settlement pays it out
+with the rest, in GLD, to everybody holding land. The chain's own coin or a
+stablecoin also goes to the vault, is counted under its own heading
+(`POST /api/nft {"royalties":true}` shows it), and is turned into $EMERGE by
+hand. `POST /api/nft {"sweep":true}` runs a sweep now.
 
 ## Reading the registry without the game
 
@@ -404,12 +453,32 @@ The point of putting land on chain is that you do not have to ask us anything.
 
 ```solidity
 ownerOf(seed)              // who holds a plot
-worldName(seed)            // what they called it
-priceOf(seed)              // what an unclaimed plot costs
-claimedCount()             // how many plots exist
-registry(start, count)     // a page of (seeds, owners, names)
-balanceOf(address)         // how many plots a wallet holds
+tokenURI(seed)             // its metadata: name, picture, era, level, population
+royaltyInfo(seed, price)   // who is paid on a resale, and how much
+mintedCount()              // how many plots have ever been minted
+registry(start, count)     // a page of (seeds, holders); a burnt plot reads as zero
+tokensOf(address)          // every plot a wallet holds
+balanceOf(address)         // how many
 ```
 
-`registry` exists so the world map can draw every plot anybody holds in one call
-rather than one call per plot.
+and on the market:
+
+```solidity
+listings(seed)             // seller, price, listedAt
+listedCount()
+board(start, count)        // a page of (seeds, sellers, prices, live)
+```
+
+`registry` and `board` exist so the world map can draw every plot and every
+listing in one call rather than one call per plot.
+
+## Metadata
+
+`tokenURI(seed)` points at `/api/nft/{seed}`, which answers with the OpenSea
+metadata standard: the world's name and region, a description, the picture at
+`/api/nft/{seed}/image`, and attributes — biome, region, era, expanded, city
+level, population, buildings, days settled, banner, when it was claimed. The
+picture is an SVG drawn from the plot's own land and the owner's last
+published settlement, cached ten minutes. Both are served by the app, so
+changing them is a deploy, not a contract call; `refreshAll()` on the land
+contract tells marketplaces to re-read.

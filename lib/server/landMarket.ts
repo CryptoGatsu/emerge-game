@@ -19,6 +19,7 @@ import { biomeFor } from '../world/biomes';
 import { getValue, setValue } from './kv';
 import { serverKey } from '../limits';
 import { allClaims, worldHeadlines } from './registry';
+import { marketBoard, nftLive } from './nft';
 
 export interface LandListing {
   seed: number;
@@ -78,14 +79,21 @@ export async function landMarket(fresh = false): Promise<LandMarket> {
   const [claims, heads] = await Promise.all([allClaims(), worldHeadlines()]);
   const headOf = new Map(heads.map((h) => [h.seed, h]));
   const now = Date.now();
+  /*
+   * Where plots are tokens the market contract is the board: a listing is
+   * what a seller wrote on chain and the price the contract will enforce,
+   * and only while the seller still holds the plot and the market may move
+   * it. The rows' own `forSale` is a mirror and is not trusted on its own.
+   */
+  const onChain = nftLive() ? new Map((await marketBoard().catch(() => [])).filter((l) => l.live).map((l) => [l.seed, l])) : null;
   const rows: LandListing[] = claims
-    .filter((c) => typeof c.forSale === 'number' && c.forSale > 0)
+    .filter((c) => (onChain ? onChain.has(c.seed) && onChain.get(c.seed)!.seller === c.owner.toLowerCase() : typeof c.forSale === 'number' && c.forSale > 0))
     .map((c) => {
       const head = headOf.get(c.seed);
       const offers = (c.offers ?? []).filter((o) => o.price > 0);
       return {
         seed: c.seed, region: c.region, worldName: c.worldName, owner: c.owner, ownerName: c.ownerName,
-        price: c.forSale as number, listedAt: c.listedAt ?? c.at,
+        price: onChain ? onChain.get(c.seed)!.price : c.forSale as number, listedAt: c.listedAt ?? c.at,
         offers: offers.length, bestOffer: offers.length ? Math.max(...offers.map((o) => o.price)) : null,
         era: c.era ?? 1, expanded: !!c.expandedAt, banner: c.banner ?? null,
         biome: biomeFor(c.seed).label,

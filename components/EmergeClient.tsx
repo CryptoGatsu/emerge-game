@@ -53,8 +53,8 @@ import { t, tn, tx } from '@/lib/i18n';
 import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost, earnRoom } from '@/lib/chain/vault';
-import { tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { onChainClaimsLive, releaseOnChain, renameOnChain } from '@/lib/chain/registry';
+import { TOKEN, tokenBalance, tokenLive } from '@/lib/chain/emerge';
+import { approveMarket, burnPlotOnChain, cancelOnChain, listOnChain, marketApproved, marketLive, mined, onChainClaimsLive } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
@@ -532,11 +532,15 @@ export default function EmergeClient() {
    * saying the plot is theirs, and the next person to claim it would pay and be
    * reverted.
    */
-  const release = useCallback((seed: number) => {
+  const release = useCallback(async (seed: number) => {
     if (addressRef.current && onChainClaimsLive()) {
-      // The signature is the release. Everything below is bookkeeping that
-      // follows it, so a refused signature must leave the plot alone.
-      void releaseOnChain(addressRef.current, seed);
+      // The signature is the release: the token is burned by its holder, and
+      // only once the chain has it does the row follow. A refused signature
+      // leaves the plot exactly where it was.
+      const burned = await burnPlotOnChain(addressRef.current, seed);
+      if (!burned.ok) return burned.message;
+      const state = await mined(burned.txHash);
+      if (state === 'reverted') return t('The chain refused the burn, so the plot is still yours.');
     }
     clearClaimedWorld();
     clearWorld(seed);
@@ -550,6 +554,7 @@ export default function EmergeClient() {
       return next;
     });
     setClaimed(null);
+    return null;
   }, []);
 
   /*
@@ -640,7 +645,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   /** Leave for the world map with a plot on screen. */
   onOpenMap: (seed: number) => void;
   /** Give this plot up entirely, rather than merely stepping out of it. */
-  onRelease: () => void;
+  onRelease: () => Promise<string | null> | void;
   onRename: (world: ClaimedWorld) => void;
   onPlayer: (record: PlayerRecord) => void;
   /** Credit stewardship yield the simulation has accrued. */
@@ -1829,12 +1834,8 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     const paid = await spend(player.ledger, RENAME_COST_EMERGE, wallet.address);
     if (!paid.ok) return;
     renameWorld(world, next);
-    // The name belongs to the token, not to this browser, so where there is a
-    // token it is written there too and travels with the plot. The claim row
-    // carries it as well: that is what the world map and the leaderboard show.
-    if (wallet.address && onChainClaimsLive()) {
-      void renameOnChain(wallet.address, claimed.seed, world.name);
-    }
+    // The claim row carries the name: the world map, the leaderboard and the
+    // token's metadata all read it from there, so it travels with the plot.
     if (wallet.address) void renamePlot(claimed.seed, wallet.address, world.name);
     onPlayer({ ...player, ledger: paid.ledger });
     onRename({ ...claimed, name: world.name });
@@ -2403,8 +2404,34 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!wallet.address) return;
     void (async () => {
       const asked = price !== null && price > 0 ? Math.round(price) : null;
+      /*
+       * Where plots are tokens the listing lives on the market contract: the
+       * plot stays in the seller's wallet, the market is approved to move it
+       * once, and the price is written on chain. The registry row mirrors
+       * what the chain says, so the map shows it — nothing else.
+       */
+      if (marketLive()) {
+        const me = wallet.address!;
+        const tell = (body: string) => announce({ id: `list-${claimed.seed}`, kind: 'claim', title: asked ? t('Listing') : t('Taking it down'), body, lifetime: 14_000 });
+        if (asked) {
+          if (!(await marketApproved(me))) {
+            tell(t('First, let the market move the plot when it sells: one signature, once.'));
+            const approved = await approveMarket(me);
+            if (!approved.ok) { tell(approved.message); return; }
+            if ((await mined(approved.txHash)) === 'reverted') { tell(t('The chain refused the approval.')); return; }
+          }
+          const listed = await listOnChain(me, claimed.seed, asked);
+          if (!listed.ok) { tell(listed.message); return; }
+          if ((await mined(listed.txHash)) === 'reverted') { tell(t('The chain refused the listing.')); return; }
+          tell(t('Listed on chain at {price} {ticker}. Anybody can buy it from the world map; the plot stays in your wallet until it sells.', { price: asked.toLocaleString(), ticker: TOKEN.ticker }));
+        } else {
+          const cancelled = await cancelOnChain(me, claimed.seed);
+          if (!cancelled.ok) { tell(cancelled.message); return; }
+          if ((await mined(cancelled.txHash)) === 'reverted') { tell(t('The chain refused that.')); return; }
+        }
+      }
       const result = await listPlotOnRegistry(claimed.seed, wallet.address!, asked);
-      if (!result.ok) return;
+      if (!result.ok && !marketLive()) return;
       const listings = player.listings.filter((l) => l.seed !== claimed.seed);
       if (asked) listings.push({ seed: claimed.seed, region: claimed.region, price: asked, listedAt: Date.now() });
       onPlayer({ ...player, listings });
@@ -2583,7 +2610,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onAdvance={advanceFor}
             onRenameCitizen={renameCitizenFor}
             onLeave={onLeave}
-            onRelease={onRelease}
+            onRelease={() => { void (async () => { const problem = await onRelease(); if (problem) announce({ id: `release-${claimed.seed}`, kind: 'claim', title: t('Not given up'), body: problem, lifetime: 12_000 }); })(); }}
             onVault={vault}
             onNotice={(title, body, kind) => announce({ id: `bank-${Date.now()}`, kind: kind ?? 'sync', title, body, lifetime: 12_000 })}
             onWages={setWages}

@@ -547,6 +547,26 @@ export type BuyResult =
  * Buy a listed plot from its owner. `transferTx` is the payment to the seller;
  * the registry checks it before moving the title.
  */
+/**
+ * Ask the registry to read one plot off the chain and follow it: after a
+ * purchase on the market, or on OpenSea, so the buyer's map shows the plot
+ * as theirs at once rather than at the next quarter-hour sync.
+ */
+export async function followPlot(seed: number, owner: string): Promise<{ ok: true; claim: Claim } | { ok: false; reason: string }> {
+  try {
+    const response = await withSession(
+      owner,
+      () => fetch('/api/plots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seed, owner, follow: true }) }),
+      async (r) => r,
+    );
+    const json = (await response.json()) as { claim?: Claim; error?: string };
+    if (!response.ok || !json.claim) return { ok: false, reason: json.error ?? 'The registry could not read the chain.' };
+    return { ok: true, claim: json.claim };
+  } catch {
+    return { ok: false, reason: 'Could not reach the registry.' };
+  }
+}
+
 export async function buyPlot(input: {
   seed: number; owner: string; ownerName: string; transferTx?: string; feeTx?: string;
 }): Promise<BuyResult> {
