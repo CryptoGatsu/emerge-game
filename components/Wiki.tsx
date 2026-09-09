@@ -817,6 +817,14 @@ export default function Wiki() {
               take it down. An order cannot promise what your store does not hold.
             </li>
             <li>
+              <b>Listed Gold is still yours, and still counts.</b> It has left the treasury, so you
+              cannot spend it while it stands there &mdash; but it is not gone, and it counts
+              against your settlement&rsquo;s Gold ceiling exactly as if it were in the treasury.
+              Listing a lot makes no room to earn more. The purse says how much of your Gold is
+              standing in orders, and the Bank tells the three apart: what you hold, what you can
+              spend, and what is listed.
+            </li>
+            <li>
               <b>A Gold lot is {MIN_GOLD_LOT.toLocaleString()} Gold or more</b>, and never more than the treasury in your
               plot&rsquo;s last published copy &mdash; the server checks it against that copy, not
               against the browser&rsquo;s word. Goods go up to {MAX_GOODS_LOT.toLocaleString()} a lot.
