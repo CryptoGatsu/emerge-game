@@ -50,7 +50,7 @@ export interface SavedWorld {
  */
 const KEEP = [
   'id', 'name', 'seed', 'biome', 'day', 'hour', 'terrain', 'layout',
-  'season', 'weather', 'weatherSeed', 'treasury', 'population', 'temperature',
+  'season', 'weather', 'weatherSeed', 'treasury', 'frozenGold', 'population', 'temperature',
   'deaths', 'births', 'amenities', 'bridgeWorks', 'connectedIslands',
   'families', 'citizens', 'buildings', 'resources', 'market',
   'feed', 'gatherings', 'bonds', 'projects', 'hazards', 'resolution',
@@ -205,7 +205,7 @@ export function snapshotOf(world: World): SavedWorld {
  * rounding on every save would drift. Everything else is a position, a mood
  * or a price, and three decimals are more than the game ever reads.
  */
-const EXACT = new Set<string>(['treasury', 'ledger', 'ledgerYesterday', 'flow', 'flowYesterday', 'stewardship', 'works', 'counter', 'seed', 'weatherSeed']);
+const EXACT = new Set<string>(['treasury', 'frozenGold', 'ledger', 'ledgerYesterday', 'flow', 'flowYesterday', 'stewardship', 'works', 'counter', 'seed', 'weatherSeed']);
 
 /**
  * A copy with every non-integer number cut to three decimals.

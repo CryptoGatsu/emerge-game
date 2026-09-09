@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BUILD_COSTS, addSettler, advance, carryCitizenTo, collectYield, constructBuilding, createWorld,
-  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, fundTreasury, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
+  advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, frozenGold, fundTreasury, setFrozenGold, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, escrowGoods, receiveDelivery, type WorkingJob,
@@ -2156,6 +2156,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         refresh();
         return tx(r.reason);
       }
+      // Said at once rather than at the next poll: a player who has just
+      // watched the Gold leave the treasury should not wait a minute to be
+      // told where it went. The poll reads the book and corrects this.
+      if (kind === 'gold') setFrozenGold(world, frozenGold(world) + qty);
+      saveWorld(world);
       refresh();
       return null;
     },
@@ -2186,6 +2191,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       // What comes back goes to the world it came out of. Another plot's
       // refund waits there for that world to open; crediting it here would
       // pay it twice.
+      // The lot is no longer standing, wherever it goes back to.
+      if (r.delivery && r.delivery.kind === 'gold' && r.seed === claimed.seed) {
+        setFrozenGold(world, frozenGold(world) - r.delivery.amount);
+        saveWorld(world);
+      }
       if (r.seed !== claimed.seed) { refresh(); return t('Taken down. What was unsold goes back to the plot it came from, the next time that world is open.'); }
       if (r.delivery) takeDeliveries([r.delivery]);
       refresh();
@@ -2212,6 +2222,21 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       const done = await resumePending(address, nameRef.current).catch(() => []);
       const book = await fetchExchange(claimed.seed, address);
       if (!live) return;
+      /*
+       * What this settlement has standing in Gold orders, read off the book
+       * rather than tallied as orders come and go. The book is the only thing
+       * that knows about a fill, a cancel or a listing made on another device,
+       * so reading it is what keeps the figure from drifting — and it is only
+       * written when the book actually answered, so a failed fetch leaves the
+       * last known figure alone rather than reporting nothing is listed.
+       */
+      const world = worldRef.current;
+      if (book && world) {
+        const mine = book.orders
+          .filter((o) => o.kind === 'gold' && o.seed === claimed.seed && o.seller.toLowerCase() === address.toLowerCase())
+          .reduce((sum, o) => sum + Math.max(0, o.remaining), 0);
+        if (setFrozenGold(world, mine)) { saveWorld(world); refresh(); }
+      }
       const waiting = [...done.map((d) => d.delivery), ...(book?.owed ?? [])];
       if (!waiting.length) return;
       if (takeDeliveries(waiting)) refresh();

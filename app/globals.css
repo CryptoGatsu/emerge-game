@@ -1068,6 +1068,16 @@ button {
 .purse-cell.gold.full b { color: var(--warn, #d08a3a); }
 .purse-cell.gold.full i { color: var(--warn, #d08a3a); opacity: .85; }
 .purse-cell.gold b { color: var(--gold); }
+/* Gold standing in an order, said beside the purse rather than left to look
+   like Gold that went missing. */
+.purse-cell.gold u { display: block; margin-top: 1px; font-size: 9px; letter-spacing: .04em; text-decoration: none; color: var(--muted); }
+/* Held, spendable, listed — the three figures a player asked to be able to tell apart. */
+.bank-purse { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 10px 0 4px; align-items: start; }
+.bank-purse div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--panel-edge-soft); border-radius: 8px; min-width: 0; }
+.bank-purse span { font-size: 9px; letter-spacing: .1em; color: var(--muted); }
+.bank-purse b { font-size: 15px; color: var(--cream); }
+.bank-purse b i { font-style: normal; font-size: 11px; color: var(--muted); }
+.bank-purse .listed b { color: var(--gold); }
 .purse-cell.emerge b { color: var(--emerald); }
 .purse-cell.wallet b { color: var(--cream); font-size: 13px; }
 @media (max-width: 760px) {

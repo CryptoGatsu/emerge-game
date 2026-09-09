@@ -767,11 +767,16 @@ function Purse({ view, player, visiting, onPanel }: {
           <b>—</b>
         </span>
       ) : (
-        <span className={`purse-cell gold${view.treasury >= view.goldCap ? ' full' : ''}`}>
+        <span className={`purse-cell gold${view.treasury + view.frozen >= view.goldCap ? ' full' : ''}`}>
           <em>{t('GOLD')}</em>
           {/* What it holds of what it may hold: the answer to "how much can I
-              keep?" belongs next to the Gold, not in a guide. */}
+              keep?" belongs next to the Gold, not in a guide.
+              The big figure is what can be spent. Gold standing in an order is
+              still the town's and still counts against the ceiling, so it is
+              said here rather than left to look like Gold that went missing —
+              which is exactly what players took it for. */}
           <b>{Math.floor(view.treasury).toLocaleString()}<i> / {view.goldCap.toLocaleString()}</i></b>
+          {view.frozen > 0 && <u>{t('+{n} listed', { n: view.frozen.toLocaleString() })}</u>}
         </span>
       )}
       <span className="purse-cell emerge">

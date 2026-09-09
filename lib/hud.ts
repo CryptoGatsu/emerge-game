@@ -9,7 +9,7 @@
 
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, festivalCost, goldCap, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
+import { cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -117,6 +117,8 @@ export interface Snapshot {
   treasury: number;
   /** The most Gold the settlement may hold, shown beside what it holds. */
   goldCap: number;
+  /** Gold of this settlement's own standing in exchange orders, spendable by nobody until it sells or comes back. */
+  frozen: number;
   /** What a full treasury turned away yesterday, if anything. */
   unbanked: number;
   /** What the settlement pays, as a multiple of the going rate. */
@@ -617,6 +619,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     seated: people.filter((c) => c.seated).length,
     treasury: world.treasury,
     goldCap: goldCap(world),
+    frozen: frozenGold(world),
     unbanked: Math.round(world.ledgerYesterday?.unbanked ?? 0),
     wageRate: world.wageRate,
     payroll: Math.round(world.citizens

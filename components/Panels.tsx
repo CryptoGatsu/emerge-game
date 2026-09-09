@@ -1596,6 +1596,16 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
   return (
     <Shell title={t('Bank')} subtitle={t('Gold circulates between the treasury, workers, households and the market.')} onClose={onClose} wide>
       <div className="bank-balance">{Math.floor(view.treasury).toLocaleString()} <small>{t('GOLD')}</small></div>
+      {/* Held, spendable, and standing in orders. A player asked for exactly
+          this, and was right to: Gold listed on the exchange had left the
+          balance with nothing anywhere saying it was still theirs, so it read
+          as Gold that had gone missing. It counts against the ceiling too,
+          which is why the ceiling is quoted against what is held. */}
+      <div className="bank-purse">
+        <div><span>{t('HELD')}</span><b>{(Math.floor(view.treasury) + view.frozen).toLocaleString()}<i> / {view.goldCap.toLocaleString()}</i></b></div>
+        <div><span>{t('SPENDABLE')}</span><b>{Math.floor(view.treasury).toLocaleString()}</b></div>
+        <div className={view.frozen > 0 ? 'listed' : ''}><span>{t('LISTED ON THE EXCHANGE')}</span><b>{view.frozen.toLocaleString()}</b></div>
+      </div>
       <div className="bank-grid">
         <div><span>{t('HOUSEHOLD WEALTH')}</span><b>{Math.floor(view.householdWealth).toLocaleString()}</b></div>
         <div><span>{t('WAGES PER DAY')}</span><b>{Math.floor(view.dailyWages).toLocaleString()}</b></div>

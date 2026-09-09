@@ -466,6 +466,15 @@ export interface World {
    */
   layout: WorldLayout;
   season: Season; weather: Weather; weatherSeed: number; treasury: number; population: number;
+  /**
+   * Gold out of the treasury and standing in exchange orders.
+   *
+   * Not a second purse: it is the settlement's own Gold, which has left the
+   * store and not yet been paid for. Kept so the ceiling can count it and the
+   * Bank can show it, and rewritten from the exchange's own book every time
+   * the book is read, so it corrects itself rather than drifting.
+   */
+  frozenGold?: number;
   /** Air temperature right now, in degrees Celsius. */
   temperature: number;
   /** Everyone who has ever died here, so a settlement has a history. */
@@ -742,6 +751,16 @@ function earn(world: World, line: LedgerLine, amount: number) {
   if (!(amount > 0)) return 0;
   const cap = goldCap(world);
   /*
+   * What the town holds, wherever it is standing.
+   *
+   * Gold listed on the exchange has left the treasury and is still the town's
+   * — so a ceiling that looked at the treasury alone could be stepped around
+   * by parking Gold in an order, earning into the room that made, and taking
+   * the order down. A player spotted it and said so. The ceiling counts what
+   * is parked, so listing makes no room at all.
+   */
+  const held = world.treasury + frozenGold(world);
+  /*
    * A town already above its ceiling is left alone.
    *
    * The ceiling arrived after these settlements did, and some are a long way
@@ -757,7 +776,7 @@ function earn(world: World, line: LedgerLine, amount: number) {
    * because a town under it is clamped to exactly the ceiling and never past.
    * A grandfathered town that spends back under comes under the rule for good.
    */
-  if (world.treasury > cap) {
+  if (held > cap) {
     world.treasury += amount;
     world.ledger.in[line] = (world.ledger.in[line] ?? 0) + amount;
     return amount;
@@ -765,7 +784,7 @@ function earn(world: World, line: LedgerLine, amount: number) {
   // A full treasury turns income away rather than having Gold taken off it.
   // Nothing a town has earned is ever removed; what it cannot hold it simply
   // does not take, and the Bank says how much that was.
-  const room = Math.max(0, cap - world.treasury);
+  const room = Math.max(0, cap - held);
   const taken = Math.min(amount, room);
   if (taken < amount) world.ledger.unbanked = (world.ledger.unbanked ?? 0) + (amount - taken);
   if (!(taken > 0)) return 0;
@@ -9888,6 +9907,33 @@ export function upgradeAllOfType(world: World, type: string): { ok: boolean; mes
 }
 
 /**
+ * Gold this settlement has standing in exchange orders.
+ *
+ * Zero for a world that has never listed anything, and for every world saved
+ * before this existed — which is right: an old save with a standing order
+ * learns of it the first time the exchange's book is read.
+ */
+export function frozenGold(world: { frozenGold?: number }): number {
+  const n = Number(world.frozenGold ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Say how much of this settlement's Gold is standing in orders.
+ *
+ * Written from the exchange's own book rather than counted up as orders come
+ * and go: a running total drifts the moment a fill, a cancel or a purchase on
+ * another device happens while this one is closed, and the book always knows.
+ */
+export function setFrozenGold(world: World, gold: number) {
+  useWorld(world);
+  const n = Math.max(0, Math.round(Number(gold) || 0));
+  if (frozenGold(world) === n) return false;
+  world.frozenGold = n;
+  return true;
+}
+
+/**
  * Add Gold to the treasury from outside the settlement's own economy.
  *
  * This never meets the ceiling, and that is the whole point of it. Everything
@@ -9916,11 +9962,11 @@ export function fundTreasury(world: World, gold: number, note: string) {
   if (!(gold > 0)) return;
   noteAttention(world);
   const cap = goldCap(world);
-  const was = world.treasury;
+  const was = world.treasury + frozenGold(world);
   world.treasury += gold;
   world.ledger.in.vault = (world.ledger.in.vault ?? 0) + gold;
   pushFeed(world, 'market', note);
-  if (was <= cap && world.treasury > cap) {
+  if (was <= cap && world.treasury + frozenGold(world) > cap) {
     pushFeed(world, 'market', `That takes the treasury past the ${Math.round(cap).toLocaleString()} Gold this rung holds. Nothing has been taken off it, but the town earns nothing more until it is spent back under.`);
   }
 }
