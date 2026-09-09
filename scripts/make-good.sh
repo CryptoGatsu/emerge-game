@@ -14,6 +14,14 @@
 #   scripts/make-good.sh 0xWALLET 1234 20000 "Gold for the purchase that did not settle"
 #
 # Arguments: wallet, plot seed, whole Gold, and an optional note for the feed.
+#
+# The Gold is owed to one plot, so the seed has to be a plot that wallet owns
+# or the delivery waits somewhere they will never open. The registry is public
+# and needs no secret, so a wallet or a world name is enough to find it:
+#
+#   curl -s https://emergerh.world/api/plots \
+#     | python3 -c 'import json,sys; [print(c["seed"], c["worldName"], c["owner"]) \
+#         for c in json.load(sys.stdin)["claims"] if "0xWALLET".lower() in c["owner"].lower()]'
 set -euo pipefail
 
 SITE="${EMERGE_SITE:-https://emergerh.world}"
