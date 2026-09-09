@@ -1061,7 +1061,16 @@ function roadPath(layout: WorldLayout, start: number, end: number): number[] {
   return [start, end];
 }
 
-function findBuilding(world: World, type: string) { return world.buildings.find((b) => b.type === type); }
+/** The first of a type — a standing one when there is one, so a ruin is never the depot, the jail or the hut people are sent to while another stands. */
+function findBuilding(world: World, type: string) { return standing(world, type) ?? world.buildings.find((b) => b.type === type); }
+/**
+ * The first standing building of a type, and nothing when every one is a
+ * ruin. For the places people are sent to go inside: a ruin has no inside.
+ * People used to be sent into a wrecked storehouse on their errands and to
+ * "work" in a wrecked mine until the settlement raised it again, and a
+ * player watching them walk into rubble and vanish reported it.
+ */
+function standing(world: World, type: string) { return world.buildings.find((b) => b.type === type && !b.ruined); }
 function homeOf(world: World, c: Citizen) {
   const family = world.families.find((f) => f.id === c.familyId);
   return family ? world.buildings.find((b) => b.id === family.homeId) : undefined;
@@ -1085,7 +1094,9 @@ function jobBuilding(world: World, c: Citizen): Building | undefined {
   const water = waterOf(world);
   const walks = !(hasFerry(world) && wealthOf(c) === 'wealthy');
   const sites = world.buildings.filter((b) => b.type === type && b.active && !b.ruined && (!walks || reachable(world, water, water.landAt(b.x, b.y))));
-  if (sites.length === 0) return findBuilding(world, type);
+  // No site standing that they can get to is no site: they are not sent into
+  // the ruin, or to the shore to face one across the water.
+  if (sites.length === 0) { c.workplaceId = undefined; return undefined; }
   if (sites.length === 1) { c.workplaceId = sites[0].id; return sites[0]; }
   const posted = new Map<string, number>();
   for (const o of world.citizens) if (o.job === c.job && o.workplaceId && o.id !== c.id) posted.set(o.workplaceId, (posted.get(o.workplaceId) ?? 0) + 1);
@@ -1120,6 +1131,12 @@ function releaseAmenity(world: World, c: Citizen) {
  * settlement piles onto the same seat and the rest of the furniture may as well
  * not exist.
  */
+/** After the benches and stalls are laid out again, nobody is left holding one that is gone. */
+function pruneAmenityUsers(world: World) {
+  const ids = new Set(world.amenities.map((a) => a.id));
+  for (const c of world.citizens) if (c.usingId && !ids.has(c.usingId)) { c.usingId = undefined; c.seated = false; }
+}
+
 function claimAmenity(world: World, c: Citizen, kinds: AmenityKind[], reach: number): Amenity | undefined {
   let best: Amenity | undefined;
   let bestD = reach * reach;
@@ -1159,7 +1176,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
       spread = 2.0;
       c.roughSleeper = false;
     } else {
-      const shelter = gatheringPlace(world) ?? findBuilding(world, 'Market');
+      const shelter = gatheringPlace(world) ?? standing(world, 'Market');
       target = shelter;
       spread = 4.0;
       c.roughSleeper = !shelter || phase === 'sleeping';
@@ -1171,7 +1188,10 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     // settlement doing it at once, the streets never emptied and eighteen
     // people read as a crowd of far more.
     const workplace = jobBuilding(world, c);
-    const depot = findBuilding(world, 'Storage') ?? findBuilding(world, 'Market');
+    // Nowhere standing to work: the day is spent out in the open like anyone
+    // else's off-day, not inside the storehouse or the rubble.
+    if (!workplace) return assignDestination(world, c, 'wandering');
+    const depot = standing(world, 'Storage') ?? standing(world, 'Market');
     // The outdoor trades run their errand only after a spell at work: a
     // fisher whose first trip of the morning was to the store spent the day
     // on the road and cast for an hour.
@@ -1233,7 +1253,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     const quarry = world.citizens.find((x) => x.id === c.chasing);
     if (quarry) { target = { x: quarry.x, y: quarry.y }; exact = true; }
   } else if (phase === 'jailed') {
-    const cell = findBuilding(world, 'Jail') ?? findBuilding(world, 'Market');
+    const cell = standing(world, 'Jail') ?? standing(world, 'Market');
     if (cell) { target = cell; spread = 1.2; }
   } else if (phase === 'fleeing') {
     // The square: open ground, away from walls that might come down.
@@ -1241,8 +1261,11 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
     spread = 3.5;
   } else if (phase === 'eating') {
     // A market stall to buy at, if one is free, rather than the doorway.
+    // A stall is stood at, not gone into: the target carries no building id,
+    // or the shopper counted as indoors and the renderer walked them through
+    // a door that was not there and hid them.
     const stall = claimAmenity(world, c, ['stall'], 60);
-    target = stall ?? findBuilding(world, 'Market') ?? findBuilding(world, 'Bakery');
+    target = stall ? { x: stall.x, y: stall.y } : standing(world, 'Market') ?? standing(world, 'Bakery');
     if (stall) spread = 0.9;
   } else if (phase === 'socialising') {
     const gathering = activeGathering(world);
@@ -1251,7 +1274,7 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
       target = venue;
       spread = 4.0;
     } else {
-      const options = [gatheringPlace(world), findBuilding(world, 'Market'), undefined];
+      const options = [gatheringPlace(world), standing(world, 'Market'), undefined];
       target = options[c.wanderIdx % options.length];
       spread = 3.0;
     }
@@ -2707,7 +2730,7 @@ function enforceSpacing(buildings: Building[], layout: WorldLayout, water: Water
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const a = buildings[i], b = buildings[j];
-        const need = footprintRadius(a) + footprintRadius(b) + 0.8;
+        const need = footprintRadius(a) + footprintRadius(b) + WALK_GAP + 0.1;
         let ex = b.x - a.x, ey = b.y - a.y;
         let d = Math.hypot(ex, ey);
         if (d >= need) continue;
@@ -2757,7 +2780,7 @@ function enforceSpacing(buildings: Building[], layout: WorldLayout, water: Water
       dy[i] += out.y * (out.d + 2.4);
     }
 
-    if (residual < 0.02) return;
+    if (residual < 0.02) break;
 
     // Damped, because a full correction against several constraints at once
     // overshoots and the whole set oscillates.
@@ -2771,17 +2794,25 @@ function enforceSpacing(buildings: Building[], layout: WorldLayout, water: Water
   // somewhere with no valid position nearby. Move it instead. A building that
   // ends up a little further from its intended plot is invisible; two buildings
   // sharing a wall is a corridor citizens cannot walk down.
+  //
+  // Always, not only when the springs failed to settle: the springs know
+  // water as the wet cells alone, and the bank beside them that nobody can
+  // stand on is not one of their constraints. A pass that settled at once
+  // used to return here, and one plot in thirty opened with its storehouse
+  // on that bank — "Nothing can stand on the water" for the building every
+  // errand in the settlement walks to.
   relocateStuck(buildings, layout, water);
 }
 
 /** Somewhere this building can legally stand, searched outward in a spiral. */
 function relocateStuck(buildings: Building[], layout: WorldLayout, water: WaterField) {
-  const legal = (b: Building, x: number, y: number, bankGap: number) => {
+  const legal = (b: Building, x: number, y: number, bankGap: number, roadGap = 1) => {
     if (x < 6 || x > 94 || y < 8 || y > 92) return false;
+    if (water.blocks(x, y)) return false;
     // Leave walkable bank, not merely dry ground: a wall closer to the water
     // than a person is wide turns the gap between them into a trap.
     if (water.distanceToWater(x, y) < footprintRadius(b) + bankGap) return false;
-    const need = footprintRadius(b) + 1;
+    const need = footprintRadius(b) + roadGap;
     for (let u = 0; u < layout.nodes.length; u++) {
       for (const v of layout.edges[u]) {
         if (v < u) continue;
@@ -2795,8 +2826,19 @@ function relocateStuck(buildings: Building[], layout: WorldLayout, water: WaterF
     }
     for (const other of buildings) {
       if (other === b) continue;
-      const gap = footprintRadius(b) + footprintRadius(other) + 0.8;
+      const gap = footprintRadius(b) + footprintRadius(other) + WALK_GAP + 0.1;
       if ((other.x - x) ** 2 + (other.y - y) ** 2 < gap * gap) return false;
+    }
+    // Clear of every crossing's deck and ramps, with the room a ramp may
+    // still grow by once the banks are measured: a farm set half a unit off
+    // a short deck stood across the ramp the settlement later walked up.
+    for (const br of layout.bridges) {
+      const reach = br.span + RAMP_REACH;
+      const ax = br.x - Math.cos(br.angle) * reach, ay = br.y - Math.sin(br.angle) * reach;
+      const bx = br.x + Math.cos(br.angle) * reach, by = br.y + Math.sin(br.angle) * reach;
+      const ddx = bx - ax, ddy = by - ay, len2 = ddx * ddx + ddy * ddy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * ddx + (y - ay) * ddy) / len2));
+      if (Math.hypot(x - (ax + ddx * t), y - (ay + ddy * t)) < footprintRadius(b) + 0.5) return false;
     }
     return true;
   };
@@ -2804,14 +2846,16 @@ function relocateStuck(buildings: Building[], layout: WorldLayout, water: WaterF
   for (const b of buildings) {
     if (legal(b, b.x, b.y, 1.5)) continue;
     let moved = false;
-    // Roomy first, then cramped, so a fen still gets its buildings placed.
-    for (const bankGap of [1.5, 0.4]) {
-      for (let ring = 1; ring <= 14 && !moved; ring++) {
+    // Roomy first, then cramped, then anywhere the placement rules allow at
+    // all, so a fen or a corner shore still gets its buildings placed — a
+    // storehouse left standing in the water is worse than one hard by a road.
+    for (const [bankGap, roadGap, rings] of [[1.5, 1, 14], [0.4, 1, 14], [0, 0.3, 30]] as const) {
+      for (let ring = 1; ring <= rings && !moved; ring++) {
         for (let k = 0; k < 16; k++) {
           const a = (k / 16) * Math.PI * 2 + ring * 0.4;
           const x = b.x + Math.cos(a) * ring * 2.4;
           const y = b.y + Math.sin(a) * ring * 2.4 * 0.9;
-          if (!legal(b, x, y, bankGap)) continue;
+          if (!legal(b, x, y, bankGap, roadGap)) continue;
           b.x = x; b.y = y; moved = true;
           break;
         }
@@ -4148,7 +4192,7 @@ export const CLINIC_CARE = 0.15;
  */
 export function gatheringPlace(world: World): Building | undefined {
   useWorld(world);
-  return findBuilding(world, 'Tavern') ?? findBuilding(world, 'Cafe');
+  return standing(world, 'Tavern') ?? standing(world, 'Cafe');
 }
 
 /* ------------------------------------------------------------------ *
@@ -4609,8 +4653,8 @@ export function trainCitizen(world: World, id: string, job: WorkingJob): { ok: b
   const head = TRAIN_SKILL_DAYS * (hasCivic(world, 'School') ? 2 : 1);
   c.skills = c.skills ?? {};
   c.skills[job] = Math.max(c.skills[job] ?? 0, head);
-  // New trade, new day: drop what they were walking toward.
-  c.path = []; c.detour = undefined; c.dwell = 0;
+  // New trade, new day: drop what they were walking toward, and the old post.
+  c.path = []; c.detour = undefined; c.dwell = 0; c.workplaceId = undefined;
   pushFeed(world, 'work', was === 'unemployed'
     ? `${c.name} was trained as a ${tradeWord(world, job)}.`
     : `${c.name} was retrained from ${tradeWord(world, was)} to ${tradeWord(world, job)}.`);
@@ -6648,6 +6692,25 @@ export function startBridgeAt(world: World, x: number, y: number): { ok: boolean
  * ends are dry ground inside the plot, and the deck is never longer than a
  * crew could build.
  */
+/**
+ * Whether a deck laid between two banks, with the ramps it may grow, would
+ * lie across a building. The crossing search used to look only at the water,
+ * and a bridge the player ordered was staked out through the farm.
+ */
+function deckHitsBuilding(world: World, fromX: number, fromY: number, toX: number, toY: number): boolean {
+  const dx = toX - fromX, dy = toY - fromY, len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const reach = BRIDGE_RAMP + RAMP_REACH;
+  const ax = fromX - ux * reach, ay = fromY - uy * reach;
+  const bx = toX + ux * reach, by = toY + uy * reach;
+  const ex = bx - ax, ey = by - ay, len2 = ex * ex + ey * ey || 1;
+  for (const b of world.buildings) {
+    const t = Math.max(0, Math.min(1, ((b.x - ax) * ex + (b.y - ay) * ey) / len2));
+    if (Math.hypot(b.x - (ax + ex * t), b.y - (ay + ey * t)) < footprintRadius(b) + 0.5) return true;
+  }
+  return false;
+}
+
 function shortcutCrossing(world: World, x: number, y: number): { fromX: number; fromY: number; toX: number; toY: number; gap: number } | null {
   const water = waterOf(world);
   const ext = activeExtent;
@@ -6698,6 +6761,7 @@ function shortcutCrossing(world: World, x: number, y: number): { fromX: number; 
     // best crossing if its ramp ends on a spit nobody can leave.
     const exits = crossingExits(water, from[0], from[1], to[0], to[1]);
     if (exits.from > MAX_RAMP_EXTRA || exits.to > MAX_RAMP_EXTRA) continue;
+    if (deckHitsBuilding(world, from[0], from[1], to[0], to[1])) continue;
     const cost = gap + (exits.from + exits.to) * 0.5;
     if (!best || cost < bestCost) { best = { fromX: from[0], fromY: from[1], toX: to[0], toY: to[1], gap }; bestCost = cost; }
   }
@@ -6903,6 +6967,7 @@ function narrowestCrossing(world: World, island: number) {
       // Both ends must be somewhere people can step off.
       const exits = crossingExits(water, fromX, fromY, x, y);
       if (exits.from > MAX_RAMP_EXTRA || exits.to > MAX_RAMP_EXTRA) continue;
+      if (deckHitsBuilding(world, fromX, fromY, x, y)) continue;
       const score = back.d + rim * 1.4 + inland * 0.22 + (exits.from + exits.to) * 0.5;
       if (score >= bestScore) continue;
       bestScore = score;
@@ -7227,6 +7292,7 @@ function settlementRebuilds(world: World): boolean {
     b.damage = 0;
     b.active = true;
     world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+    pruneAmenityUsers(world);
     if (b.type === 'House') rehouse(world);
     staffNow(world);
     pushFeed(world, 'build', `The settlement raised the ${named(world, b.type).toLowerCase()} from its ruins.`);
@@ -7266,6 +7332,18 @@ function settlementBuilds(world: World) {
     const shore = biomeProfile(world.biome).trades.indexOf('Fishery');
     const farm = biomeProfile(world.biome).trades.indexOf('Farm');
     ownChoice = shore >= 0 && shore < farm && !world.buildings.some((b) => b.type === 'Fishery') ? 'Fishery' : 'Farm';
+  }
+  else if (idleAdults(world) >= 2) {
+    /*
+     * Hands with no post: a workplace of the trade the land is best at.
+     *
+     * The town raised houses when people had no roof and nothing when they
+     * had no work, so a rich plot whose children came of age watched them
+     * take the road with a fortune in the treasury and every workshop full.
+     */
+    const profile = biomeProfile(world.biome);
+    ownChoice = profile.trades.find((t) => WORKPLACES.has(t)) ?? 'Farm';
+    needSaid = `${idleAdults(world)} adults had no post.`;
   }
   else {
     /*
@@ -7330,7 +7408,10 @@ function settlementBuilds(world: World) {
     return;
   }
 
-  const site = freeSite(world, want === 'House');
+  // A plot from the settlement's own plan that the placement rules allow —
+  // the plan's plots and nowhere else, so a rich town does not sprawl a
+  // building a day across every yard of open ground.
+  const site = freeSite(world, want === 'House', want);
   if (!site) return;
 
   spend(world, 'building', cost);
@@ -7340,6 +7421,7 @@ function settlementBuilds(world: World) {
   if (raised.type === 'House') rehouse(world);
   linkToRoads(world, raised);
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  pruneAmenityUsers(world);
   pushFeed(world, 'build', bySay
     ? `The settlement built a ${named(world, want)}, as the meeting resolved.`
     : want === 'House'
@@ -7425,7 +7507,7 @@ function staffOpenPosts(world: World, tally: Partial<Record<Job, number>>) {
 }
 
 /** A legal, empty plot from the settlement's own plan. */
-function freeSite(world: World, housing: boolean): [number, number] | null {
+function freeSite(world: World, housing: boolean, type?: string): [number, number] | null {
   const water = waterOf(world);
   const plots = housing ? world.layout.housePlots : world.layout.workSites;
   const radius = housing ? 2.6 : 3.2;
@@ -7466,6 +7548,10 @@ function freeSite(world: World, housing: boolean): [number, number] | null {
       }
     }
     if (onRoad) continue;
+    // And a site the placement rules would allow the player: the plan's own
+    // gap is a wall's width narrower than theirs, and the settlement raised
+    // a house that close to the mine.
+    if (type && placementProblem(world, type, x, y)) continue;
     return [x, y];
   }
   return null;
@@ -8470,6 +8556,9 @@ function daily(world: World) {
     if (c.job === 'unemployed') {
       pushFeed(world, 'work', `${c.name} is old enough to work, and took up ${tradeWord(world, jobKey)}.`);
     }
+    // A new trade is a new post: the old one is dropped here, not carried
+    // until the next posting happens to overwrite it.
+    if (jobKey !== c.job) c.workplaceId = undefined;
     c.job = jobKey;
     tally[jobKey] = (tally[jobKey] ?? 0) + 1;
   }
@@ -9308,6 +9397,7 @@ export function rebuildForEra(world: World): string | null {
   world.formed = era;
   world.restoredForms = true;
   world.amenities = buildAmenities(world.buildings, world.layout, water);
+  pruneAmenityUsers(world);
   // A merged house may hold more families than its beds; rehouse sorts it.
   rehouse(world);
   staffNow(world);
@@ -9346,6 +9436,7 @@ export function catchUpForms(world: World): void {
   world.formed = era;
   world.restoredForms = true;
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  pruneAmenityUsers(world);
   rehouse(world);
   staffNow(world);
   if (fromEra < era) {
@@ -9419,6 +9510,7 @@ export function restoreFoldedForms(world: World): number {
   }
   if (!raised) return 0;
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  pruneAmenityUsers(world);
   rehouse(world);
   staffNow(world);
   pushFeed(world, 'build', `The buildings the age rebuild folded away were raised again at no cost: ${said.join(', ')}. They stand on the open ground the fold left.`);
@@ -9593,7 +9685,17 @@ export function placementProblem(world: World, type: string, x: number, y: numbe
 
 /** Whether a footprint of radius `r` at (x, y) lies on a bridge's deck or either ramp. */
 function bridgeUnder(world: World, x: number, y: number, r: number): boolean {
-  for (const b of world.layout.bridges) {
+  // A crossing still being built counts as a bridge already: it lands in a
+  // few days on exactly this line, and a house raised on it meanwhile stood
+  // across the deck the day the crew finished.
+  const works = world.bridgeWorks;
+  const planned: Bridge[] = works ? [{
+    x: (works.fromX + works.toX) / 2, y: (works.fromY + works.toY) / 2,
+    angle: Math.atan2(works.toY - works.fromY, works.toX - works.fromX),
+    span: Math.hypot(works.toX - works.fromX, works.toY - works.fromY) / 2 + BRIDGE_RAMP + RAMP_REACH,
+    deck: 0,
+  }] : [];
+  for (const b of [...world.layout.bridges, ...planned]) {
     // The deck and the little bank at each end: the span. Beyond that is
     // open ground, and a building beside the road there is passed.
     const reach = b.span;
@@ -9650,6 +9752,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
     pushFeed(world, 'build', `A lane was cut through to the new ${named(world, type)}.`);
   }
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  pruneAmenityUsers(world);
   staffNow(world);
   if (type === 'House') rehouse(world);
   pushFeed(world, 'build', `A new ${named(world, type)} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
@@ -9741,7 +9844,9 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   // another house with room if there is one, and onto the tavern benches
   // until one is raised if there is not. "Rehouse them first" was a wall,
   // because nothing in the game let the player do that.
-  const home = world.families.find((f) => f.homeId === building.id && f.members.length > 0);
+  // Every family under that roof, not the first found: houses are shared,
+  // and the second family used to keep the id of a house that was gone.
+  const homes = world.families.filter((f) => f.homeId === building.id);
 
   const need = buildMaterials(building.type);
   const wood = Math.floor(need.wood / 2);
@@ -9757,17 +9862,20 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
     world.notables = world.notables!.filter((x) => x.id !== n.id);
     pushFeed(world, 'social', `${n.name} left: the ${formName(building.type, building.era ?? 1).toLowerCase()} they kept is gone.`);
   }
-  if (home) {
-    home.homeId = '';
+  if (homes.length) {
+    for (const f of homes) f.homeId = '';
     const moved = rehouse(world);
-    if (!moved) pushFeed(world, 'social', `The ${home.name} family is without a roof. They will take the next house raised.`);
+    const still = homes.filter((f) => f.members.length && !f.homeId);
+    if (!moved || still.length) for (const f of still) pushFeed(world, 'social', `The ${f.name} family is without a roof. They will take the next house raised.`);
   }
-  // Anyone who was heading there needs somewhere else to be, now.
+  // Anyone who was heading there, inside it, or posted to it needs somewhere else to be, now.
   for (const c of world.citizens) {
     if (c.destId === id) { c.destId = undefined; c.path = []; c.detour = undefined; c.dwell = 0; }
-    if (c.targetBuildingId === id) c.targetBuildingId = undefined;
+    if (c.targetBuildingId === id) { c.targetBuildingId = undefined; c.inside = false; }
+    if (c.workplaceId === id) c.workplaceId = undefined;
   }
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  pruneAmenityUsers(world);
   staffNow(world);
   noteAttention(world);
   pushFeed(world, 'build', `The ${formName(building.type, building.era ?? 1).toLowerCase()} was pulled down. ${wood} timber and ${stone} stone were salvaged.`);
@@ -9899,6 +10007,7 @@ export function moveBuilding(world: World, id: string, x: number, y: number): { 
   building.y = to.y;
   linkToRoads(world, building);
   world.amenities = buildAmenities(world.buildings, world.layout, waterOf(world));
+  pruneAmenityUsers(world);
   // Everybody heading for the old spot re-picks, or they walk to bare ground.
   for (const c of world.citizens) {
     if (c.destId === id || c.targetBuildingId === id) {
