@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { RESOURCES, RESOURCE_LABELS, type Resource } from '@/lib/world/goods';
 import { TOKEN } from '@/lib/chain/emerge';
+import { GOLD_SALE_BURN_RATE } from '@/lib/chain/vault';
 import { eraName } from '@/lib/world/eras';
 import { useText } from '@/lib/i18n';
 import { LanguageSwitch } from './LanguageSwitch';
@@ -169,7 +170,7 @@ export default function Markets() {
                    actually filled, which is the part that was never public. */}
             <section id="exchange">
               <h2>{t('Player to player')}</h2>
-              <p>{t('Goods and Gold that players have put up for each other. Goods are paid for in Gold; Gold is paid for in {ticker}, wallet to wallet.', { ticker: TOKEN.ticker })}</p>
+              <p>{t('Goods and Gold that players have put up for each other. Goods are paid for in Gold; Gold is paid for in {ticker}, wallet to wallet. A Gold sale burns {pct}% of the {ticker} out of the seller’s end, so the price you see is the price the buyer pays.', { ticker: TOKEN.ticker, pct: Math.round(GOLD_SALE_BURN_RATE * 100) })}</p>
 
               <h3>{t('Goods on offer')}</h3>
               {goodsOrders.length === 0 ? <p className="muted">{t('Nothing is up right now.')}</p> : (

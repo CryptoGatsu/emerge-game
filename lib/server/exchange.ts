@@ -30,9 +30,10 @@ import 'server-only';
 import type { Resource } from '../world/goods';
 import { RESOURCES } from '../world/goods';
 import { serverKey } from '../limits';
-import { tokenLive } from '../chain/emerge';
+import { TOKEN, tokenLive } from '../chain/emerge';
+import { goldSaleSplit } from '../chain/vault';
 import { utcDay } from './accounts';
-import { spendBurn, verifyTransfer } from './burns';
+import { spendBurn, verifyBurn, verifyTransfer } from './burns';
 import { counter, hdel, hget, hgetall, hset, hsetWindow, incrBy, releaseLock, takeLock } from './kv';
 import { claimOf, readWorld } from './registry';
 import { noteTrade } from './tape';
@@ -364,6 +365,8 @@ export const PAID_HOLD_MS = 24 * 3_600_000;
  */
 export interface PaidIntent {
   txHash: string;
+  /** The receipt for the burn that goes with it, where the token is live. */
+  burnTx?: string;
   id: string;
   buyer: string;
   seed: number;
@@ -392,15 +395,20 @@ export async function unsettled(buyer: string): Promise<PaidIntent[]> {
  * only useful answer is "recorded". Anything wrong with the order is found
  * later, by settling, where it can be retried and seen.
  */
-export async function recordPaid(input: { id: string; buyer: string; seed: number; qty: number; txHash: string }): Promise<Result<{ recorded: true }>> {
+export async function recordPaid(input: { id: string; buyer: string; seed: number; qty: number; txHash: string; burnTx?: string }): Promise<Result<{ recorded: true }>> {
   const { buyer, txHash } = input;
   if (!ADDRESS.test(buyer)) return { ok: false, reason: 'A payment belongs to a wallet.' };
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { ok: false, reason: 'That is not a transaction hash.' };
   const qty = Math.floor(Number(input.qty));
   if (!(qty > 0)) return { ok: false, reason: 'Say how much Gold.' };
+  const burnTx = String(input.burnTx ?? '');
   const intent: PaidIntent = {
     txHash: txHash.toLowerCase(), id: String(input.id ?? ''), buyer: buyer.toLowerCase(),
     seed: Number(input.seed), qty, at: Date.now(),
+    // Both receipts are written down together. The burn is half of what the
+    // buyer paid: a record that kept only the transfer would settle the trade
+    // later with no way to prove the burn happened, and refuse it for ever.
+    ...(/^0x[0-9a-fA-F]{64}$/.test(burnTx) ? { burnTx: burnTx.toLowerCase() } : {}),
   };
   await hset(paidKey(buyer), intent.txHash, JSON.stringify(intent));
   // The lot is now standing against money that has left a wallet: hold it.
@@ -440,7 +448,7 @@ export async function settleMine(buyer: string, buyerName: string): Promise<{ de
   const delivered: Delivery[] = [];
   const problems: string[] = [];
   for (const intent of (await unsettled(buyer)).slice(0, 8)) {
-    const r = await buyGold({ id: intent.id, buyer, buyerName, seed: intent.seed, qty: intent.qty, txHash: intent.txHash });
+    const r = await buyGold({ id: intent.id, buyer, buyerName, seed: intent.seed, qty: intent.qty, txHash: intent.txHash, burnTx: intent.burnTx });
     if (r.ok) { delivered.push(r.delivery); await clearPaid(buyer, intent.txHash); continue; }
     // A payment the chain says was never this buyer's, or failed outright, is
     // not going to become valid: forget it. Everything else waits and is shown.
@@ -499,7 +507,7 @@ export async function buyGoods(input: { id: string; buyer: string; buyerName: st
  * the Gold less the fee. Off chain (the token not live) the transfer is not
  * checked, as with a plot resale.
  */
-export async function buyGold(input: { id: string; buyer: string; buyerName: string; seed: number; qty: number; txHash?: string }): Promise<Result<{ delivery: Delivery; paid: number; burned: number; remaining: number }>> {
+export async function buyGold(input: { id: string; buyer: string; buyerName: string; seed: number; qty: number; txHash?: string; burnTx?: string }): Promise<Result<{ delivery: Delivery; paid: number; burned: number; tokensBurned: number; remaining: number }>> {
   const { id, buyer, seed } = input;
   const qty = Math.floor(Number(input.qty));
   if (!(qty > 0)) return { ok: false, reason: 'Say how much Gold.' };
@@ -511,13 +519,48 @@ export async function buyGold(input: { id: string; buyer: string; buyerName: str
     // The buyer's own hold counts as free to them; only others' holds are set aside.
     if (qty > available(order, buyer)) return { ok: false as const, reason: `Only ${available(order, buyer).toLocaleString()} Gold is free on that order right now.` };
     const price = qty * order.unitPrice;
+    // What the buyer parts with, and how it divides: the seller's share and
+    // the share that is destroyed. Both off one rounded total, so they always
+    // add back up to it.
+    const split = goldSaleSplit(price);
+    let tokensBurned = 0;
     if (tokenLive()) {
       const tx = String(input.txHash ?? '');
-      const paid = await verifyTransfer(tx, buyer, order.seller, price);
+      const burnTx = String(input.burnTx ?? '');
+      const paid = await verifyTransfer(tx, buyer, order.seller, split.toSeller);
       // A payment the chain has not settled yet is asked about again, with the
       // same receipt; a payment that will never be right is refused for good.
       if (!paid.ok) return { ok: false as const, reason: paid.reason, retry: paid.retry };
+      /*
+       * The burn is checked before either receipt is marked spent.
+       *
+       * Spending the transfer first and then finding the burn unconfirmed
+       * would answer "ask again" and refuse every later attempt as already
+       * used — the buyer's money gone and the Gold never delivered, which is
+       * the exact failure this flow was rebuilt once to prevent.
+       */
+      let gone: { ok: true; whole: number } | null = null;
+      if (burnTx) {
+        const check = await verifyBurn(burnTx, buyer, split.burned);
+        if (!check.ok) return { ok: false as const, reason: check.reason, retry: check.retry };
+        gone = check;
+      } else if (paid.whole < split.whole) {
+        // No burn receipt and the seller was not paid the whole price: this is
+        // neither the new flow nor the old one.
+        return { ok: false as const, reason: `A Gold sale burns ${split.burned.toLocaleString()} ${TOKEN.ticker}. Hand that receipt in as well.` };
+      }
+      // A purchase paid for before the burn existed sent the whole price to
+      // the seller. It is settled as it was sold: nothing burned, rather than
+      // a receipt stranded for ever over a rule that came after it.
       if (!(await spendBurn(tx, `exchange:${id}`))) return { ok: false as const, reason: 'That payment was already used.' };
+      if (burnTx && !(await spendBurn(burnTx, `exchange-burn:${id}`))) {
+        return { ok: false as const, reason: 'That payment was already used.' };
+      }
+      tokensBurned = gone ? split.burned : 0;
+    } else {
+      // Off chain the ledger is the only book there is, and it has already
+      // taken the whole price off the buyer.
+      tokensBurned = split.burned;
     }
     const burned = fee(qty);
     const remaining = order.remaining - qty;
@@ -529,8 +572,11 @@ export async function buyGold(input: { id: string; buyer: string; buyerName: str
     await recordBoth(buyer, order.seller,
       { at: Date.now(), kind: 'gold', qty, unitPrice: order.unitPrice, burned },
       { got: qty - burned, seed, name: input.buyerName.slice(0, 32) },
-      { got: price, seed: order.seed, name: order.sellerName || '' });
-    return { ok: true as const, delivery, paid: price, burned, remaining };
+      // The seller's record says what reached their wallet, not what the buyer
+      // sent: the difference is the burn, and a history that showed the price
+      // would be telling them they had been paid money nobody has.
+      { got: split.whole - tokensBurned, seed: order.seed, name: order.sellerName || '' });
+    return { ok: true as const, delivery, paid: split.whole, burned, tokensBurned, remaining };
   }, soonMsg);
 }
 

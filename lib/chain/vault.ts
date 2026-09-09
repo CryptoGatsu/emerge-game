@@ -249,6 +249,27 @@ export const HIRE_FEE_EMERGE = 10_000;
 /** The registry's fee on a resale, paid by the buyer into the vault. */
 export const RESALE_FEE_RATE = 0.05;
 export const resaleFee = (price: number) => Math.ceil(price * RESALE_FEE_RATE);
+/**
+ * The burn on Gold sold for $EMERGE on the exchange.
+ *
+ * Gold changes hands for tokens wallet to wallet, so the only way a share of
+ * it can be destroyed is for the buyer to send that share somewhere it cannot
+ * come back from rather than to the seller. It comes out of the seller's
+ * proceeds, not on top of the price: a lot listed at twenty a Gold costs the
+ * buyer exactly twenty, so the rate the markets page reads off the book is
+ * the rate somebody actually pays, and the fee falls on the side earning the
+ * tokens. A seller who wants twenty net lists at twenty-one, which is their
+ * decision to make and visible to everyone.
+ *
+ * Both figures come off the same rounded total so the two halves can never
+ * fail to add up to what left the buyer's wallet.
+ */
+export const GOLD_SALE_BURN_RATE = 0.05;
+export const goldSaleSplit = (price: number) => {
+  const whole = Math.max(0, Math.ceil(price));
+  const burned = Math.ceil(whole * GOLD_SALE_BURN_RATE);
+  return { whole, burned, toSeller: Math.max(0, whole - burned) };
+};
 /** Prestige: a monument in the square, and a banner on the world map. */
 export const MONUMENT_COST_EMERGE = 250_000;
 export const BANNER_COST_EMERGE = 100_000;

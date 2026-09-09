@@ -8,8 +8,9 @@
  */
 
 import type { Resource } from '@/lib/world/goods';
-import { pay } from '@/lib/chain/spend';
+import { pay, spend } from '@/lib/chain/spend';
 import type { VaultLedger } from '@/lib/chain/vault';
+import { goldSaleSplit } from '@/lib/chain/vault';
 
 export interface ExchangeOrder {
   id: string; kind: 'resource' | 'gold'; seller: string; sellerName: string; seed: number;
@@ -22,7 +23,7 @@ export interface TradeRecord {
   resource?: Resource; qty: number; unitPrice: number; burned: number; got: number; seed: number; other: string; otherName: string;
 }
 /** A payment made and not yet settled, as the server holds it. */
-export interface PaidIntent { txHash: string; id: string; buyer: string; seed: number; qty: number; at: number; problem?: string; tries?: number }
+export interface PaidIntent { txHash: string; burnTx?: string; id: string; buyer: string; seed: number; qty: number; at: number; problem?: string; tries?: number }
 export interface ExchangeView { orders: ExchangeOrder[]; owed: Delivery[]; history: TradeRecord[]; paid: PaidIntent[]; terms: ExchangeTerms; shared: boolean; degraded?: boolean }
 
 const DEFAULT_TERMS: ExchangeTerms = { fee: 0.05, minGoldLot: 100, maxGoodsLot: 5_000 };
@@ -65,7 +66,7 @@ export const collectDeliveries = (address: string, seed: number, ids: string[]) 
  * A Gold purchase paid for but not yet settled: the receipt is kept in the
  * browser so the same payment can be handed in again, never paid twice.
  */
-export interface PendingPurchase { id: string; seed: number; qty: number; txHash: string | null; at: number; address: string }
+export interface PendingPurchase { id: string; seed: number; qty: number; txHash: string | null; burnTx?: string | null; at: number; address: string }
 const PENDING = 'emerge.exchange.pending.v1';
 export function pendingPurchases(address: string | null): PendingPurchase[] {
   try {
@@ -81,7 +82,7 @@ function rememberPending(p: PendingPurchase | null, dropId?: string) {
   } catch { /* private browsing: the receipt is only in the wallet's history then */ }
 }
 
-type Settled = { delivery: Delivery; paid: number; burned: number; remaining: number };
+type Settled = { delivery: Delivery; paid: number; burned: number; tokensBurned?: number; remaining: number };
 
 /**
  * Hand a receipt in, asking again while the chain has not settled it.
@@ -97,7 +98,7 @@ type Settled = { delivery: Delivery; paid: number; burned: number; remaining: nu
 async function settle(address: string, name: string, p: PendingPurchase, tries = 40): Promise<Reply<Settled>> {
   let last: Reply<Settled> = { ok: false, reason: 'The exchange did not answer.', retry: true };
   for (let i = 0; i < tries; i++) {
-    last = await post<Settled>({ action: 'buyGold', address, name, seed: p.seed, id: p.id, qty: p.qty, txHash: p.txHash ?? undefined });
+    last = await post<Settled>({ action: 'buyGold', address, name, seed: p.seed, id: p.id, qty: p.qty, txHash: p.txHash ?? undefined, burnTx: p.burnTx ?? undefined });
     if (last.ok || !last.retry) break;
     await new Promise((r) => setTimeout(r, 5_000));
   }
@@ -118,12 +119,34 @@ export async function buyGold(ledger: VaultLedger, address: string, name: string
   const held = await post<{ until: number }>({ action: 'reserve', address, seed, id: order.id, qty });
   if (!held.ok) return held;
   const price = qty * order.unitPrice;
-  const paid = await pay(ledger, price, address, order.seller);
+  /*
+   * The price divides in two: the seller's share and the share that is
+   * destroyed. Wallet to wallet is the whole point of a Gold sale, so there is
+   * no contract in the middle to split one payment — the buyer signs both, the
+   * seller's first.
+   *
+   * Order matters. The seller's share goes first because it is the leg the
+   * trade cannot do without and the leg the server can retry for ever; the
+   * burn follows. A burn that fails after the seller has been paid leaves the
+   * receipt on the browser's books and settles later, and the server will
+   * wait rather than refuse — see `buyGold`, which checks both receipts before
+   * it spends either.
+   */
+  const split = goldSaleSplit(price);
+  const paid = await pay(ledger, split.toSeller, address, order.seller);
   if (!paid.ok) {
     void post({ action: 'release', address, seed, id: order.id });
     return { ok: false, reason: paid.refused ?? 'The payment was refused.' };
   }
-  const pending: PendingPurchase = { id: order.id, seed, qty, txHash: paid.txHash, at: Date.now(), address: address.toLowerCase() };
+  const gone = await spend(paid.ledger, split.burned, address);
+  if (!gone.ok) {
+    // The seller has been paid and the burn has not gone through. Nothing is
+    // lost — the receipt is kept and handed in — but this purchase cannot
+    // settle until the burn does, so say so plainly rather than silently.
+    void post({ action: 'release', address, seed, id: order.id });
+    return { ok: false, reason: `${gone.refused ?? 'The burn was refused.'} The seller has been paid; the purchase finishes once the burn goes through.` };
+  }
+  const pending: PendingPurchase = { id: order.id, seed, qty, txHash: paid.txHash, burnTx: gone.txHash, at: Date.now(), address: address.toLowerCase() };
   rememberPending(pending);
   /*
    * Tell the server the money has moved, before asking it for anything.
@@ -136,15 +159,15 @@ export async function buyGold(ledger: VaultLedger, address: string, name: string
    * something either side can retry afterwards, for as long as it takes.
    */
   if (paid.txHash) {
-    const noted = await post<{ recorded: true; delivered: Delivery[] }>({ action: 'paid', address, name, seed, id: order.id, qty, txHash: paid.txHash });
+    const noted = await post<{ recorded: true; delivered: Delivery[] }>({ action: 'paid', address, name, seed, id: order.id, qty, txHash: paid.txHash, burnTx: gone.txHash ?? undefined });
     if (noted.ok && noted.delivered?.length) {
       rememberPending(null, pending.id);
       const d = noted.delivered[0];
-      return { ok: true, delivery: d, paid: price, burned: 0, remaining: 0, ledger: paid.ledger };
+      return { ok: true, delivery: d, paid: split.whole, burned: 0, remaining: 0, ledger: gone.ledger };
     }
   }
   const r = await settle(address, name, pending);
-  if (r.ok) { rememberPending(null, pending.id); return { ...r, ledger: paid.ledger }; }
+  if (r.ok) { rememberPending(null, pending.id); return { ...r, ledger: gone.ledger }; }
   /*
    * The receipt is kept unless the chain says this payment was never valid.
    * It used to be dropped on any refusal that was not marked retryable, which

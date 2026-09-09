@@ -52,7 +52,7 @@ function operator(request: Request): boolean {
 export async function POST(request: Request) {
   let body: {
     action?: string; address?: string; name?: string; seed?: number; id?: string;
-    kind?: 'resource' | 'gold'; resource?: string; qty?: number; unitPrice?: number; txHash?: string; ids?: string[];
+    kind?: 'resource' | 'gold'; resource?: string; qty?: number; unitPrice?: number; txHash?: string; burnTx?: string; ids?: string[];
     gold?: number; note?: string;
   };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: 'Expected JSON.' }, { status: 400 }); }
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
          * seller has it. Refusing here would be refusing to remember money
          * that has already moved, which is how a player lost theirs.
          */
-        const r = await recordPaid({ id: String(body.id ?? ''), buyer: address, seed, qty: Number(body.qty), txHash: String(body.txHash ?? '') });
+        const r = await recordPaid({ id: String(body.id ?? ''), buyer: address, seed, qty: Number(body.qty), txHash: String(body.txHash ?? ''), burnTx: body.burnTx });
         if (!r.ok) return NextResponse.json({ error: r.reason }, { status: 400 });
         // Try it at once; if it cannot settle yet it is safe on the record.
         const done = await settleMine(address, name).catch(() => ({ delivered: [], problems: [] as string[] }));
@@ -129,8 +129,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true });
       }
       case 'buyGold': {
-        const r = await buyGold({ id: String(body.id ?? ''), buyer: address, buyerName: name, seed, qty: Number(body.qty), txHash: body.txHash });
-        return r.ok ? NextResponse.json({ delivery: r.delivery, paid: r.paid, burned: r.burned, remaining: r.remaining }) : NextResponse.json({ error: r.reason, retry: r.retry === true }, { status: r.retry ? 202 : 400 });
+        const r = await buyGold({ id: String(body.id ?? ''), buyer: address, buyerName: name, seed, qty: Number(body.qty), txHash: body.txHash, burnTx: body.burnTx });
+        return r.ok ? NextResponse.json({ delivery: r.delivery, paid: r.paid, burned: r.burned, tokensBurned: r.tokensBurned, remaining: r.remaining }) : NextResponse.json({ error: r.reason, retry: r.retry === true }, { status: r.retry ? 202 : 400 });
       }
       case 'collect': {
         await collect(address, seed, Array.isArray(body.ids) ? body.ids.map(String) : []);

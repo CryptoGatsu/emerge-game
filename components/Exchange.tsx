@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RESOURCE_LABELS, type Resource } from '@/lib/world/goods';
 import { TOKEN } from '@/lib/chain/emerge';
+import { GOLD_SALE_BURN_RATE, goldSaleSplit } from '@/lib/chain/vault';
 import { shortAddress } from '@/lib/chain/emerge';
 import { fetchExchange, pendingPurchases, type ExchangeOrder, type ExchangeView, type TradeRecord } from '@/lib/net/exchange';
 import type { Snapshot } from '@/lib/hud';
@@ -41,6 +42,8 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   const mine = me?.toLowerCase() ?? '';
   const terms = book?.terms ?? { fee: 0.05, minGoldLot: 100, maxGoodsLot: 5_000 };
   const feePct = Math.round(terms.fee * 100);
+  /** The share of a Gold lot's $EMERGE that is burned, out of the seller's end. */
+  const tokenPct = Math.round(GOLD_SALE_BURN_RATE * 100);
   const orders = book?.orders ?? [];
   const goods = useMemo(() => orders.filter((o) => o.kind === 'resource'), [orders]);
   const gold = useMemo(() => orders.filter((o) => o.kind === 'gold'), [orders]);
@@ -110,7 +113,9 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
         </span>
         <span className="exchange-price">
           <b>{o.kind === 'gold' ? t('{n} {ticker} a Gold', { n: o.unitPrice.toLocaleString(), ticker: TOKEN.ticker }) : t('{n} Gold each', { n: o.unitPrice.toLocaleString() })}</b>
-          <small className="muted">{o.kind === 'gold' ? t('you receive {n} Gold after the {pct}% burn', { n: afterFee.toLocaleString(), pct: feePct }) : t('{pct}% of the Gold is burned', { pct: feePct })}</small>
+          <small className="muted">{o.kind === 'gold'
+            ? t('you receive {n} Gold after the {pct}% burn; {pct2}% of the {ticker} is burned too', { n: afterFee.toLocaleString(), pct: feePct, pct2: tokenPct, ticker: TOKEN.ticker })
+            : t('{pct}% of the Gold is burned', { pct: feePct })}</small>
         </span>
         {canAct && !yours ? (
           <span className="exchange-buy">
@@ -129,7 +134,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
   return (
     <div className="exchange">
       <p className="muted small">
-        {t('Settlements sell goods to each other for Gold, and players sell Gold to each other for {ticker}, wallet to wallet. {pct}% of the Gold in every trade is burned. Goods and Gold you list leave your store at once and come back if you take the order down; what you buy arrives in the world in front of you.', { ticker: TOKEN.ticker, pct: feePct })}
+        {t('Settlements sell goods to each other for Gold, and players sell Gold to each other for {ticker}, wallet to wallet. {pct}% of the Gold in every trade is burned, and on a Gold lot {pct2}% of the {ticker} is burned as well, out of the seller’s end. Goods and Gold you list leave your store at once and come back if you take the order down; what you buy arrives in the world in front of you.', { ticker: TOKEN.ticker, pct: feePct, pct2: tokenPct })}
       </p>
       <div className="build-shelves">
         <button className={tab === 'buy' ? 'on' : ''} onClick={() => setTab('buy')}>{t('Buy')}{orders.length > 0 && <span className="people-open"> · {orders.length}</span>}</button>
@@ -190,7 +195,7 @@ export function ExchangePanel({ view, seed, me, spectating, actions }: {
             <>
               <label>{t('Gold to sell')}<input type="number" min={terms.minGoldLot} max={Math.floor(view.treasury)} value={qty} onChange={(e) => setQty(e.target.value)} placeholder={String(terms.minGoldLot)} /></label>
               <label>{t('{ticker} a Gold', { ticker: TOKEN.ticker })}<input type="number" min={1} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="10000" /></label>
-              <p className="muted small">{t('The buyer pays {n} {ticker} straight to your wallet and receives the Gold less the {pct}% burn. Lots are {min} Gold or more, and never more than the treasury in your last published copy. The Gold leaves the treasury now.', { n: (q * p).toLocaleString(), ticker: TOKEN.ticker, pct: feePct, min: terms.minGoldLot })}</p>
+              <p className="muted small">{t('The buyer pays {n} {ticker}: {net} straight to your wallet and {gone} burned. They receive the Gold less the {pct}% burn. Lots are {min} Gold or more, and never more than the treasury in your last published copy. The Gold leaves the treasury now.', { n: goldSaleSplit(q * p).whole.toLocaleString(), net: goldSaleSplit(q * p).toSeller.toLocaleString(), gone: goldSaleSplit(q * p).burned.toLocaleString(), ticker: TOKEN.ticker, pct: feePct, min: terms.minGoldLot })}</p>
             </>
           )}
           <button className="claim-button" disabled={busy || !sellOk} onClick={() => act(async () => { const why = await actions.list(kind, q, p, kind === 'resource' ? resource : undefined); if (!why) { setQty(''); setPrice(''); setTab('mine'); } return why; })}>
