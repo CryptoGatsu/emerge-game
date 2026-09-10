@@ -171,7 +171,12 @@ function HoverTip({ hover }: { hover: HudProps['hover'] }) {
     const move = (e: PointerEvent) => {
       const el = ref.current;
       if (!el) return;
-      el.style.transform = `translate3d(${e.clientX + 16}px, ${e.clientY + 18}px, 0)`;
+      // Kept inside the window: near the bottom or the right edge it flips
+      // to the other side of the pointer rather than running off screen.
+      const w = el.offsetWidth, h = el.offsetHeight;
+      const x = e.clientX + 16 + w > window.innerWidth - 8 ? e.clientX - 16 - w : e.clientX + 16;
+      const y = e.clientY + 18 + h > window.innerHeight - 8 ? e.clientY - 18 - h : e.clientY + 18;
+      el.style.transform = `translate3d(${Math.max(8, x)}px, ${Math.max(8, y)}px, 0)`;
     };
     window.addEventListener('pointermove', move);
     return () => window.removeEventListener('pointermove', move);

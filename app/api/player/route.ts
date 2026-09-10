@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { allClaims, readPlayerRecord, savePlayerRecord } from '@/lib/server/registry';
 import { sessionAddress } from '@/lib/server/session';
+import { normaliseLedger, type VaultLedger } from '@/lib/chain/vault';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,7 +118,11 @@ async function withHeldPlots(address: string, record: Rec | null): Promise<Rec |
     txHash: null,
   }));
   if (!added.length && kept.length === held.length) return record;
-  return { ...(record ?? {}), claims: [...kept, ...added] };
+  // A wallet the store has never heard of, holding land the registry has:
+  // the record made for it here is a whole one, ledger included. Without
+  // that the Bank opened on a record with no ledger and threw.
+  const ledger = normaliseLedger((record as { ledger?: Partial<VaultLedger> } | null)?.ledger);
+  return { ...(record ?? {}), ledger, claims: [...kept, ...added] };
 }
 
 export async function GET(request: Request) {
@@ -126,7 +131,11 @@ export async function GET(request: Request) {
   try {
     const held = (await readPlayerRecord(address)) as Rec | null;
     const record = await withHeldPlots(address, held);
-    return NextResponse.json({ record }, { headers: { 'cache-control': 'no-store, max-age=0' } });
+    // Whatever was stored, what leaves here has a whole ledger: a record
+    // pushed by an old build, or made from the registry alone, opened the
+    // Bank on a ledger with fields missing and threw.
+    const whole = record ? { ...record, ledger: normaliseLedger(record.ledger as Partial<VaultLedger> | undefined) } : null;
+    return NextResponse.json({ record: whole }, { headers: { 'cache-control': 'no-store, max-age=0' } });
   } catch {
     return NextResponse.json({ record: null, reason: 'The store is not reachable.' });
   }

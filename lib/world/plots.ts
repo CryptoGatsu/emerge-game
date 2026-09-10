@@ -551,7 +551,7 @@ export function mergeRecords(local: PlayerRecord, remote: PlayerRecord): PlayerR
     ...newer,
     name,
     ledger: {
-      ...newer.ledger,
+      ...normaliseLedger(newer.ledger),
       earnedEmerge: Math.max(local.ledger?.earnedEmerge ?? 0, remote.ledger?.earnedEmerge ?? 0),
     },
     nameChanges: Math.max(localChanges, remoteChanges),

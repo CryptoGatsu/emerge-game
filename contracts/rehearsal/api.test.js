@@ -158,6 +158,8 @@ const S1 = 1120, S2 = 1365;
      (healed.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(healed.record?.claims ?? []).slice(0, 200));
   ok('and the reconciled plot keeps the world’s name',
      (healed.record?.claims ?? []).find((c) => c.seed === S2)?.name === 'Harbourfall', JSON.stringify(healed.record?.claims ?? []).slice(0, 200));
+  ok('and a reconciled record carries a whole ledger',
+     typeof healed.record?.ledger?.depositedGold === 'number' && typeof healed.record?.ledger?.lifetimeEarned === 'number', JSON.stringify(healed.record?.ledger ?? null).slice(0, 200));
   const other = (await api('/api/player', undefined, B)).json;
   ok('a wallet is not handed somebody else’s plot', !(other.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(other.record?.claims ?? []).slice(0, 200));
   // The other half of the same report: a record still naming plots the wallet

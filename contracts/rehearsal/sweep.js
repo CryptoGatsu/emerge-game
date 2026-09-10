@@ -15,7 +15,6 @@ const walletLive = require('./wallet.js');
 const { cookieFor, api, BASE } = require('./site.js');
 const C = require('./chain.js');
 const A = C.addr('a').toLowerCase();
-const S1 = 1120;
 const OUT = process.env.OUT ?? './shots/sweep';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, tries = 60) => { for (let i = 0; i < tries; i++) { if (await fn()) return true; await sleep(1000); } return false; };
@@ -89,6 +88,13 @@ const inspect = async (p, where) => {
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
+  // The API trials may have sold the usual plot on: take it, or the first one nobody holds.
+  let S1 = 1120;
+  // The home chart's own seeds, so the plot taken is one the map opens on.
+  for (const seed of [1120, 1050, 1000, 1020, 1220, 1060, 1030, 1080, 1040]) {
+    const holder = await C.ownerOf(seed).catch(() => null);
+    if (!holder || holder.toLowerCase() === A) { S1 = seed; break; }
+  }
   if ((await C.ownerOf(S1).catch(() => null)) !== A) {
     const held = await api('/api/plots', { owner: A, reserve: true, seed: S1 }, A);
     if (held.json?.price) {
