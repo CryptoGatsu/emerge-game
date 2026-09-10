@@ -29,7 +29,7 @@ import { UNISWAP_ON_ROBINHOOD, parseRoute } from '../chain/universal';
 import { ERC20_ABI, LAND_ABI, LAND_ADDRESS, MARKET_ABI, MARKET_ADDRESS, ROYALTIES_ABI, ROYALTIES_ADDRESS, plotsAreTokens } from '../chain/plots';
 import { serverKey } from '../limits';
 import { counter, getValue, hdel, hget, hgetall, hset, incrBy, push, range, releaseLock, setValue, takeLock } from './kv';
-import { allClaims, claimOf, displayNames, handOverRecords, publishWorld, readWorld, type Claim } from './registry';
+import { allClaims, claimOf, displayNames, handOverRecords, listClaim, publishWorld, readWorld, type Claim } from './registry';
 import { callFromVault, receiptOf, vaultAddress, vaultCanSign } from './signer';
 import { DIVIDEND_POOL } from './treasury';
 import { forgetLandMarket } from './landMarket';
@@ -146,6 +146,66 @@ export async function queueMint(seed: number, to: string): Promise<void> {
 export async function mintQueue(): Promise<QueuedMint[]> {
   const rows = await hgetall(MINT_QUEUE);
   return Object.values(rows).map((raw) => { try { return JSON.parse(raw) as QueuedMint; } catch { return null; } }).filter((q): q is QueuedMint => !!q).sort((a, b) => a.at - b.at);
+}
+
+/** Where one plot's title stands: minted, queued (and how far back), or neither. */
+export interface MintState {
+  seed: number; minted: boolean;
+  /** The queue entry, when the title is still to be minted. */
+  queued: { since: number; position: number; ahead: number; tries: number; problem: string | null } | null;
+  /** A batch carrying this seed has been sent and is waiting for its receipt. */
+  inFlight: boolean;
+}
+
+export async function mintState(seed: number): Promise<MintState> {
+  const out: MintState = { seed, minted: false, queued: null, inFlight: false };
+  if (!nftLive()) return out;
+  if (await hget(MINTED, String(seed))) { out.minted = true; return out; }
+  const queue = await mintQueue();
+  const at = queue.findIndex((q) => q.seed === seed);
+  if (at >= 0) {
+    const q = queue[at];
+    out.queued = { since: q.at, position: at + 1, ahead: at, tries: q.tries, problem: q.problem ?? null };
+    const flying = await getValue(IN_FLIGHT).catch(() => null);
+    if (flying) { try { out.inFlight = (JSON.parse(flying) as { seeds: number[] }).seeds.includes(seed); } catch { /* not in flight */ } }
+    return out;
+  }
+  // Not in the queue and not in the minted book: the chain has the last word.
+  const holder = await holderOnChain(seed).catch(() => null);
+  out.minted = holder !== null;
+  return out;
+}
+
+/**
+ * Tell the operator when the queue has stood still.
+ *
+ * A plot a player paid for and cannot see in their wallet is the complaint
+ * that reaches Discord first. The queue is durable and the cron drains it,
+ * but a vault out of gas or a chain that keeps refusing the batch leaves it
+ * standing with nothing said. With `EMERGE_OPS_WEBHOOK` set (a Discord or
+ * Slack incoming webhook), one message an hour goes out while a mint has
+ * waited longer than an hour, naming the oldest and the problem it carries.
+ */
+const STUCK_AFTER_MS = 60 * 60_000;
+const STUCK_TOLD = serverKey('nft:mint-stuck-told');
+
+export async function warnStuckMints(): Promise<{ stuck: number; told: boolean }> {
+  const queue = await mintQueue();
+  const now = Date.now();
+  const stuck = queue.filter((q) => now - q.at > STUCK_AFTER_MS);
+  if (!stuck.length) return { stuck: 0, told: false };
+  const hook = process.env.EMERGE_OPS_WEBHOOK;
+  if (!hook || (await getValue(STUCK_TOLD))) return { stuck: stuck.length, told: false };
+  const oldest = stuck[0];
+  const hours = Math.round((now - oldest.at) / 3_600_000);
+  const text = `Emerge: ${stuck.length} plot mint${stuck.length === 1 ? '' : 's'} waiting over an hour. Oldest: plot #${oldest.seed} for ${oldest.to}, ${hours}h, ${oldest.tries} tries${oldest.problem ? `, last problem: ${oldest.problem}` : ''}. Check GET /api/nft with the cron secret, and the vault's gas.`;
+  try {
+    await fetch(hook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: text, text }) });
+    await setValue(STUCK_TOLD, String(now), 3600);
+    return { stuck: stuck.length, told: true };
+  } catch {
+    return { stuck: stuck.length, told: false };
+  }
 }
 
 export type Flushed = {
@@ -280,7 +340,7 @@ export async function airdrop(): Promise<{ queued: number; alreadyMinted: number
  * Following the chain
  * ------------------------------------------------------------------ */
 
-export interface Synced { moved: { seed: number; from: string; to: string }[]; released: number[]; unminted: number; at: number }
+export interface Synced { moved: { seed: number; from: string; to: string }[]; released: number[]; unminted: number; delisted?: number[]; at: number }
 
 /**
  * Bring the rows into line with the chain.
@@ -315,7 +375,25 @@ export async function syncOwners(chain?: Map<number, string | null>): Promise<Sy
         out.moved.push({ seed: row.seed, from: row.owner.toLowerCase(), to: holder });
       }
     }
-    if (out.moved.length || out.released.length) {
+    /*
+     * A row that says "for sale" with no live listing behind it on the
+     * market contract advertises a price nothing will honour, and leaves
+     * its owner a listing they can see in one place and not take down in
+     * another. The chain is the board: the row follows it.
+     */
+    if (nftLive()) {
+      const board = await marketBoard().catch(() => null);
+      if (board) {
+        const live = new Map(board.filter((l) => l.live).map((l) => [l.seed, l.seller]));
+        for (const row of await allClaims()) {
+          if (!(typeof row.forSale === 'number' && row.forSale > 0)) continue;
+          if (live.get(row.seed) === row.owner.toLowerCase()) continue;
+          await listClaim(row.seed, row.owner, null);
+          (out.delisted ??= []).push(row.seed);
+        }
+      }
+    }
+    if (out.moved.length || out.released.length || out.delisted?.length) {
       await forgetLandMarket().catch(() => {});
       await forgetLandCatalogue().catch(() => {});
       await forgetChainSales().catch(() => {});

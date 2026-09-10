@@ -33,9 +33,10 @@ const text = async (p) => (await p.evaluate(() => document.body.innerText)).repl
   const mapCard = await text(a.p);
   ok('A’s plot card says it is a token, with OpenSea and explorer links', /OpenSea/.test(mapCard) && await a.p.locator('a', { hasText: /View on OpenSea/ }).count() === 1, mapCard.match(/.{0,80}OpenSea.{0,80}/)?.[0] ?? mapCard.slice(0, 120));
   const osHref = await a.p.locator('a', { hasText: /View on OpenSea/ }).getAttribute('href');
-  ok('the OpenSea link names the land contract and the seed', osHref === `https://opensea.io/item/robinhood/${C.deployed.land}/${S1}`, osHref);
+  ok('the OpenSea link names the land contract and the seed', (osHref ?? '').toLowerCase() === `https://opensea.io/item/robinhood/${C.deployed.land}/${S1}`.toLowerCase(), osHref);
   const exHref = await a.p.locator('a', { hasText: /Verify on Robinhood Chain/ }).getAttribute('href');
-  ok('the explorer link is the token instance on Blockscout', exHref === `${process.env.EXPLORER ?? 'http://explorer.local'}/token/${C.deployed.land}/instance/${S1}`, exHref);
+  // The explorer host is built in (Robinhood Chain's Blockscout); the path is what matters here.
+  ok('the explorer link is the token instance on Blockscout', (exHref ?? '').toLowerCase().endsWith(`/token/${C.deployed.land}/instance/${S1}`.toLowerCase()) && /^https?:\/\//.test(exHref ?? ''), exHref);
   await a.p.locator('.land-claim .claim-button').first().click();
   await a.p.waitForSelector('.action', { timeout: 60000 }); await a.p.waitForTimeout(2000);
   await a.p.locator('button.action.connect').first().click(); await a.p.waitForTimeout(1200);

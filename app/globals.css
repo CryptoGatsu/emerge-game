@@ -3602,6 +3602,7 @@ button.ghost.tiny { padding: 4px 10px; min-height: 24px; font-size: 10.5px; bord
 /* A transaction hash is one unbreakable word: shortened, linked, and never allowed past the card. */
 .tx-line { overflow-wrap: anywhere; word-break: break-all; min-width: 0; }
 .tx-line a { color: var(--emerald); text-decoration: none; border-bottom: 1px dotted rgba(184, 231, 86, 0.5); }
+.minting { color: var(--gold); border-left: 2px solid rgba(240, 208, 94, 0.6); padding-left: 8px; }
 
 .casino-buy-block { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .casino-passes { display: flex; gap: 4px; }

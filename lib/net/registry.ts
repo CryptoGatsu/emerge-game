@@ -767,6 +767,23 @@ export interface Leader {
   era: number; banner: string | null; level: number; score: number; population: number; day: number; gld: string;
 }
 
+/** Where a plot's title stands: minted to its holder, or still in the vault's queue. */
+export interface MintState {
+  seed: number; minted: boolean;
+  queued: { since: number; position: number; ahead: number; tries: number; problem: string | null } | null;
+  inFlight: boolean;
+}
+
+export async function fetchMintState(seed: number): Promise<MintState | null> {
+  try {
+    const response = await fetch(`/api/nft?seed=${seed}`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    return (await response.json()) as MintState;
+  } catch {
+    return null;
+  }
+}
+
 /** The cities ranked by judged level, or null when the relay could not say. */
 export async function fetchLeaderboard(): Promise<{ rows: Leader[]; total: number } | null> {
   try {

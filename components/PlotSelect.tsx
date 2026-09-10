@@ -41,7 +41,7 @@ import { EARNING_PLOT_LIMIT, LOCAL_TEST_ALLOCATION, PROSPECT_COST_EMERGE, HAND_D
 import { pay, settleBurn, spend } from '@/lib/chain/spend';
 import {
   buyPlot, fetchClaims, followPlot, placeOffer, priceFor, quotePlot, redeemPayment, reservePlot, surveyPlot, takePlot, withdrawOffer,
-  type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader,
+  type Claim, type Find, quitJob, takeJob, fetchLeaderboard, type Leader, fetchMintState, type MintState,
 } from '@/lib/net/registry';
 import { keepReceipt, dropReceipt, resumeReceipts, redeemFallback, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { WalletPicker, useWallet } from './WalletPicker';
@@ -791,6 +791,26 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
   const heldByOther = selected ? takenByOthers.get(selected.seed) ?? null : null;
 
   /*
+   * A plot of mine whose title has not reached the wallet yet says so, rather
+   * than leaving "my wallet does not have the NFT" to be asked in Discord.
+   * Read when a plot of mine is selected, and again every half minute while
+   * it stays selected, until the title is there.
+   */
+  const [mintState, setMintState] = useState<MintState | null>(null);
+  const mineSelected = !!selected && !heldByOther && ownedSeeds.has(selected.seed);
+  const mintSeed = mineSelected && onChainClaimsLive() ? selected!.seed : null;
+  useEffect(() => {
+    setMintState(null);
+    if (mintSeed === null) return;
+    let live = true;
+    const read = async () => { const state = await fetchMintState(mintSeed); if (live && state) setMintState(state); };
+    void read();
+    const timer = window.setInterval(() => { if (mintState?.minted) return; void read(); }, 30_000);
+    return () => { live = false; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mintSeed]);
+
+  /*
    * A plot sold from under this browser's record.
    *
    * The registry is the title. When it says somebody else now holds a seed
@@ -1374,6 +1394,13 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                 {t('Claimed {date} for {price} {ticker}', { date: new Date(mine.claimedAt).toLocaleDateString(), price: mine.price.toLocaleString(), ticker: TOKEN.ticker })}
                 {mine.owner ? t(' by {address}', { address: shortAddress(mine.owner) }) : t(' with no wallet connected')}.
                 {mine.txHash ? ` ${t('Paid on chain: {tx}.', { tx: mine.txHash })}` : ''}
+              </p>
+            )}
+            {mineSelected && mintState && !mintState.minted && (
+              <p className="muted small minting">
+                {mintState.queued
+                  ? t('The title is being minted to your wallet: {ahead} ahead of it in the vault’s queue. It usually takes a few minutes. If it is still here after an hour, tell us in Discord.', { ahead: mintState.queued.ahead })
+                  : t('The title has not reached your wallet yet. The vault checks every quarter hour and mints what is missing; if it is still missing after an hour, tell us in Discord.')}
               </p>
             )}
             {/* Who else holds this land. */}

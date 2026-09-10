@@ -54,7 +54,7 @@ import {
   ADVANCE_COST_EMERGE, EARNING_PLOT_LIMIT, EMERGE_PER_GOLD, EXPAND_COST_EMERGE, HAND_DAILY_CEILING, HAND_SHARE, RENAME_CITIZEN_EMERGE, RENAME_COST_EMERGE, accrue, charge,
   liveToken, type VaultLedger, DAILY_EARN_CEILING, CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, WALLET_DAILY_CEILING, advanceCost, charterCost, earnRoom } from '@/lib/chain/vault';
 import { TOKEN, tokenBalance, tokenLive } from '@/lib/chain/emerge';
-import { approveMarket, burnPlotOnChain, cancelOnChain, listOnChain, marketApproved, marketLive, mined, onChainClaimsLive } from '@/lib/chain/registry';
+import { approveMarket, burnPlotOnChain, cancelOnChain, listOnChain, marketApproved, marketListing, marketLive, mined, onChainClaimsLive } from '@/lib/chain/registry';
 import { spend } from '@/lib/chain/spend';
 import { DIG_COST_EMERGE, drawPrize, prizeStory, type Prize } from '@/lib/chain/gacha';
 import { Soundscape } from '@/lib/audio/soundscape';
@@ -2463,12 +2463,28 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
           }
           const listed = await listOnChain(me, claimed.seed, asked);
           if (!listed.ok) { tell(listed.message); return; }
-          if ((await mined(listed.txHash)) === 'reverted') { tell(t('The chain refused the listing.')); return; }
+          const state = await mined(listed.txHash);
+          if (state === 'reverted') { tell(t('The chain refused the listing.')); return; }
+          if (state === 'pending') {
+            // Not written as listed until the chain says so: a listing the
+            // chain never took used to sit in this record with nothing to
+            // take it down, invisible on the board and refusing to be
+            // withdrawn. The panel reads the chain and shows it when it lands.
+            tell(t('The listing is still settling on chain. It will show here and on the world map once the chain has it.'));
+            return;
+          }
           tell(t('Listed on chain at {price} {ticker}. Anybody can buy it from the world map; the plot stays in your wallet until it sells.', { price: asked.toLocaleString(), ticker: TOKEN.ticker }));
         } else {
-          const cancelled = await cancelOnChain(me, claimed.seed);
-          if (!cancelled.ok) { tell(cancelled.message); return; }
-          if ((await mined(cancelled.txHash)) === 'reverted') { tell(t('The chain refused that.')); return; }
+          // Only a listing the chain actually holds is cancelled there. A
+          // record of one the chain does not have is simply cleared.
+          const held = await marketListing(claimed.seed).catch(() => null);
+          if (held && held.seller === me.toLowerCase()) {
+            const cancelled = await cancelOnChain(me, claimed.seed);
+            if (!cancelled.ok) {
+              const still = await marketListing(claimed.seed).catch(() => held);
+              if (still && still.seller === me.toLowerCase()) { tell(cancelled.message); return; }
+            } else if ((await mined(cancelled.txHash)) === 'reverted') { tell(t('The chain refused that.')); return; }
+          }
         }
       }
       const result = await listPlotOnRegistry(claimed.seed, wallet.address!, asked);

@@ -157,7 +157,13 @@ export async function POST(request: Request) {
 
   const encoded = JSON.stringify(body.snapshot);
   if (encoded.length > MAX_SNAPSHOT) {
-    return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, and the relay takes ${Math.round(MAX_SNAPSHOT / 1024)}KB.` }, { status: 413 });
+    // Which parts are the bulk, so the report says where the world grew
+    // rather than only that it did.
+    const parts = Object.entries((snap.world ?? {}) as Record<string, unknown>)
+      .map(([k, v]) => [k, JSON.stringify(v)?.length ?? 0] as const)
+      .sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([k, n]) => `${k} ${Math.round(n / 1024)}KB`).join(', ');
+    return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, and the relay takes ${Math.round(MAX_SNAPSHOT / 1024)}KB. The largest parts: ${parts}.` }, { status: 413 });
   }
 
   // Where the settlement is, read from the world itself rather than from

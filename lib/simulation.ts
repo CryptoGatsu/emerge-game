@@ -6335,6 +6335,8 @@ function bury(world: World, c: Citizen, line: string) {
 function forget(world: World, c: Citizen) {
   world.citizens = world.citizens.filter((x) => x.id !== c.id);
   for (const f of world.families) f.members = f.members.filter((id) => id !== c.id);
+  // A household with nobody left in it is a name in a list that only grows.
+  world.families = world.families.filter((f) => f.members.length > 0);
   // The bed they leave behind is somebody else's tonight, not tomorrow.
   rehouse(world);
   for (const [key, bond] of Object.entries(world.bonds)) {

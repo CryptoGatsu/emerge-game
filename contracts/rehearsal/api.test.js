@@ -36,6 +36,11 @@ const S1 = 1120, S2 = 1365;
   ok('a second flush mints nothing', flushAgain.json.minted === 0 && flushAgain.json.waiting === 0, JSON.stringify(flushAgain.json));
   st = (await api('/api/nft')).json;
   ok('status counts one token, no queue', st.mintedCount === 1 && st.queue === 0 && st.unminted === 0 && st.inFlight === null, JSON.stringify({ m: st.mintedCount, q: st.queue, u: st.unminted, f: st.inFlight }));
+  // The public answer for one plot: what the holder's card says while the title is on its way.
+  const ms1 = (await api(`/api/nft?seed=${S1}`)).json;
+  ok('mint state: the minted plot reads as minted', ms1.minted === true && ms1.queued === null, JSON.stringify(ms1));
+  const ms2 = (await api(`/api/nft?seed=${S2}`)).json;
+  ok('mint state: an unclaimed plot is neither minted nor queued', ms2.minted === false && ms2.queued === null, JSON.stringify(ms2));
 
   // 2. Metadata as OpenSea would read it.
   const uri = await C.read('land', 'tokenURI', [BigInt(S1)]);

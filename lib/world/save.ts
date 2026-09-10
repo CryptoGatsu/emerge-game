@@ -20,7 +20,7 @@
  * cost a player their progress, never their ability to open the game.
  */
 
-import { catchUpForms, createWorld, type Citizen, type World } from '../simulation';
+import { CLEARING_DAYS, catchUpForms, createWorld, type Bond, type Citizen, type World } from '../simulation';
 import { RESOURCES } from './goods';
 import { clientKey } from '../limits';
 
@@ -197,7 +197,44 @@ export function snapshotOf(world: World): SavedWorld {
     void _detour;
     return { ...rest, path: [], navWait: 0 };
   });
+  /*
+   * What grows without bound in a long-lived town, cut back to what play
+   * reads. A world played for months came to five times what the relay
+   * takes, and a world that cannot be published cannot advance an era.
+   *
+   * Bonds are one per pair who ever met, so a big town carries tens of
+   * thousands; the ones that matter are the strongest around each person
+   * and every friendship or rivalry. A household whose last member died
+   * is nothing but a name. A clearing regrows after its days are up.
+   */
+  slim.bonds = keepBonds(world);
+  slim.families = tidy(world.families.filter((f) => f.members.length > 0));
+  slim.clearings = (world.clearings ?? []).filter(([, , day]) => world.day - day < CLEARING_DAYS);
+  slim.unlockedAreas = [...new Set(world.unlockedAreas)];
   return { version: SAVE_VERSION, seed: world.seed, at: Date.now(), world: slim };
+}
+
+/** How many of a person's strongest bonds the save keeps, besides every friendship and rivalry. */
+const BONDS_KEPT = 16;
+
+function keepBonds(world: World): Record<string, Bond> {
+  const alive = new Set(world.citizens.map((c) => c.id));
+  const byPerson = new Map<string, [string, Bond][]>();
+  const kept: Record<string, Bond> = {};
+  for (const [key, bond] of Object.entries(world.bonds)) {
+    if (!alive.has(bond.a) || !alive.has(bond.b)) continue;
+    if (bond.friends || bond.rivals) { kept[key] = tidy(bond); continue; }
+    for (const id of [bond.a, bond.b]) {
+      const list = byPerson.get(id) ?? [];
+      list.push([key, bond]);
+      byPerson.set(id, list);
+    }
+  }
+  for (const list of byPerson.values()) {
+    list.sort((x, y) => Math.abs(y[1].strength) - Math.abs(x[1].strength));
+    for (const [key, bond] of list.slice(0, BONDS_KEPT)) kept[key] = tidy(bond);
+  }
+  return kept;
 }
 
 /**

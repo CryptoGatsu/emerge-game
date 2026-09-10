@@ -17,6 +17,16 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.11.1',
+    date: '2026-09-11',
+    title: 'Three things players reported, fixed',
+    notes: [
+      'A listing you could see but not withdraw, or withdraw but not see, is over. The On-Chain panel now reads the land market contract itself to say whether your plot is listed, rather than what this browser remembered. A listing the chain never took is no longer written down as if it had been, and taking one down works even when the chain has nothing to take down. The registry also clears any old for-sale price that has no live listing behind it.',
+      'A plot whose title has not reached your wallet now says so. Where the claim card or the On-Chain panel used to say nothing, it says the title is being minted, how many are ahead of it in the vault\u2019s queue, and what to do if it is still waiting after an hour. Operators can point a webhook at the vault and be told when the queue has stood still.',
+      'A world that had grown too large to publish could not advance an era. Saves and published copies now keep only what play reads: the strongest sixteen bonds around each person plus every friendship and rivalry, households that still have somebody in them, and clearings that have not yet regrown. A world that is still too large is told which parts are the bulk.',
+    ],
+  },
+  {
     version: '2.11.0',
     date: '2026-09-10',
     title: 'Snow to play in, holidays to keep, and weather that costs something',
@@ -383,6 +393,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.11.1',
+    date: '2026-09-11',
+    title: '玩家反馈的三个问题，修好了',
+    notes: [
+      '看得见却撤不下、或撤得下却看不见的挂牌，不会再有了。链上面板现在直接读取土地市场合约来判断你的地块是否在挂牌，而不是这个浏览器记住的东西。链上从未接受的挂牌不会再被当作已挂牌记下来；撤下挂牌时即使链上没有可撤的，也能正常完成。注册表也会清掉背后没有有效挂牌的旧售价。',
+      '地契还没到钱包的地块现在会说明。以前地块卡片和链上面板什么都不说，现在会说地契正在铸造、金库队列里有多少在它前面，以及等超过一小时该怎么办。运营者可以给金库配置一个 webhook，队列停滞时会收到通知。',
+      '大到无法发布的世界以前无法推进时代。存档和发布的副本现在只保留游戏会读取的内容：每个人周围最强的十六段关系加上所有友谊和宿怨、仍有人在的家庭，以及尚未重新长回的空地。如果世界仍然太大，会告诉你哪些部分占了体积。',
+    ],
+  },
   {
     version: '2.11.0',
     date: '2026-09-10',

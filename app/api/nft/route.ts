@@ -20,7 +20,7 @@
 import { NextResponse } from 'next/server';
 import { operator } from '@/lib/server/operator';
 import { preflight } from '@/lib/server/preflight';
-import { airdrop, drainMints, nftLive, nftStatus, recentTransfers, royaltyBook, sweepRoyalties, syncOwners } from '@/lib/server/nft';
+import { airdrop, drainMints, mintState, nftLive, nftStatus, recentTransfers, royaltyBook, sweepRoyalties, syncOwners, warnStuckMints } from '@/lib/server/nft';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -40,7 +40,17 @@ export async function GET(request: Request) {
     const synced = await syncOwners().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'sync failed' }));
     const minted = await drainMints().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'mint failed' }));
     const swept = await sweepRoyalties().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'sweep failed' }));
-    return NextResponse.json({ live: true, synced, minted, swept });
+    const stuck = await warnStuckMints().catch(() => ({ stuck: -1, told: false }));
+    return NextResponse.json({ live: true, synced, minted, swept, stuck });
+  }
+  // Public: where one plot's title stands, so its holder can be told "minting" rather than nothing.
+  const seed = Number(url.searchParams.get('seed'));
+  if (Number.isInteger(seed) && seed > 0) {
+    try {
+      return NextResponse.json(await mintState(seed), { headers: { 'cache-control': 'no-store' } });
+    } catch (error) {
+      return NextResponse.json({ seed, error: error instanceof Error ? error.message : 'unreachable' }, { status: 502 });
+    }
   }
   try {
     return NextResponse.json(await nftStatus());

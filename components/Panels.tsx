@@ -38,10 +38,10 @@ import {
 } from '@/lib/chat';
 import { DIG_COST_EMERGE, odds, type Prize } from '@/lib/chain/gacha';
 import { fetchNames } from '@/lib/net/names';
-import { answerOffer, fetchClaims, quitJob, setHiring, type Claim, type Offer } from '@/lib/net/registry';
+import { answerOffer, fetchClaims, fetchMintState, quitJob, setHiring, type Claim, type MintState, type Offer } from '@/lib/net/registry';
 import { keepReceipt, dropReceipt, SETTLED_ANSWER } from '@/lib/net/receipts';
 import { creditDeposit, fetchPayouts, type PayoutHistory } from '@/lib/net/payouts';
-import { marketLive, onChainClaimsLive, openSeaUrl, plotExplorerUrl } from '@/lib/chain/registry';
+import { marketListing, marketLive, onChainClaimsLive, openSeaUrl, plotExplorerUrl, type MarketListing } from '@/lib/chain/registry';
 import { ROYALTY_PERCENT } from '@/lib/chain/plots';
 import { untilUtcMidnight, MAX_GIFT_GOLD } from '@/lib/limits';
 import { spend } from '@/lib/chain/spend';
@@ -2410,9 +2410,30 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   const configured = tokenLive();
   const affordable = player.ledger.balance >= RENAME_COST_EMERGE;
   const changed = draftName.trim().length > 0 && draftName.trim() !== view.name;
-  const listing = player.listings.find((l) => l.seed === claimed.seed);
   useLocale();
   const { wallet } = useWallet();
+  /*
+   * Whether the plot is listed is the chain's to say where the market is a
+   * contract: the record in this browser is only what was last seen. Read
+   * with the offers below; until the first answer the record stands in.
+   */
+  const [chainListing, setChainListing] = useState<MarketListing | null | undefined>(undefined);
+  // Whether the title has reached the wallet, so "minting" is said rather than nothing.
+  const [mint, setMint] = useState<MintState | null>(null);
+  const remembered = player.listings.find((l) => l.seed === claimed.seed);
+  const me = wallet.address?.toLowerCase() ?? '';
+  const listing = marketLive() && chainListing !== undefined
+    ? (chainListing && chainListing.seller === me ? { seed: claimed.seed, price: chainListing.price } : undefined)
+    : remembered;
+  useEffect(() => {
+    if (!marketLive() || chainListing === undefined) return;
+    const onChain = chainListing && chainListing.seller === me;
+    if (!onChain && remembered) onPlayer({ ...player, listings: player.listings.filter((l) => l.seed !== claimed.seed) });
+    else if (onChain && chainListing && (!remembered || remembered.price !== chainListing.price)) {
+      onPlayer({ ...player, listings: [...player.listings.filter((l) => l.seed !== claimed.seed), { seed: claimed.seed, region: claimed.region, price: chainListing.price, listedAt: remembered?.listedAt ?? Date.now() }] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainListing]);
 
   /*
    * Offers other players have made on this plot, from the registry.
@@ -2437,6 +2458,14 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
       const mine = claims.find((c) => c.seed === claimed.seed) ?? null;
       setRow(mine);
       setOffers(mine?.offers ?? []);
+      if (marketLive()) {
+        const held = await marketListing(claimed.seed).catch(() => undefined);
+        if (live && held !== undefined) setChainListing(held);
+      }
+      if (onChainClaimsLive()) {
+        const state = await fetchMintState(claimed.seed);
+        if (live && state) setMint(state);
+      }
     };
     void tick();
     const timer = window.setInterval(() => { void tick(); }, 15_000);
@@ -2529,6 +2558,14 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
               )
               : t('Recorded in this browser. Not settled on chain yet.')}
           </p>
+          {onChainClaimsLive() && mint && !mint.minted && (
+            <p className="muted small tx-line minting">
+              {mint.queued
+                ? t('The title is being minted to your wallet: {ahead} ahead of it in the vault’s queue, waiting since {since}. It usually takes a few minutes. If it is still here after an hour, tell us in Discord.', { ahead: mint.queued.ahead, since: sinceWhen(mint.queued.since) })
+                : t('The title has not reached your wallet yet. The vault checks every quarter hour and mints what is missing; if it is still missing after an hour, tell us in Discord.')}
+              {mint.queued?.problem ? ` ${t('Last attempt: {problem}', { problem: mint.queued.problem })}` : ''}
+            </p>
+          )}
           {onChainClaimsLive() && (
             <p className="muted small tx-line">
               {t('This plot is token #{seed} of Emerge Land, an ERC-721 in your wallet. It sells on the land market for {ticker} or on OpenSea, the settlement goes with it, and a share of every sale is paid back to everyone who holds land.', { seed: view.seed, ticker: TOKEN.ticker })}
