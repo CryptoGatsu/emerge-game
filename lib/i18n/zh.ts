@@ -337,6 +337,8 @@ export const UI: Record<string, string> = {
   'On the map for every player. A buyer pays your wallet directly in {ticker} — a transfer, not a burn — and the plot and this settlement move to them the moment the chain settles it.': '已在所有玩家的地图上。买家直接用 {ticker} 付到你的钱包——是转账，不是销毁——链上确认的那一刻，地块和这个聚落就转给对方。',
   'Listed on the land market contract. The plot stays in your wallet until it sells; a buyer pays the price in {ticker} in one transaction, {fee}% of it goes to the holders’ dividend pool, and the plot and this settlement move to them the moment the chain settles it.': '已挂在土地市场合约上。地块在售出前一直留在你的钱包里；买家用一笔交易支付 {ticker} 价款，其中 {fee}% 进入持有者分红池，链上确认的那一刻，地块和这个聚落就转给对方。',
   'The plot is a token: listing it takes one signature to let the market move it when it sells, then one to name the price. It stays in your wallet until a buyer pays, on the world map or on OpenSea; {fee}% of every resale goes to the holders’ dividend pool.': '地块是一枚代币：挂牌需要先签一次名让市场在售出时转移它，再签一次名定价。在买家（无论在世界地图还是 OpenSea 上）付款之前，它一直留在你的钱包里；每次转售的 {fee}% 进入持有者分红池。',
+  'Your plots': '你的地块',
+  'Your land': '你的土地',
   'Currency': '币种',
   'Any currency': '任意币种',
   '{a} on OpenSea · {b} on the game’s market': 'OpenSea 上 {a} 块 · 游戏市场上 {b} 块',

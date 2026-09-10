@@ -3570,3 +3570,10 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 a { color: var(--emerald); text-decoration-color: rgba(184, 231, 86, 0.45); text-underline-offset: 2px; }
 a:hover { color: #d6f58a; text-decoration-color: rgba(214, 245, 138, 0.8); }
 a:focus-visible { outline: 2px solid var(--emerald); outline-offset: 2px; border-radius: 3px; }
+
+/* Your land, wherever it is: the map draws one chart at a time, so a holder
+   needs a way to reach the plots that are not on the one in front of them. */
+.my-plots { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 8px 0 2px; }
+.my-plots > .muted { margin-right: 2px; }
+.my-plots button.on { border-color: rgba(240, 208, 94, 0.7); color: #f6e9a8; }
+.my-plots button em { font-style: normal; }

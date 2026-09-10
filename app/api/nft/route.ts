@@ -20,7 +20,7 @@
 import { NextResponse } from 'next/server';
 import { operator } from '@/lib/server/operator';
 import { preflight } from '@/lib/server/preflight';
-import { airdrop, flushMints, nftLive, nftStatus, recentTransfers, royaltyBook, sweepRoyalties, syncOwners } from '@/lib/server/nft';
+import { airdrop, drainMints, nftLive, nftStatus, recentTransfers, royaltyBook, sweepRoyalties, syncOwners } from '@/lib/server/nft';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     if (!operator(request)) return NextResponse.json({ error: 'Not for this door.' }, { status: 401 });
     if (!nftLive()) return NextResponse.json({ live: false });
     const synced = await syncOwners().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'sync failed' }));
-    const minted = await flushMints().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'mint failed' }));
+    const minted = await drainMints().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'mint failed' }));
     const swept = await sweepRoyalties().catch((e: unknown) => ({ problem: e instanceof Error ? e.message : 'sweep failed' }));
     return NextResponse.json({ live: true, synced, minted, swept });
   }
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   try {
     if (body.airdrop) return NextResponse.json(await airdrop());
     if (body.sync) return NextResponse.json(await syncOwners());
-    if (body.mint) return NextResponse.json(await flushMints());
+    if (body.mint) return NextResponse.json(await drainMints());
     if (body.sweep) return NextResponse.json(await sweepRoyalties());
     if (body.transfers) return NextResponse.json({ transfers: await recentTransfers() });
     if (body.royalties) return NextResponse.json(await royaltyBook());

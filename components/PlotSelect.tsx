@@ -1288,6 +1288,35 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
           </div>
           <button className="ghost" onClick={() => sail(1)} aria-label={t('Next chart')}>›</button>
         </nav>
+        {/* Your land, wherever it is.
+            The map draws one chart at a time, so a wallet holding plots on two
+            charts could only ever see one of them and had no way to know the
+            other was there — it read as a plot going missing. These are every
+            plot this wallet holds, from the registry rather than from this
+            browser's memory, and tapping one sails to its chart and opens it. */}
+        {mineBySeed.size > 0 && (
+          <nav className="my-plots" aria-label={t('Your plots')}>
+            <span className="muted small">{t('Your land')}</span>
+            {[...mineBySeed.values()]
+              .sort((a, b) => a.seed - b.seed)
+              .map((c) => {
+                const where = chartOfSeed(c.seed, player, discovered);
+                const here = where === chart;
+                return (
+                  <button
+                    key={c.seed}
+                    className={`ghost small ${c.seed === selectedSeed ? 'on' : ''}`}
+                    onClick={() => showPlot(c.seed)}
+                    title={where === null ? undefined : tx(chartName(where))}
+                  >
+                    {c.worldName}
+                    {!here && where !== null && <em className="muted"> · {tx(chartName(where))}</em>}
+                  </button>
+                );
+              })}
+          </nav>
+        )}
+
         {/* The whole world, not this chart: how much land is spoken for and how
             much is still to be had, which is the number that says whether
             there is any hurry. */}

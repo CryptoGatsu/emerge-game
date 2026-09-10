@@ -148,7 +148,11 @@ export async function mintQueue(): Promise<QueuedMint[]> {
   return Object.values(rows).map((raw) => { try { return JSON.parse(raw) as QueuedMint; } catch { return null; } }).filter((q): q is QueuedMint => !!q).sort((a, b) => a.at - b.at);
 }
 
-export type Flushed = { minted: number; skipped: number; waiting: number; txHash: string | null; problem?: string };
+export type Flushed = {
+  minted: number; skipped: number; waiting: number; txHash: string | null; problem?: string;
+  /** True when another flush held the lock, so this one did nothing and the queue is untouched. Worth retrying; a `problem` is not. */
+  busy?: boolean;
+};
 
 /**
  * Mint what is waiting, in one batch of up to thirty.
@@ -162,7 +166,7 @@ export type Flushed = { minted: number; skipped: number; waiting: number; txHash
 export async function flushMints(limit = 30): Promise<Flushed> {
   if (!nftLive()) return { minted: 0, skipped: 0, waiting: 0, txHash: null, problem: 'Plots are not tokens on this build.' };
   if (!vaultCanSign()) return { minted: 0, skipped: 0, waiting: (await mintQueue()).length, txHash: null, problem: 'The vault is not configured to sign.' };
-  if (!(await takeLock(MINT_LOCK, 120))) return { minted: 0, skipped: 0, waiting: (await mintQueue()).length, txHash: null, problem: 'A mint is already being sent.' };
+  if (!(await takeLock(MINT_LOCK, 120))) return { minted: 0, skipped: 0, waiting: (await mintQueue()).length, txHash: null, problem: 'A mint is already being sent.', busy: true };
   try {
     // A batch in flight settles first, one way or the other.
     const flying = await getValue(IN_FLIGHT);
@@ -220,6 +224,30 @@ export async function flushMints(limit = 30): Promise<Flushed> {
 }
 
 /**
+ * Mint what is waiting, waiting our turn if another flush has the lock.
+ *
+ * One flush at a time is right — two would race to mint the same seed — but
+ * losing the race must not mean giving up. Two claims a second apart used to
+ * leave the second plot sitting in the queue until the quarter-hour cron came
+ * round, so a player who bought two plots saw one appear and the other not,
+ * with nothing anywhere saying why.
+ *
+ * So a flush that finds the lock taken waits and asks again, a few times, for
+ * a few seconds. Under `after()` the request has already been answered, so
+ * this costs the player nothing. If the lock is still busy at the end, the
+ * queue is durable and the cron is still the backstop.
+ */
+export async function drainMints(tries = 6, gapMs = 1500): Promise<Flushed> {
+  let last: Flushed = { minted: 0, skipped: 0, waiting: 0, txHash: null };
+  for (let i = 0; i < tries; i++) {
+    last = await flushMints();
+    if (!last.busy) return last;
+    await new Promise((resolve) => setTimeout(resolve, gapMs));
+  }
+  return last;
+}
+
+/**
  * The surprise: every plot anybody holds, minted to them. Reads the chain
  * once, queues what is missing, and drains the queue a batch at a time.
  */
@@ -240,7 +268,7 @@ export async function airdrop(): Promise<{ queued: number; alreadyMinted: number
   const batches: Flushed[] = [];
   let waiting = (await mintQueue()).length;
   for (let i = 0; i < 3 && waiting > 0; i++) {
-    const done = await flushMints();
+    const done = await drainMints();
     batches.push(done);
     waiting = (await mintQueue()).length;
     if (done.problem) break;
@@ -273,8 +301,9 @@ export async function syncOwners(chain?: Map<number, string | null>): Promise<Sy
     const rows = await allClaims();
     const names = await displayNames().catch(() => ({} as Record<string, string>));
     const out: Synced = { moved: [], released: [], unminted: 0, at: Date.now() };
+    let queued = false;
     for (const row of rows) {
-      if (!chainMap.has(row.seed)) { out.unminted++; if (nftLive()) await queueMint(row.seed, row.owner); continue; }
+      if (!chainMap.has(row.seed)) { out.unminted++; if (nftLive()) { await queueMint(row.seed, row.owner); queued = true; } continue; }
       const holder = chainMap.get(row.seed) ?? null;
       if (holder === null) {
         await releaseRow(row);
@@ -292,6 +321,8 @@ export async function syncOwners(chain?: Map<number, string | null>): Promise<Sy
       await forgetChainSales().catch(() => {});
     }
     await setValue(LAST_SYNC, JSON.stringify(out), 7 * 86_400);
+    // A plot the sync found without a token is minted now, not next quarter hour.
+    if (queued) background(() => drainMints());
     return out;
   } finally {
     await releaseLock(SYNC_LOCK);

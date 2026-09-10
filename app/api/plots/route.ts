@@ -59,7 +59,7 @@ import { OPEN_ERA, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS } from '@/lib/wor
 import { priceOfSeed } from '@/lib/world/price';
 import { PROSPECT_COST_EMERGE } from '@/lib/chain/vault';
 import { registryConfigured, judgedLevel } from '@/lib/server/land';
-import { background, flushMints, holderOnChain, holdsPlot, marketBoard, nftLive, queueMint, syncOwners } from '@/lib/server/nft';
+import { background, drainMints, holderOnChain, holdsPlot, marketBoard, nftLive, queueMint, syncOwners } from '@/lib/server/nft';
 import { presenceDays, markBanner } from '@/lib/server/registry';
 import { isEmblem } from '@/lib/world/emblems';
 import { advanceCost, charterCost } from '@/lib/world/eras';
@@ -864,7 +864,7 @@ export async function POST(request: Request) {
     // a slow chain never costs them the claim, and sent now when it can be.
     if (result.ok && nftLive()) {
       await queueMint(seed, owner).catch(() => {});
-      background(() => flushMints());
+      background(() => drainMints());
     }
     if (!result.ok) {
       // Somebody else's now. The payment goes back on account: it bought
