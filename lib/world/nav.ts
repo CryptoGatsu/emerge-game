@@ -33,8 +33,19 @@ const CELL = 1;
  * clip a corner, and the walker was shoved off it on every third frame.
  */
 const MARGIN = 0.75;
-/** The most cells one search may open before giving up. Bounds the cost of an impossible route. */
-const MAX_EXPANSIONS = 7000;
+/**
+ * The most cells one search may open before giving up.
+ *
+ * The point of a cap is to bound an impossible route, and a route is proven
+ * impossible once every cell reachable from the start has been closed — so
+ * the honest bound is the grid itself, not a number. It used to be a flat
+ * 7,000, which is most of a base plot's 100×100 but well under half of an
+ * expanded one's 125×125: a search that had to follow a channel from one
+ * corner to the far one ran out of budget and answered "no way through" for
+ * ground that was plainly walkable. Nobody re-routed, so people walked at
+ * the water until it stopped them and stood there in a crowd.
+ */
+const expansionLimit = (n: number) => n * n;
 /** More than one footprint covers this cell. */
 const SHARED = -2;
 /** Nothing built here. */
@@ -219,6 +230,7 @@ export function findDetour(grid: NavGrid, ax: number, ay: number, bx: number, by
   const open = new Heap(f);
   open.push(start);
   let expansions = 0;
+  const limit = expansionLimit(N);
   let found = false;
 
   while (open.size) {
@@ -226,7 +238,7 @@ export function findDetour(grid: NavGrid, ax: number, ay: number, bx: number, by
     if (closed[current]) continue;
     if (current === goal) { found = true; break; }
     closed[current] = 1;
-    if (++expansions > MAX_EXPANSIONS) break;
+    if (++expansions > limit) break;
     const x = current % N, y = (current / N) | 0;
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -253,7 +265,14 @@ export function findDetour(grid: NavGrid, ax: number, ay: number, bx: number, by
   const cells: number[] = [];
   for (let cursor = goal; cursor !== -1; cursor = came[cursor]) cells.push(cursor);
   cells.reverse();
-  const points: [number, number][] = cells.map((i) => [(i % N) + 0.5, ((i / N) | 0) + 0.5]);
+  // Back to world coordinates, which means adding the grid's corner. Without
+  // it a cell read as its own index, which is the same thing only while the
+  // grid starts at the origin: on an expanded plot it starts at -12.5, so
+  // every waypoint of every detour came back shifted by that much in both
+  // axes. The walk was then aimed at ground the walker had not asked for and
+  // the sight-lines below were tested somewhere else again, so people set off
+  // wrong, never arrived, and gathered wherever the bad line ran them out.
+  const points: [number, number][] = cells.map((i) => [(i % N) + grid.x0 + 0.5, ((i / N) | 0) + grid.y0 + 0.5]);
   points[0] = [ax, ay];
   points[points.length - 1] = [bx, by];
 
