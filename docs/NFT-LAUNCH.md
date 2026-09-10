@@ -143,6 +143,23 @@ Land" with the OpenSea and explorer links; the token is in their wallet.
   this is the other direction, and it is a deliberate manual step so the
   vault never swaps unattended.
 
+### Showing OpenSea's listings on the land page
+
+`/land` shows the game's own market from the contract. To show what is
+listed on OpenSea too — which is where most land will trade, priced in
+USDG — it needs to be allowed to ask OpenSea:
+
+```
+OPENSEA_API_KEY     = a key from opensea.io/account/settings (server-only, no NEXT_PUBLIC_)
+OPENSEA_COLLECTION  = the collection's slug, the last part of its OpenSea URL
+```
+
+Without them the page shows the in-game market alone and says so. With
+them, each card shows every place a plot is listed and what it is priced
+in, an OpenSea listing links out to OpenSea to buy, and the floor is given
+per currency, because one figure across two currencies would mean nothing.
+`OPENSEA_LISTINGS_URL` overrides the endpoint if their API moves.
+
 The server watches USDG without being told: it reads the stepping-stone
 token out of `EMERGE_SWAP_PATH`, which the GLD dividend swap already sets.
 Wrapped ETH is built in. Anything else is named in `EMERGE_ROYALTY_TOKENS`

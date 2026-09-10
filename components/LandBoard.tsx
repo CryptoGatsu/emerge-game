@@ -28,22 +28,35 @@ import { LanguageSwitch } from './LanguageSwitch';
 import { BrandLine } from './Brand';
 import { WalletPicker, useWallet } from './WalletPicker';
 
+interface PlotListing { where: 'market' | 'opensea'; price: number; currency: string; at: number }
 interface Plot {
   seed: number; region: string; worldName: string; owner: string; ownerName: string;
-  price: number | null; listedAt: number | null; claimedAt: number;
+  listings: PlotListing[]; price: number | null; currency: string | null; listedAt: number | null; claimedAt: number;
   era: number; expanded: boolean; banner: string | null; biome: string;
   level: number | null; population: number | null; buildings: number | null;
   day: number | null; publishedAt: number | null;
 }
 interface Sale { seed: number; seller: string; buyer: string; price: number; fee: number; at: number; txHash: string }
 interface Catalogue {
-  plots: Plot[]; total: number; listed: number; floor: number | null; holders: number;
+  plots: Plot[]; total: number; listed: number;
+  listedBy: { market: number; opensea: number };
+  floors: { currency: string; price: number }[];
+  holders: number; openSeaRead: boolean;
   sales: Sale[]; at: number; degraded?: boolean;
 }
 
 type Sort = 'price-up' | 'price-down' | 'level' | 'people' | 'recent' | 'seed';
 
 const n = (v: number) => Math.round(v).toLocaleString();
+/**
+ * A price, kept whole.
+ *
+ * Counts round; money does not. A stablecoin asking price has cents in it,
+ * and rounding 480.50 to 481 on a page people buy from is a small lie about
+ * what something costs.
+ */
+const money = (v: number) =>
+  Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 function ago(at: number, now: number, t: (text: string, vars?: Record<string, string | number>) => string) {
@@ -69,6 +82,7 @@ export default function LandMarket() {
   const [biome, setBiome] = useState('');
   const [era, setEra] = useState('');
   const [forSale, setForSale] = useState(false);
+  const [currencyOnly, setCurrencyOnly] = useState('');
   const [mine, setMine] = useState(false);
   const [sort, setSort] = useState<Sort>('price-up');
   const [shown, setShown] = useState(36);
@@ -103,12 +117,14 @@ export default function LandMarket() {
   }, [me]);
 
   const biomes = useMemo(() => [...new Set((board?.plots ?? []).map((p) => p.biome))].sort(), [board]);
+  const currencies = useMemo(() => (board?.floors ?? []).map((f) => f.currency), [board]);
   const eras = useMemo(() => [...new Set((board?.plots ?? []).map((p) => p.era))].sort((a, b) => a - b), [board]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const out = (board?.plots ?? []).filter((p) => {
-      if (forSale && p.price === null) return false;
+      if (forSale && p.listings.length === 0) return false;
+      if (currencyOnly && !p.listings.some((l) => l.currency === currencyOnly)) return false;
       if (mine && p.owner !== me) return false;
       if (biome && p.biome !== biome) return false;
       if (era && String(p.era) !== era) return false;
@@ -131,9 +147,9 @@ export default function LandMarket() {
         default: return a.seed - b.seed;
       }
     });
-  }, [board, search, biome, era, forSale, mine, sort, me]);
+  }, [board, search, biome, era, forSale, mine, currencyOnly, sort, me]);
 
-  useEffect(() => { setShown(36); }, [search, biome, era, forSale, mine, sort]);
+  useEffect(() => { setShown(36); }, [search, biome, era, forSale, mine, currencyOnly, sort]);
 
   /**
    * Buy a listed plot.
@@ -143,17 +159,18 @@ export default function LandMarket() {
    * seller who raises the price between the render and the signature gets a
    * refusal rather than the buyer's money.
    */
-  const buy = useCallback(async (plot: Plot) => {
+  const buy = useCallback(async (plot: Plot, listing: PlotListing) => {
+    if (listing.where !== 'market') return;
     if (!me) { setNotice(t('Connect a wallet to buy.')); return; }
     if (!marketLive()) { setNotice(t('The land market is not open on this build.')); return; }
     setBusy(plot.seed);
     setNotice(null);
     try {
-      const listing = await marketListing(plot.seed);
-      if (!listing || !listing.live) { setNotice(t('That plot is not listed right now. The holder may have taken it down.')); return; }
-      const price = listing.price;
+      const onChain = await marketListing(plot.seed);
+      if (!onChain || !onChain.live) { setNotice(t('That plot is not listed on the game’s market right now. The holder may have taken it down.')); return; }
+      const price = onChain.price;
       if (balance !== null && balance < price) {
-        setNotice(t('{world} costs {price} {ticker}, and your wallet holds {held}.', { world: plot.worldName, price: n(price), ticker: TOKEN.ticker, held: n(balance) }));
+        setNotice(t('{world} costs {price} {ticker}, and your wallet holds {held}.', { world: plot.worldName, price: money(price), ticker: TOKEN.ticker, held: money(balance) }));
         return;
       }
       if ((await marketAllowance(me)) < price) {
@@ -162,7 +179,7 @@ export default function LandMarket() {
         if (!allowed.ok) { setNotice(allowed.message); return; }
         if ((await mined(allowed.txHash)) === 'reverted') { setNotice(t('The chain refused the approval.')); return; }
       }
-      setNotice(t('Now the purchase: {price} {ticker} to the holder, and the plot to you.', { price: n(price), ticker: TOKEN.ticker }));
+      setNotice(t('Now the purchase: {price} {ticker} to the holder, and the plot to you.', { price: money(price), ticker: TOKEN.ticker }));
       const bought = await buyOnChain(me, plot.seed, price);
       if (!bought.ok) { setNotice(bought.message); return; }
       const state = await mined(bought.txHash);
@@ -200,6 +217,9 @@ export default function LandMarket() {
         {board && (
           <>
             {board.degraded && <p className="muted">{t('Some of this could not be read just now.')}</p>}
+            {tokens && !board.openSeaRead && (
+              <p className="muted">{t('Showing the game’s own market only. Plots listed on OpenSea are not counted here yet.')}</p>
+            )}
 
             <section className="landmkt-stats" aria-label={t('The board at a glance')}>
               <div className="markets-figure">
@@ -208,11 +228,19 @@ export default function LandMarket() {
               </div>
               <div className="markets-figure">
                 <em>{t('FOR SALE')}</em><b>{n(board.listed)}</b>
-                <span>{board.listed ? t('priced in {ticker}', { ticker: TOKEN.ticker }) : t('nothing listed right now')}</span>
+                <span>
+                  {board.listed === 0 ? t('nothing listed right now')
+                    : t('{a} on OpenSea · {b} on the game’s market', { a: n(board.listedBy.opensea), b: n(board.listedBy.market) })}
+                </span>
               </div>
               <div className="markets-figure">
-                <em>{t('FLOOR')}</em><b>{board.floor === null ? '—' : n(board.floor)}</b>
-                <span>{t('the cheapest asking price')}</span>
+                <em>{t('FLOOR')}</em>
+                {board.floors.length === 0 ? <b>—</b> : (
+                  <b className="landmkt-floors">
+                    {board.floors.map((f) => <span key={f.currency}>{money(f.price)} <i>{f.currency}</i></span>)}
+                  </b>
+                )}
+                <span>{board.floors.length > 1 ? t('the cheapest in each currency') : t('the cheapest asking price')}</span>
               </div>
               <div className="markets-figure">
                 <em>{t('ROYALTY')}</em><b>{ROYALTY_PERCENT}%</b>
@@ -223,7 +251,7 @@ export default function LandMarket() {
             {tokens && (
               <div className="landmkt-wallet">
                 <WalletPicker compact />
-                {me && balance !== null && <span className="muted">{t('Your wallet holds {n} {ticker}.', { n: n(balance), ticker: TOKEN.ticker })}</span>}
+                {me && balance !== null && <span className="muted">{t('Your wallet holds {n} {ticker}.', { n: money(balance), ticker: TOKEN.ticker })}</span>}
               </div>
             )}
             {notice && <p className="landmkt-notice" role="status">{notice}</p>}
@@ -261,6 +289,15 @@ export default function LandMarket() {
                   <option value="seed">{t('Token id')}</option>
                 </select>
               </label>
+              {currencies.length > 1 && (
+                <label>
+                  <span className="sr-only">{t('Currency')}</span>
+                  <select id="land-money" value={currencyOnly} onChange={(e) => setCurrencyOnly(e.target.value)}>
+                    <option value="">{t('Any currency')}</option>
+                    {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+              )}
               <button type="button" className={`landmkt-toggle ${forSale ? 'on' : ''}`} aria-pressed={forSale} onClick={() => setForSale((v) => !v)}>
                 {t('For sale only')}
               </button>
@@ -303,21 +340,33 @@ export default function LandMarket() {
                             {tokens && <> · <span className="muted">#{p.seed}</span></>}
                           </p>
                           <div className="landmkt-deal">
-                            {p.price === null ? (
+                            {p.listings.length === 0 ? (
                               <span className="muted">{t('Not for sale')}</span>
                             ) : (
-                              <b>{n(p.price)} {TOKEN.ticker}</b>
+                              <span className="landmkt-prices">
+                                {p.listings.map((l) => (
+                                  <span key={l.where} className="landmkt-price">
+                                    <b>{money(l.price)} {l.currency}</b>
+                                    <em>{l.where === 'opensea' ? t('on OpenSea') : t('in the game')}</em>
+                                  </span>
+                                ))}
+                              </span>
                             )}
-                            {p.price !== null && p.listedAt && <span className="muted">{ago(p.listedAt, now, t)}</span>}
+                            {p.listedAt ? <span className="muted">{ago(p.listedAt, now, t)}</span> : null}
                           </div>
                           <div className="landmkt-actions">
-                            {p.price !== null && !isMine && marketLive() && (
-                              <button type="button" disabled={busy !== null} onClick={() => void buy(p)}>
-                                {busy === p.seed ? t('Buying…') : !me ? t('Connect a wallet to buy') : t('Buy')}
+                            {!isMine && marketLive() && p.listings.filter((l) => l.where === 'market').map((l) => (
+                              <button key="market" type="button" disabled={busy !== null} onClick={() => void buy(p, l)}>
+                                {busy === p.seed ? t('Buying…') : !me ? t('Connect a wallet to buy') : t('Buy for {n} {c}', { n: money(l.price), c: l.currency })}
                               </button>
+                            ))}
+                            {!isMine && os && p.listings.some((l) => l.where === 'opensea') && (
+                              <a href={os} target="_blank" rel="noreferrer noopener" className="landmkt-os">{t('Buy on OpenSea')}</a>
                             )}
                             <Link href={`/?plot=${p.seed}`} className="ghost">{t('Visit')}</Link>
-                            {os && <a href={os} target="_blank" rel="noreferrer noopener" className="ghost">OpenSea</a>}
+                            {os && !(!isMine && p.listings.some((l) => l.where === 'opensea')) && (
+                              <a href={os} target="_blank" rel="noreferrer noopener" className="ghost">OpenSea</a>
+                            )}
                             {ex && <a href={ex} target="_blank" rel="noreferrer noopener" className="ghost">{t('Chain')}</a>}
                           </div>
                         </div>
@@ -353,10 +402,10 @@ export default function LandMarket() {
                           <b>{plot?.worldName ?? t('Plot #{n}', { n: s.seed })}</b>
                           {plot && <em className="muted"> {plot.region}</em>}
                         </span>
-                        <span className="landmkt-sale-price">{n(s.price)} {TOKEN.ticker}</span>
+                        <span className="landmkt-sale-price">{money(s.price)} {TOKEN.ticker}</span>
                         <span className="muted landmkt-sale-who">
                           {t('{from} → {to}', { from: short(s.seller), to: short(s.buyer) })}
-                          {s.fee > 0 && <> · {t('{n} to holders', { n: n(s.fee) })}</>}
+                          {s.fee > 0 && <> · {t('{n} to holders', { n: money(s.fee) })}</>}
                         </span>
                         <span className="muted landmkt-sale-when">{s.at ? ago(s.at, now, t) : ''}</span>
                       </div>
