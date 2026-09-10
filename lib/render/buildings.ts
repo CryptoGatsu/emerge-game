@@ -832,6 +832,54 @@ function umbrellaTable(p: Pixels, x: number, y: number, color: string) {
   rect(p, x - 8, y - 12, 16, 1, shade(color, -0.4));
 }
 
+/**
+ * The colour of one pixel of coursed stone, keyed to the sprite's own grid.
+ *
+ * A great work is drawn as an elevation standing on its platform rather than
+ * as an extruded box, so it cannot use the wall texture every other building
+ * gets, and a monument painted in one flat grey reads as cardboard next to a
+ * cottage whose every block is laid. Keying the courses to the sprite grid
+ * rather than to each rectangle means a pier, the arch above it and the deck
+ * over that are all cut from the same wall, which is what makes it read as
+ * masonry instead of as separate pieces pushed together.
+ */
+function stoneCourse(gx: number, gy: number, tint: number): string {
+  const row = Math.floor(gy / 5);
+  const off = row % 2 ? 3 : 0;
+  const col = Math.floor((gx + off) / 7);
+  const h = (Math.imul(row + 1, 73856093) ^ Math.imul(col + 1, 19349663)) >>> 0;
+  const pick = (h % 1000) / 1000;
+  const c = shade(pick < 0.3 ? BUILD.stoneWallLight : pick < 0.72 ? BUILD.stoneWall : shade(BUILD.stoneWall, -0.09), tint);
+  if (gy % 5 === 4) return shade(c, -0.3);
+  if (gy % 5 === 0) return shade(c, 0.16);
+  if ((gx + off) % 7 === 6) return shade(c, -0.24);
+  return c;
+}
+
+/** Fill a rectangle with that coursed stone. */
+function masonry(p: Pixels, x: number, y: number, w: number, h: number, tint = 0) {
+  const x0 = Math.round(x), y0 = Math.round(y), w0 = Math.round(w), h0 = Math.round(h);
+  for (let gy = y0; gy < y0 + h0; gy++) {
+    for (let gx = x0; gx < x0 + w0; gx++) rect(p, gx, gy, 1, 1, stoneCourse(gx, gy, tint));
+  }
+}
+
+/**
+ * The two visible faces of an isometric box, in coursed stone.
+ *
+ * `isoWalls` paints them flat, which is right for a plinth and wrong for a
+ * tower somebody is meant to look at. This walks the same two edges and
+ * drops a column of masonry down from each, the left face a shade darker
+ * because the sun is upper right.
+ */
+function isoMasonry(p: Pixels, cx: number, topY: number, w: number, h: number, depth: number, tint = 0) {
+  const halfW = w / 2, halfH = h / 2;
+  for (let i = 0; i < halfW; i++) {
+    masonry(p, Math.round(cx - halfW + i), Math.round(topY + halfH + (i * halfH) / halfW), 1, depth, tint - 0.16);
+    masonry(p, Math.round(cx + i), Math.round(topY + h - (i * halfH) / halfW), 1, depth, tint);
+  }
+}
+
 const RECIPES: Record<string, Recipe> = {
   // A monument: a stone plinth with an obelisk, bought as prestige. Drawn
   // narrow so it reads as a column in the square rather than a building.
@@ -912,31 +960,28 @@ const RECIPES: Record<string, Recipe> = {
     extras: (p, _lit, g) => {
       const x = g.cx;
       const mid = g.wallTopY + g.bh / 2;
-      // The footing's top, repainted in the same stone as the piers, so the
-      // arcade and what it stands on are plainly one piece of masonry.
-      isoTop(p, x, g.wallTopY - 2, g.bw + 4, g.bh + 2, BUILD.stoneWallLight);
-      isoTop(p, x, g.wallTopY, g.bw - 10, g.bh - 5, BUILD.stoneWall);
+      // The footing's top, in the same stone as the piers standing on it.
+      isoTop(p, x, g.wallTopY - 2, g.bw + 4, g.bh + 2, BUILD.stoneWall);
+      isoTop(p, x, g.wallTopY, g.bw - 12, g.bh - 6, shade(BUILD.stoneWall, -0.14));
       /**
-       * One tier of an arcade: piers, the spandrel between them, and the
-       * arches cut out of it as real openings rather than painted-on holes,
+       * One tier of an arcade: a deck, the piers carrying it, and the arches
+       * cut out of the spandrel as real openings rather than painted-on holes,
        * so the sky shows through the way it does under a real aqueduct.
        */
       const arcade = (footY: number, halfW: number, height: number, bays: number) => {
         const span = (halfW * 2) / bays;
-        const pierW = Math.max(5, Math.round(span * 0.26));
-        const deck = 6;
-        const top = footY - height;
-        // The deck the arches carry, and the piers standing under it.
-        rect(p, x - halfW, top, halfW * 2, deck, BUILD.stoneWall);
-        rect(p, x - halfW, top, halfW * 2, 2, BUILD.stoneWallLight);
-        rect(p, x - halfW, top + deck - 1, halfW * 2, 1, BUILD.stoneWallDark);
+        const pierW = Math.max(6, Math.round(span * 0.28));
+        const deck = 7;
+        const top = Math.round(footY - height);
+        masonry(p, x - halfW, top, halfW * 2, deck);
+        rect(p, x - halfW, top, halfW * 2, 1, BUILD.stoneWallLight);
+        rect(p, x - halfW, top + deck - 1, halfW * 2, 1, shade(BUILD.stoneWallDark, -0.2));
         for (let i = 0; i <= bays; i++) {
           const px = Math.round(x - halfW + i * span - pierW / 2);
-          rect(p, px, top + deck, pierW, height - deck, BUILD.stoneWall);
-          rect(p, px, top + deck, 2, height - deck, BUILD.stoneWallLight);
-          rect(p, px + pierW - 1, top + deck, 1, height - deck, BUILD.stoneWallDark);
+          masonry(p, px, top + deck, pierW, height - deck);
+          rect(p, px, top + deck, 1, height - deck, BUILD.stoneWallLight);
+          rect(p, px + pierW - 1, top + deck, 1, height - deck, shade(BUILD.stoneWallDark, -0.18));
         }
-        // The spandrel, carried down each side of every opening as an arch.
         for (let i = 0; i < bays; i++) {
           const left = Math.round(x - halfW + i * span + pierW / 2);
           const w = Math.round(span - pierW);
@@ -945,24 +990,33 @@ const RECIPES: Record<string, Recipe> = {
             const half = Math.round(Math.sqrt(Math.max(0, r * r - (r - t) * (r - t))));
             const fill = r - half;
             if (fill <= 0) continue;
-            rect(p, left, top + deck + t, fill, 1, BUILD.stoneWall);
-            rect(p, left + w - fill, top + deck + t, fill, 1, BUILD.stoneWall);
-            // The voussoirs on the lit side of each arch.
-            rect(p, left + w - fill, top + deck + t, 1, 1, BUILD.stoneWallLight);
+            masonry(p, left, top + deck + t, fill, 1);
+            masonry(p, left + w - fill, top + deck + t, fill, 1);
+            // The voussoirs, following the curve of each arch.
+            rect(p, left + fill - 1, top + deck + t, 1, 1, BUILD.stoneWallLight);
+            rect(p, left + w - fill, top + deck + t, 1, 1, shade(BUILD.stoneWallLight, -0.1));
           }
+          // The shadow the deck throws into the head of the arch.
+          rect(p, left + 2, top + deck, w - 4, 1, shade(BUILD.stoneWallDark, -0.3));
         }
       };
-      // The piers stand on the footing's front face; the upper tier on the
-      // deck of the lower one.
+      // The piers stand on the footing; the upper tier on the deck below it.
       const foot = Math.round(mid + 2);
       arcade(foot, 46, 32, 4);
       arcade(foot - 32, 38, 24, 6);
       // The channel along the top, with water catching the light in it.
       const chan = foot - 56;
-      rect(p, x - 40, chan - 7, 80, 7, BUILD.stoneWallLight);
-      rect(p, x - 40, chan - 7, 80, 1, BUILD.stoneWall);
-      rect(p, x - 37, chan - 5, 74, 3, shade(WATER.deep, 0.25));
-      rect(p, x - 37, chan - 5, 74, 1, WATER.foam);
+      masonry(p, x - 40, chan - 8, 80, 8);
+      rect(p, x - 40, chan - 8, 80, 1, BUILD.stoneWallLight);
+      rect(p, x - 36, chan - 6, 72, 4, shade(WATER.deep, 0.18));
+      rect(p, x - 36, chan - 6, 72, 1, shade(WATER.deep, -0.2));
+      rect(p, x - 34, chan - 5, 68, 1, WATER.foam);
+      // Moss where the piers meet the footing, as on every other wall here.
+      // Clipped to pixels that are actually stone: an arch is an opening, and
+      // moss hanging in one is moss growing on the sky.
+      const img = p.ctx.getImageData(0, 0, p.w, p.h);
+      speckle(p, 907, 260, [BUILD.moss, BUILD.mossDark], (sx, sy) =>
+        sy > foot - 14 && sy < foot + 6 && Math.abs(sx - x) < 48 && img.data[(sy * p.w + sx) * 4 + 3] > 200);
     },
   },
   'Great Library': {
@@ -979,10 +1033,21 @@ const RECIPES: Record<string, Recipe> = {
         rect(p, cx - 5, top + 3, 10, 4, BUILD.stoneWallLight);
         rect(p, cx - 5, top + 38, 10, 4, BUILD.stoneWallDark);
       }
-      rect(p, x - 40, top - 2, 80, 6, BUILD.stoneWallLight);
-      rect(p, x - 6, top - 12, 12, 10, BUILD.stoneWallDark);
-      rect(p, x - 3, top - 9, 6, 5, BUILD.glassLit);
-      glow(lit, x, top - 7, 12, BUILD.glassLit, 0.5);
+      // The entablature the columns carry, and a pediment over it with a
+      // lamp burning in the tympanum.
+      masonry(p, x - 42, top - 4, 84, 9);
+      rect(p, x - 42, top - 4, 84, 1, BUILD.stoneWallLight);
+      rect(p, x - 42, top + 4, 84, 1, shade(BUILD.stoneWallDark, -0.2));
+      for (let i = 0; i < 16; i++) {
+        const w = 84 - i * 5;
+        if (w <= 2) break;
+        masonry(p, x - w / 2, top - 5 - i, w, 1, -0.04);
+        rect(p, Math.round(x - w / 2), top - 5 - i, 1, 1, BUILD.stoneWallLight);
+        rect(p, Math.round(x + w / 2) - 1, top - 5 - i, 1, 1, shade(BUILD.stoneWallDark, -0.2));
+      }
+      rect(p, x - 4, top - 12, 8, 7, shade(BUILD.stoneWallDark, -0.25));
+      rect(p, x - 3, top - 11, 6, 5, BUILD.glassLit);
+      glow(lit, x, top - 9, 14, BUILD.glassLit, 0.5);
     },
   },
   'Grand Exchange': {
@@ -1038,15 +1103,19 @@ const RECIPES: Record<string, Recipe> = {
       const mid = g.wallTopY + g.bh / 2;
       // The drum: its walls run down into the yard, so the two are one thing.
       const drumTop = Math.round(mid - 30);
-      isoWalls(p, x, drumTop, 34, 17, 42, shade(BUILD.stoneWall, -0.18), BUILD.stoneWall);
+      isoMasonry(p, x, drumTop, 34, 17, 42);
+      // String courses round the drum, where the floors inside it are.
       for (let band = 1; band <= 3; band++) {
         const by = drumTop + 8 + band * 11;
         for (let i = 0; i < 17; i++) {
-          rect(p, x - 17 + i, by + Math.round((i * 8.5) / 17), 1, 2, BUILD.stoneWallDark);
+          rect(p, x - 17 + i, by + Math.round((i * 8.5) / 17), 1, 2, shade(BUILD.stoneWallDark, -0.1));
+          rect(p, x - 17 + i, by + Math.round((i * 8.5) / 17) - 1, 1, 1, shade(BUILD.stoneWallLight, -0.1));
           rect(p, x + i, by + 8 - Math.round((i * 8.5) / 17), 1, 2, BUILD.stoneWallDark);
+          rect(p, x + i, by + 8 - Math.round((i * 8.5) / 17) - 1, 1, 1, BUILD.stoneWallLight);
         }
       }
       isoTop(p, x, drumTop, 34, 17, BUILD.stoneWallLight);
+      isoTop(p, x, drumTop + 2, 26, 13, shade(BUILD.stoneWall, 0.05));
       // The dome: a ring of shells, each narrower and higher than the last.
       isoWalls(p, x, drumTop - 4, 40, 20, 5, shade(BUILD.metalLight, -0.28), shade(BUILD.metalLight, -0.06));
       const shells: [number, number][] = [[40, 0], [34, 4], [26, 7], [16, 9], [8, 10]];
