@@ -21,7 +21,7 @@ import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
 import { waterOf, type Animal, type Hazard } from '../simulation';
 import type { Dir } from './character';
-import { speechFor } from '../speech';
+import { utteranceFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
@@ -82,6 +82,8 @@ interface Bubble {
   label: Text;
   citizenId: string | null;
   text: string;
+  /** Spoken aloud, with a tail to the mouth; otherwise a thought, with the little circles. */
+  said: boolean;
   life: number;
 }
 
@@ -880,7 +882,7 @@ export class EmergeScene {
       label.position.set(9, 7);
       root.addChild(bg, label);
       this.hudRoot.addChild(root);
-      this.bubbles.push({ root, bg, label, citizenId: null, text: '', life: 0 });
+      this.bubbles.push({ root, bg, label, citizenId: null, text: '', said: true, life: 0 });
     }
   }
 
@@ -1210,14 +1212,28 @@ export class EmergeScene {
     return screenToWorld(scene.x, scene.y);
   }
 
-  /** Redraw a bubble's box around whatever its label now says. */
+  /**
+   * Redraw a bubble's box around whatever its label now says.
+   *
+   * Speech has a tail to the mouth. A thought has the two little circles,
+   * a fainter edge and an italic hand, so a person musing over the mill
+   * that went up this morning does not look like they are announcing it.
+   */
   private layoutBubble(bubble: Bubble) {
     const bw = Math.ceil(bubble.label.width) + 18;
     const bh = Math.ceil(bubble.label.height) + 14;
     bubble.bg.clear();
     // The same glass as the panels: near-black green, a thin luminous edge.
-    bubble.bg.roundRect(0, 0, bw, bh, 9).fill({ color: 0x07140d, alpha: 0.9 }).stroke({ width: 1, color: 0xb8e756, alpha: 0.32 });
-    bubble.bg.moveTo(bw / 2 - 5, bh).lineTo(bw / 2, bh + 6).lineTo(bw / 2 + 5, bh).fill({ color: 0x07140d, alpha: 0.9 });
+    const edge = bubble.said ? 0.32 : 0.16;
+    bubble.bg.roundRect(0, 0, bw, bh, bubble.said ? 9 : 12).fill({ color: 0x07140d, alpha: bubble.said ? 0.9 : 0.82 }).stroke({ width: 1, color: 0xb8e756, alpha: edge });
+    if (bubble.said) {
+      bubble.bg.moveTo(bw / 2 - 5, bh).lineTo(bw / 2, bh + 6).lineTo(bw / 2 + 5, bh).fill({ color: 0x07140d, alpha: 0.9 });
+    } else {
+      bubble.bg.circle(bw / 2 - 2, bh + 4, 2.6).fill({ color: 0x07140d, alpha: 0.82 }).stroke({ width: 1, color: 0xb8e756, alpha: edge });
+      bubble.bg.circle(bw / 2 + 4, bh + 9, 1.6).fill({ color: 0x07140d, alpha: 0.82 }).stroke({ width: 1, color: 0xb8e756, alpha: edge });
+    }
+    bubble.label.style.fontStyle = bubble.said ? 'normal' : 'italic';
+    bubble.label.style.fill = bubble.said ? 0xe6efdc : 0xc9dabb;
   }
 
   private setHover(target: PickTarget) {
@@ -2093,17 +2109,19 @@ export class EmergeScene {
       const listener = speaker === talk.a ? talk.b : talk.a;
       const citizen = this.world.citizens.find((c) => c.id === speaker);
       if (!citizen || !this.citizens.has(speaker)) continue;
-      const line = speechFor(this.world, citizen, this.beat);
-      if (!line) continue;
+      const said = utteranceFor(this.world, citizen, this.beat);
+      if (!said) continue;
+      const line = said.text;
       let bubble = this.bubbles.find((b) => b.citizenId === speaker) ?? this.bubbles.find((b) => b.citizenId === listener);
       if (!bubble) {
         const spare = this.bubbles.filter((b) => !b.citizenId || !inTalk.has(b.citizenId)).sort((p, q) => (p.citizenId ? p.life : -1) - (q.citizenId ? q.life : -1));
         bubble = spare[0];
       }
       if (!bubble) continue;
-      if (bubble.citizenId !== speaker || bubble.text !== line) {
+      if (bubble.citizenId !== speaker || bubble.text !== line || bubble.said !== said.said) {
         bubble.citizenId = speaker;
         bubble.text = line;
+        bubble.said = said.said;
         bubble.label.text = line;
         bubble.life = BUBBLE_ROTATE;
         this.layoutBubble(bubble);
@@ -2172,14 +2190,16 @@ export class EmergeScene {
       let assigned = false;
       while (index < scored.length) {
         const citizen = scored[index++].c;
-        const line = speechFor(this.world, citizen, this.beat);
-        if (!line) continue;
+        const said = utteranceFor(this.world, citizen, this.beat);
+        if (!said) continue;
+        const line = said.text;
         // Two citizens saying the same thing at once reads as a bug, not a crowd.
         if (spoken.has(line)) continue;
         spoken.add(line);
-        if (bubble.citizenId !== citizen.id || bubble.text !== line) {
+        if (bubble.citizenId !== citizen.id || bubble.text !== line || bubble.said !== said.said) {
           bubble.citizenId = citizen.id;
           bubble.text = line;
+          bubble.said = said.said;
           bubble.label.text = line;
           this.layoutBubble(bubble);
         }

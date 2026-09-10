@@ -33,8 +33,65 @@ export const TRAIT_LABELS: Record<Trait, string> = {
 /** What has happened to somebody lately, as the simulation records it. */
 export type EpisodeKind =
   | 'hungry' | 'unpaid' | 'roughSleep' | 'sawFight' | 'newFriend' | 'household' | 'child'
-  | 'arrived' | 'mastered' | 'freed' | 'sick' | 'recovered' | 'hazard' | 'festival' | 'fellOut' | 'lost';
-export interface Episode { day: number; kind: EpisodeKind; about?: string }
+  | 'arrived' | 'mastered' | 'freed' | 'sick' | 'recovered' | 'hazard' | 'festival' | 'fellOut' | 'lost'
+  | 'wantMet';
+export interface Episode { day: number; kind: EpisodeKind; about?: string; detail?: string }
+
+/**
+ * Something a person wants and does not have.
+ *
+ * A being with a want is a being with a story: the thing they keep coming
+ * back to when nothing else is pressing, the thing they say when they meet
+ * somebody, and the thing that, when it comes, is worth a day's talk. It is
+ * read off their state each morning — no roof, no trade, nobody to talk to —
+ * and held until the state changes, so a want lasts days and is met or not.
+ */
+export type WantKind = 'roof' | 'trade' | 'mastery' | 'company' | 'rest' | 'purpose' | 'horizon';
+export interface Want { kind: WantKind; since: number; about?: string }
+
+/**
+ * The want said as a thing: "a roof before winter".
+ *
+ * In the first person for their own mouth, in the third for the card, the
+ * feed and anybody passing it on — "a trade of my own" is theirs to say and
+ * nobody else's.
+ */
+export function wantWord(w: Want, person: 'first' | 'third' = 'first'): string {
+  const own = person === 'first' ? 'my own' : 'their own';
+  switch (w.kind) {
+    case 'roof': return 'a roof before winter';
+    case 'trade': return `a trade of ${own}`;
+    case 'mastery': return `to be called a master ${w.about ?? 'at the work'}`;
+    case 'company': return 'somebody to talk to';
+    case 'rest': return 'a proper night\'s sleep';
+    case 'purpose': return 'work that means something';
+    case 'horizon': return 'to see what is over the ridge';
+  }
+}
+
+/** A want met, kept on an episode as its kind, so each voice can say it in its own person. */
+export function wantFrom(e: Episode): Want | null {
+  const kind = e.about as WantKind | undefined;
+  if (!kind || !['roof', 'trade', 'mastery', 'company', 'rest', 'purpose', 'horizon'].includes(kind)) return null;
+  return { kind, since: e.day, about: e.detail };
+}
+
+/** The want in the first person, as a thought: what they would say to nobody. */
+export function wantLine(w: Want, roll: number): string {
+  const pick = (a: string, b: string) => (roll % 2 === 0 ? a : b);
+  switch (w.kind) {
+    case 'roof': return pick('I want a roof over my head before the cold comes.', 'One more night under the sky. I am so tired of it.');
+    case 'trade': return pick('I want a trade of my own. Something with my name on it.', 'Everybody here has work but me.');
+    case 'mastery': return pick(`One day they will call me a master ${w.about ?? ''}. One day.`.replace('  ', ' '), 'Every day at the bench gets me closer.');
+    case 'company': return pick('I would like somebody to talk to, some evenings.', 'It is quiet, being new here.');
+    case 'rest': return pick('What I would give for one whole night\'s sleep.', 'My feet have not stopped in days.');
+    case 'purpose': return pick('I want work that means something. This is not it.', 'There has to be more to it than this.');
+    case 'horizon': return pick('One day I will go and see what is past the ridge.', 'I keep looking at the far shore.');
+  }
+}
+
+/** What somebody has heard about somebody else: news that travelled. */
+export interface Heard { about: string; kind: EpisodeKind; day: number; detail?: string }
 
 /** How the two of them stand to each other. */
 export type Relation = 'rivals' | 'spouse' | 'kin' | 'friends' | 'known' | 'strangers';
@@ -54,6 +111,10 @@ export interface Brief {
   evening: string | null;
   /** The last thing they talked about with this same person, if they remember. */
   lastTalk: { topic: string; day: number } | null;
+  /** What they want and do not have, if anything. */
+  want?: Want | null;
+  /** News about other people that reached them, newest last. */
+  heard?: Heard[];
 }
 
 export interface TownBrief {
@@ -98,6 +159,7 @@ export function episodeLine(e: Episode, day: number): string {
     case 'festival': return 'That festival was a day to remember.';
     case 'fellOut': return `${e.about ?? 'Somebody'} and I are not speaking.`;
     case 'lost': return `We buried ${e.about ?? 'somebody'} ${when}.`;
+    case 'wantMet': { const w = wantFrom(e); return w ? `I have ${wantWord(w, 'first')} at last.` : 'I have what I wanted at last.'; }
   }
 }
 
@@ -120,7 +182,14 @@ export function episodeNote(e: Episode): string {
     case 'festival': return 'Danced at the festival';
     case 'fellOut': return `Fell out with ${e.about ?? 'somebody'}`;
     case 'lost': return `Lost ${e.about ?? 'somebody'}`;
+    case 'wantMet': { const w = wantFrom(e); return w ? `Got ${wantWord(w, 'third')}` : 'Got what they wanted'; }
   }
+}
+
+/** The same news about a third person, as a rumour would carry it: "went to bed hungry". */
+export function heardLine(h: Heard): string {
+  const note = episodeNote({ day: h.day, kind: h.kind, about: h.detail });
+  return note.charAt(0).toLowerCase() + note.slice(1);
 }
 
 /** Which way a piece of news cuts, which decides how the listener answers. */
@@ -128,6 +197,7 @@ type Cut = 'trouble' | 'good' | 'work' | 'weather' | 'town' | 'callback' | 'meet
 const CUT: Record<EpisodeKind, Cut> = {
   hungry: 'trouble', unpaid: 'trouble', roughSleep: 'trouble', sawFight: 'trouble', sick: 'trouble', fellOut: 'trouble', lost: 'trouble',
   newFriend: 'good', household: 'good', child: 'good', mastered: 'good', freed: 'good', recovered: 'good', festival: 'good', hazard: 'good', arrived: 'good',
+  wantMet: 'good',
 };
 
 /* ------------------------------------------------------------------ *
@@ -331,6 +401,19 @@ function subjects(a: Brief, b: Brief, rel: Relation, town: TownBrief): Subject[]
   }
   for (const e of recentA) {
     out.push({ topic: e.kind === 'sawFight' ? 'the fight in the square' : e.kind === 'child' ? `${a.name}'s new child` : `${a.name}'s ${CUT[e.kind] === 'trouble' ? 'trouble' : 'news'}`, line: episodeLine(e, town.day), cut: CUT[e.kind] });
+  }
+  // The thing they want comes up with anybody they know: it is what is on
+  // their mind. Said as a wish, so the listener answers it as trouble or as
+  // hope depending on who they are.
+  if (a.want && rel !== 'strangers' && rel !== 'rivals') {
+    out.push({ topic: `what ${a.name} wants`, line: `What I want is ${wantWord(a.want)}.`, cut: a.want.kind === 'horizon' || a.want.kind === 'mastery' ? 'good' : 'trouble' });
+  }
+  // News that reached them about somebody else, passed on. This is how a
+  // settlement comes to know things: not because everybody saw them but
+  // because somebody told somebody. The listener does not hear news about
+  // themselves this way, and a rumour is dropped after a few days.
+  for (const h of (a.heard ?? []).filter((h) => town.day - h.day <= 3 && h.about !== b.name).slice(-2)) {
+    out.push({ topic: `${h.about}'s news`, line: `I heard ${h.about} ${heardLine(h)}.`, cut: CUT[h.kind] === 'trouble' ? 'trouble' : 'town' });
   }
   if (a.lastTalk && town.day - a.lastTalk.day <= 6 && rel !== 'strangers') {
     out.push({ topic: a.lastTalk.topic, line: `You remember what we said about ${a.lastTalk.topic}?`, cut: 'callback' });

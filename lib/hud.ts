@@ -7,6 +7,7 @@
  * never holds a reference into mutable simulation state.
  */
 
+import { heardLine, wantWord } from './dialogue';
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
 import { cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
@@ -37,6 +38,10 @@ export interface FocusCitizen {
   traits: string[];
   /** What has happened to them lately, newest first. */
   lately: string[];
+  /** What they want and do not have, said as a thing, with how long: "a roof before winter". */
+  want: { what: string; days: number } | null;
+  /** What they have heard about other people, newest first: "Maren went to bed hungry". */
+  heard: string[];
   /** The last conversation they had, if they remember one: who and what about. */
   lastTalk: { name: string; topic: string; daysAgo: number } | null;
   trouble: string | null;
@@ -473,6 +478,8 @@ function focusFor(world: World, target: { kind: 'citizen' | 'building'; id: stri
       friends: friendsOf(world, c.id).slice(0, 4).map((f) => ({ id: f.citizen.id, name: f.citizen.name })),
       traits: [WEALTH_WORDS[wealthOf(c)], ...traitWords(c)],
       lately: latelyOf(world, c).slice(0, 4),
+      want: c.want ? { what: wantWord(c.want, 'third'), days: world.day - c.want.since } : null,
+      heard: [...(c.heard ?? [])].reverse().filter((h) => world.day - h.day <= 4).slice(0, 3).map((h) => `${h.about} ${heardLine(h)}`),
       lastTalk: (() => {
         const talks = Object.entries(c.lastTalk ?? {}).sort((x, y) => y[1].day - x[1].day);
         for (const [id, talk] of talks) {

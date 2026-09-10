@@ -19,7 +19,7 @@ import { biomeFor, biomeProfile, type BiomeKind } from './world/biomes';
 import { heightField } from './world/relief';
 import { BRIDGE_HALF_WIDTH, BRIDGE_RAMP, DECK_OVERHANG, createLayout, deckAt, onDeck, type Bridge, type WorldLayout } from './world/layout';
 import { buildNavGrid, findDetour, lineClear, navKey, type NavGrid } from './world/nav';
-import { compose, episodeNote, traitsOf, TRAIT_LABELS, type Brief, type Episode, type EpisodeKind, type Relation, type TownBrief } from './dialogue';
+import { compose, episodeNote, traitsOf, wantWord, TRAIT_LABELS, type Brief, type Episode, type EpisodeKind, type Heard, type Relation, type TownBrief, type Want } from './dialogue';
 import { buildWater, type WaterField , type DugWater } from './world/water';
 import { woodedAt } from './world/cover';
 import { BASE_EXTENT, extentOf, inset, type Extent } from './world/extent';
@@ -355,13 +355,162 @@ export interface Citizen {
   recent?: Episode[];
   /** The last thing they talked about with each person, by that person's id. */
   lastTalk?: Record<string, { topic: string; day: number }>;
+  /** What they want and do not have, read off their state each morning and held until it changes. */
+  want?: Want | null;
+  /** News about other people that reached them by word of mouth, newest last, four at most. */
+  heard?: Heard[];
+}
+
+/* ------------------------------------------------------------------ *
+ * Wants
+ * ------------------------------------------------------------------ */
+
+/**
+ * The one thing this person would say they want, if asked, or null.
+ *
+ * Read off their state rather than rolled, so it is true: somebody with no
+ * roof wants a roof, and stops wanting one the morning they have it. The
+ * order is the order of pressing — shelter, then a living, then the rest —
+ * and the dreamer's want sits last, because it is never pressing and never
+ * quite goes away until the plot itself grows.
+ */
+function wantOf(world: World, c: Citizen): Want | null {
+  if (c.age < 16) return null;
+  const family = world.families.find((f) => f.id === c.familyId);
+  const housed = !!(family?.homeId && world.buildings.some((b) => b.id === family.homeId && !b.ruined));
+  if (!housed || c.roughSleeper) return { kind: 'roof', since: world.day };
+  if (c.job === 'unemployed') return { kind: 'trade', since: world.day };
+  // Not rest: this runs at the midnight rollover, when everybody's rest is at
+  // its nightly low, so "wants a night's sleep" was true of the whole town
+  // every morning and met by nobody. Sleeping rough is what a want for rest
+  // really is, and that is the roof above.
+  const friends = Object.values(world.bonds).some((b) => b.friends && (b.a === c.id || b.b === c.id));
+  if (c.social < 35 && !friends) return { kind: 'company', since: world.day };
+  if (c.purpose < 30) return { kind: 'purpose', since: world.day };
+  const level = skillLevel(skillDays(c, c.job as WorkingJob));
+  if (level >= 3 && level < 6) return { kind: 'mastery', since: world.day, about: tradeWord(world, c.job) };
+  if (traitsOf(c.hash)[0] === 'dreamer' && !world.expanded) return { kind: 'horizon', since: world.day };
+  return null;
+}
+
+/** Whether a want they hold is now met. The mirror of `wantOf`, per kind. */
+function wantMet(world: World, c: Citizen, w: Want): boolean {
+  const family = world.families.find((f) => f.id === c.familyId);
+  switch (w.kind) {
+    case 'roof': return !c.roughSleeper && !!(family?.homeId && world.buildings.some((b) => b.id === family.homeId && !b.ruined));
+    case 'trade': return c.job !== 'unemployed';
+    case 'rest': return true; // no longer given out; anybody saved with one is let go of it
+    case 'company': return c.social > 60 || Object.values(world.bonds).some((b) => b.friends && (b.a === c.id || b.b === c.id));
+    case 'purpose': return c.purpose > 65;
+    case 'mastery': return c.job !== 'unemployed' && skillLevel(skillDays(c, c.job as WorkingJob)) >= 6;
+    case 'horizon': return !!world.expanded;
+  }
+}
+
+/**
+ * Each morning: a want that has been met becomes a thing that happened to
+ * them, and anybody with nothing pressing picks up whatever presses now. A
+ * want is kept rather than re-rolled while it stands, so `since` says how
+ * long they have wanted it.
+ */
+function refreshWants(world: World) {
+  for (const c of world.citizens) {
+    if (c.age < 16) { c.want = null; continue; }
+    if (c.want && wantMet(world, c, c.want)) {
+      // Kept as the kind, so the card says "their own" and their mouth says "my own".
+      noteEpisode(world, c, 'wantMet', c.want.kind, c.want.about);
+      pushFeed(world, 'social', `${c.name} has ${wantWord(c.want, 'third')} at last.`);
+      c.want = null;
+    }
+    if (!c.want) c.want = wantOf(world, c);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Word of mouth
+ * ------------------------------------------------------------------ */
+
+/**
+ * What a conversation leaves behind besides a topic: news. Each takes what
+ * happened to the other lately, and what the other had heard about third
+ * parties, so a thing that happened to one person on Monday can be raised
+ * by somebody who never met them on Wednesday. Bounded, and nothing about
+ * themselves, and nothing they already know.
+ */
+function hearAbout(world: World, listener: Citizen, speaker: Citizen) {
+  const heard = listener.heard ?? (listener.heard = []);
+  const knows = (about: string, kind: EpisodeKind) => heard.some((h) => h.about === about && h.kind === kind) || about === listener.name;
+  for (const e of (speaker.recent ?? []).filter((e) => world.day - e.day <= 2 && e.kind !== 'wantMet').slice(-2)) {
+    if (knows(speaker.name, e.kind)) continue;
+    heard.push({ about: speaker.name, kind: e.kind, day: e.day, detail: e.about });
+  }
+  for (const h of (speaker.heard ?? []).filter((h) => world.day - h.day <= 2).slice(-2)) {
+    if (knows(h.about, h.kind)) continue;
+    heard.push({ ...h });
+  }
+  while (heard.length > 4) heard.shift();
+}
+
+/* ------------------------------------------------------------------ *
+ * Noticing the owner's hand
+ * ------------------------------------------------------------------ */
+
+export type NoticedKind = 'built' | 'cleared' | 'festival' | 'wagesUp' | 'wagesDown' | 'demolished' | 'improved' | 'city';
+export interface Noticed { day: number; hour: number; kind: NoticedKind; about: string }
+
+/**
+ * Something the player just did to the settlement, for the people in it to
+ * remark on. A world that grows a mill by the water and says nothing about
+ * it is a diorama; one where the baker looks up and says "somebody has put
+ * up a mill" is a place with people in it. Kept short and for a day.
+ */
+export function notice(world: World, kind: NoticedKind, about: string) {
+  const list = world.noticed ?? (world.noticed = []);
+  list.push({ day: world.day, hour: world.hour, kind, about });
+  while (list.length > 6) list.shift();
+}
+
+/** What this person would say about the latest thing the owner did, in their own voice, or null. */
+export function noticedLine(world: World, c: Citizen, roll: number): string | null {
+  const fresh = (world.noticed ?? []).filter((n) => (world.day - n.day) * 24 + (world.hour - n.hour) <= 20);
+  if (!fresh.length) return null;
+  const n = fresh[(c.hash + roll) % fresh.length];
+  const [trait] = traitsOf(c.hash);
+  const it = n.about.toLowerCase();
+  switch (n.kind) {
+    case 'built':
+      return trait === 'grumbler' ? `Another ${it}. Who asked for that?`
+        : trait === 'proud' ? `A ${it}. I could have built it better.`
+          : trait === 'worrier' ? `A ${it}. I hope it does not fall on anybody.`
+            : trait === 'dreamer' ? `A ${it}! This place is becoming something.`
+              : `Somebody has put up a ${it}. This place is growing.`;
+    case 'cleared':
+      return trait === 'dreamer' ? 'They cleared the wood. You can see the sky from the square now.'
+        : trait === 'grumbler' ? 'They have cut the trees down. It was nice, that wood.'
+          : 'The wood is gone. Lighter now, and quieter.';
+    case 'festival':
+      return trait === 'joker' ? 'A festival! I will be unbearable by evening.' : 'A festival today. Did you hear the drums?';
+    case 'wagesUp':
+      return trait === 'blunt' ? 'The wage has gone up. About time.' : 'The wage has gone up. Somebody was listening.';
+    case 'wagesDown':
+      return trait === 'steady' ? 'They cut the wage. We will manage.' : 'They cut the wage. I will remember that.';
+    case 'demolished':
+      return trait === 'worrier' ? `They pulled the ${it} down. What if we needed it?` : `They pulled the ${it} down. Just like that.`;
+    case 'improved':
+      return trait === 'proud' ? `The ${it} has been done up. Nearly to my standard.` : `The ${it} has been done up. Looks proper now.`;
+    case 'city':
+      return trait === 'grumbler' ? `A proper town, they say. Same mud.` : `They say ${world.name} is a proper town now.`;
+  }
 }
 
 /** Remember something that happened to somebody, once per kind per day. */
-export function noteEpisode(world: World, c: Citizen, kind: EpisodeKind, about?: string) {
+export function noteEpisode(world: World, c: Citizen, kind: EpisodeKind, about?: string, detail?: string) {
   const list = c.recent ?? (c.recent = []);
   if (list.some((e) => e.kind === kind && e.day === world.day)) return;
-  list.push(about ? { day: world.day, kind, about } : { day: world.day, kind });
+  const e: Episode = { day: world.day, kind };
+  if (about) e.about = about;
+  if (detail) e.detail = detail;
+  list.push(e);
   while (list.length > 6) list.shift();
 }
 
@@ -510,6 +659,8 @@ export interface World {
   conversations: Conversation[];
   /** Ponds and channels the player dug. */
   dug?: DugWater[];
+  /** The last few things the owner did to the place, for people to remark on. */
+  noticed?: Noticed[];
   /** Trades that could not work in full yesterday, and what they ran short of. */
   shortages?: Partial<Record<WorkingJob, { short: Resource; hands: number; workers: number }>>;
   /** Whatever is currently going wrong. */
@@ -2146,6 +2297,8 @@ function briefOf(world: World, c: Citizen, other: Citizen): Brief {
     recent: c.recent ?? [],
     evening: boundFor(world, c),
     lastTalk: c.lastTalk?.[other.id] ?? null,
+    want: c.want ?? null,
+    heard: c.heard ?? [],
   };
 }
 
@@ -2227,6 +2380,8 @@ function converse(world: World, hours: number) {
         noteEpisode(world, b, 'newFriend', a.name);
       }
       rememberTalk(world, a, b, talk.topic);
+      hearAbout(world, a, b);
+      hearAbout(world, b, a);
       world.conversations.splice(i, 1);
     }
   }
@@ -3484,6 +3639,7 @@ export function setWageRate(world: World, rate: number): boolean {
   const raised = next > world.wageRate;
   world.wageRate = next;
   noteAttention(world);
+  notice(world, raised ? 'wagesUp' : 'wagesDown', 'the wage');
   pushFeed(world, 'work', raised
     ? `Wages were raised to ${Math.round(next * 100)}% of the going rate.`
     : `Wages were cut to ${Math.round(next * 100)}% of the going rate.`);
@@ -7018,6 +7174,7 @@ export function clearTrees(world: World, x: number, y: number, standing: number)
   note(world, 'produced', 'wood', wood);
   world.clearings = [...(world.clearings ?? []).filter(([, , day]) => world.day - day < CLEARING_DAYS), [x, y, world.day]];
   noteAttention(world);
+  notice(world, 'cleared', 'the wood');
   pushFeed(world, 'build', felled === 1
     ? `A tree was cleared for ${gold} Gold. ${wood} timber went to the yard.`
     : `${felled} trees were cleared for ${gold} Gold. ${wood} timber went to the yard.`);
@@ -8519,6 +8676,7 @@ export function rankWealth(world: World) {
 
 function daily(world: World) {
   rankWealth(world);
+  refreshWants(world);
   // The night just gone, as each of them will remember it.
   for (const c of world.citizens) {
     if (c.age < 16) continue;
@@ -9048,6 +9206,7 @@ export function raiseCity(world: World): { ok: boolean; message: string } {
   works.level = gate.next;
   noteAttention(world);
   pushFeed(world, 'build', `The public works are done. ${world.name} is a level ${gate.next} city, and earns like one.`);
+  notice(world, 'city', world.name);
   return { ok: true, message: `${world.name} is now level ${gate.next}.` };
 }
 
@@ -9115,6 +9274,7 @@ export function holdFestival(world: World): { ok: boolean; message: string } {
   }
   noteAttention(world);
   pushFeed(world, 'social', `${world.name} held a festival in the square. Everyone went.`);
+  notice(world, 'festival', 'the square');
   return { ok: true, message: 'The festival is on.' };
 }
 
@@ -9767,6 +9927,7 @@ export function constructBuilding(world: World, type: string, cost: number, x: n
   staffNow(world);
   if (type === 'House') rehouse(world);
   pushFeed(world, 'build', `A new ${named(world, type)} was built for ${cost} Gold, ${need.wood} wood and ${need.stone} stone.`);
+  notice(world, 'built', named(world, type));
   checkUnlocks(world);
   return building;
 }
@@ -9890,6 +10051,7 @@ export function demolishBuilding(world: World, id: string): { ok: boolean; messa
   staffNow(world);
   noteAttention(world);
   pushFeed(world, 'build', `The ${formName(building.type, building.era ?? 1).toLowerCase()} was pulled down. ${wood} timber and ${stone} stone were salvaged.`);
+  notice(world, 'demolished', formName(building.type, building.era ?? 1));
   return { ok: true, message: `Salvaged ${wood} timber and ${stone} stone. The Gold is gone.` };
 }
 
@@ -10069,6 +10231,7 @@ export function upgradeBuilding(world: World, id: string): { ok: boolean; messag
   staffNow(world);
   noteAttention(world);
   pushFeed(world, 'build', `The ${formName(building.type, building.era ?? 1).toLowerCase()} was improved to level ${building.level}.`);
+  notice(world, 'improved', formName(building.type, building.era ?? 1));
   return { ok: true, message: `Improved to level ${building.level}.` };
 }
 

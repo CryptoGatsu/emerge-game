@@ -433,10 +433,25 @@ function BeingCard({ focus, following, player, readOnly, treasury, moving, onCle
         </button>
       </div>
       {focus.project && <div className="being-note">{t('Working on {project}', { project: tx(focus.project) })}</div>}
+      {/* What they want is the thread of their story: the thing to watch for,
+          and often the thing the player can do something about. */}
+      {focus.want && (
+        <div className="being-want">
+          <span className="muted">{t('Wants')}</span>
+          <b>{tx(focus.want.what)}</b>
+          {focus.want.days > 0 && <em>{focus.want.days === 1 ? t('for a day') : t('for {n} days', { n: focus.want.days })}</em>}
+        </div>
+      )}
       {focus.lately.length > 0 && (
         <div className="being-lately">
           <span className="muted">{t('Lately')}</span>
           <ul>{focus.lately.map((line, i) => <li key={i}>{tx(line)}</li>)}</ul>
+        </div>
+      )}
+      {focus.heard.length > 0 && (
+        <div className="being-lately being-heard">
+          <span className="muted">{t('Heard')}</span>
+          <ul>{focus.heard.map((line, i) => <li key={i}>{tx(line)}</li>)}</ul>
         </div>
       )}
       {focus.lastTalk && (

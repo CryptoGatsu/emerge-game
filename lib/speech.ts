@@ -13,7 +13,19 @@ import {
   type Citizen, type WorkingJob, type World,
 } from './simulation';
 import { tx } from './i18n';
-import { episodeLine } from './dialogue';
+import { episodeLine, heardLine, wantLine } from './dialogue';
+import { noticedLine } from './simulation';
+
+/**
+ * A line, and whether it was said out loud.
+ *
+ * A turn in a conversation and a word to somebody they are walking towards
+ * are speech. Everything else a person has in their head — what they want,
+ * what they heard, what they make of the mill that went up this morning —
+ * is thought, and the renderer draws the two differently, so a settlement
+ * reads as people thinking as well as people talking.
+ */
+export interface Utterance { text: string; said: boolean }
 
 type Line = string;
 
@@ -121,17 +133,22 @@ const BY_WEATHER: Partial<Record<string, Line[]>> = {
 
 /** A line for a citizen at the current beat, or null when they have nothing to say. */
 export function speechFor(world: World, c: Citizen, beat: number): string | null {
-  const line = speechLine(world, c, beat);
-  return line === null ? null : tx(line);
+  return utteranceFor(world, c, beat)?.text ?? null;
 }
 
-function speechLine(world: World, c: Citizen, beat: number): string | null {
+/** The line and whether it was spoken aloud, or null. */
+export function utteranceFor(world: World, c: Citizen, beat: number): Utterance | null {
+  const line = speechLine(world, c, beat);
+  return line === null ? null : { text: tx(line.text), said: line.said };
+}
+
+function speechLine(world: World, c: Citizen, beat: number): Utterance | null {
   // An actual conversation outranks anything this module can invent. When
   // somebody is mid-exchange the bubble is their turn in it, so two people
   // standing together take turns on one subject instead of saying two
   // unrelated things at each other.
   const spoken = spokenLine(world, c.id);
-  if (spoken) return spoken.text;
+  if (spoken) return { text: spoken.text, said: true };
   // In a conversation but not the one talking: listening. Turn-taking only
   // reads as turn-taking if the listener is quiet — otherwise both bubbles are
   // up at once and it looks like two people talking over each other.
@@ -139,20 +156,39 @@ function speechLine(world: World, c: Citizen, beat: number): string | null {
 
   const roll = (c.hash * 31 + beat * 17) % 100;
   if (roll > 34) return null;
+  const thought = (text: string | null): Utterance | null => (text === null ? null : { text, said: false });
 
   // Somebody they are on their way to see. The most specific thing anybody in
   // the settlement can be doing, so it is the first thing they will mention.
   if (c.seeking) {
     const friend = world.citizens.find((other) => other.id === c.seeking);
     if (friend && roll < 22) {
-      return SEEKING[(c.hash + beat) % SEEKING.length].replace('{friend}', friend.name);
+      return { text: SEEKING[(c.hash + beat) % SEEKING.length].replace('{friend}', friend.name), said: true };
     }
+  }
+
+  // Something the owner just did. The one thing that makes a world feel
+  // aware of the hand shaping it, so it comes before their own concerns for
+  // the day it is fresh.
+  if (roll < 14) {
+    const seen = noticedLine(world, c, beat);
+    if (seen) return thought(seen);
+  }
+
+  // What they want, which is the thing they keep coming back to.
+  if (c.want && roll >= 14 && roll < 21) return thought(wantLine(c.want, c.hash + beat));
+
+  // What they heard about somebody. A rumour is a thought until it is told.
+  const rumours = (c.heard ?? []).filter((h) => world.day - h.day <= 3);
+  if (rumours.length && roll >= 21 && roll < 26) {
+    const h = rumours[(c.hash + beat) % rumours.length];
+    return thought(`They say ${h.about} ${heardLine(h)}.`);
   }
 
   // The voice of somebody who has done the work for years.
   if (c.job !== 'unemployed' && c.activity === 'working' && roll < 9
     && skillLevel(skillDays(c, c.job as WorkingJob)) >= 6) {
-    return BY_MASTERY[(c.hash + beat) % BY_MASTERY.length];
+    return thought(BY_MASTERY[(c.hash + beat) % BY_MASTERY.length]);
   }
 
   // Something that happened to them lately is on their mind, in their own
@@ -161,7 +197,7 @@ function speechLine(world: World, c: Citizen, beat: number): string | null {
   const lately = (c.recent ?? []).filter((e) => world.day - e.day <= 2);
   if (lately.length && roll < 16) {
     const e = lately[(c.hash + beat) % lately.length];
-    return episodeLine(e, world.day);
+    return thought(episodeLine(e, world.day));
   }
 
   // What they are actually doing, before anything generic. A line that names
@@ -169,9 +205,9 @@ function speechLine(world: World, c: Citizen, beat: number): string | null {
   // anybody: "Off to the bakery — flour to drop in" tells the player something
   // true about the settlement, and "Beautiful day in Fernrest" does not.
   const real = plannedLine(world, c);
-  if (real && (c.hash + beat) % 3 !== 0) return real.replace('{world}', world.name);
+  if (real && (c.hash + beat) % 3 !== 0) return thought(real.replace('{world}', world.name));
 
-  return moodLine(world, c, beat);
+  return thought(moodLine(world, c, beat));
 }
 
 /**
