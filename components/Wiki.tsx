@@ -5,7 +5,7 @@ import { formNames } from '@/lib/world/forms';
 import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
 import { UPKEEP_EMPTY_SHARE, BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 
-import { UPDATES } from '@/lib/updates';
+import { UPDATES_SORTED } from '@/lib/updates';
 
 /**
  * The guide.
@@ -1583,7 +1583,7 @@ export default function Wiki() {
         {/* ---------------------------------------------------------- */}
         <section id="updates">
           <h2>Update notes</h2>
-          {UPDATES.map((u) => (
+          {UPDATES_SORTED.map((u) => (
             <div key={u.version} className="wiki-update">
               <h3>v{u.version} — {u.title} <em>{u.date}</em></h3>
               <ul>

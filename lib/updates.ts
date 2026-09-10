@@ -15,10 +15,20 @@ export interface Update {
   notes: string[];
 }
 
+/** Version order, newest first: 2.10 after 2.9.4, whatever a string compare would say. */
+export function byVersion(a: Update, b: Update): number {
+  const pa = a.version.split('.').map(Number), pb = b.version.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] ?? 0) - (pa[i] ?? 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
 export const UPDATES: Update[] = [
   {
     version: '2.11.1',
-    date: '2026-09-11',
+    date: '2026-09-10',
     title: 'Three things players reported, fixed',
     notes: [
       'A listing you could see but not withdraw, or withdraw but not see, is over. The On-Chain panel now reads the land market contract itself to say whether your plot is listed, rather than what this browser remembered. A listing the chain never took is no longer written down as if it had been, and taking one down works even when the chain has nothing to take down. The registry also clears any old for-sale price that has no live listing behind it.',
@@ -148,7 +158,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.8',
-    date: '2026-09-08',
+    date: '2026-09-07',
     title: 'Notables',
     notes: [
       'Notables. From the township, the civic buildings want somebody to keep them: a teacher for the school, a physician for the clinic or hospital, a banker for the bank, a researcher for the laboratory or research campus, an administrator for the town hall. Without one the building runs at three quarters of its strength; with one it runs at full strength and more — a competent professional adds 15%, an accomplished one 30%, a renowned one 50% — on top of whatever its level gives. Professionals turn up in town on their own, most days one for a building the town has standing, a renowned one about one time in twelve, and stay three days. They are engaged for a fee and kept on a salary out of the treasury, and three days unpaid they leave. The People panel has a Notables tab for who is in town and who is engaged, and a building’s card says who keeps it. Nothing wants a professional before the township, so a settlement is untouched.',
@@ -186,7 +196,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.6',
-    date: '2026-09-11',
+    date: '2026-09-05',
     title: 'Ages that mean something, and a Bank that tells the truth',
     notes: [
       'Wealth classes, and transport as a luxury. Each morning everybody over sixteen is ranked by their purse: the top slice are well off, then comfortable, then getting by, then poor, and it shows on the card. A Stables used to put every working adult on a cart and a Harbour put every crosser in a boat of their own, and the roads and channels were a traffic jam. Now only the well-off ride — cart, rail, car, pod, or a boat across the water — in every age. Everybody else walks, and needs a bridge; a workplace on an island still has to be bridged to count as reachable, so the settlement builds crossings as it did before there was a ferry.',
@@ -237,7 +247,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.5',
-    date: '2026-09-10',
+    date: '2026-09-04',
     title: 'The lodge, and plots you are not looking at',
     notes: [
       'Hunting is paid like every other trade. The stalking you can watch is the visible part of the day; the snares, the lines and the ground beyond the plot’s edge bring in the rest, so a lodge full of hunters no longer shares one herd of ten and reports 0 a day. An improved lodge and a full quiver raise the take as they should.',
@@ -255,7 +265,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.4',
-    date: '2026-09-09',
+    date: '2026-09-04',
     title: 'The GLD dividend',
     notes: [
       'Every charge now splits three ways: 60% burned by the vault, 25% kept to pay withdrawals, 15% set aside in a dividend pool. Withdrawal holds split the same way.',
@@ -266,7 +276,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.3',
-    date: '2026-09-08',
+    date: '2026-09-04',
     title: 'The flywheel, judged: every improvement counts, every charge feeds the vault, and the vault pays what it can see',
     notes: [
       'Every improvement does something, and the building’s card says what. Workplaces make 22% more per level as before; a house adds two beds; a school, library, lab, clinic, hospital, cafe, tavern, chapel and the rest do their job a quarter more strongly per level; a market sells exports for 5% more per level; a bank makes every building’s upkeep 5% cheaper per level; a town hall lifts stewardship quality 2% per level; an improved store counts half again toward readiness; stables, stations, depots and pod hubs move people 10% faster per level; an improved jail halves the odds again and stops a rogue sooner.',
@@ -279,7 +289,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.2',
-    date: '2026-09-07',
+    date: '2026-09-04',
     title: 'The flywheel, one of each, and no more twenty-seven-building rogues',
     notes: [
       'The split on every charge is now three quarters burned and a quarter kept in the vault to pay withdrawals from. The Bank has a THE FLYWHEEL card showing the vault’s book: paid in by players, burned by the vault, kept for withdrawals, owed to the burn.',
@@ -291,7 +301,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.1',
-    date: '2026-09-07',
+    date: '2026-09-04',
     title: 'Ten times the rewards, and charges that fund them',
     notes: [
       'Rewards are ten times what they were. A plot’s daily ceiling now runs from 60,000 $EMERGE at level one to 250,000 for a level-ten city in the AI era. Five plots earn instead of four, and a wallet can collect up to 1,000,000 a day across them. A single withdrawal can be up to 1,000,000.',
@@ -302,7 +312,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '2.0',
-    date: '2026-09-06',
+    date: '2026-09-04',
     title: 'City levels, Gold with somewhere to go, and $EMERGE worth holding',
     notes: [
       'City levels. Every plot has a level, one to ten, read from its people and its buildings standing. Size earns the next level; Gold pays for the public works that confirm it, from 1,500 Gold at level two to 130,000 at level ten. The CITY card in the Bank shows the level, what the next one asks, and the button. An existing city is graded on what it already is, with nothing to pay for the levels it has grown into.',
@@ -318,7 +328,7 @@ export const UPDATES: Update[] = [
   },
   {
     version: '1.6',
-    date: '2026-09-05',
+    date: '2026-09-04',
     title: 'People, training, and rewards that grow with the city',
     notes: [
       'A People panel in the bar. Every adult with their trade, their skill and where they work, the unemployed first, filterable by trade. Every trade with its workers against its posts and how many stand open. Every workplace with its crew and its posts, ruins flagged. No more guessing what a building is or which jobs you are missing.',
@@ -395,7 +405,7 @@ export const UPDATES: Update[] = [
 export const UPDATES_ZH: Update[] = [
   {
     version: '2.11.1',
-    date: '2026-09-11',
+    date: '2026-09-10',
     title: '玩家反馈的三个问题，修好了',
     notes: [
       '看得见却撤不下、或撤得下却看不见的挂牌，不会再有了。链上面板现在直接读取土地市场合约来判断你的地块是否在挂牌，而不是这个浏览器记住的东西。链上从未接受的挂牌不会再被当作已挂牌记下来；撤下挂牌时即使链上没有可撤的，也能正常完成。注册表也会清掉背后没有有效挂牌的旧售价。',
@@ -525,7 +535,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.8',
-    date: '2026-09-08',
+    date: '2026-09-07',
     title: '名士',
     notes: [
       '名士。从城镇时代起，市政建筑需要有人主持：学校要教师，诊所或医院要医师，银行要银行家，实验室或研究园区要研究员，市政厅要行政官。没有人主持时建筑只以四分之三的效能运转；有人主持则满效甚至更高——称职的加 15%，干练的加 30%，有名望的加 50%——叠加在等级之上。专业人才会自己来到镇上，大多数日子会有一位为镇上已有的建筑而来，有名望者约十二次里才有一次，停留三天。聘用需付一笔费用，之后从金库按日支薪；三天没有发薪他们就会离开。人物面板新增“名士”页，显示谁在镇上、谁已聘用；建筑卡片会写明由谁主持。城镇之前没有建筑需要专业人才，所以聚落不受影响。',
@@ -563,7 +573,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.6',
-    date: '2026-09-11',
+    date: '2026-09-05',
     title: '有分量的时代，和说实话的银行',
     notes: [
       '阶层，和作为奢侈品的交通。每天早上，所有十六岁以上的人按钱包排名：最上面一小部分是富裕，然后是小康、过得去、清贫，卡片上会显示。以前马厩让每个上班的成年人坐马车，港口让每个过水的人各乘一船，路上和水道上挤成一团。现在只有富裕的人乘车——马车、铁路、汽车、出行舱，或者乘船过水——每个时代都是如此。其他人步行，需要桥；岛上的工作场所仍要架桥才算能到达，所以聚落会像有渡船之前那样修渡口。',
@@ -613,7 +623,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.5',
-    date: '2026-09-10',
+    date: '2026-09-04',
     title: '猎人小屋，和你没在看的地块',
     notes: [
       '狩猎现在和其他行业一样计产。屏幕上能看到的追猎只是一天的可见部分；陷阱、绳套和地块边缘之外的猎场带回其余部分，所以满员的猎人小屋不再十个猎人分一群猎物、报出"每天 0"。升级的小屋和满满的箭筒会如期提高收获。',
@@ -631,7 +641,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.4',
-    date: '2026-09-09',
+    date: '2026-09-04',
     title: 'GLD 分红',
     notes: [
       '每笔收费现在三分：60% 由金库销毁，25% 留作提现，15% 进入分红池。提现扣留部分同样分配。',
@@ -642,7 +652,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.3',
-    date: '2026-09-08',
+    date: '2026-09-04',
     title: '飞轮经过裁定：每次升级都有意义，每笔收费都进金库，金库只付它看得见的',
     notes: [
       '每次升级都有效果，建筑卡片会写明。工作场所仍是每级多 22% 产出；房子多两张床；学校、图书馆、实验室、诊所、医院、咖啡馆、酒馆、教堂等每级效果增强四分之一；市场每级出口多卖 5%；银行每级让所有建筑维护费便宜 5%；市政厅每级提高经营质量 2%；升级后的仓库在防备中算一个半；马厩、车站、公交站和出行舱站每级让人快 10%；升级后的监狱几率再减半并更早制止暴徒。',
@@ -655,7 +665,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.2',
-    date: '2026-09-07',
+    date: '2026-09-04',
     title: '飞轮、每样一座，再也没有毁掉二十七栋楼的暴徒',
     notes: [
       '每笔收费的分配改为四分之三销毁、四分之一留在金库用于支付提现。银行新增"飞轮"卡片，显示金库账本：玩家付入、金库已销毁、留作提现、待销毁。',
@@ -667,7 +677,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.1',
-    date: '2026-09-07',
+    date: '2026-09-04',
     title: '十倍的收益，以及为它买单的收费',
     notes: [
       '收益是原来的十倍。地块的每日上限从一级的 60,000 $EMERGE 到人工智能时代十级城市的 250,000。五块地可以赚而不是四块，一个钱包每天最多可收取 1,000,000。单笔提现最多 1,000,000。',
@@ -678,7 +688,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '2.0',
-    date: '2026-09-06',
+    date: '2026-09-04',
     title: '城市等级、有去处的金币，以及值得持有的 $EMERGE',
     notes: [
       '城市等级。每块地都有一个等级，一到十级，由人口和完好建筑数决定。规模让你有资格升级，金币支付确认升级的公共工程：二级 1,500 金币，十级 130,000 金币。银行里的"城市"卡片显示等级、下一级的要求和按钮。已有的城市按现状评级，已经长到的等级不用付钱。',
@@ -694,7 +704,7 @@ export const UPDATES_ZH: Update[] = [
   },
   {
     version: '1.6',
-    date: '2026-09-05',
+    date: '2026-09-04',
     title: '居民、培训，以及随城市成长的收益',
     notes: [
       '操作栏新增"居民"面板。每位成年人的行当、技能和工作地点，无业者排在最前，可按行当筛选。每个行当的在岗人数对比岗位数，以及有多少空缺。每个工作场所的在岗人员与岗位，废墟有标记。不用再猜某栋建筑是什么、缺哪些工作。',
@@ -767,3 +777,7 @@ export const UPDATES_ZH: Update[] = [
     ],
   },
 ];
+
+/** The notes in version order, newest first, whichever order they were written in. */
+export const UPDATES_SORTED: Update[] = [...UPDATES].sort(byVersion);
+export const UPDATES_ZH_SORTED: Update[] = [...UPDATES_ZH].sort(byVersion);

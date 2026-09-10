@@ -27,7 +27,7 @@ import { WalletPicker, useWallet } from './WalletPicker';
 import { SiteNav } from './SiteNav';
 import { WorldPulse } from './WorldPulse';
 import { t, useLocale } from '@/lib/i18n';
-import { UPDATES, UPDATES_ZH } from '@/lib/updates';
+import { UPDATES_SORTED, UPDATES_ZH_SORTED } from '@/lib/updates';
 
 /** Where to find the project outside the game. */
 export const X_URL = 'https://x.com/emergerh';
@@ -135,7 +135,7 @@ function ContractAddress() {
  * lot, and both are here without a trip to another site.
  */
 function UpdateNotes({ locale }: { locale: string }) {
-  const list = locale === 'zh' ? UPDATES_ZH : UPDATES;
+  const list = locale === 'zh' ? UPDATES_ZH_SORTED : UPDATES_SORTED;
   return (
     <section className="updates" id="updates">
       <span className="eyebrow">{t('WHAT\u2019S NEW')}</span>
