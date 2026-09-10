@@ -17,6 +17,19 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.11.0',
+    date: '2026-09-10',
+    title: 'Snow to play in, holidays to keep, and weather that costs something',
+    notes: [
+      'Snow is on the ground now, not just the roofs. It blends into the grass as it settles \u2014 patches first, then a cover \u2014 and lies until it melts; ponds and the shore freeze over in a hard frost. People leave footprints in it, their breath shows when it is cold, flowers and reeds go under it, and now and then somebody slips on the ice or in the mud.',
+      'People play in it. When the snow lies deep and it is not storming, children go out for snowball fights \u2014 you will see the snowballs fly \u2014 or lie down and make snow angels, which stay in the snow behind them. Adults build snowmen in the square and along the lanes, and clear the snow from their own doorsteps once a day, which keeps most of the snow off their roof too. It is all in the feed and in what they say, and the snowmen melt with the thaw.',
+      'Rain darkens the ground. The paths, the square and the bare ground go dark and wet under rain and stay so for a while after, with the puddles standing on them, so a wet day reads as wet rather than only as rain in front of the camera.',
+      'Holidays. Six a year, on the same day every year: Blossom Day in spring, the Midsummer Fair, Halloween, Thanksgiving, Christmas and New Year\u2019s Eve. The town is dressed for each the day before \u2014 pumpkins at the doors, sheaves, wreaths and strings of lights that come on after dark, bunting for the fair, a lit tree in the square through Christmas week \u2014 and everybody gathers at the appointed hour. Halloween sends the children round for treats; Thanksgiving and Christmas eat from the stores and Christmas burns six logs and sends everyone home warm with a gift; the fair takes Gold at the stalls; and on New Year\u2019s Eve the town stays up for fireworks over the square. People remember them and talk about them, and the day is named in the clock.',
+      'The weather draws on your stores. A snowy day \u2014 snow falling, or snow lying \u2014 burns half as much firewood again in the hearths, and the feed says so. A storm has stone laid on the stacks to hold them down, one for every three buildings; without enough stone the wind takes some of the wood. Rain gets into the wheat when there is no granary to keep it in, and spoils a little of it.',
+      'Fireworks go over the night rather than under it, and the snow angels read as what they are.',
+    ],
+  },
+  {
     version: '2.10.0',
     date: '2026-09-10',
     title: 'Weather you can see on the ground, and a world that is easy on a phone',
@@ -370,6 +383,19 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.11.0',
+    date: '2026-09-10',
+    title: '可以玩的雪、要过的节日，以及会花掉东西的天气',
+    notes: [
+      '雪落在地上了，不只在屋顶。积雪先一片片混进草地，再连成一整层，一直留到融化为止；严寒时池塘和岸边会结冰。人们在雪里留下脚印，天冷时呼出白气，花和芦苇被雪盖住，偶尔还有人在冰上或泥里滑一跤。',
+      '人们会在雪里玩。雪够深又没有暴风雪的时候，孩子们出门打雪仗——能看到雪球飞过去——或者躺下做雪天使，雪天使会留在他们身后的雪地里。大人在广场和小巷里堆雪人，每天清一次自家门前的雪，屋顶上的雪也因此少了大半。这些都会写进动态和他们的闲聊里，回暖时雪人随雪一起化掉。',
+      '雨会把地面弄暗。小路、广场和裸地在雨中变得又暗又湿，雨停后还会保持一阵子，水洼就积在上面，所以雨天看起来是湿的，而不只是镜头前面在下雨。',
+      '节日来了。一年六个，每年同一天：春天的花日、仲夏集市、万圣节、感恩节、圣诞节和除夕。前一天镇子就会装扮起来——门口的南瓜、麦捆、花环和入夜亮起的彩灯、集市的彩旗、圣诞周广场上点亮的圣诞树——到点大家都会聚在一起。万圣节孩子们挨家讨糖；感恩节和圣诞节从库存里吃，圣诞节还烧六根柴，人人带着礼物暖暖地回家；集市在摊位上收金币；除夕全镇熬夜看广场上空的烟花。人们会记住这些、谈论这些，节日的名字也显示在时钟上。',
+      '天气会消耗你的库存。下雪或积雪的日子，炉膛要多烧一半的柴，动态里会写明。暴风雨时要在堆料上压石头，每三栋建筑一块；石头不够，风就会刮走一部分木材。没有粮仓时，雨会渗进小麦里，坏掉一小部分。',
+      '烟花现在画在夜色之上而不是之下，雪天使也看得出是雪天使了。',
+    ],
+  },
   {
     version: '2.10.0',
     date: '2026-09-10',

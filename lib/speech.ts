@@ -14,7 +14,7 @@ import {
 } from './simulation';
 import { tx } from './i18n';
 import { episodeLine, heardLine, wantLine } from './dialogue';
-import { noticedLine } from './simulation';
+import { holidayFor, noticedLine } from './simulation';
 
 /**
  * A line, and whether it was said out loud.
@@ -178,6 +178,12 @@ function speechLine(world: World, c: Citizen, beat: number): Utterance | null {
   // What they want, which is the thing they keep coming back to.
   if (c.want && roll >= 14 && roll < 21) return thought(wantLine(c.want, c.hash + beat));
 
+  // The day itself: a holiday, snow on the ground, the puddles, the cold.
+  if (roll >= 26 && roll < 32) {
+    const day = dayLine(world, c, beat);
+    if (day) return { text: day, said: true };
+  }
+
   // What they heard about somebody. A rumour is a thought until it is told.
   const rumours = (c.heard ?? []).filter((h) => world.day - h.day <= 3);
   if (rumours.length && roll >= 21 && roll < 26) {
@@ -266,6 +272,33 @@ function moodLine(world: World, c: Citizen, beat: number): string | null {
 }
 
 /** One-line status used by the inspector and the selected-being card. */
+const HOLIDAY_LINES: Record<string, string[]> = {
+  'Halloween': ['Happy Halloween!', 'Did you carve one this year?', 'The lanterns look good on the doors.', 'Something moved behind the well. I am not going to look.'],
+  'Thanksgiving': ['Happy Thanksgiving.', 'Save me a place at the table.', 'A whole year, and we are still here. That is worth a feast.', 'I am bringing the bread.'],
+  'Christmas': ['Happy Christmas!', 'Did you see the tree in the square?', 'I have a gift for you. Later.', 'The lights are up. Look at them.'],
+  'New Year\u2019s Eve': ['Happy New Year, nearly.', 'Stay up for the fireworks.', 'Another year of this place. Good.', 'Midnight in the square. Be there.'],
+  'Midsummer Fair': ['The fair is on. Come down.', 'Longest day of the year and I am spending it working.', 'They have stalls up in the square.'],
+  'Blossom Day': ['The blossom is out. Picnic later?', 'Every year I forget how pink it gets.', 'Bring something to eat; we are going under the trees.'],
+};
+const SNOW_LINES = ['Mind the ice by the well.', 'My boots are soaked through.', 'Deep enough for a snowman, this.', 'The children have been out in it since dawn.', 'Another log on the fire tonight.', 'Nothing to do in snow like this but enjoy it.'];
+const WET_LINES = ['Mind the puddles.', 'The lane is a river.', 'Everything is mud.', 'I slipped twice on the way over.'];
+const COLD_LINES = ['Cold enough to crack stone.', 'I can see my own breath.', 'Nobody is out who does not have to be.'];
+
+/** What is worth saying about the day: the holiday, the snow, the wet, the cold. */
+function dayLine(world: World, c: Citizen, beat: number): string | null {
+  const pick = (lines: string[]) => lines[(c.hash + beat) % lines.length];
+  const holiday = holidayFor(world.day);
+  if (holiday && HOLIDAY_LINES[holiday.name]) return pick(HOLIDAY_LINES[holiday.name]);
+  const snow = world.ground?.snow ?? 0, wet = world.ground?.wet ?? 0;
+  if (snow > 0.5) {
+    if ((world.snowmen ?? []).length && (c.hash + beat) % 3 === 0) return 'Have you seen the snowman on the green?';
+    return pick(SNOW_LINES);
+  }
+  if (wet > 0.5) return pick(WET_LINES);
+  if (world.temperature < -3) return pick(COLD_LINES);
+  return null;
+}
+
 export function statusLine(c: Citizen, world?: World): string {
   return tx(statusText(c, world));
 }

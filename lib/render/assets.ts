@@ -30,7 +30,7 @@ import { clash, funnel, rubble, torch } from './dangerArt';
 import { ANIMAL_KINDS } from '../world/wildlife';
 import { buildTiles, canopyPattern } from './tiles';
 import { BLOOM, BUILD, FOLIAGE, UI, WATER } from './palette';
-import { glow, outline, rect, rng, surface, type Pixels } from './pixelCanvas';
+import { glow, groundShadow, outline, rect, rng, surface, type Pixels } from './pixelCanvas';
 
 const PAGE = 2048;
 const PAD = 2;
@@ -616,9 +616,236 @@ function snowedProp(p: Pixels): Pixels {
   return out;
 }
 
+/**
+ * Snow lying in patches: the same tile with snow where the ground is low
+ * and grass still showing where it is not, from a blobby noise so the
+ * patches are patches and not speckle. This is the first dressing a tile
+ * gets as the snow settles, before it goes white altogether.
+ */
+function snowedTileLight(p: Pixels): Pixels {
+  const out = surface(p.w, p.h);
+  const src = p.ctx.getImageData(0, 0, p.w, p.h);
+  const img = out.ctx.createImageData(p.w, p.h);
+  // Value noise on a coarse grid, seeded by the tile's own pixels so two
+  // variants of one kind lie differently.
+  let seed = 7;
+  for (let i = 0; i < src.data.length; i += 97) seed = (seed * 31 + src.data[i]) >>> 0;
+  const r = rng(seed);
+  const G = 5;
+  const grid: number[] = [];
+  for (let i = 0; i < (G + 1) * (G + 1); i++) grid.push(r());
+  const at = (gx: number, gy: number) => grid[((gy + G + 1) % (G + 1)) * (G + 1) + ((gx + G + 1) % (G + 1))];
+  const noise = (x: number, y: number) => {
+    const fx = (x / p.w) * G, fy = (y / p.h) * G;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * sx;
+    const b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * sx;
+    return a + (b - a) * sy;
+  };
+  for (let y = 0; y < p.h; y++) {
+    for (let x = 0; x < p.w; x++) {
+      const i = (y * p.w + x) * 4;
+      const a = src.data[i + 3];
+      if (!a) continue;
+      const n = noise(x, y);
+      const cover = Math.max(0, Math.min(1, (n - 0.42) / 0.22));
+      const l = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255;
+      const t = cover * 0.86;
+      img.data[i] = Math.round(src.data[i] * (1 - t) + (222 + 26 * l) * t);
+      img.data[i + 1] = Math.round(src.data[i + 1] * (1 - t) + (230 + 22 * l) * t);
+      img.data[i + 2] = Math.round(src.data[i + 2] * (1 - t) + (238 + 17 * l) * t);
+      img.data[i + 3] = a;
+    }
+  }
+  out.ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/** Bare ground after rain: darker and a little cooler, the way wet earth and wet stone are. */
+function wetTile(p: Pixels): Pixels {
+  const out = surface(p.w, p.h);
+  const src = p.ctx.getImageData(0, 0, p.w, p.h);
+  const img = out.ctx.createImageData(p.w, p.h);
+  for (let i = 0; i < src.data.length; i += 4) {
+    const a = src.data[i + 3];
+    if (!a) continue;
+    img.data[i] = Math.round(src.data[i] * 0.74);
+    img.data[i + 1] = Math.round(src.data[i + 1] * 0.77);
+    img.data[i + 2] = Math.round(src.data[i + 2] * 0.84);
+    img.data[i + 3] = a;
+  }
+  out.ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/** Water frozen over: pale, still, with a few cracks. */
+function iceTile(p: Pixels): Pixels {
+  const out = surface(p.w, p.h);
+  const src = p.ctx.getImageData(0, 0, p.w, p.h);
+  const img = out.ctx.createImageData(p.w, p.h);
+  for (let i = 0; i < src.data.length; i += 4) {
+    const a = src.data[i + 3];
+    if (!a) continue;
+    const l = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255;
+    const t = 0.72;
+    img.data[i] = Math.round(src.data[i] * (1 - t) + (200 + 40 * l) * t);
+    img.data[i + 1] = Math.round(src.data[i + 1] * (1 - t) + (218 + 30 * l) * t);
+    img.data[i + 2] = Math.round(src.data[i + 2] * (1 - t) + (232 + 20 * l) * t);
+    img.data[i + 3] = a;
+  }
+  out.ctx.putImageData(img, 0, 0);
+  const r = rng(p.w * 131 + p.h);
+  out.ctx.strokeStyle = 'rgba(150, 180, 200, 0.55)';
+  out.ctx.lineWidth = 1;
+  for (let k = 0; k < 2; k++) {
+    let x = 12 + r() * (p.w - 24), y = 8 + r() * (p.h - 16);
+    out.ctx.beginPath(); out.ctx.moveTo(x, y);
+    for (let j = 0; j < 4; j++) { x += (r() - 0.5) * 14; y += (r() - 0.5) * 6; out.ctx.lineTo(x, y); }
+    out.ctx.stroke();
+  }
+  return out;
+}
+
+/** A pair of footprints in the snow, side by side, heading up the screen. */
+function footprint(): Pixels {
+  const p = surface(7, 4);
+  rect(p, 1, 1, 2, 2, 'rgba(120, 150, 180, 0.55)');
+  rect(p, 4, 0, 2, 2, 'rgba(120, 150, 180, 0.55)');
+  return p;
+}
+
+/** A snowman: three balls, a hat, a carrot, two stick arms. */
+function snowman(): Pixels {
+  const p = surface(24, 34);
+  groundShadow(p, 12, 32, 9, 3, 0.3);
+  const ball = (cx: number, cy: number, r: number) => {
+    p.ctx.fillStyle = '#eef4f8'; p.ctx.beginPath(); p.ctx.arc(cx, cy, r, 0, Math.PI * 2); p.ctx.fill();
+    p.ctx.fillStyle = '#c9d8e4'; p.ctx.beginPath(); p.ctx.arc(cx + r * 0.3, cy + r * 0.35, r * 0.75, 0, Math.PI * 2); p.ctx.fill();
+    p.ctx.fillStyle = '#eef4f8'; p.ctx.beginPath(); p.ctx.arc(cx - r * 0.15, cy - r * 0.15, r * 0.72, 0, Math.PI * 2); p.ctx.fill();
+  };
+  ball(12, 26, 8); ball(12, 16, 6); ball(12, 8, 4.5);
+  rect(p, 10, 6, 1, 1, '#1a1a1a'); rect(p, 13, 6, 1, 1, '#1a1a1a');
+  rect(p, 12, 8, 3, 1, '#e58a2c');
+  rect(p, 10, 15, 1, 1, '#1a1a1a'); rect(p, 13, 17, 1, 1, '#1a1a1a'); rect(p, 11, 20, 1, 1, '#1a1a1a');
+  for (let i = 0; i < 5; i++) { rect(p, 5 - i, 14 - i, 1, 1, '#5a3a1a'); rect(p, 18 + i, 14 - i, 1, 1, '#5a3a1a'); }
+  rect(p, 8, 3, 8, 1, '#222'); rect(p, 9, 0, 6, 3, '#222'); rect(p, 9, 2, 6, 1, '#b83030');
+  outline(p, '#2a3038', 0.9);
+  return p;
+}
+
+/** A snow angel: the print a person leaves lying in the snow, arms swept. */
+function snowAngel(): Pixels {
+  // An imprint, not a figure: the hollow a body leaves in snow, wings swept
+  // out either side in two fans, a skirt below. Read by its shaded floor and
+  // the bright lip of pushed-up snow along the top edge.
+  const p = surface(48, 28);
+  const c = p.ctx;
+  const shape = (inset: number) => {
+    c.beginPath();
+    c.ellipse(24, 8, 5 - inset, 4.5 - inset, 0, 0, Math.PI * 2);
+    c.moveTo(24, 14);
+    c.ellipse(24, 14, 22 - inset, 5 - inset, 0, Math.PI, Math.PI * 2);
+    c.ellipse(24, 14, 22 - inset, 3 - inset, 0, 0, Math.PI);
+    c.moveTo(24, 14);
+    c.moveTo(19, 14); c.lineTo(14, 25 - inset); c.lineTo(34, 25 - inset); c.lineTo(29, 14); c.closePath();
+  };
+  c.fillStyle = 'rgba(96, 126, 160, 0.92)'; shape(0); c.fill();
+  c.fillStyle = 'rgba(150, 178, 206, 0.95)'; shape(1.6); c.fill();
+  // Where the arms swept: two fans darker again, so the wings read.
+  c.fillStyle = 'rgba(112, 142, 176, 0.9)';
+  for (const [x, dir] of [[10, -1], [38, 1]] as const) {
+    c.beginPath(); c.moveTo(24, 13);
+    c.lineTo(x, 10); c.lineTo(x + dir * 2, 13); c.lineTo(x, 16); c.closePath(); c.fill();
+  }
+  // The lip of snow pushed up along the top edge, catching the light.
+  c.strokeStyle = 'rgba(248, 252, 255, 0.95)'; c.lineWidth = 1.5;
+  c.beginPath(); c.ellipse(24, 8, 5.5, 5, 0, Math.PI * 1.1, Math.PI * 1.9); c.stroke();
+  c.beginPath(); c.ellipse(24, 14, 22.5, 5.5, 0, Math.PI * 1.02, Math.PI * 1.98); c.stroke();
+  return p;
+}
+
+function snowball(): Pixels {
+  const p = surface(5, 5);
+  rect(p, 1, 0, 3, 5, '#f4f8fb'); rect(p, 0, 1, 5, 3, '#f4f8fb'); rect(p, 3, 3, 1, 1, '#c9d8e4');
+  return p;
+}
+
+/** Halloween: a carved pumpkin at the door. */
+function pumpkin(): Pixels {
+  const p = surface(12, 11);
+  p.ctx.fillStyle = '#e07a20'; p.ctx.beginPath(); p.ctx.ellipse(6, 6.5, 5.5, 4.5, 0, 0, Math.PI * 2); p.ctx.fill();
+  rect(p, 3, 2, 1, 8, '#c2601a'); rect(p, 8, 2, 1, 8, '#c2601a');
+  rect(p, 5, 0, 2, 2, '#4a7a2a');
+  rect(p, 3, 5, 2, 2, '#ffe070'); rect(p, 7, 5, 2, 2, '#ffe070');
+  rect(p, 4, 8, 4, 1, '#ffe070'); rect(p, 3, 7, 1, 1, '#ffe070'); rect(p, 8, 7, 1, 1, '#ffe070');
+  outline(p, '#3a1a08', 0.8);
+  return p;
+}
+
+/** Christmas: a wreath on the door. */
+function wreath(): Pixels {
+  const p = surface(11, 11);
+  p.ctx.strokeStyle = '#2f6a2a'; p.ctx.lineWidth = 3;
+  p.ctx.beginPath(); p.ctx.arc(5.5, 5.5, 3.5, 0, Math.PI * 2); p.ctx.stroke();
+  rect(p, 2, 2, 1, 1, '#c8302a'); rect(p, 8, 3, 1, 1, '#c8302a'); rect(p, 3, 8, 1, 1, '#c8302a');
+  rect(p, 4, 0, 3, 2, '#c8302a'); rect(p, 5, 1, 1, 2, '#8a1a18');
+  return p;
+}
+
+/** Thanksgiving: a sheaf of wheat by the door. */
+function sheaf(): Pixels {
+  const p = surface(10, 14);
+  for (let i = 0; i < 5; i++) { rect(p, 2 + i, 4 + (i % 2), 1, 9, '#c8a34a'); rect(p, 2 + i, 1 + (i % 2) * 2, 1, 3, '#e0c060'); }
+  rect(p, 1, 9, 8, 2, '#8a5a2a');
+  rect(p, 0, 12, 4, 2, '#e07a20'); rect(p, 1, 11, 2, 1, '#4a7a2a');
+  return p;
+}
+
+/** A string of coloured lights, tiled along an eave. */
+function lightString(): Pixels {
+  const p = surface(32, 5);
+  rect(p, 0, 1, 32, 1, 'rgba(30, 40, 30, 0.7)');
+  const colours = ['#ff4a4a', '#ffd23f', '#4ad4ff', '#7dff7d', '#ff8ad4'];
+  for (let i = 0; i < 5; i++) rect(p, 2 + i * 6, 2, 2, 2, colours[i]);
+  return p;
+}
+
+/** The tree in the square at Christmas. */
+function xmasTree(): Pixels {
+  const p = surface(32, 52);
+  groundShadow(p, 16, 50, 12, 4, 0.3);
+  rect(p, 13, 42, 6, 8, '#5a3a1a');
+  const tiers: [number, number, number][] = [[46, 15, 12], [36, 12, 11], [27, 9, 10], [18, 6, 8]];
+  for (const [base, half, h] of tiers) {
+    p.ctx.fillStyle = '#2f6a2a'; p.ctx.beginPath(); p.ctx.moveTo(16, base - h); p.ctx.lineTo(16 - half, base); p.ctx.lineTo(16 + half, base); p.ctx.closePath(); p.ctx.fill();
+    p.ctx.fillStyle = '#3f8a38'; p.ctx.beginPath(); p.ctx.moveTo(16, base - h); p.ctx.lineTo(16 - half * 0.5, base - 1); p.ctx.lineTo(16 + half * 0.2, base - 1); p.ctx.closePath(); p.ctx.fill();
+  }
+  const r = rng(99);
+  const colours = ['#ff4a4a', '#ffd23f', '#4ad4ff', '#ff8ad4', '#ffffff'];
+  for (let i = 0; i < 16; i++) { const y = 14 + r() * 32, half = 3 + ((y - 10) / 36) * 12; rect(p, Math.round(16 + (r() - 0.5) * half * 2), Math.round(y), 2, 2, colours[i % colours.length]); }
+  rect(p, 15, 3, 2, 2, '#ffe070'); rect(p, 14, 4, 4, 1, '#ffe070'); rect(p, 15, 2, 2, 1, '#ffe070'); rect(p, 15, 5, 2, 1, '#ffe070');
+  outline(p, '#1d2a1d', 0.9);
+  return p;
+}
+
+/** Bunting for the fair: a string of little flags, tiled. */
+function bunting(): Pixels {
+  const p = surface(32, 8);
+  rect(p, 0, 0, 32, 1, 'rgba(60, 50, 40, 0.8)');
+  const colours = ['#ff6a6a', '#ffd23f', '#6ad4ff', '#9dff7d'];
+  for (let i = 0; i < 4; i++) {
+    const x = 1 + i * 8;
+    p.ctx.fillStyle = colours[i]; p.ctx.beginPath(); p.ctx.moveTo(x, 1); p.ctx.lineTo(x + 6, 1); p.ctx.lineTo(x + 3, 7); p.ctx.closePath(); p.ctx.fill();
+  }
+  return p;
+}
+
 /** Ground and growth that take snow: everything but water, rock faces and the foam. */
 const SNOWABLE_TILE = /^tile\.(grass|flowers|meadow|forest|soil|tilled|crop|path|plaza|rock|sand|dune|marsh|scrub|blend|street|cobble|setts|tarmac|composite)/;
 const SNOWABLE_PROP = /^prop\.(tree|bush)/;
+/** Ground that shows the rain: the bare and the paved, never the grass. */
+const WETTABLE_TILE = /^tile\.(soil|tilled|path|plaza|rock|sand|dune|street|cobble|setts|tarmac|composite)/;
 
 /** Low sun through the trees: soft diagonal bands, added over the frame at dawn and dusk. */
 function lightRays(): Pixels {
@@ -657,8 +884,10 @@ export class AssetLibrary {
   private textures = new Map<string, Texture>();
   private overrides = new Map<string, Texture>();
   readonly buildingMeta = new Map<string, BuildingMeta>();
-  /** For every texture that has a version under snow, that version. */
-  readonly snowPairs = new Map<Texture, Texture>();
+  /** For every texture that takes snow: the same ground in patches, and under it altogether. */
+  readonly snowPairs = new Map<Texture, { light: Texture; full: Texture }>();
+  /** For every texture that shows the rain, the same ground wet. */
+  readonly wetPairs = new Map<Texture, Texture>();
 
   get(name: string): Texture {
     const found = this.overrides.get(name) ?? this.textures.get(name);
@@ -762,16 +991,27 @@ export function loadAssets(): AssetLibrary {
   const pack = new AtlasPacker();
   const put = (name: string, pixels: Pixels) => lib.set(name, pack.add(pixels));
 
-  // Ground and growth get a second texture each, under snow, paired with the first.
-  const snowable = (name: string, pixels: Pixels, snow: (p: Pixels) => Pixels) => {
+  // Ground and growth get more textures each, paired with the first: in
+  // patches of snow and under it altogether, and for the bare ground, wet.
+  const snowable = (name: string, pixels: Pixels, snow: (p: Pixels) => Pixels, light?: (p: Pixels) => Pixels) => {
     const base = pack.add(pixels);
     lib.set(name, base);
-    const white = pack.add(snow(pixels));
-    lib.set(`${name}.snow`, white);
-    lib.snowPairs.set(base, white);
+    const full = pack.add(snow(pixels));
+    lib.set(`${name}.snow`, full);
+    const patchy = light ? pack.add(light(pixels)) : full;
+    if (light) lib.set(`${name}.snow1`, patchy);
+    lib.snowPairs.set(base, { light: patchy, full });
+    if (WETTABLE_TILE.test(name)) {
+      const wet = pack.add(wetTile(pixels));
+      lib.set(`${name}.wet`, wet);
+      lib.wetPairs.set(base, wet);
+    }
   };
   for (const { name, pixels } of buildTiles()) {
-    if (SNOWABLE_TILE.test(name)) snowable(name, pixels, snowedTile); else put(name, pixels);
+    if (SNOWABLE_TILE.test(name)) snowable(name, pixels, snowedTile, snowedTileLight);
+    else put(name, pixels);
+    if (name === 'tile.water.0') put('tile.water.ice', iceTile(pixels));
+    if (name === 'tile.watershore.0') put('tile.watershore.ice', iceTile(pixels));
   }
   for (const { name, pixels } of buildProps()) {
     if (SNOWABLE_PROP.test(name)) snowable(name, pixels, snowedProp); else put(name, pixels);
@@ -852,6 +1092,16 @@ export function loadAssets(): AssetLibrary {
   put('fx.butterfly.0', butterfly(0));
   put('fx.butterfly.1', butterfly(1));
   put('fx.fog', fogWisp());
+  put('fx.footprint', footprint());
+  put('fx.snowman', snowman());
+  put('fx.angel', snowAngel());
+  put('fx.snowball', snowball());
+  put('fx.pumpkin', pumpkin());
+  put('fx.wreath', wreath());
+  put('fx.sheaf', sheaf());
+  put('fx.lights', lightString());
+  put('fx.xmastree', xmasTree());
+  put('fx.bunting', bunting());
   put('fx.rays', lightRays());
   for (const kind of ['work', 'eat', 'social', 'sleep', 'trade'] as const) {
     put(`icon.${kind}`, activityIcon(kind));

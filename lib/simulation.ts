@@ -51,11 +51,31 @@ export { ANIMAL_LABELS };
 export type FeedKind = 'world' | 'build' | 'social' | 'discovery' | 'project' | 'market' | 'weather' | 'work';
 export interface FeedEntry { id: string; kind: FeedKind; text: string; day: number; hour: number }
 
-export type GatheringKind = 'meetup' | 'showcase' | 'market' | 'feast';
+export type GatheringKind = 'meetup' | 'showcase' | 'market' | 'feast' | 'holiday';
+/** Snow and wet on the ground, 0 to 1. Both rise with the weather and fall with the hours after it. */
+export interface Ground { snow: number; wet: number }
+export type PlayKind = 'snowball' | 'snowman' | 'angel' | 'shovel';
+export interface Play {
+  kind: PlayKind;
+  x: number; y: number;
+  day: number;
+  /** The hour it ends. */
+  until: number;
+  /** The other side of a snowball fight. */
+  partner?: string;
+}
+export interface Snowman { x: number; y: number; day: number; by: string }
+export interface Angel { x: number; y: number; day: number }
+
+export type HolidayKey = 'blossom' | 'midsummer' | 'halloween' | 'thanksgiving' | 'christmas' | 'newyear';
+export interface Holiday { key: HolidayKey; name: string; dayOfYear: number; hour: number; duration: number }
+
 export interface Gathering {
   id: string; name: string; kind: GatheringKind;
   day: number; hour: number; duration: number;
   buildingId: string; attendees: string[];
+  /** Which day of the year this is, when the gathering is the holiday itself. */
+  holiday?: HolidayKey;
   /**
    * What came of it, once it has finished. A gathering used to be a place
    * people walked to and nothing more: the meeting decided nothing, the
@@ -298,6 +318,12 @@ export interface Citizen {
   chasing?: string;
   /** Hours left in a scuffle, during which nobody moves. */
   scuffle?: number;
+  /**
+   * What they are doing in the snow, or on the holiday: where, until when,
+   * and with whom. Set when an off-duty hour finds snow on the ground;
+   * cleared when the hour runs out or the snow goes.
+   */
+  play?: Play;
   /** Days sick with the plague, from one. */
   sick?: number;
   /** Hours left running for open ground, from an earthquake or a funnel. */
@@ -558,6 +584,8 @@ export interface Amenity {
 export interface Family { id: string; name: string; members: string[]; homeId: string; wealth: number }
 export interface Building {
   id: string; type: string; x: number; y: number; workers: string[]; active: boolean;
+  /** The day somebody last cleared the snow from this doorstep. */
+  snowCleared?: number;
   production?: string;
   /** How badly it is knocked about, nought to one. At one it is a ruin. */
   damage?: number;
@@ -669,6 +697,13 @@ export interface World {
   wildlife: Animal[];
   /** The day's hunting so far: kills, how many the feed has told of, and whether the quiver is full. */
   hunt: { today: number; lines: number; arrows: boolean; game?: number; hides?: number };
+  /** What lies on the ground: snow and wet, 0 to 1, integrated hour by hour from the weather. */
+  ground?: Ground;
+  /** The last day the weather's morning draws were taken. */
+  drawnDay?: number;
+  /** What the snow play left standing, until the melt takes it. */
+  snowmen?: Snowman[];
+  angels?: Angel[];
   /** The standing decision of the last town meeting, if it is still in force. */
   resolution: Resolution | null;
   /** Everything the settlement's showcases have produced, newest first. */
@@ -1432,6 +1467,24 @@ function assignDestination(world: World, c: Citizen, phase: Phase) {
   }
 
   /*
+   * The snow.
+   *
+   * Somebody off the clock with snow on the ground has something better to
+   * do than sit down. A play already under way is walked back to; a fresh
+   * hour with nothing chosen rolls for one.
+   */
+  if (phase !== 'socialising' && phase !== 'wandering') c.play = undefined;
+  else if (!target) {
+    if (c.play && (c.play.day !== world.day || world.hour >= c.play.until)) finishPlay(world, c, true);
+    if (!c.play && snowToPlayIn(world, c)) c.play = pickPlay(world, c) ?? undefined;
+    if (c.play) {
+      target = { x: c.play.x, y: c.play.y };
+      exact = true;
+      c.seeking = c.play.partner;
+    }
+  }
+
+  /*
    * Going to find somebody.
    *
    * The one thing a settlement of strangers was missing. People had friends —
@@ -1960,6 +2013,8 @@ function moveCitizens(world: World, hours: number) {
     // Nobody in a scuffle moves.
     if (c.scuffle && c.scuffle > 0) { c.moving = false; c.activity = 'idle'; continue; }
     let phase = phaseFor(c, world.hour);
+    // A holiday evening keeps the town up past its bedtime, children too.
+    if (phase === 'sleeping' && c.age >= 8 && activeGathering(world)?.kind === 'holiday') phase = 'socialising';
     if (c.hunger < 35 && phase !== 'sleeping') phase = 'eating';
     // Trouble outranks the day's routine: the jailed stay in, a rogue is at
     // the walls whatever the hour, their pursuers are after them, and a
@@ -1976,6 +2031,14 @@ function moveCitizens(world: World, hours: number) {
     if (c.warmth < 30) c.sheltering = true;
     else if (c.warmth > 58) c.sheltering = false;
     if (c.sheltering && phase !== 'sleeping' && homeOf(world, c)) phase = 'athome';
+
+    // Play runs its hour and ends; if the snow goes from under it, it ends
+    // with nothing to show. At the spot, the pose is the play's.
+    if (c.play) {
+      if (c.play.day !== world.day || world.hour >= c.play.until) { finishPlay(world, c, true); assignDestination(world, c, phase); }
+      else if ((world.ground?.snow ?? 0) < 0.35 || (phase !== 'socialising' && phase !== 'wandering')) { finishPlay(world, c, false); assignDestination(world, c, phase); }
+      else if (hasArrived(c)) c.activity = c.play.kind === 'angel' ? 'resting' : c.play.kind === 'snowball' ? 'idle' : 'working';
+    }
 
     if (phase !== c.phase) {
       assignDestination(world, c, phase);
@@ -2315,6 +2378,9 @@ function townBrief(world: World): TownBrief {
     project: world.projects[0]?.name ?? null,
     babies: world.citizens.filter((c) => c.age < 3).length,
     festivalToday: world.festivalDay === world.day,
+    holiday: holidayFor(world.day)?.name ?? null,
+    snow: (world.ground?.snow ?? 0) > 0.5,
+    snowmen: (world.snowmen ?? []).length,
     gatesClosed: !!world.gatesClosed,
     arrivals: world.citizens.filter((c) => (c.recent ?? []).some((e) => e.kind === 'arrived' && e.day === world.day)).length,
   };
@@ -2674,6 +2740,37 @@ function seasonForDay(day: number): Season {
 
 /** How far through the year we are, 0 at the first day of spring. */
 const yearPhase = (day: number) => ((day - 1) % DAYS_PER_YEAR) / DAYS_PER_YEAR;
+
+/**
+ * The holidays, on the twenty-four-day year: spring 0-5, summer 6-11,
+ * autumn 12-17, winter 18-23. Each is one day, held in the square in the
+ * evening — New Year's Eve later than the rest, so the fireworks are in the
+ * dark — and each one costs something real and does something real, like
+ * every other gathering.
+ */
+export const HOLIDAYS: Holiday[] = [
+  { key: 'blossom', name: 'Blossom Day', dayOfYear: 2, hour: 18, duration: 2.5 },
+  { key: 'midsummer', name: 'Midsummer Fair', dayOfYear: 8, hour: 17, duration: 3 },
+  { key: 'halloween', name: 'Halloween', dayOfYear: 16, hour: 18, duration: 3 },
+  { key: 'thanksgiving', name: 'Thanksgiving', dayOfYear: 17, hour: 18, duration: 3 },
+  { key: 'christmas', name: 'Christmas', dayOfYear: 21, hour: 18, duration: 3 },
+  { key: 'newyear', name: 'New Year\u2019s Eve', dayOfYear: 23, hour: 21, duration: 3 },
+];
+export function holidayFor(day: number): Holiday | null {
+  const n = (day - 1) % DAYS_PER_YEAR;
+  return HOLIDAYS.find((h) => h.dayOfYear === n) ?? null;
+}
+/**
+ * Which holiday the town is dressed for. The decorations go up the day
+ * before and come down the day after, so the town is not bare on the
+ * morning of the day itself; Christmas lights stay up through New Year.
+ */
+export function decorFor(day: number): HolidayKey | null {
+  const n = (day - 1) % DAYS_PER_YEAR;
+  if (n >= 20 && n <= 23) return n === 23 ? 'newyear' : 'christmas';
+  for (const h of HOLIDAYS) if (n >= h.dayOfYear - 1 && n <= h.dayOfYear + 1) return h.key;
+  return null;
+}
 
 /** What the weather does to the air temperature. */
 const WEATHER_TEMP: Record<Weather, number> = {
@@ -3231,7 +3328,12 @@ function scheduleGatherings(world: World) {
   // meeting.
   const larder = world.resources.bread + world.resources.vegetables;
   const feasting = square && larder > world.citizens.length * 4 && world.day % 6 === 3;
-  if (feasting) {
+  const holiday = holidayFor(world.day);
+  if (holiday && square) {
+    // The holiday is the evening, whatever else the calendar had in mind.
+    next.push({ id: `g${world.day}-${holiday.key}`, name: holiday.name, kind: 'holiday', holiday: holiday.key, day: world.day, hour: holiday.hour, duration: holiday.duration, buildingId: square.id, attendees: [] });
+    pushFeed(world, 'social', `${holiday.name} today. The town gathers at the ${(square.type ?? 'square').toLowerCase()} at ${holiday.hour > 12 ? `${holiday.hour - 12}pm` : `${holiday.hour}am`}.`);
+  } else if (feasting) {
     next.push({ id: `g${world.day}-feast`, name: 'Harvest Feast', kind: 'feast', day: world.day, hour: 19, duration: 2.5, buildingId: square!.id, attendees: [] });
   } else if (square && rand() < 0.35) {
     // At the same place the town gathers anyway. Holding it at the market
@@ -3328,7 +3430,9 @@ function concludeGatherings(world: World) {
       continue;
     }
 
-    if (g.kind === 'meetup') {
+    if (g.kind === 'holiday') {
+      concludeHoliday(world, g, present);
+    } else if (g.kind === 'meetup') {
       const business = meetingBusiness(world);
       world.resolution = { text: business.text, want: business.want, day: world.day, voters: present.length };
       g.outcome = `Resolved ${business.text}.`;
@@ -3430,6 +3534,218 @@ function markAttendance(world: World) {
       && world.amenities.some((a) => a.id === c.usingId && a.kind === 'stall');
     if (!atStall && Math.hypot(c.x - venue.x, c.y - venue.y) > reach) continue;
     if (!g.attendees.includes(c.id)) g.attendees.push(c.id);
+  }
+}
+
+/**
+ * What a holiday leaves behind.
+ *
+ * A feast eats what the settlement has; Halloween sends the children round
+ * the doors and costs a little bread in treats; Christmas is a feast with a
+ * fire and a gift for everyone, which is the one evening the town's mood
+ * lifts most; New Year burns wood in the square and everyone stays up for
+ * it. Every one of them is worth more to a person who came than one who did
+ * not, so the square is where to be.
+ */
+function concludeHoliday(world: World, g: Gathering, present: Citizen[]) {
+  const key = g.holiday ?? 'thanksgiving';
+  const eat = (perHead: number) => {
+    const wanted = present.length * perHead;
+    const bread = Math.min(world.resources.bread, wanted * 0.7);
+    const veg = Math.min(world.resources.vegetables, wanted - bread);
+    world.resources.bread -= bread;
+    world.resources.vegetables -= veg;
+    note(world, 'consumed', 'bread', bread);
+    note(world, 'consumed', 'vegetables', veg);
+    for (const c of present) c.hunger = Math.min(100, c.hunger + 30);
+    return bread + veg;
+  };
+  const lift = (happiness: number, social: number) => {
+    for (const c of present) {
+      c.happiness = Math.min(100, c.happiness + happiness);
+      c.social = Math.min(100, c.social + social);
+      noteEpisode(world, c, 'holiday', g.name);
+    }
+  };
+  if (key === 'thanksgiving') {
+    const ate = eat(2.2);
+    lift(9, 22);
+    g.outcome = `${present.length} sat down together.`;
+    pushFeed(world, 'social', `Thanksgiving: ${present.length} sat down to the feast and ate through ${Math.round(ate)} of the stores.`);
+  } else if (key === 'christmas') {
+    const ate = eat(1.8);
+    const logs = Math.min(world.resources.wood, 6);
+    world.resources.wood -= logs;
+    note(world, 'consumed', 'wood', logs);
+    for (const c of present) c.warmth = Math.min(100, c.warmth + 16);
+    lift(12, 24);
+    g.outcome = `${present.length} exchanged gifts.`;
+    pushFeed(world, 'social', `Christmas: ${present.length} gathered round the fire, ate ${Math.round(ate)} from the stores, and every one of them went home with a gift.`);
+  } else if (key === 'halloween') {
+    const children = present.filter((c) => c.age < 16);
+    const treats = Math.min(world.resources.bread, children.length * 0.6);
+    world.resources.bread -= treats;
+    note(world, 'consumed', 'bread', treats);
+    for (const c of children) c.happiness = Math.min(100, c.happiness + 8);
+    lift(5, 14);
+    g.outcome = `${children.length} went trick-or-treating.`;
+    pushFeed(world, 'social', children.length
+      ? `Halloween: ${children.length} went door to door in costume and came home with ${Math.round(treats * 3)} treats. Lanterns burned at every door.`
+      : 'Halloween: lanterns burned at every door, and the grown-ups told the old stories.');
+  } else if (key === 'newyear') {
+    const logs = Math.min(world.resources.wood, 8);
+    world.resources.wood -= logs;
+    note(world, 'consumed', 'wood', logs);
+    lift(8, 18);
+    for (const c of present) c.purpose = Math.min(100, c.purpose + 6);
+    g.outcome = `${present.length} saw the year out.`;
+    pushFeed(world, 'social', `New Year\u2019s Eve: ${present.length} stayed up for the fireworks over the square. A new year in ${world.name}.`);
+  } else if (key === 'midsummer') {
+    const ate = eat(1.4);
+    const takings = Math.round(present.length * 4);
+    earn(world, 'exports', takings);
+    lift(7, 18);
+    g.outcome = `The fair took ${takings} Gold.`;
+    pushFeed(world, 'social', `Midsummer Fair: ${present.length} came to the stalls, ate ${Math.round(ate)} from the stores, and the fair took ${takings} Gold.`);
+  } else {
+    const ate = eat(1.2);
+    lift(6, 16);
+    g.outcome = `${present.length} picnicked under the blossom.`;
+    pushFeed(world, 'social', `Blossom Day: ${present.length} picnicked under the trees and ate ${Math.round(ate)} from the stores.`);
+  }
+}
+
+/**
+ * What lies on the ground, hour by hour.
+ *
+ * Snow settles while it snows and covers the ground by mid-morning; it holds
+ * while the air stays at or below freezing, melts over a day or so once it
+ * warms, and rain takes it faster. Wet ground comes with the rain and dries
+ * in the hours after, quickly on a hot day. The renderer eases toward these
+ * two figures; the people play in one and slip on the other.
+ */
+function groundStep(world: World, hours: number) {
+  const g = world.ground ?? (world.ground = { snow: 0, wet: 0 });
+  const w = world.weather, t = world.temperature;
+  const raining = w === 'Rain' || w === 'Storm';
+  if (w === 'Snow') g.snow = Math.min(1, g.snow + hours * 0.22);
+  else if (raining) g.snow = Math.max(0, g.snow - hours * 0.12);
+  else if (t > 10) g.snow = Math.max(0, g.snow - hours * 0.05);
+  else if (t > 3) g.snow = Math.max(0, g.snow - hours * 0.012);
+  else g.snow = Math.max(0, g.snow - hours * 0.003);
+  if (raining) g.wet = Math.min(1, g.wet + hours * 0.5);
+  else if (w === 'Snow') g.wet = Math.max(0, g.wet - hours * 0.05);
+  else g.wet = Math.max(0, g.wet - hours * (t > 22 ? 0.2 : 0.09));
+  // What the snow play left goes with the snow.
+  if (g.snow < 0.25) {
+    if (world.snowmen?.length) {
+      pushFeed(world, 'weather', world.snowmen.length === 1 ? 'The snowman has melted away.' : 'The snowmen have melted away.');
+      world.snowmen = [];
+    }
+    if (world.angels?.length) world.angels = [];
+  }
+}
+
+/** Whether there is snow enough on the ground to play in, and the weather to be out in it. */
+function snowToPlayIn(world: World, c: Citizen) {
+  return (world.ground?.snow ?? 0) > 0.55 && c.warmth > 42 && world.temperature > -12 && !c.sheltering
+    && world.weather !== 'Storm' && !activeGathering(world);
+}
+
+/**
+ * Something to do in the snow.
+ *
+ * Children pair off for a snowball fight or throw themselves down for an
+ * angel; adults build a snowman on the open ground or clear the snow from
+ * their own doorstep, once a day. Deterministic in the person and the hour,
+ * so a replay plays the same games.
+ */
+function pickPlay(world: World, c: Citizen): Play | null {
+  const roll = ((c.hash * 131 + world.day * 977 + Math.floor(world.hour) * 31) >>> 0) % 100;
+  const child = c.age < 16;
+  if (roll >= (child ? 48 : 24)) return null;
+  const spots = world.layout.wanderSpots;
+  const spot = spots.length ? spots[(c.hash + world.day + Math.floor(world.hour)) % spots.length] : [world.layout.plaza.x, world.layout.plaza.y];
+  const home = homeOf(world, c);
+  if (child) {
+    // A partner: another child who is out, free, and not too far.
+    const partner = world.citizens.find((o) => o.id !== c.id && o.age < 16 && !o.play && !o.inside && !o.sheltering
+      && Math.hypot(o.x - c.x, o.y - c.y) < 16 && (o.phase === 'wandering' || o.phase === 'socialising'));
+    if (partner && roll < 30) {
+      const until = world.hour + 1.2;
+      partner.play = { kind: 'snowball', x: spot[0] + 2.2, y: spot[1], day: world.day, until, partner: c.id };
+      assignDestination(world, partner, partner.phase);
+      pushFeed(world, 'social', `${c.name} and ${partner.name} are having a snowball fight.`);
+      return { kind: 'snowball', x: spot[0] - 2.2, y: spot[1], day: world.day, until, partner: partner.id };
+    }
+    return { kind: 'angel', x: spot[0] + (roll % 3) - 1, y: spot[1] + (roll % 2), day: world.day, until: world.hour + 0.6 };
+  }
+  if (home && (home.snowCleared ?? -1) !== world.day && roll < 12) {
+    return { kind: 'shovel', x: home.x + 1.6, y: home.y + 2.4, day: world.day, until: world.hour + 1.1 };
+  }
+  const built = (world.snowmen ?? []).length;
+  if (built >= 6) return null;
+  const at = home && roll % 2 === 0 ? [home.x - 2.6, home.y + 2.2] : [spot[0] + 1.5, spot[1] - 1];
+  return { kind: 'snowman', x: at[0], y: at[1], day: world.day, until: world.hour + 1.8 };
+}
+
+/** The play is over: leave what it made, and let go of the spot. */
+function finishPlay(world: World, c: Citizen, done: boolean) {
+  const play = c.play;
+  c.play = undefined;
+  if (!play || !done) return;
+  if (play.kind === 'snowman') {
+    (world.snowmen ??= []).push({ x: play.x, y: play.y, day: world.day, by: c.name });
+    noteEpisode(world, c, 'snowman');
+    pushFeed(world, 'social', `${c.name} built a snowman${homeOf(world, c) && Math.hypot(play.x - homeOf(world, c)!.x, play.y - homeOf(world, c)!.y) < 5 ? ' outside the house' : ' on the green'}.`);
+  } else if (play.kind === 'angel') {
+    const angels = (world.angels ??= []);
+    angels.push({ x: play.x, y: play.y, day: world.day });
+    if (angels.length > 24) angels.shift();
+  } else if (play.kind === 'shovel') {
+    const home = homeOf(world, c);
+    if (home) home.snowCleared = world.day;
+    if (!world.feed.some((f) => f.day === world.day && f.text.includes('clearing the snow'))) pushFeed(world, 'work', 'People are out clearing the snow from their doorsteps.');
+  }
+}
+
+/**
+ * What the weather costs, each morning at six, once the day's weather is
+ * what it is.
+ *
+ * A storm has stone laid on the stacks to hold them down, and a settlement
+ * with no stone loses timber to the wind; rain gets into wheat that has no
+ * granary over it. The firewood is drawn with the rest of the day's heating.
+ * Booked like any other consumption, so the figures the player reads are
+ * true.
+ */
+function weatherDraws(world: World) {
+  const people = world.citizens.length;
+  if (!people) return;
+  // The hearths are the firewood's business, in heatTheHomes; this is the rest.
+  if (world.weather === 'Storm') {
+    const want = Math.max(1, Math.ceil(world.buildings.length / 3));
+    const had = Math.min(Math.floor(world.resources.stone), want);
+    world.resources.stone -= had;
+    note(world, 'consumed', 'stone', had);
+    if (had < want) {
+      const lost = Math.round(world.resources.wood * 0.06);
+      world.resources.wood -= lost;
+      note(world, 'consumed', 'wood', lost);
+      pushFeed(world, 'weather', lost > 0
+        ? `The wind took ${lost} wood off the uncovered stacks: only ${had} stone to hold them down.`
+        : `The stacks stood uncovered in the wind: no stone to hold them down.`);
+    } else {
+      pushFeed(world, 'weather', `Stone was laid on the stacks to hold them down in the wind: ${had} used.`);
+    }
+  }
+  if ((world.weather === 'Rain' || world.weather === 'Storm') && world.resources.wheat > 8 && !findBuilding(world, 'Granary')) {
+    const spoiled = Math.round(world.resources.wheat * 0.03);
+    if (spoiled > 0) {
+      world.resources.wheat -= spoiled;
+      note(world, 'consumed', 'wheat', spoiled);
+      pushFeed(world, 'weather', `Rain got into the wheat: ${spoiled} spoiled. A granary would keep it dry.`);
+    }
   }
 }
 
@@ -8457,7 +8773,10 @@ function heatTheHomes(world: World) {
   const dawn = temperatureAt({ biome: world.biome, day: world.day, hour: 5, weather: world.weather });
   if (dawn > 12) return;
   const households = world.buildings.filter((b) => b.type === 'House' && b.active).length;
-  const need = Math.round((12 - dawn) * 0.22 * Math.max(1, households) * 0.5);
+  // Snow on the ground, or falling, keeps the hearths lit all day: half as
+  // much again goes on them as the same cold without it.
+  const snowy = world.weather === 'Snow' || (world.ground?.snow ?? 0) > 0.5;
+  const need = Math.round((12 - dawn) * 0.22 * Math.max(1, households) * 0.5 * (snowy ? 1.5 : 1));
   if (need <= 0) return;
   const burned = Math.min(need, Math.floor(world.resources.wood));
   world.resources.wood -= burned;
@@ -8467,7 +8786,7 @@ function heatTheHomes(world: World) {
       ? 'There is no firewood left. The hearths went cold.'
       : `Firewood ran short in the cold — only ${burned} of ${need} loads to burn.`);
   } else if (need >= 8) {
-    pushFeed(world, 'weather', `A cold day. ${burned} loads of firewood went on the hearths.`);
+    pushFeed(world, 'weather', snowy ? `Snow on the ground. ${burned} loads of firewood went on the hearths.` : `A cold day. ${burned} loads of firewood went on the hearths.`);
   }
 }
 
@@ -8878,12 +9197,18 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
   runMarket(world, hours);
   let guard = 0;
   while (world.hour >= 24 && guard++ < 8) {
+    // Whatever was still running at midnight ends with the day, so a
+    // gathering that runs to the stroke of it — New Year's Eve — is
+    // concluded before the day's list is replaced.
+    concludeGatherings(world);
     world.hour -= 24; world.day++;
     world.season = seasonForDay(world.day);
     world.weather = weatherFor(world.season, world.weatherSeed, world.day);
     daily(world);
   }
   world.temperature = temperatureAt(world);
+  groundStep(world, hours);
+  if (world.hour >= 6 && world.drawnDay !== world.day) { world.drawnDay = world.day; weatherDraws(world); }
   updateBuildingWorkers(world);
   socialStep(world, hours);
   converse(world, hours);

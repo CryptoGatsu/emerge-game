@@ -1443,6 +1443,17 @@ export default function Wiki() {
             fireflies, leaves and flurries into the air in their turn.
           </p>
           <p>
+            Snow is something to play in. When it lies deep, children have snowball fights and make
+            snow angels, adults build snowmen and clear their own doorsteps, and it all shows in the
+            feed and in what they say; the snowmen go with the thaw. Weather draws on the stores:
+            a snowy day burns half as much firewood again, a storm wants a stone laid on the stacks
+            for every three buildings or the wind takes some of the wood, and rain spoils a little
+            wheat where there is no granary. Six holidays fall on the same days every year &mdash;
+            Blossom Day, the Midsummer Fair, Halloween, Thanksgiving, Christmas and New Year&rsquo;s
+            Eve &mdash; each with the town dressed for it, a gathering at the appointed hour, and
+            fireworks over the square to see the year out.
+          </p>
+          <p>
             <b>On a phone</b> the world is drawn to what the device can afford: thirty frames a
             second, fewer particles, and on a low-end phone half resolution with no bloom pass, so
             it stays cool. If frames still run long, particles are shed first and the bloom after,

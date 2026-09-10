@@ -568,7 +568,7 @@ function StatusPanel({ view, woodland, activePanel, onPanel }: {
         />
       )}
       <div className="status-foot">
-        <span>{tn(view.season)} · {tn(view.weather)}</span>
+        <span>{tn(view.season)} · {tn(view.weather)}{view.holiday ? <> · <b className="holiday">{tn(view.holiday)}</b></> : null}</span>
         <span>{t('{n} working', { n: view.employed })} · {t('{n} outdoors', { n: view.outdoors })}{view.seated > 0 ? ` · ${t('{n} sitting', { n: view.seated })}` : ''}</span>
         <span>{t('{born} born · {died} died here', { born: view.births, died: view.deaths })}</span>
       </div>

@@ -10,7 +10,7 @@
 import { heardLine, wantWord } from './dialogue';
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
+import { cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, holidayFor, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -112,6 +112,8 @@ export interface Snapshot {
   clock: string;
   season: string;
   weather: string;
+  /** Today's holiday, if it is one. */
+  holiday: string | null;
   /** Degrees Celsius, and the word for how that feels. */
   temperature: number;
   temperatureLabel: string;
@@ -623,6 +625,7 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
     clock: formatClock(world.hour),
     season: world.season,
     weather: world.weather,
+    holiday: holidayFor(world.day)?.name ?? null,
     temperature: world.temperature,
     temperatureLabel: describeTemperature(world.temperature),
     population: world.population,

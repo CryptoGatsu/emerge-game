@@ -34,7 +34,7 @@ export const TRAIT_LABELS: Record<Trait, string> = {
 export type EpisodeKind =
   | 'hungry' | 'unpaid' | 'roughSleep' | 'sawFight' | 'newFriend' | 'household' | 'child'
   | 'arrived' | 'mastered' | 'freed' | 'sick' | 'recovered' | 'hazard' | 'festival' | 'fellOut' | 'lost'
-  | 'wantMet';
+  | 'wantMet' | 'holiday' | 'snowman';
 export interface Episode { day: number; kind: EpisodeKind; about?: string; detail?: string }
 
 /**
@@ -128,6 +128,11 @@ export interface TownBrief {
   project: string | null;
   babies: number;
   festivalToday: boolean;
+  /** Today's holiday by name, if it is one. */
+  holiday: string | null;
+  /** Snow lying deep enough to play in, and how many snowmen stand in it. */
+  snow: boolean;
+  snowmen: number;
   gatesClosed: boolean;
   arrivals: number;
 }
@@ -160,6 +165,8 @@ export function episodeLine(e: Episode, day: number): string {
     case 'fellOut': return `${e.about ?? 'Somebody'} and I are not speaking.`;
     case 'lost': return `We buried ${e.about ?? 'somebody'} ${when}.`;
     case 'wantMet': { const w = wantFrom(e); return w ? `I have ${wantWord(w, 'first')} at last.` : 'I have what I wanted at last.'; }
+    case 'holiday': return ago <= 1 ? `That was a good ${e.about ?? 'holiday'}.` : `${e.about ?? 'The holiday'} was ${when}. Already.`;
+    case 'snowman': return ago <= 1 ? 'I built a snowman. It is still standing.' : 'I built a snowman the other day.';
   }
 }
 
@@ -183,6 +190,8 @@ export function episodeNote(e: Episode): string {
     case 'fellOut': return `Fell out with ${e.about ?? 'somebody'}`;
     case 'lost': return `Lost ${e.about ?? 'somebody'}`;
     case 'wantMet': { const w = wantFrom(e); return w ? `Got ${wantWord(w, 'third')}` : 'Got what they wanted'; }
+    case 'holiday': return e.about ?? 'A holiday';
+    case 'snowman': return 'Built a snowman';
   }
 }
 
@@ -197,7 +206,7 @@ type Cut = 'trouble' | 'good' | 'work' | 'weather' | 'town' | 'callback' | 'meet
 const CUT: Record<EpisodeKind, Cut> = {
   hungry: 'trouble', unpaid: 'trouble', roughSleep: 'trouble', sawFight: 'trouble', sick: 'trouble', fellOut: 'trouble', lost: 'trouble',
   newFriend: 'good', household: 'good', child: 'good', mastered: 'good', freed: 'good', recovered: 'good', festival: 'good', hazard: 'good', arrived: 'good',
-  wantMet: 'good',
+  wantMet: 'good', holiday: 'good', snowman: 'good',
 };
 
 /* ------------------------------------------------------------------ *
@@ -419,6 +428,8 @@ function subjects(a: Brief, b: Brief, rel: Relation, town: TownBrief): Subject[]
     out.push({ topic: a.lastTalk.topic, line: `You remember what we said about ${a.lastTalk.topic}?`, cut: 'callback' });
   }
   if (town.festivalToday) out.push({ topic: 'the festival', line: 'A festival, today of all days. Are you going down?', cut: 'town' });
+  if (town.holiday) out.push({ topic: town.holiday, line: `${town.holiday} today. Are you coming down to the square this evening?`, cut: 'town' });
+  if (town.snow) out.push({ topic: 'the snow', line: town.snowmen > 0 ? 'Did you see the snowmen on the green? The children have been at it all morning.' : 'Snow like this, and the whole town out in it. I love a day like today.', cut: 'town' });
   if (town.resolution) out.push({ topic: 'the meeting', line: `They resolved ${town.resolution} at the meeting.`, cut: 'town' });
   if (town.showcase) out.push({ topic: 'the showcase', line: `Did you see ${town.showcase.maker}'s piece? “${town.showcase.title}”.`, cut: 'town' });
   if (town.project) out.push({ topic: town.project, line: `Have you seen how far along ${town.project.toLowerCase()} is?`, cut: 'town' });

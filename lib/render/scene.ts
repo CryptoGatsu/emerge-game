@@ -26,7 +26,7 @@ import { utteranceFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, cloudTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
-import { CLEARING_DAYS, CLEAR_RADIUS, bridgeAt, buildBounds, digProblem, dugAt, placementProblem } from '../simulation';
+import { CLEARING_DAYS, CLEAR_RADIUS, bridgeAt, buildBounds, decorFor, digProblem, dugAt, placementProblem, type HolidayKey } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
 import { extentOf } from '../world/extent';
@@ -68,6 +68,8 @@ interface BuildingView {
   rubble?: Sprite;
   /** The roof under snow, laid over the building and faded with the cover. */
   snow?: Sprite;
+  /** What the holiday hung on it: a pumpkin, a wreath, a string of lights. */
+  decor: Container[];
   artKey: string;
   door: { x: number; y: number };
   chimney?: { x: number; y: number };
@@ -93,7 +95,9 @@ interface Bubble {
 interface Particle { sprite: Sprite; vx: number; vy: number; life: number; max: number }
 
 /** What is in the air: which decides how it moves and when it appears. */
-type AmbientKind = 'firefly' | 'leaf' | 'petal' | 'pollen' | 'butterfly' | 'ember' | 'flurry';
+type AmbientKind = 'firefly' | 'leaf' | 'petal' | 'pollen' | 'butterfly' | 'ember' | 'flurry' | 'snowball' | 'puff' | 'rocket' | 'spark';
+/** Fireworks come in these. */
+const FIREWORK_TINTS = [0xff6a6a, 0xffd23f, 0x6ad4ff, 0x9dff7d, 0xff8ad4, 0xffffff];
 interface AmbientParticle extends Particle { kind: AmbientKind; spin: number; phase: number }
 
 /** A puddle or a drift on the ground: one sprite that is either, faded by the weather. */
@@ -295,8 +299,31 @@ export class EmergeScene {
   private cloud: TilingSprite | null = null;
   /** Mist and snow-light: a pale wash over the world, plain-blended, so fog whitens rather than darkens. */
   private hazeWash = new Sprite(Texture.WHITE);
-  /** What a sprite showed before it was dressed in snow, and the snow it wears, so it can be undressed. */
-  private bare = new WeakMap<Sprite, { orig: Texture; snow: Texture }>();
+  /** What each ground sprite and prop wore before the weather dressed it, and how far it is dressed. */
+  private worn = new WeakMap<Sprite, { orig: Texture; snow: number; wet: boolean }>();
+  /** Whether the water is frozen over. */
+  private icy = false;
+  /** Footprints in the snow, and where each person last left one. */
+  private prints: Particle[] = [];
+  private lastPrint = new Map<string, { x: number; y: number }>();
+  /** Who is mid-slip, how long is left of it, and which way they went over. */
+  private slipping = new Map<string, { left: number; dir: number }>();
+  /** When each person next breathes out, in the cold. */
+  private nextBreath = new Map<string, number>();
+  /** When each person at play next throws or shovels. */
+  private nextPlay = new Map<string, number>();
+  /** The snowmen and the angels standing in the world, as last drawn. */
+  private snowmenSprites: Sprite[] = [];
+  private angelSprites: Sprite[] = [];
+  private snowKey = '';
+  private snowSyncTimer = 0;
+  /** The holiday the town is dressed for, and everything it hung up. */
+  private decorKey = '';
+  private decorTimer = 0;
+  private squareDecor: Container[] = [];
+  /** Lights and lanterns: on after dark, at their own strength. */
+  private nightDecor: { sprite: Container; k: number }[] = [];
+  private fireworkTimer = 0;
   /** Low sun at dawn and dusk, added over the frame. */
   private rays: Sprite | null = null;
   /** Lightning: the whole frame, for a few frames. */
@@ -375,6 +402,7 @@ export class EmergeScene {
   setGround(wet: number, snow: number) {
     this.wet = Math.max(0, Math.min(1, wet));
     this.snowCover = Math.max(0, Math.min(1, snow));
+    this.world.ground = { wet: this.wet, snow: this.snowCover };
     this.groundShown = '';
   }
   /** A bolt of lightning now, for the trials. */
@@ -384,7 +412,8 @@ export class EmergeScene {
     return {
       fog: this.fogAmount, wisps: this.fog.length, wisp: this.fog[0] ? { a: this.fog[0].sprite.alpha, x: this.fog[0].sprite.x, y: this.fog[0].sprite.y, w: this.fog[0].sprite.width, v: this.fog[0].sprite.visible } : null,
       haze: this.hazeWash.alpha, hazeOn: this.hazeWash.visible, cloud: this.cloud?.alpha ?? -1, cloudOn: this.cloud?.visible, rays: this.rays?.alpha ?? -1,
-      weatherOn: this.weatherLayer.visible, wet: this.wet, snow: this.snowCover, budget: this.budget,
+      weatherOn: this.weatherLayer.visible, wet: this.wet, snow: this.snowCover, budget: this.budget, night: this.nightAmount, slips: this.slipping.size, prints: this.prints.filter((m) => m.life > 0).length,
+      air: this.ambience.reduce<Record<string, number>>((n, p) => { if (p.life > 0) n[p.kind] = (n[p.kind] ?? 0) + 1; return n; }, {}),
       root: this.sceneRoot.children.map((c) => `${c.constructor.name}:${c.visible ? 1 : 0}:${c.alpha.toFixed(2)}:${c.width}x${c.height}`),
     };
   }
@@ -782,6 +811,8 @@ export class EmergeScene {
     view.lit.destroy();
     view.glow?.destroy();
     view.snow?.destroy();
+    for (const d of view.decor) d.destroy();
+    this.nightDecor = this.nightDecor.filter((n) => !view.decor.includes(n.sprite));
     view.wheel?.destroy();
     view.badge.destroy({ children: true });
     this.buildings.delete(id);
@@ -932,7 +963,7 @@ export class EmergeScene {
 
       const doorWorld = screenToWorld(meta.door[0], meta.door[1]);
       this.buildings.set(building.id, {
-        building, base, lit, glow, snow, wheel, artKey, height,
+        building, base, lit, glow, snow, wheel, artKey, height, decor: [],
         at: { x: building.x, y: building.y },
         badge, badgeIcon: icon, badgeText: text,
         door: { x: building.x + doorWorld.x, y: building.y + doorWorld.y },
@@ -1052,7 +1083,14 @@ export class EmergeScene {
       this.fxLayer.addChild(sprite);
       this.splashes.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
     }
-    for (let i = 0; i < pool(80, 24); i++) {
+    for (let i = 0; i < pool(160, 40); i++) {
+      const sprite = new Sprite(this.assets.get('fx.footprint'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.decalLayer.addChild(sprite);
+      this.prints.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
+    for (let i = 0; i < pool(96, 30); i++) {
       const sprite = new Sprite(this.assets.get('fx.firefly'));
       sprite.anchor.set(0.5, 0.5);
       sprite.visible = false;
@@ -1130,14 +1168,29 @@ export class EmergeScene {
     }
   }
 
-  /** The ground as it is when a world is entered: already wet if it is raining, under snow if it is snowing. */
+  /**
+   * The ground as it is when a world is entered. The simulation owns the
+   * figures; a world saved before it did is given them from the weather it
+   * was saved in, and the picture starts where the figures are rather than
+   * easing up from bare ground.
+   */
   private primeGround() {
     const w = this.world.weather;
-    this.wet = w === 'Rain' || w === 'Storm' ? 0.9 : 0;
     const temp = this.world.temperature ?? 10;
-    this.snowCover = w === 'Snow' ? 1 : this.world.season === 'Winter' && temp <= 1 ? 0.7 : 0;
+    if (!this.world.ground) {
+      this.world.ground = {
+        wet: w === 'Rain' || w === 'Storm' ? 0.9 : 0,
+        snow: w === 'Snow' ? 1 : this.world.season === 'Winter' && temp <= 1 ? 0.7 : 0,
+      };
+    }
+    this.wet = this.world.ground.wet;
+    this.snowCover = this.world.ground.snow;
     this.groundShown = '';
     this.lastSeason = '';
+    this.icy = false;
+    this.waterFrame = -1;
+    this.snowKey = '';
+    this.decorKey = '';
   }
 
   /* ---------------------------------------------------------------- *
@@ -1617,6 +1670,15 @@ export class EmergeScene {
     this.fog = [];
     this.fogAmount = 0;
     this.lightning = 0;
+    this.prints = [];
+    this.lastPrint.clear();
+    this.slipping.clear();
+    this.nextBreath.clear();
+    this.nextPlay.clear();
+    this.snowmenSprites = [];
+    this.angelSprites = [];
+    this.squareDecor = [];
+    this.nightDecor = [];
     this.minimapBase = null;
     this.selected = null;
     this.hovered = null;
@@ -1669,6 +1731,10 @@ export class EmergeScene {
       for (const child of layer.removeChildren()) child.destroy({ children: true });
     }
     this.decals = [];
+    // The decal layer held the prints and the angels; the pool is rebuilt below.
+    this.prints = [];
+    this.angelSprites = [];
+    this.snowKey = '';
     // Props live in the shared object layer alongside buildings and citizens,
     // and their glows live in the lights layer, so each is destroyed by hand
     // rather than by emptying a container.
@@ -1691,8 +1757,16 @@ export class EmergeScene {
     this.buildTerrain();
     this.buildProps();
     this.buildDecals();
+    for (let i = 0; i < Math.max(40, Math.round(160 * this.quality.particles)); i++) {
+      const sprite = new Sprite(this.assets.get('fx.footprint'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.decalLayer.addChild(sprite);
+      this.prints.push({ sprite, vx: 0, vy: 0, life: 0, max: 1 });
+    }
     this.groundShown = '';
     this.lastSeason = '';
+    this.waterFrame = -1;
   }
 
   private update(dt: number) {
@@ -1721,6 +1795,10 @@ export class EmergeScene {
     this.updateLighting();
     this.updateGround(clamped);
     this.updateSky(clamped);
+    this.updateWeatherOnPeople(clamped);
+    this.syncSnowThings(clamped);
+    this.syncDecor(clamped);
+    this.updateFireworks(clamped);
     this.updateSmoke(clamped);
     this.updateWeather(clamped);
     this.updateAmbience(clamped);
@@ -1737,13 +1815,17 @@ export class EmergeScene {
   }
 
   private updateWater() {
-    const frame = Math.floor(this.time * 5) % 4;
+    // Frozen over once the snow has lain a while in air below freezing: the
+    // water stops moving and goes pale, and thaws with the snow.
+    const frozen = this.snowCover > 0.7 && this.world.temperature <= -1;
+    if (frozen !== this.icy) { this.icy = frozen; this.waterFrame = -1; }
+    const frame = frozen ? 9 : Math.floor(this.time * 5) % 4;
     if (frame === this.waterFrame) return;
     this.waterFrame = frame;
     for (const { sprite, kind } of this.waterSprites) {
-      sprite.texture = this.assets.get(kind === 'water' ? `tile.water.${frame}` : `tile.watershore.${frame}`);
+      sprite.texture = this.assets.get(frozen ? (kind === 'water' ? 'tile.water.ice' : 'tile.watershore.ice') : kind === 'water' ? `tile.water.${frame}` : `tile.watershore.${frame}`);
     }
-    for (const sprite of this.waterfallSprites) sprite.texture = this.assets.get(`tile.waterfall.${frame}`);
+    for (const sprite of this.waterfallSprites) sprite.texture = this.assets.get(`tile.waterfall.${frame % 4}`);
     for (const sprite of this.campfires) sprite.texture = this.assets.get(`prop.campfire.${frame % 2}`);
   }
   private waterFrame = -1;
@@ -2167,6 +2249,7 @@ export class EmergeScene {
       if (view.glow) view.glow.alpha = night * 0.45;
     }
     for (const glow of this.lampGlows) glow.alpha = night * 0.6;
+    for (const d of this.nightDecor) d.sprite.alpha = night * d.k;
     this.nightAmount = night;
     if (this.grade) this.grade.night = night;
   }
@@ -2312,8 +2395,9 @@ export class EmergeScene {
     const wants: [AmbientKind, number][] = [];
     if (season === 'Autumn') wants.push(['leaf', 2.6 * windy * gusting]);
     else if (this.gust > 0 && season !== 'Winter') wants.push(['leaf', 1.4]);
-    if (season === 'Spring' && day > 0.5 && !wet) { wants.push(['petal', 1.3 * windy * gusting]); wants.push(['butterfly', 0.35]); }
-    if (season === 'Summer' && day > 0.5 && (w === 'Clear' || w === 'Cloudy')) { wants.push(['pollen', 1.1]); wants.push(['butterfly', 0.25]); }
+    const snowy = w === 'Snow' || this.snowCover > 0.4;
+    if (season === 'Spring' && day > 0.5 && !wet && !snowy) { wants.push(['petal', 1.3 * windy * gusting * (decorFor(this.world.day) === 'blossom' ? 3 : 1)]); wants.push(['butterfly', 0.35]); }
+    if (season === 'Summer' && day > 0.5 && (w === 'Clear' || w === 'Cloudy') && !snowy) { wants.push(['pollen', 1.1]); wants.push(['butterfly', 0.25]); }
     if ((season === 'Summer' || season === 'Spring') && night > 0.35 && !wet && w !== 'Snow') wants.push(['firefly', 2.2]);
     if (this.snowCover > 0.4 && w !== 'Snow' && (this.gust > 0 || w === 'Storm')) wants.push(['flurry', 2.2]);
     if (night > 0.3 && this.campfires.length && !wet) wants.push(['ember', 0.7 * Math.min(4, this.campfires.length)]);
@@ -2363,6 +2447,31 @@ export class EmergeScene {
             p.sprite.position.y += p.vy * dt + Math.sin(this.time * 4 + p.phase) * 6 * dt;
             p.sprite.alpha = env * 0.7;
             break;
+          case 'snowball':
+            p.vy += 260 * dt;
+            p.sprite.position.x += p.vx * dt;
+            p.sprite.position.y += p.vy * dt;
+            p.sprite.alpha = 1;
+            break;
+          case 'puff':
+            p.vy += 220 * dt;
+            p.sprite.position.x += p.vx * dt;
+            p.sprite.position.y += p.vy * dt;
+            p.sprite.alpha = Math.max(0, k);
+            break;
+          case 'rocket':
+            p.sprite.position.x += p.vx * dt;
+            p.sprite.position.y += p.vy * dt;
+            p.sprite.alpha = 0.9;
+            if (p.life <= 0) this.burst(p.sprite.x, p.sprite.y);
+            break;
+          case 'spark':
+            p.vy += 90 * dt;
+            p.vx *= 1 - dt * 0.8;
+            p.sprite.position.x += p.vx * dt;
+            p.sprite.position.y += p.vy * dt;
+            p.sprite.alpha = Math.min(1, k * 1.6) * (0.75 + 0.25 * Math.sin(this.time * 30 + p.phase));
+            break;
           default:
             p.sprite.position.x += p.vx * dt;
             p.sprite.position.y += p.vy * dt + Math.sin(this.time * 2 + p.phase) * 6 * dt;
@@ -2383,11 +2492,13 @@ export class EmergeScene {
     p.kind = kind;
     p.phase = Math.random() * Math.PI * 2;
     p.spin = 0;
+    p.sprite.blendMode = 'normal';
     p.sprite.rotation = 0;
     p.sprite.tint = 0xffffff;
     p.sprite.scale.set(1);
     p.sprite.visible = true;
     p.sprite.alpha = 0;
+    if (p.sprite.parent !== this.fxLayer) this.fxLayer.addChild(p.sprite);
     const wx = 8 + Math.random() * 84, wy = 8 + Math.random() * 84;
     const pos = worldToScreen(wx, wy, this.map.heightAt(wx, wy));
     switch (kind) {
@@ -2458,15 +2569,16 @@ export class EmergeScene {
    * rain. The puddles, the drifts and every roof follow the two figures.
    */
   private updateGround(dt: number) {
-    const w = this.world.weather;
-    const raining = w === 'Rain' || w === 'Storm';
-    const temp = this.world.temperature ?? 10;
-    if (raining) this.wet = Math.min(1, this.wet + dt / 25);
-    else this.wet = Math.max(0, this.wet - dt / (temp > 22 ? 70 : 160));
-    if (w === 'Snow') this.snowCover = Math.min(1, this.snowCover + dt / 40);
-    else if (raining) this.snowCover = Math.max(0, this.snowCover - dt / 30);
-    else if (temp <= 1) this.snowCover = Math.max(0, this.snowCover - dt / 2400);
-    else this.snowCover = Math.max(0, this.snowCover - dt / (temp > 8 ? 60 : 140));
+    // The simulation says what lies on the ground; the picture eases after
+    // it over a few seconds, so a change of weather reads as one.
+    const g = this.world.ground;
+    if (g) {
+      const k = 1 - Math.exp(-dt * 0.4);
+      this.wet += (g.wet - this.wet) * k;
+      this.snowCover += (g.snow - this.snowCover) * k;
+      if (Math.abs(g.wet - this.wet) < 0.004) this.wet = g.wet;
+      if (Math.abs(g.snow - this.snowCover) < 0.004) this.snowCover = g.snow;
+    }
 
     // The sprites are only touched when the figures have moved enough to see.
     const key = `${Math.round(this.wet * 40)}:${Math.round(this.snowCover * 40)}`;
@@ -2483,9 +2595,12 @@ export class EmergeScene {
     }
     for (const view of this.buildings.values()) {
       if (!view.snow) continue;
-      view.snow.alpha = this.snowCover;
+      // A doorstep cleared today keeps most of its roof clear too.
+      const cleared = view.building.snowCleared === this.world.day ? 0.4 : 1;
+      view.snow.alpha = this.snowCover * cleared;
       view.snow.visible = this.snowCover > 0.02;
     }
+    this.dressGround();
   }
 
   /** Cloud shadows, low sun, mist and lightning: the sky, as far as the frame shows it. */
@@ -2951,29 +3066,334 @@ export class EmergeScene {
     for (const leaf of this.foliage) leaf.sprite.tint = tint;
     const horizon = BACKDROP_TINT[this.world.biome];
     if (this.backdrop) this.backdrop.tint = snowy ? mixTint(horizon, 0xe8f0f6, 0.55) : horizon;
-    this.dressSnow(snowy);
   }
 
   /**
-   * Put the ground and the trees under snow, or take them out of it.
+   * Dress the ground and the trees for the weather.
    *
-   * A tint cannot whiten anything, so every tile and tree that takes snow has
-   * a second texture, and this swaps them. A sprite is only undressed if it
-   * is still wearing the snow it was given: a tree felled meanwhile shows a
+   * A tint cannot whiten anything, so every tile that takes snow has two more
+   * textures — snow in patches, and snow altogether — and every bare tile has
+   * one for the wet. Each sprite has its own threshold from a hash of where
+   * it stands, so as the snow settles the ground goes over tile by tile, the
+   * hollows first, rather than the whole map switching at once; and the same
+   * hash sends it back the same way as it melts. A sprite is only undressed
+   * if it is still wearing what it was given: a tree felled meanwhile shows a
    * stump, and the stump stays.
    */
-  private dressSnow(on: boolean) {
-    const swap = (sprite: Sprite) => {
-      if (on) {
-        const snow = this.assets.snowPairs.get(sprite.texture);
-        if (snow) { this.bare.set(sprite, { orig: sprite.texture, snow }); sprite.texture = snow; }
-      } else {
-        const worn = this.bare.get(sprite);
-        if (worn) { if (sprite.texture === worn.snow) sprite.texture = worn.orig; this.bare.delete(sprite); }
+  private dressGround() {
+    const snow = this.snowCover, wet = this.wet;
+    const noise = (x: number, y: number) => {
+      const h = (Math.imul(Math.round(x) | 0, 73856093) ^ Math.imul(Math.round(y) | 0, 19349663)) >>> 0;
+      return (h % 1000) / 1000;
+    };
+    const dress = (sprite: Sprite, tree: boolean) => {
+      const worn = this.worn.get(sprite);
+      const base = worn?.orig ?? sprite.texture;
+      const pair = this.assets.snowPairs.get(base);
+      const damp = this.assets.wetPairs.get(base);
+      if (!pair && !damp) return;
+      const n = noise(sprite.x, sprite.y);
+      const level = tree
+        ? (snow > 0.45 + n * 0.35 ? 2 : 0)
+        : snow > 0.58 + n * 0.32 ? 2 : snow > 0.18 + n * 0.34 ? 1 : 0;
+      const soaked = level === 0 && !!damp && wet > 0.2 + n * 0.4;
+      if (worn && worn.snow === level && worn.wet === soaked) return;
+      const want = level === 2 ? pair!.full : level === 1 ? pair!.light : soaked ? damp! : base;
+      // Only a sprite still wearing what the weather gave it is changed.
+      const wearing = sprite.texture === base || sprite.texture === pair?.light || sprite.texture === pair?.full || sprite.texture === damp;
+      if (!wearing) return;
+      sprite.texture = want;
+      if (level === 0 && !soaked) this.worn.delete(sprite); else this.worn.set(sprite, { orig: base, snow: level, wet: soaked });
+    };
+    for (const child of this.groundLayer.children) if (child instanceof Sprite) dress(child, false);
+    // Flowers and reeds go under the snow once it lies deep.
+    const buried = Math.max(0, Math.min(1, (snow - 0.55) / 0.3));
+    for (const entry of this.propSprites) {
+      dress(entry.sprite, true);
+      if (entry.prop.name.startsWith('prop.flowers') || entry.prop.name === 'prop.reeds') entry.sprite.alpha = 1 - buried;
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * What the snow leaves standing, and what the holiday hangs up
+   * ---------------------------------------------------------------- */
+
+  /** The snowmen and the angels, redrawn when the world's list changes. */
+  private syncSnowThings(dt: number) {
+    this.snowSyncTimer += dt;
+    if (this.snowSyncTimer < 0.5) return;
+    this.snowSyncTimer = 0;
+    const men = this.world.snowmen ?? [], angels = this.world.angels ?? [];
+    const key = `${men.length}:${angels.length}:${men[men.length - 1]?.day ?? 0}`;
+    if (key === this.snowKey) return;
+    this.snowKey = key;
+    for (const sp of this.snowmenSprites) sp.destroy();
+    for (const sp of this.angelSprites) sp.destroy();
+    this.snowmenSprites = []; this.angelSprites = [];
+    for (const m of men) {
+      const pos = worldToScreen(m.x, m.y, this.map.heightAt(m.x, m.y));
+      const sprite = new Sprite(this.assets.get('fx.snowman'));
+      sprite.anchor.set(0.5, 0.95);
+      sprite.position.set(pos.x, pos.y);
+      sprite.zIndex = depthOf(m.x, m.y);
+      this.objectLayer.addChild(sprite);
+      this.snowmenSprites.push(sprite);
+    }
+    for (const a of angels) {
+      const pos = worldToScreen(a.x, a.y, this.map.heightAt(a.x, a.y));
+      const sprite = new Sprite(this.assets.get('fx.angel'));
+      sprite.anchor.set(0.5, 0.5);
+      sprite.position.set(pos.x, pos.y + 2);
+      this.decalLayer.addChild(sprite);
+      this.angelSprites.push(sprite);
+    }
+  }
+
+  /**
+   * Dress the town for the holiday: a pumpkin at every door for Halloween,
+   * a sheaf for Thanksgiving, a wreath and a string of lights for Christmas
+   * that stay up through New Year, bunting for the fair, and a tree in the
+   * square. Hung once when the day changes; the lights come on after dark.
+   */
+  private syncDecor(dt: number) {
+    this.decorTimer += dt;
+    if (this.decorTimer < 1) return;
+    this.decorTimer = 0;
+    const holiday = decorFor(this.world.day);
+    const key = `${holiday ?? ''}:${this.buildings.size}`;
+    if (key === this.decorKey) return;
+    this.decorKey = key;
+    for (const view of this.buildings.values()) { for (const d of view.decor) d.destroy(); view.decor = []; }
+    for (const sp of this.squareDecor) sp.destroy();
+    this.squareDecor = [];
+    this.nightDecor = [];
+    if (!holiday) return;
+    const lit = (x: number, y: number, tint: number, scale: number, k: number) => {
+      const g = new Sprite(this.assets.get('fx.lampglow'));
+      g.anchor.set(0.5, 0.5); g.position.set(x, y); g.scale.set(scale); g.tint = tint; g.alpha = 0;
+      this.lightsRoot.addChild(g);
+      this.nightDecor.push({ sprite: g, k });
+      return g;
+    };
+    const doorProp = (view: BuildingView, texture: string): Sprite => {
+      const at = worldToScreen(view.door.x, view.door.y, view.height);
+      const sprite = new Sprite(this.assets.get(texture));
+      sprite.anchor.set(0.5, 1);
+      sprite.position.set(at.x + 7, at.y + 1);
+      sprite.zIndex = view.base.zIndex + 0.004;
+      this.objectLayer.addChild(sprite);
+      view.decor.push(sprite);
+      return sprite;
+    };
+    const eave = (view: BuildingView, texture: string, glowing: boolean) => {
+      const meta = this.assets.buildingMeta.get(view.artKey);
+      if (!meta) return;
+      const w = meta.width * 0.78;
+      const string = new TilingSprite({ texture: this.assets.get(texture), width: w, height: this.assets.get(texture).height });
+      string.position.set(view.base.x - w / 2, view.base.y - meta.height * 0.6);
+      string.zIndex = view.base.zIndex + 0.003;
+      this.objectLayer.addChild(string);
+      view.decor.push(string);
+      if (glowing) {
+        const glow = new TilingSprite({ texture: this.assets.get(texture), width: w, height: this.assets.get(texture).height });
+        glow.position.copyFrom(string.position);
+        glow.alpha = 0;
+        this.lightsRoot.addChild(glow);
+        view.decor.push(glow);
+        this.nightDecor.push({ sprite: glow, k: 0.9 });
       }
     };
-    for (const child of this.groundLayer.children) if (child instanceof Sprite) swap(child);
-    for (const entry of this.propSprites) swap(entry.sprite);
+    for (const view of this.buildings.values()) {
+      if (view.building.ruined) continue;
+      if (holiday === 'halloween') {
+        const pumpkin = doorProp(view, 'fx.pumpkin');
+        view.decor.push(lit(pumpkin.x, pumpkin.y - 5, 0xffa040, 0.5, 0.55));
+      } else if (holiday === 'thanksgiving') {
+        doorProp(view, 'fx.sheaf');
+      } else if (holiday === 'christmas' || holiday === 'newyear') {
+        doorProp(view, 'fx.wreath').position.y -= 14;
+        eave(view, 'fx.lights', true);
+      } else if (holiday === 'midsummer') {
+        eave(view, 'fx.bunting', false);
+      }
+    }
+    if (holiday === 'christmas' || holiday === 'newyear') {
+      const { x, y } = this.world.layout.plaza;
+      const pos = worldToScreen(x, y, this.map.heightAt(x, y));
+      const tree = new Sprite(this.assets.get('fx.xmastree'));
+      tree.anchor.set(0.5, 0.96);
+      tree.position.set(pos.x, pos.y);
+      tree.zIndex = depthOf(x, y);
+      this.objectLayer.addChild(tree);
+      this.squareDecor.push(tree, lit(pos.x, pos.y - 26, 0xfff0a0, 2.2, 0.8));
+    }
+  }
+
+  /** Fireworks over the square on New Year's Eve, once it is dark. */
+  private updateFireworks(dt: number) {
+    if (decorFor(this.world.day) !== 'newyear' || this.nightAmount < 0.3) return;
+    const hour = this.world.hour;
+    if (!(hour >= 20.5 || hour < 0.5)) return;
+    this.fireworkTimer -= dt;
+    if (this.fireworkTimer > 0) return;
+    this.fireworkTimer = (1.4 + Math.random() * 1.6) / Math.max(0.35, this.budget);
+    const p = this.takeAmbient('rocket');
+    if (!p) return;
+    const { x, y } = this.world.layout.plaza;
+    const pos = worldToScreen(x + (Math.random() - 0.5) * 8, y + (Math.random() - 0.5) * 8, this.map.heightAt(x, y));
+    p.sprite.texture = this.assets.get('fx.spark');
+    p.sprite.tint = 0xfff0c0;
+    p.sprite.scale.set(0.9);
+    p.sprite.blendMode = 'add';
+    p.sprite.position.set(pos.x, pos.y - 6);
+    p.vx = (Math.random() - 0.5) * 30; p.vy = -120 - Math.random() * 40;
+    p.max = 1.1 + Math.random() * 0.4; p.life = p.max;
+  }
+
+  /** A rocket goes off: a ring of coloured sparks that fall and fade. */
+  private burst(x: number, y: number) {
+    const tint = FIREWORK_TINTS[Math.floor(Math.random() * FIREWORK_TINTS.length)];
+    const n = Math.round(22 * Math.max(0.4, this.budget));
+    for (let i = 0; i < n; i++) {
+      const p = this.takeAmbient('spark');
+      if (!p) return;
+      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.3, speed = 45 + Math.random() * 75;
+      p.sprite.texture = this.assets.get('fx.spark');
+      p.sprite.tint = tint;
+      p.sprite.scale.set(1.1 + Math.random() * 0.5);
+      p.sprite.blendMode = 'add';
+      p.sprite.position.set(x, y);
+      p.vx = Math.cos(ang) * speed; p.vy = Math.sin(ang) * speed * 0.7;
+      p.max = 1.2 + Math.random() * 0.6; p.life = p.max;
+    }
+  }
+
+  /** A free particle from the pool, cleared for whoever wants it. */
+  private takeAmbient(kind: AmbientKind): AmbientParticle | null {
+    const p = this.ambience.find((m) => m.life <= 0);
+    if (!p) return null;
+    p.kind = kind;
+    p.phase = Math.random() * Math.PI * 2;
+    p.spin = 0;
+    p.sprite.blendMode = 'normal';
+    p.sprite.rotation = 0;
+    p.sprite.tint = 0xffffff;
+    p.sprite.scale.set(1);
+    p.sprite.alpha = 1;
+    p.sprite.visible = true;
+    // Fireworks are light: they go over the night rather than under it.
+    const home = kind === 'rocket' || kind === 'spark' ? this.lightsRoot : this.fxLayer;
+    if (p.sprite.parent !== home) home.addChild(p.sprite);
+    return p;
+  }
+
+  /**
+   * The people in the weather: footprints behind anyone walking on snow, a
+   * breath in the cold, a slip now and then on wet or icy ground, and the
+   * snow play — snowballs thrown at a partner, snow flung from a shovel or
+   * heaped onto a snowman, and somebody lying down for an angel.
+   */
+  private updateWeatherOnPeople(dt: number) {
+    const snowy = this.snowCover > 0.55, slippery = this.wet > 0.5 || this.snowCover > 0.35;
+    const cold = this.world.temperature < 2 && this.budget >= 0.6;
+    for (const citizen of this.world.citizens) {
+      const sprite = this.citizens.get(citizen.id);
+      if (!sprite || citizen.inside) continue;
+      const c = sprite.container;
+      const moving = citizen.moving && !citizen.afloat;
+
+      // Footprints.
+      if (snowy && moving && this.prints.length) {
+        const last = this.lastPrint.get(citizen.id);
+        if (!last || Math.hypot(sprite.wx - last.x, sprite.wy - last.y) > 0.8) {
+          const print = this.prints.find((m) => m.life <= 0);
+          if (print) {
+            const pos = worldToScreen(sprite.wx, sprite.wy, this.map.heightAt(sprite.wx, sprite.wy));
+            print.sprite.position.set(pos.x, pos.y + 2);
+            print.sprite.rotation = last ? Math.atan2(pos.y - worldToScreen(last.x, last.y).y, pos.x - worldToScreen(last.x, last.y).x) + Math.PI / 2 : 0;
+            print.sprite.visible = true;
+            print.max = 28; print.life = 28;
+          }
+          this.lastPrint.set(citizen.id, { x: sprite.wx, y: sprite.wy });
+        }
+      }
+
+      // Breath.
+      if (cold) {
+        const next = this.nextBreath.get(citizen.id) ?? this.time + Math.random() * 3;
+        if (this.time >= next) {
+          this.nextBreath.set(citizen.id, this.time + 2.6 + Math.random() * 2.4);
+          const puff = this.smoke.find((m) => m.life <= 0);
+          if (puff) {
+            puff.sprite.visible = true;
+            puff.sprite.position.set(c.x + 4, c.y - 26);
+            puff.sprite.scale.set(0.16);
+            puff.sprite.tint = 0xffffff;
+            puff.vx = 6; puff.vy = -5;
+            puff.max = 0.9; puff.life = 0.9;
+          }
+        }
+      }
+
+      // Slips.
+      const slip = this.slipping.get(citizen.id);
+      if (slip) {
+        slip.left -= dt;
+        if (slip.left <= 0) { this.slipping.delete(citizen.id); c.rotation = 0; }
+        else {
+          const k = 1 - slip.left / 0.75;
+          c.rotation = Math.sin(k * Math.PI) * 0.6 * slip.dir;
+          c.y += Math.sin(k * Math.PI) * 5;
+        }
+      } else if (slippery && moving && Math.random() < dt * 0.02) {
+        this.slipping.set(citizen.id, { left: 0.75, dir: Math.random() < 0.5 ? -1 : 1 });
+      }
+
+      // The play.
+      const play = citizen.play;
+      if (play && Math.hypot(citizen.destX - citizen.x, citizen.destY - citizen.y) < 0.6) {
+        if (play.kind === 'angel') {
+          c.rotation = -1.25;
+          c.y += 6;
+          continue;
+        }
+        const next = this.nextPlay.get(citizen.id) ?? 0;
+        if (this.time < next) continue;
+        if (play.kind === 'snowball') {
+          const other = play.partner ? this.citizens.get(play.partner) : null;
+          if (!other) continue;
+          this.nextPlay.set(citizen.id, this.time + 1.2 + Math.random() * 1.4);
+          const p = this.takeAmbient('snowball');
+          if (!p) continue;
+          const dx = other.container.x - c.x, dy = other.container.y - c.y, dist = Math.max(1, Math.hypot(dx, dy));
+          const flight = Math.max(0.35, dist / 160);
+          p.sprite.texture = this.assets.get('fx.snowball');
+          p.sprite.scale.set(1.5);
+          p.sprite.position.set(c.x, c.y - 18);
+          p.vx = dx / flight; p.vy = dy / flight - 130 * flight;
+          p.max = flight; p.life = flight;
+        } else {
+          // Shovelling or heaping: snow flung up in a little arc.
+          this.nextPlay.set(citizen.id, this.time + 0.45 + Math.random() * 0.4);
+          const p = this.takeAmbient('puff');
+          if (!p) continue;
+          p.sprite.texture = this.assets.get('fx.snow');
+          p.sprite.scale.set(0.8);
+          p.sprite.position.set(c.x + 6, c.y - 8);
+          p.vx = 20 + Math.random() * 30; p.vy = -50 - Math.random() * 40;
+          p.max = 0.6; p.life = 0.6;
+        }
+      } else if (play && play.kind === 'angel') {
+        // Walking to the spot: upright.
+        if (c.rotation !== 0 && !this.slipping.has(citizen.id)) c.rotation = 0;
+      }
+    }
+    for (const p of this.prints) {
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      p.sprite.alpha = Math.min(1, p.life / 8) * 0.9;
+      if (p.life <= 0 || this.snowCover < 0.4) { p.life = 0; p.sprite.visible = false; }
+    }
   }
 
   private updateBirds(dt: number) {
@@ -3415,6 +3835,11 @@ export class EmergeScene {
     this.birds = [];
     this.decals = [];
     this.fog = [];
+    this.prints = [];
+    this.snowmenSprites = [];
+    this.angelSprites = [];
+    this.squareDecor = [];
+    this.nightDecor = [];
     if (this.app.renderer) this.app.destroy({ removeView: true }, { children: true });
   }
 }
