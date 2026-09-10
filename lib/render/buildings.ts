@@ -546,6 +546,8 @@ export interface BuildingArt {
   name: string;
   pixels: Pixels;
   lit: Pixels;
+  /** The same building's roof under snow, to lay over it when it snows. */
+  snow: Pixels;
   anchorY: number;
   /** Offsets from the ground contact point, in sprite pixels. */
   door: [number, number];
@@ -712,10 +714,47 @@ function buildOne(name: string, seed: number, r: Recipe, level: ArtLevel): Build
     name: level === 1 ? name : `${name}.L${level}`,
     pixels: p,
     lit,
+    snow: snowCap(p, g, overhang),
     anchorY: (canvasH - BOTTOM_MARGIN) / canvasH,
     door: [Math.round(doorX), Math.round(doorY)],
     chimney: chimneyOffset,
   };
+}
+
+/**
+ * The roof under snow.
+ *
+ * Every building sits on the same roof diamond — the wall footprint plus the
+ * overhang — whatever shape the roof over it takes, so the snow is laid on
+ * everything drawn above that diamond's lower edges: the slopes, the ridge,
+ * the chimney, a tower, a set-back upper storey. The roof's own shading is
+ * kept as the snow's shading, so the ridge and the eave still read, and the
+ * silhouette's dark outline becomes a pale rim, which is what the edge of a
+ * snow-covered roof looks like.
+ */
+function snowCap(p: Pixels, g: Geometry, overhang: number): Pixels {
+  const out = surface(p.w, p.h);
+  const src = p.ctx.getImageData(0, 0, p.w, p.h);
+  const img = out.ctx.createImageData(p.w, p.h);
+  const halfW = g.bw / 2 + overhang;
+  const halfH = g.bh / 2 + overhang / 2;
+  const cy = g.wallTopY + g.bh / 2;
+  for (let y = 0; y < p.h; y++) {
+    for (let x = 0; x < p.w; x++) {
+      const i = (y * p.w + x) * 4;
+      if (src.data[i + 3] < 40) continue;
+      const eave = cy + halfH * (1 - Math.min(1, Math.abs(x - g.cx) / halfW));
+      if (y > eave + 1) continue;
+      const l = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255;
+      const t = 0.5 + l * 0.5;
+      img.data[i] = Math.round(190 + 65 * t);
+      img.data[i + 1] = Math.round(206 + 49 * t);
+      img.data[i + 2] = Math.round(224 + 31 * t);
+      img.data[i + 3] = 236;
+    }
+  }
+  out.ctx.putImageData(img, 0, 0);
+  return out;
 }
 
 /* ------------------------------------------------------------------ *

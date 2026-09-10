@@ -405,7 +405,7 @@ button {
 .land-claim .redeem-row button { flex: none; }
 
 @media (max-width: 1080px) {
-  .land-head { grid-template-columns: 1fr; grid-template-areas: 'brand' 'intro' 'side'; }
+  .land-head { grid-template-columns: 1fr; grid-template-areas: 'intro' 'side'; }
   .land-head-side { align-items: flex-start; flex-direction: row; flex-wrap: wrap; margin-top: 14px; }
   .land-body { grid-template-columns: 1fr; }
   .land-claim { position: static; max-height: none; }
@@ -2082,6 +2082,8 @@ button.fold:hover { color: var(--emerald); }
   flex: none;
   color: var(--muted); font-size: 15px; line-height: 1;
   padding: 0 2px;
+  min-width: 24px; min-height: 24px;
+  display: inline-grid; place-items: center;
 }
 .notice-close:hover { color: var(--cream); }
 
@@ -3728,3 +3730,138 @@ a:focus-visible { outline: 2px solid var(--emerald); outline-offset: 2px; border
 .my-plots > .muted { margin-right: 2px; }
 .my-plots button.on { border-color: rgba(240, 208, 94, 0.7); color: #f6e9a8; }
 .my-plots button em { font-style: normal; }
+
+/* ------------------------------------------------------------------ *
+ * The site outside the world
+ *
+ * The front door, the world map, the land board, the markets and the guide
+ * are one place, so they share one header and one ground. The header is
+ * glass like the panels over the world; the ground carries the same slow
+ * aurora behind every page. Cards on these pages are the panels' colour and
+ * edge without the blur — a dozen blurred cards on a scrolling page is what
+ * makes a phone warm, and over a still background the blur adds nothing.
+ * ------------------------------------------------------------------ */
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 22px;
+  padding: 9px 14px 9px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge-soft);
+  background: var(--panel);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(190, 255, 170, 0.06);
+  backdrop-filter: blur(14px) saturate(1.15);
+}
+.site-brand { display: flex; align-items: center; text-decoration: none; color: inherit; }
+.site-nav .brand-line { gap: 10px; }
+.site-nav .wordmark { font-size: 15px; letter-spacing: 4px; }
+.site-nav .tagline { display: none; }
+.site-links { display: flex; gap: 2px; margin-left: 4px; }
+.site-links a {
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.site-links a:hover { color: var(--emerald); }
+.site-links a.on { color: var(--cream); background: rgba(184, 231, 86, 0.12); border-color: var(--panel-edge-soft); }
+.site-side { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.site-side .map-nav { justify-content: flex-end; }
+
+/* The ground behind every page: the logo's own dark, with the green of the
+   disc welling up and drifting, slowly. One composited layer, moved by
+   transform only, and still under reduced motion. */
+.landing, .wiki, .world-map { background: var(--night); }
+.landing::before, .wiki::before, .world-map::before {
+  content: '';
+  position: fixed;
+  inset: -30% -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 34% 30% at 28% 22%, rgba(40, 110, 50, 0.22), transparent 70%),
+    radial-gradient(ellipse 30% 26% at 76% 68%, rgba(7, 81, 65, 0.26), transparent 70%),
+    radial-gradient(ellipse 22% 20% at 62% 12%, rgba(184, 231, 86, 0.06), transparent 70%);
+  animation: aura 42s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes aura {
+  from { transform: translate3d(-2.5%, -2%, 0) scale(1); }
+  to { transform: translate3d(2.5%, 3%, 0) scale(1.07); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing::before, .wiki::before, .world-map::before { animation: none; }
+}
+.landing-inner, .wiki-inner, .land-inner { position: relative; z-index: 1; }
+.landing-inner { padding-top: 18px; }
+.wiki-inner { padding-top: 18px; }
+.land-inner { padding-top: 18px; }
+.hero { min-height: 78vh; }
+.wiki-head h1 { margin-top: 6px; }
+
+/* The pulse under the front page's title. */
+.world-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: -6px 0 0;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge-soft);
+  background: var(--panel);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: var(--text);
+}
+.world-pulse .spark {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--emerald);
+  box-shadow: 0 0 0 0 rgba(184, 231, 86, 0.5);
+  animation: heartbeat 2.4s ease-out infinite;
+}
+.world-pulse .dot { color: var(--muted); }
+
+/* The world map's header, now that the mark is in the bar above it. */
+@media (min-width: 781px) { .land-head { grid-template-areas: 'intro side'; } }
+.land-intro { margin-top: 0; }
+
+/* Cards, all of one make. */
+.markets-figure, .landmkt-card, .landmkt-notice, .wiki-callout, .wiki-formula, .update, .contract,
+.token-stats, .live-ledger, .ledger-figure, .charts, .leader-row, .notes, .token-tile, .token-card, .land-balance {
+  background: rgba(5, 16, 11, 0.72);
+  border-color: var(--panel-edge-soft);
+  box-shadow: inset 0 1px 0 rgba(190, 255, 170, 0.05);
+}
+.markets-figure, .ledger-figure, .token-tile, .token-card { border-radius: 14px; }
+.notes { background: var(--panel-edge-soft); }
+.notes article { background: rgba(5, 16, 11, 0.72); }
+.wiki-callout.warn { background: rgba(28, 24, 4, 0.55); border-color: rgba(225, 210, 78, 0.42); }
+.markets-figure em, .token-tile span { color: var(--emerald-dim); }
+.landmkt-toggle, .landmkt-more, .landmkt-controls select, .landmkt-search input {
+  background: rgba(5, 16, 11, 0.72);
+  border-color: var(--panel-edge);
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .site-nav { flex-wrap: wrap; gap: 8px 10px; padding: 9px 10px; border-radius: 18px; margin-bottom: 16px; }
+  .site-nav .wordmark { font-size: 14px; letter-spacing: 3px; }
+  .site-links { order: 3; width: 100%; margin: 2px 0 0; }
+  .site-links a { flex: 1; text-align: center; padding: 8px 4px; min-height: 34px; }
+  .site-side { margin-left: auto; }
+  .site-side .lang-switch button { min-height: 30px; padding: 4px 9px; }
+  .site-side .map-nav .ghost { padding: 6px 9px; }
+  .landing-inner { padding-top: 12px; }
+  .wiki-inner, .land-inner { padding-top: 12px; }
+  .hero { min-height: 74vh; }
+  .world-pulse { font-size: 11.5px; padding: 7px 13px; }
+}

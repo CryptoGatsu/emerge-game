@@ -21,8 +21,7 @@ import { TOKEN } from '@/lib/chain/emerge';
 import { GOLD_SALE_BURN_RATE } from '@/lib/chain/vault';
 import { eraName } from '@/lib/world/eras';
 import { useText } from '@/lib/i18n';
-import { LanguageSwitch } from './LanguageSwitch';
-import { BrandLine } from './Brand';
+import { SiteNav } from './SiteNav';
 
 interface Order {
   id: string; kind: 'resource' | 'gold'; sellerName: string; seed: number;
@@ -99,9 +98,8 @@ export default function Markets() {
       <div className="wiki-inner">
         {/* The same head the guide wears, down to the mark that takes you home:
             two pages of the same site should not have two different ways back. */}
+        <SiteNav current="/markets" />
         <header className="wiki-head">
-          <Link href="/" className="wiki-home"><BrandLine size={40} /></Link>
-          <LanguageSwitch className="wiki-lang" />
           <h1>{t('Markets')}</h1>
           <p className="wiki-lede">
             {t('Every price in the game, in one place: what goods cost, what players are asking each other, what a Gold is worth in {ticker}, and what land is going for. No wallet needed to look.', { ticker: TOKEN.ticker })}

@@ -24,7 +24,10 @@ export function surface(w: number, h: number): Pixels {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
+  // Read back as often as drawn to: the snow variants, the outlines and the
+  // atlas are all made by reading pixels, and a canvas that expects that keeps
+  // its bitmap where reading it is cheap.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingEnabled = false;
   return { canvas, ctx, w, h };
 }

@@ -24,8 +24,7 @@ import { ROYALTY_PERCENT } from '@/lib/chain/plots';
 import { followPlot } from '@/lib/net/registry';
 import { eraName } from '@/lib/world/eras';
 import { useText } from '@/lib/i18n';
-import { LanguageSwitch } from './LanguageSwitch';
-import { BrandLine } from './Brand';
+import { SiteNav } from './SiteNav';
 import { WalletPicker, useWallet } from './WalletPicker';
 
 interface PlotListing { where: 'market' | 'opensea'; price: number; currency: string; at: number }
@@ -200,9 +199,8 @@ export default function LandMarket() {
   return (
     <main className="wiki landmkt">
       <div className="wiki-inner">
+        <SiteNav current="/land" />
         <header className="wiki-head">
-          <Link href="/" className="wiki-home"><BrandLine size={40} /></Link>
-          <LanguageSwitch className="wiki-lang" />
           <h1>{t('Land')}</h1>
           <p className="wiki-lede">
             {tokens

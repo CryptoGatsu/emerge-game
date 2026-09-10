@@ -31,8 +31,7 @@ import {
 import { MAX_GIFT_GOLD, MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
 import { tj, tn } from '@/lib/i18n';
-import { BrandLine } from './Brand';
-import { LanguageSwitch } from './LanguageSwitch';
+import { SiteNav } from './SiteNav';
 
 const n = (value: number) => value.toLocaleString();
 const pct = (value: number) => `${Math.round(value * 100)}%`;
@@ -182,9 +181,8 @@ export function WikiZh() {
   return (
     <main className="wiki" lang="zh-CN">
       <div className="wiki-inner">
+        <SiteNav current="/wiki" />
         <header className="wiki-head">
-          <Link href="/" className="wiki-home"><BrandLine size={40} /></Link>
-          <LanguageSwitch className="wiki-lang" />
           <h1>Emerge 是怎么运作的</h1>
           <p className="wiki-lede">
             一个由自主居民组成的活的世界，你在其中拥有土地、塑造它，但不指挥它。
@@ -681,6 +679,8 @@ export function WikiZh() {
           <h2>世界本身</h2>
           <p>你地块上的每个居民都有自己的饥饿、精力、手艺、友谊和积怨。他们醒来、劳作、争吵、相爱、养育孩子、埋葬死者，不管你看不看。<b>你不能命令任何人。</b>你可以给他们盖一间作坊，看着有人决定那是自己的。</p>
           <p>你真正控制的是这个地方：注资金库、盖房子和作坊、拆掉不管用的、修路和桥到没人能到的土地。八个人的营地变成三十人的镇子，是因为你做的决定，或者没有。</p>
+          <p>天气不只在空中，也落在地上。雨在小路和裸地上留下水洼，雨停后慢慢干掉；雪先积成雪堆，再盖住地面、树木和每个屋顶，回暖时融化。阴天有云影飘过，雾一团团涌来，暴风雨带来闪电，而四季各自把花瓣、花粉、萤火虫、落叶和雪尘放进空气里。</p>
+          <p><b>在手机上</b>，世界按设备能承受的程度来绘制：每秒三十帧、更少的粒子，低端机则用一半分辨率且不做泛光，好让手机保持凉爽。如果帧仍然偏长，会先减少粒子再关掉泛光，帧恢复变短后两者都会回来。时钟栏里的画面按钮可以把泛光、暖色调和边缘柔化一起关掉。</p>
           <p>季节更替，天气降临，糟糕的冬天食物短缺，沙漠里没有农场的聚落会像你预料的那样挣扎。九种生物群系，各自支持不同的行当——这就是它们价格不同的原因。</p>
         </section>
 

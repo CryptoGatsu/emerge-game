@@ -432,6 +432,222 @@ function leafMote(color: string): Pixels {
 }
 
 /* ------------------------------------------------------------------ *
+ * Weather on the ground and in the air
+ *
+ * Rain that only falls in front of the camera never convinces; what makes a
+ * wet day is the ground. So rain leaves puddles that lie in the low, open
+ * places and dry out after it stops, and snow lies on the ground and on the
+ * roofs, and melts. All of it is a decal: one flat sprite on the ground,
+ * faded by how wet or how snowed-on the world is.
+ * ------------------------------------------------------------------ */
+
+/** Standing water: an isometric ellipse of reflected sky with a bright rim on the far edge. */
+function puddle(variant: number): Pixels {
+  const sizes: [number, number][] = [[30, 13], [20, 9], [40, 16]];
+  const [w, h] = sizes[variant % sizes.length];
+  const p = surface(w, h);
+  const cx = w / 2, cy = h / 2;
+  const r = rng(41 + variant);
+  // Two overlapping ellipses so the edge is not a perfect oval.
+  for (const [dx, dy, rx, ry] of [[0, 0, cx - 1, cy - 1], [(r() - 0.5) * 6, (r() - 0.5) * 2, cx * 0.6, cy * 0.7]] as [number, number, number, number][]) {
+    p.ctx.fillStyle = 'rgba(96, 128, 150, 0.62)';
+    p.ctx.beginPath();
+    p.ctx.ellipse(cx + dx, cy + dy, rx, ry, 0, 0, Math.PI * 2);
+    p.ctx.fill();
+  }
+  // The sky in it: paler toward the top, and a thin bright rim on the far edge.
+  const sky = p.ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, 'rgba(190, 214, 228, 0.45)');
+  sky.addColorStop(1, 'rgba(60, 90, 116, 0.0)');
+  p.ctx.globalCompositeOperation = 'source-atop';
+  p.ctx.fillStyle = sky;
+  p.ctx.fillRect(0, 0, w, h);
+  p.ctx.globalCompositeOperation = 'source-over';
+  p.ctx.strokeStyle = 'rgba(220, 236, 244, 0.5)';
+  p.ctx.lineWidth = 1;
+  p.ctx.beginPath();
+  p.ctx.ellipse(cx, cy, cx - 1.5, cy - 1.5, 0, Math.PI * 1.1, Math.PI * 1.9);
+  p.ctx.stroke();
+  return p;
+}
+
+/** Lying snow: a soft-edged drift, two tones, ragged so it reads as snow and not paint. */
+function snowPatch(variant: number): Pixels {
+  const sizes: [number, number][] = [[34, 15], [24, 11], [46, 19]];
+  const [w, h] = sizes[variant % sizes.length];
+  const p = surface(w, h);
+  const r = rng(73 + variant);
+  const cx = w / 2, cy = h / 2;
+  const blobs: [number, number, number, number][] = [[0, 0, cx - 1, cy - 1]];
+  for (let i = 0; i < 3; i++) blobs.push([(r() - 0.5) * w * 0.5, (r() - 0.5) * h * 0.4, cx * (0.35 + r() * 0.3), cy * (0.4 + r() * 0.3)]);
+  for (const [dx, dy, rx, ry] of blobs) {
+    p.ctx.fillStyle = '#d6e2ec';
+    p.ctx.beginPath(); p.ctx.ellipse(cx + dx, cy + dy, rx, ry, 0, 0, Math.PI * 2); p.ctx.fill();
+  }
+  for (const [dx, dy, rx, ry] of blobs) {
+    p.ctx.fillStyle = '#f4f8fb';
+    p.ctx.beginPath(); p.ctx.ellipse(cx + dx, cy + dy - 1, rx * 0.8, ry * 0.7, 0, 0, Math.PI * 2); p.ctx.fill();
+  }
+  return p;
+}
+
+/** A blossom petal, spring's leaf. */
+function petal(): Pixels {
+  const p = surface(5, 5);
+  rect(p, 1, 1, 3, 3, '#f4bfd0');
+  rect(p, 2, 1, 1, 1, '#ffe0ea');
+  rect(p, 1, 3, 1, 1, '#e08fa8');
+  return p;
+}
+
+/** A butterfly, two frames: wings open, wings closed. Drawn white and tinted. */
+function butterfly(frame: number): Pixels {
+  const p = surface(9, 7);
+  const wing = '#ffffff', body = '#3a2a2a';
+  if (frame === 0) {
+    rect(p, 1, 1, 3, 3, wing); rect(p, 5, 1, 3, 3, wing);
+    rect(p, 2, 4, 2, 2, wing); rect(p, 5, 4, 2, 2, wing);
+    rect(p, 2, 2, 1, 1, '#e0e0e0'); rect(p, 6, 2, 1, 1, '#e0e0e0');
+  } else {
+    rect(p, 3, 1, 1, 4, wing); rect(p, 5, 1, 1, 4, wing);
+  }
+  rect(p, 4, 1, 1, 5, body);
+  return p;
+}
+
+/** A bank of mist: a wide soft blob with no hard pixel in it. */
+function fogWisp(): Pixels {
+  const p = surface(128, 48);
+  for (const [x, y, rx, ry, a] of [[64, 24, 60, 20, 0.5], [34, 26, 32, 14, 0.4], [96, 22, 30, 15, 0.4]] as [number, number, number, number, number][]) {
+    // Drawn as a circle in a squashed space, so the falloff is an ellipse.
+    p.ctx.save();
+    p.ctx.translate(x, y);
+    p.ctx.scale(1, ry / rx);
+    const g = p.ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(226, 236, 236, ${a})`);
+    g.addColorStop(0.55, `rgba(226, 236, 236, ${a * 0.45})`);
+    g.addColorStop(1, 'rgba(226, 236, 236, 0)');
+    p.ctx.fillStyle = g;
+    p.ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+    p.ctx.restore();
+  }
+  return p;
+}
+
+/**
+ * Cloud shadow. Tiled across the screen and multiplied over the world, so it
+ * must be white where there is no cloud: the grey is the shadow.
+ */
+function cloudShadow(): Pixels {
+  const p = surface(256, 256);
+  p.ctx.fillStyle = '#ffffff';
+  p.ctx.fillRect(0, 0, 256, 256);
+  const r = rng(1201);
+  for (let i = 0; i < 9; i++) {
+    const x = r() * 256, y = r() * 256, rad = 40 + r() * 70;
+    // Drawn three times with the wrap offsets so the tile seams do not show.
+    for (const [ox, oy] of [[0, 0], [-256, 0], [256, 0], [0, -256], [0, 256], [-256, -256], [256, 256], [-256, 256], [256, -256]]) {
+      const g = p.ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, rad);
+      g.addColorStop(0, 'rgba(150, 160, 150, 0.9)');
+      g.addColorStop(0.6, 'rgba(150, 160, 150, 0.5)');
+      g.addColorStop(1, 'rgba(150, 160, 150, 0)');
+      p.ctx.fillStyle = g;
+      p.ctx.fillRect(x + ox - rad, y + oy - rad, rad * 2, rad * 2);
+    }
+  }
+  return p;
+}
+
+/**
+ * The same ground under snow.
+ *
+ * A tint cannot whiten anything — it can only take colour away — so lying
+ * snow is its own texture: the tile's pattern, most of the way to white,
+ * with the shading kept faintly so the ground still reads as ground.
+ */
+function snowedTile(p: Pixels): Pixels {
+  const out = surface(p.w, p.h);
+  const src = p.ctx.getImageData(0, 0, p.w, p.h);
+  const img = out.ctx.createImageData(p.w, p.h);
+  for (let i = 0; i < src.data.length; i += 4) {
+    const a = src.data[i + 3];
+    if (!a) continue;
+    const l = (src.data[i] * 0.299 + src.data[i + 1] * 0.587 + src.data[i + 2] * 0.114) / 255;
+    const t = 0.78;
+    // Toward a cold white, lifted a little by the original's own light.
+    img.data[i] = Math.round(src.data[i] * (1 - t) + (222 + 26 * l) * t);
+    img.data[i + 1] = Math.round(src.data[i + 1] * (1 - t) + (230 + 22 * l) * t);
+    img.data[i + 2] = Math.round(src.data[i + 2] * (1 - t) + (238 + 17 * l) * t);
+    img.data[i + 3] = a;
+  }
+  out.ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/**
+ * A tree or a bush under snow: a cap of it along the top of the canopy, and
+ * the canopy itself frosted, with the trunk left as it is.
+ */
+function snowedProp(p: Pixels): Pixels {
+  const out = surface(p.w, p.h);
+  const src = p.ctx.getImageData(0, 0, p.w, p.h);
+  const img = out.ctx.createImageData(p.w, p.h);
+  img.data.set(src.data);
+  const cap = Math.max(2, Math.round(p.h * 0.09));
+  const canopy = p.h * 0.62;
+  for (let x = 0; x < p.w; x++) {
+    let top = -1;
+    for (let y = 0; y < p.h; y++) {
+      const i = (y * p.w + x) * 4;
+      if (src.data[i + 3] < 40) continue;
+      if (top < 0) top = y;
+      if (y < top + cap) {
+        const last = y === top + cap - 1;
+        img.data[i] = last ? 214 : 238; img.data[i + 1] = last ? 226 : 244; img.data[i + 2] = last ? 236 : 248;
+      } else if (y < canopy) {
+        const t = 0.42;
+        img.data[i] = Math.round(src.data[i] * (1 - t) + 221 * t);
+        img.data[i + 1] = Math.round(src.data[i + 1] * (1 - t) + 231 * t);
+        img.data[i + 2] = Math.round(src.data[i + 2] * (1 - t) + 239 * t);
+      }
+    }
+  }
+  out.ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/** Ground and growth that take snow: everything but water, rock faces and the foam. */
+const SNOWABLE_TILE = /^tile\.(grass|flowers|meadow|forest|soil|tilled|crop|path|plaza|rock|sand|dune|marsh|scrub|blend|street|cobble|setts|tarmac|composite)/;
+const SNOWABLE_PROP = /^prop\.(tree|bush)/;
+
+/** Low sun through the trees: soft diagonal bands, added over the frame at dawn and dusk. */
+function lightRays(): Pixels {
+  const p = surface(256, 256);
+  p.ctx.save();
+  p.ctx.translate(128, 128);
+  p.ctx.rotate(-0.55);
+  for (let i = 0; i < 7; i++) {
+    const x = -200 + i * 58;
+    const g = p.ctx.createLinearGradient(x, 0, x + 34, 0);
+    g.addColorStop(0, 'rgba(255, 220, 150, 0)');
+    g.addColorStop(0.5, `rgba(255, 220, 150, ${0.35 + (i % 3) * 0.15})`);
+    g.addColorStop(1, 'rgba(255, 220, 150, 0)');
+    p.ctx.fillStyle = g;
+    p.ctx.fillRect(x, -260, 34, 520);
+  }
+  p.ctx.restore();
+  // Fade the whole thing out toward the bottom, so the rays come from above.
+  const fade = p.ctx.createLinearGradient(0, 0, 0, 256);
+  fade.addColorStop(0, 'rgba(0,0,0,1)');
+  fade.addColorStop(1, 'rgba(0,0,0,0)');
+  p.ctx.globalCompositeOperation = 'destination-in';
+  p.ctx.fillStyle = fade;
+  p.ctx.fillRect(0, 0, 256, 256);
+  p.ctx.globalCompositeOperation = 'source-over';
+  return p;
+}
+
+/* ------------------------------------------------------------------ *
  * Registry
  * ------------------------------------------------------------------ */
 
@@ -441,6 +657,8 @@ export class AssetLibrary {
   private textures = new Map<string, Texture>();
   private overrides = new Map<string, Texture>();
   readonly buildingMeta = new Map<string, BuildingMeta>();
+  /** For every texture that has a version under snow, that version. */
+  readonly snowPairs = new Map<Texture, Texture>();
 
   get(name: string): Texture {
     const found = this.overrides.get(name) ?? this.textures.get(name);
@@ -467,6 +685,7 @@ export class AssetLibrary {
       if (this.buildingMeta.has(b.name)) continue;
       this.set(`building.${b.name}`, this.packer.addLive(b.pixels));
       this.set(`building.${b.name}.lit`, this.packer.addLive(b.lit));
+      this.set(`building.${b.name}.snow`, this.packer.addLive(b.snow));
       this.buildingMeta.set(b.name, { anchorY: b.anchorY, door: b.door, chimney: b.chimney, width: b.pixels.w, height: b.pixels.h });
     }
     return this.buildingMeta.has(key);
@@ -520,6 +739,16 @@ export function backdropTexture(): Texture {
 }
 let backdrop: Texture | null = null;
 
+/** The cloud shadows, as their own texture so they tile: a frame cut from an atlas page cannot. */
+export function cloudTexture(): Texture {
+  if (!cloud) {
+    const pixels = cloudShadow();
+    cloud = new Texture({ source: new CanvasSource({ resource: pixels.canvas, scaleMode: 'linear' }) });
+  }
+  return cloud;
+}
+let cloud: Texture | null = null;
+
 let cached: AssetLibrary | null = null;
 
 /**
@@ -533,13 +762,26 @@ export function loadAssets(): AssetLibrary {
   const pack = new AtlasPacker();
   const put = (name: string, pixels: Pixels) => lib.set(name, pack.add(pixels));
 
-  for (const { name, pixels } of buildTiles()) put(name, pixels);
-  for (const { name, pixels } of buildProps()) put(name, pixels);
+  // Ground and growth get a second texture each, under snow, paired with the first.
+  const snowable = (name: string, pixels: Pixels, snow: (p: Pixels) => Pixels) => {
+    const base = pack.add(pixels);
+    lib.set(name, base);
+    const white = pack.add(snow(pixels));
+    lib.set(`${name}.snow`, white);
+    lib.snowPairs.set(base, white);
+  };
+  for (const { name, pixels } of buildTiles()) {
+    if (SNOWABLE_TILE.test(name)) snowable(name, pixels, snowedTile); else put(name, pixels);
+  }
+  for (const { name, pixels } of buildProps()) {
+    if (SNOWABLE_PROP.test(name)) snowable(name, pixels, snowedProp); else put(name, pixels);
+  }
 
   const { art, overlays } = buildBuildings();
   for (const b of art as BuildingArt[]) {
     put(`building.${b.name}`, b.pixels);
     put(`building.${b.name}.lit`, b.lit);
+    put(`building.${b.name}.snow`, b.snow);
     lib.buildingMeta.set(b.name, {
       anchorY: b.anchorY, door: b.door, chimney: b.chimney,
       width: b.pixels.w, height: b.pixels.h,
@@ -603,6 +845,14 @@ export function loadAssets(): AssetLibrary {
   put('fx.leaf.0', leafMote('#c98a3a'));
   put('fx.leaf.1', leafMote('#a85a2a'));
   put('fx.leaf.2', leafMote('#d8b24a'));
+  for (let i = 0; i < 3; i++) { put(`fx.puddle.${i}`, puddle(i)); put(`fx.snowpatch.${i}`, snowPatch(i)); }
+  put('fx.petal', petal());
+  put('fx.pollen', sparkDot('#ffe6a0'));
+  put('fx.ember', sparkDot('#ffb05a'));
+  put('fx.butterfly.0', butterfly(0));
+  put('fx.butterfly.1', butterfly(1));
+  put('fx.fog', fogWisp());
+  put('fx.rays', lightRays());
   for (const kind of ['work', 'eat', 'social', 'sleep', 'trade'] as const) {
     put(`icon.${kind}`, activityIcon(kind));
   }

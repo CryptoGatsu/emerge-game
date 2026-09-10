@@ -37,8 +37,7 @@ import {
 } from '@/lib/simulation';
 import { MAX_GIFT_GOLD, MAX_GOODS_LOT, MIN_GOLD_LOT, TRADE_FEE } from '@/lib/limits';
 import { BASE_PRICE, BIOME_KINDS_BY_INDEX, BIOME_PREMIUM, PRICE_SCALE } from '@/lib/world/price';
-import { BrandLine } from './Brand';
-import { LanguageSwitch } from './LanguageSwitch';
+import { SiteNav } from './SiteNav';
 import { useLocale } from '@/lib/i18n';
 import { WikiZh } from './WikiZh';
 
@@ -219,9 +218,8 @@ export default function Wiki() {
   return (
     <main className="wiki">
       <div className="wiki-inner">
+        <SiteNav current="/wiki" />
         <header className="wiki-head">
-          <Link href="/" className="wiki-home"><BrandLine size={40} /></Link>
-          <LanguageSwitch className="wiki-lang" />
           <h1>How Emerge works</h1>
           <p className="wiki-lede">
             A living world of autonomous beings that you own land in and shape, but do not command.
@@ -1436,6 +1434,20 @@ export default function Wiki() {
             What you actually control is the place: fund the treasury, raise houses and workshops,
             pull down what is not working, cut roads and bridges to land nobody can reach. A camp of
             eight becomes a town of thirty because of decisions you made, or it does not.
+          </p>
+          <p>
+            The weather is on the ground as well as in the air. Rain leaves puddles on the paths and
+            the bare ground that dry after it stops; snow settles in drifts, then covers the ground,
+            the trees and every roof, and melts when it warms. Cloud shadows drift over a cloudy
+            day, fog rolls in banks, a storm brings lightning, and the seasons put petals, pollen,
+            fireflies, leaves and flurries into the air in their turn.
+          </p>
+          <p>
+            <b>On a phone</b> the world is drawn to what the device can afford: thirty frames a
+            second, fewer particles, and on a low-end phone half resolution with no bloom pass, so
+            it stays cool. If frames still run long, particles are shed first and the bloom after,
+            and both come back when the frames are short again. The look button in the clock row
+            turns the bloom, the warmth and the edge softening off altogether.
           </p>
           <p>
             Seasons turn, weather lands, food runs short in a bad winter, and a settlement with no

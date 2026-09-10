@@ -910,8 +910,10 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     const app = sceneRef.current?.app;
     if (!app?.ticker) return;
-    app.ticker.maxFPS = panel ? 12 : 0;
-    return () => { if (app.ticker) app.ticker.maxFPS = 0; };
+    // Otherwise the device's own cap: a phone runs at thirty.
+    const cap = sceneRef.current?.frameCap ?? 0;
+    app.ticker.maxFPS = panel ? 12 : cap;
+    return () => { if (app.ticker) app.ticker.maxFPS = cap; };
   }, [panel, ready]);
 
   /* -------------------------------------------------------------- *
@@ -1667,7 +1669,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
   useEffect(() => {
     if (!ready || process.env.NEXT_PUBLIC_TRIALS !== '1') return;
     // A window on the running world for the browser tests, in a trial build only.
-    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; bubbles: () => unknown; digOk: (x: number, y: number) => unknown; centre: (x: number, y: number, zoom: number) => void; screenPoint: (x: number, y: number) => unknown; select: (id: string) => void; pick: (id: string) => void } }).__emerge = {
+    (window as unknown as { __emerge?: { world: () => World | null; construct: (type: string, x: number, y: number) => unknown; map: () => unknown; spot: () => unknown; music: () => unknown; focus: (id: string, zoom?: number) => void; art: (key: string) => unknown; dump: (names: string[]) => unknown; probe: (x: number, y: number) => unknown; sprites: () => unknown; bubbles: () => unknown; digOk: (x: number, y: number) => unknown; centre: (x: number, y: number, zoom: number) => void; screenPoint: (x: number, y: number) => unknown; select: (id: string) => void; pick: (id: string) => void; ground: (wet: number, snow: number) => void; bolt: () => void; pin: (on: boolean) => void; frame: () => unknown } }).__emerge = {
       world: () => worldRef.current,
       construct: (type, x, y) => {
         if (!worldRef.current) return null;
@@ -1696,6 +1698,11 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
       // Open a building's card, as a tap on it would.
       select: (id: string) => { setSelected({ kind: 'building', id }); },
       pick: (id: string) => { setSelected({ kind: 'citizen', id }); },
+      // The weather on the ground, the sky and the frame budget, by hand.
+      ground: (wet: number, snow: number) => sceneRef.current?.setGround(wet, snow),
+      bolt: () => sceneRef.current?.strike(),
+      pin: (on: boolean) => sceneRef.current?.pinBudget(on),
+      frame: () => (sceneRef.current ? { ms: sceneRef.current.frameMs, load: sceneRef.current.load, tier: sceneRef.current.quality.tier, fps: sceneRef.current.frameCap, sky: sceneRef.current.sky } : null),
     };
     const what = new URLSearchParams(window.location.search).get('trial');
     if (!what) return;

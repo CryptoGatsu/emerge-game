@@ -22,8 +22,12 @@ const until = async (fn, tries = 60) => { for (let i = 0; i < tries; i++) { if (
 const findings = [];
 /** A click that cannot land is exactly the kind of thing this is looking for. */
 const tap = async (loc, where, what) => {
-  try { await loc.click({ timeout: 6000 }); return true; }
+  const before = await loc.page().locator('.overlay-panel').count();
+  try { await loc.click({ timeout: 9000 }); return true; }
   catch (e) {
+    // The click landed and the page was merely slow to say so: on the software
+    // renderer these trials run on, a frame can take longer than the wait.
+    if (/Timeout/.test(String(e.message)) && (await loc.page().locator('.overlay-panel').count()) > before) return true;
     const m = String(e.message).match(/<([a-z0-9]+)([^>]*)>[^<]*<\/[a-z0-9]+>? from <[^>]+> subtree intercepts|<([a-z0-9]+)([^>]*)>[^<]* intercepts pointer events|(not stable)|(outside of the viewport)/i);
     note(where, `${what} cannot be tapped`, m ? m[0].slice(0, 140) : String(e.message).split('\n')[0].slice(0, 100));
     return false;

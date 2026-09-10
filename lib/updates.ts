@@ -17,6 +17,21 @@ export interface Update {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.10.0',
+    date: '2026-09-10',
+    title: 'Weather you can see on the ground, and a world that is easy on a phone',
+    notes: [
+      'Rain leaves puddles now. They gather on the paths, the square and the bare ground first, take the sky\u2019s colour, ring where the drops land, and dry out over a few minutes once the rain stops \u2014 faster on a hot day. A storm is a darker thing than rain, with lightning across the whole frame every so often.',
+      'Snow lies. It settles in drifts first, then covers the ground, the trees and every roof \u2014 each building has its own roof under snow \u2014 and holds as long as it stays below freezing. When it warms it melts; rain takes it faster. A winter plot is white now rather than a grey-green one.',
+      'The sky does more. Cloud shadows drift across the world on a cloudy day and race across it in a storm; low sun comes through at dawn and dusk; fog is banks of mist rolling over the ground, and the low valleys and wetlands get a thin morning mist in spring and autumn that burns off by breakfast.',
+      'The seasons are in the air. Petals and butterflies in spring, pollen in the summer sun and fireflies after dark, leaves in autumn that go skittering whenever the wind gets up \u2014 and it gets up in any season now, in gusts \u2014 snow lifted off the ground in a winter wind, and embers off a campfire at night. Birds cross the sky in loose flocks more often than alone, and more of them in the warm half of the year.',
+      'A light anti-aliasing on the frame. The art is pixel art drawn at whatever zoom the camera is at, so every diagonal was a staircase that crawled when the camera moved. Edges are softened where they are edges and nowhere else, so the world stops shimmering without going soft. It is part of the look, on the same button as the bloom.',
+      'All of it is budgeted for a phone. The game reads what the device can afford at boot and draws accordingly: a phone runs at thirty frames a second, with smaller particle pools, and a low-end one at half resolution with no bloom pass at all \u2014 shown at exactly two device pixels per drawn pixel, so it is crisp rather than blurred. A governor watches what each frame actually costs and sheds particles and then the bloom when they run long, and gives them back when they have been short for a while. The aim is a phone that stays cool through an afternoon of play.',
+      'The pages outside the world \u2014 the front door, the world map, the land board, the markets and the guide \u2014 now share one header: the mark, the four places to go with the current one lit, and the language switch, in the same glass as the panels over the world. Every page sits on the same slow-moving ground, and the front page carries the world\u2019s pulse: how many settlements are awake and how many players are in them right now.',
+      'The interface was walked at four screen sizes with every panel open, and what that found is fixed: on a laptop the strip of doors ran under the right rail and the last four could not be reached; on a phone the clock column swallowed taps beside it, including the guide button; in landscape the purse sat on the first-day card; and a dozen buttons were smaller than a fingertip.',
+    ],
+  },
+  {
     version: '2.9.4',
     date: '2026-09-08',
     title: 'Ten levels to every age, and a treasury with a top',
@@ -355,6 +370,21 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.10.0',
+    date: '2026-09-10',
+    title: '看得见落在地上的天气，以及一个不会让手机发烫的世界',
+    notes: [
+      '下雨会留下水洼了。它们先在小路、广场和裸地上积起来，映着天空的颜色，雨点落下时泛起涟漪，雨停后几分钟内慢慢干掉——热天更快。暴风雨比雨更暗，时不时有闪电划过整个画面。',
+      '雪会积下来。先是一片片的雪堆，然后盖住地面、树木和每一个屋顶——每栋建筑都有自己盖着雪的屋顶——只要气温在冰点以下就一直留着。回暖就会融化，下雨化得更快。冬天的地块现在是白的，而不是灰绿的。',
+      '天空更丰富了。阴天云影在世界上缓缓飘过，暴风雨时飞快掠过；黎明和黄昏有低角度的阳光穿过来；雾是一团团在地面上翻滚的薄雾，低洼的河谷和湿地在春秋两季的清晨还会起一层薄雾，到早饭时散去。',
+      '季节飘在空气里。春天有花瓣和蝴蝶，夏天阳光里有花粉、入夜有萤火虫，秋天的落叶一起风就满地打转——而且现在任何季节都会一阵阵起风——冬天的风会把地上的雪卷起来，夜里篝火会飘出火星。鸟更多时候成群掠过天空而不是独自飞过，暖季更多。',
+      '画面加了一层轻度抗锯齿。美术是像素画，却按镜头当前的缩放来绘制，所以每条斜线都是一段会随镜头移动而爬动的阶梯。现在只在有边缘的地方柔化边缘，别处不动，世界不再闪烁也不会变糊。它和泛光在同一个按钮上，属于画面观感的一部分。',
+      '这一切都按手机的预算来。游戏启动时会读取设备能承受什么，然后据此绘制：手机以每秒三十帧运行，粒子池更小；低端机以一半分辨率绘制且完全不做泛光——按恰好两个物理像素对应一个绘制像素来显示，所以是清晰而不是模糊的。一个调节器会监测每一帧的实际开销，帧变长时先减粒子再关泛光，帧连续偏短一阵后再恢复。目标是玩一下午手机也不发烫。',
+      '世界之外的页面——首页、世界地图、土地板、行情和指南——现在共用一个页眉：标志、四个去处（当前的亮着）和语言切换，用的是和世界上方面板一样的玻璃质感。每个页面都坐在同一片缓缓流动的底色上，首页还带着世界的脉搏：此刻有多少定居点在运转，多少玩家在其中。',
+      '界面在四种屏幕尺寸下把每个面板都打开走了一遍，发现的问题都修了：笔记本上门条压在右栏下面，最后四扇门点不到；手机上时钟栏吞掉了旁边的点击，包括指南按钮；横屏时钱包压在第一天卡片上；还有十来个按钮比指尖还小。',
+    ],
+  },
   {
     version: '2.9.4',
     date: '2026-09-08',

@@ -7,6 +7,11 @@
  */
 
 export const UI: Record<string, string> = {
+  // ---- 站点导航 ----
+  'World': '世界',
+  'Site': '站点',
+  '{n} settlements awake': '{n} 个定居点正在运转',
+  '{n} players here now': '{n} 位玩家在线',
   // ---- 通用 ----
   ' and ': '和',
   ' or ': '或',

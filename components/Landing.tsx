@@ -24,7 +24,8 @@ import { VERSION } from '@/lib/version';
 import TokenStats from './TokenStats';
 import LiveLedger from './LiveLedger';
 import { WalletPicker, useWallet } from './WalletPicker';
-import { LanguageSwitch } from './LanguageSwitch';
+import { SiteNav } from './SiteNav';
+import { WorldPulse } from './WorldPulse';
 import { t, useLocale } from '@/lib/i18n';
 import { UPDATES, UPDATES_ZH } from '@/lib/updates';
 
@@ -163,7 +164,7 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
   return (
     <main className="landing">
       <div className="landing-inner">
-        <LanguageSwitch className="landing-lang" />
+        <SiteNav current="/" />
         <section className="hero">
           {/*
             The mark, at the size it was drawn to be seen at. Rendered with
@@ -179,6 +180,7 @@ export default function Landing({ onEnter, onSpectate }: { onEnter: () => void; 
             priority
           />
           <h1>{t('A world that gets on with its life.')}</h1>
+          <WorldPulse />
           <p className="hero-lede">
             {t('Claim a plot of land, name the world that grows on it, and the beings who live there will call it that. They think, they work, they fall out with each other and they bury their dead whether or not you are watching. You do not control them. You shape the place they live in.')}
           </p>

@@ -50,8 +50,7 @@ import SoftStake from './SoftStake';
 import { GldWinNotices } from './Notices';
 import { music } from '@/lib/audio/music';
 import { eraName } from '@/lib/world/eras';
-import { BrandLine } from './Brand';
-import { LanguageSwitch } from './LanguageSwitch';
+import { SiteNav } from './SiteNav';
 import { t, tn, tx, useLocale } from '@/lib/i18n';
 
 /**
@@ -1233,8 +1232,8 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
     <main className="world-map">
       <GldWinNotices address={wallet.address ?? null} />
       <div className="land-inner">
+        <SiteNav current="/" />
         <header className="land-head">
-          <BrandLine />
           <p className="land-intro">
             {t('Every plot is a world waiting to happen, and no two are the same land. Claim one with {ticker}, give it a name, and the beings who live there will call it that.', { ticker: TOKEN.ticker })}
           </p>
@@ -1249,7 +1248,6 @@ export default function PlotSelect({ player, onPlayer, onEnter, onVisit, onHome,
                   {t('Disconnect wallet')}
                 </button>
               )}
-              <LanguageSwitch />
             </div>
             <div className="land-balance">
               <span>{t('YOUR BALANCE')}</span>
