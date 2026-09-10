@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { readPlayerRecord, savePlayerRecord } from '@/lib/server/registry';
+import { allClaims, readPlayerRecord, savePlayerRecord } from '@/lib/server/registry';
 import { sessionAddress } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
@@ -48,11 +48,61 @@ function mergeHeld(held: Rec | null, incoming: Rec): Rec {
   };
 }
 
+/**
+ * The plots this wallet holds, whether or not its record knows about them.
+ *
+ * The registry row is the title: it follows the token, and the map reads it,
+ * so a plot always shows under whoever holds it. The record is what the
+ * player's own list of plots is drawn from, and it is written by their
+ * browser — which is never party to a transfer made from a wallet app. A
+ * plot sent between two wallets therefore arrived on the map and nowhere
+ * else: the new holder could walk into their settlement but never saw it
+ * listed as theirs.
+ *
+ * Moving a plot now writes both sides, but only from the move onward. A
+ * transfer that had already happened left a record that would never catch
+ * up, since a sync does not move a row that already sits with the right
+ * owner. So the two are reconciled on every read: any row the registry says
+ * is this wallet's and the record does not carry is added here. It is the
+ * registry's word either way, so this can only agree with what the map is
+ * already showing.
+ *
+ * Nothing is taken away. A record naming a plot the registry gives to
+ * somebody else is the client's to drop, which it does once it has read the
+ * registry — doing it here as well would race that and could strike a plot
+ * from a record on the strength of a half-read registry.
+ */
+async function withHeldPlots(address: string, record: Rec | null): Promise<Rec | null> {
+  let rows: { seed: number; region: string; worldName: string; owner: string; price?: number; at: number }[];
+  try {
+    rows = await allClaims();
+  } catch {
+    return record; // The registry is the extra, not the record itself.
+  }
+  const mine = rows.filter((row) => row.owner?.toLowerCase() === address.toLowerCase());
+  if (!mine.length) return record;
+  const held = Array.isArray(record?.claims) ? (record!.claims as { seed?: unknown }[]) : [];
+  const known = new Set(held.map((c) => (typeof c?.seed === 'number' ? c.seed : -1)));
+  const missing = mine.filter((row) => !known.has(row.seed));
+  if (!missing.length) return record;
+  const added = missing.map((row) => ({
+    seed: row.seed,
+    name: row.worldName,
+    region: row.region,
+    price: row.price ?? 0,
+    claimedAt: row.at,
+    owner: address.toLowerCase(),
+    txHash: null,
+  }));
+  return { ...(record ?? {}), claims: [...held, ...added] };
+}
+
 export async function GET(request: Request) {
   const address = sessionAddress(request);
   if (!address) return NextResponse.json({ error: 'Sign in first.', needsSession: true }, { status: 401 });
   try {
-    const record = await readPlayerRecord(address);
+    const held = (await readPlayerRecord(address)) as Rec | null;
+    const record = await withHeldPlots(address, held);
     return NextResponse.json({ record }, { headers: { 'cache-control': 'no-store, max-age=0' } });
   } catch {
     return NextResponse.json({ record: null, reason: 'The store is not reachable.' });
@@ -84,7 +134,7 @@ export async function POST(request: Request) {
      * has been earned only ever goes up here; claims, surveys and listings
      * are the union; the name follows whoever changed it.
      */
-    const held = (await readPlayerRecord(address)) as Record<string, unknown> | null;
+    const held = await withHeldPlots(address, (await readPlayerRecord(address)) as Rec | null);
     await savePlayerRecord(address, { ...mergeHeld(held, record as Record<string, unknown>), savedAt: Date.now() });
     return NextResponse.json({ saved: true });
   } catch {

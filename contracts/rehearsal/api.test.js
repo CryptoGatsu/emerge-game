@@ -147,6 +147,19 @@ const S1 = 1120, S2 = 1365;
   ok('and keeps what it already had', recA.record?.name === 'Test' && recA.record?.ledger?.earnedEmerge === 7, JSON.stringify(recA.record).slice(0, 160));
   const recB = (await api('/api/player', undefined, B)).json;
   ok('the sending wallet’s record lets it go', !(recB.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(recB.record?.claims ?? []).slice(0, 200));
+  // A transfer that happened before any of this existed: the row sits with
+  // the right owner, so no sync will ever move it again and nothing would
+  // put it back into the holder's record. Reading the record has to be
+  // enough, or a plot sent between wallets stays missing from its owner's
+  // own list for good — which is what a player reported.
+  await api('/api/player', { record: record([]) }, A);
+  const healed = (await api('/api/player', undefined, A)).json;
+  ok('a record that never heard about a plot it holds is reconciled on read',
+     (healed.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(healed.record?.claims ?? []).slice(0, 200));
+  ok('and the reconciled plot keeps the world’s name',
+     (healed.record?.claims ?? []).find((c) => c.seed === S2)?.name === 'Harbourfall', JSON.stringify(healed.record?.claims ?? []).slice(0, 200));
+  const other = (await api('/api/player', undefined, B)).json;
+  ok('a wallet is not handed somebody else’s plot', !(other.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(other.record?.claims ?? []).slice(0, 200));
 
   // 9. Burn: the holder burns, the sync releases the row.
   const notHolderBurn = await C.write('b', 'land', 'burn', [BigInt(S2)]).catch((e) => ({ status: 'reverted' }));
