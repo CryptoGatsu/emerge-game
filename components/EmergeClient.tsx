@@ -421,7 +421,7 @@ export default function EmergeClient() {
     }
     setPlayer((prev) => {
       if (!prev) return prev;
-      // Only the first four plots a player claimed pay. Beyond that a world is
+      // Only the first few plots a player claimed pay — EARNING_PLOT_LIMIT of them. Beyond that a world is
       // theirs to play with and earns nothing, so a large wallet buys more to
       // watch rather than more income.
       const earning = [...prev.claims]

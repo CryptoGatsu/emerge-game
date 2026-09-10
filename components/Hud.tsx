@@ -1068,7 +1068,10 @@ export function Hud(props: HudProps) {
                 }}
               >
                 <b>{action.icon}</b>
-                <span>{t(compact ? action.short : action.label)}</span>
+                {/* A laptop between a phone and a wide screen shows the
+                    phone's one-word label, switched in the stylesheet. */}
+                <span className={compact ? undefined : 'door-long'}>{t(compact ? action.short : action.label)}</span>
+                {!compact && <span className="door-short" aria-hidden="true">{t(action.short)}</span>}
               </button>
             );
           })}

@@ -140,6 +140,8 @@ button {
   line-height: 1;
   color: var(--muted);
   padding: 2px 6px;
+  min-width: 26px; min-height: 26px;
+  display: inline-grid; place-items: center;
   border-radius: 6px;
 }
 .panel-close:hover { color: var(--cream); background: rgba(255, 255, 255, 0.06); }
@@ -733,7 +735,9 @@ button {
  * Selected being
  * ------------------------------------------------------------------ */
 
-.bottom-left { position: absolute; left: 22px; bottom: 22px; width: 320px; }
+/* Capped and scrolling: on a 700px laptop the first-day card grew past the
+   top of the window and sat over the brand and the language switch. */
+.bottom-left { position: absolute; left: 22px; bottom: 22px; width: 320px; max-height: calc(100vh - 130px); overflow-y: auto; }
 
 /* The observe hint is a whisper, not a card: one line, no box, so an empty
    corner of the world stays an empty corner. */
@@ -789,6 +793,7 @@ button {
 .follow-toggle {
   margin-left: auto;
   padding: 4px 11px;
+  min-height: 24px;
   border-radius: 999px;
   border: 1px solid var(--panel-edge-soft);
   font-size: 10.5px;
@@ -884,6 +889,7 @@ button {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .action.active span { color: var(--cream); }
+.action span.door-short { display: none; }
 /* The blurb is a tooltip now; the strip says one word per door. */
 .action small { display: none; }
 .action.inspire b { color: #b98ce8; }
@@ -1183,11 +1189,13 @@ button {
 }
 
 /* Rail panels that fold away, so the world can be watched unobstructed. */
-.panel.folding h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
+.panel.folding h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; min-height: 24px; }
+.panel.folding:not(.shut) h3 { margin-bottom: -4px; }
 .panel.folding.shut { padding-bottom: 11px; }
 button.fold {
   display: flex; align-items: center; gap: 6px;
   flex: 1;
+  min-height: 24px;
   padding: 0; margin: 0;
   border: none; background: none;
   font: inherit; color: inherit; letter-spacing: inherit; text-align: left;
@@ -1264,6 +1272,7 @@ button.fold:hover { color: var(--emerald); }
 
 /* Pulling a building down. */
 .demolish { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.demolish button { min-height: 26px; }
 .demolish button.danger.armed { background: rgba(217, 122, 90, 0.22); border-color: rgba(217, 122, 90, 0.5); }
 
 /* What the player is earning, and why. */
@@ -1484,6 +1493,8 @@ button.fold:hover { color: var(--emerald); }
   font-size: 12px;
   color: var(--muted);
   padding: 2px 5px;
+  min-width: 24px; min-height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
   border-radius: 5px;
   vertical-align: middle;
 }
@@ -1660,6 +1671,10 @@ button.fold:hover { color: var(--emerald); }
   /* Tighter tracking so "GAME GUIDE" still fits its button rather than
      ellipsing. */
   .action span { font-size: 10.5px; letter-spacing: 1px; }
+  /* "Food in store" wrapped to two lines on the narrower rail. */
+  .food-row { font-size: 11.5px; gap: 6px; grid-template-columns: 16px minmax(0, 1fr) auto auto; }
+  .food-row .stat-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .food-row em { display: none; }
 }
 
 @media (max-width: 1000px) {
@@ -1668,6 +1683,25 @@ button.fold:hover { color: var(--emerald); }
   .bottom-left { width: 260px; }
   .action-bar { left: 300px; }
   .action span { font-size: 10px; letter-spacing: 1px; }
+}
+
+/*
+ * A laptop between the phone and a wide screen. Ten doors at 64px each need
+ * about 700px, and between the first-day card and the rail a 1024px window
+ * has 460: the strip ran on under the rail and the last four doors could not
+ * be reached. The doors share the room the way they do on a phone, with the
+ * phone's one-word labels, and the strip stays inside its gutters.
+ */
+@media (max-width: 1100px) and (min-width: 781px) {
+  .bottom-left { width: 260px; }
+  .action-bar { left: 292px; right: 256px; }
+  .action-row { width: 100%; gap: 0; padding: 5px 4px; }
+  .action { flex: 1 1 0; min-width: 0; padding: 8px 2px 7px; }
+  .action.group-start { margin-left: 4px; }
+  .action.group-start::before { left: -2px; }
+  .action span { font-size: 8.5px; letter-spacing: 0.4px; }
+  .action span.door-long { display: none; }
+  .action span.door-short { display: block; }
 }
 
 /*
@@ -1688,7 +1722,8 @@ button.fold:hover { color: var(--emerald); }
      height — full width, the observe card ran underneath the three buttons. */
   .bottom-left { left: 12px; right: 68px; width: auto; bottom: 84px; }
   .whisper { font-size: 12px; }
-  .hud-corner { top: 60px; left: 12px; }
+  .hud-corner { top: 20px; left: 128px; }
+  .hud-guide { width: 32px; height: 32px; }
   .being-card { max-height: 40vh; overflow-y: auto; }
   /*
    * The action bar is a tab bar on a phone, not a floating card.
@@ -1769,12 +1804,17 @@ button.fold:hover { color: var(--emerald); }
    * on top of each other.
    */
   .brand-block, .world-chip { top: 12px; left: 12px; max-width: 54vw; }
+  /* Shrunk to its widest child rather than spanning the screen: as a
+     full-width band it took every tap beside the pills, on the world and on
+     the guide button alike. */
   .top-centre {
     top: 60px;
-    left: 0; right: 0;
-    transform: none;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100vw - 20px);
     align-items: center;
-    padding: 0 10px;
+    padding: 0;
   }
   .beings-pill { padding: 7px 14px; font-size: 11px; }
   .time-controls { flex-wrap: wrap; justify-content: center; }
@@ -1855,6 +1895,16 @@ button.fold:hover { color: var(--emerald); }
   .phone-sheet .feed-scroll { max-height: 42vh; }
   .bottom-left { bottom: 76px; }
   .touch-zoom { bottom: 80px; }
+  /* With the brand gone the clock column moves up to the top edge, the
+     language switch and the guide button tuck under the world's name, and
+     the first-day card scrolls inside what is left rather than running up
+     under the purse: at 375px tall the purse used to sit on its text. */
+  .top-centre { top: 12px; }
+  .hud-corner { top: 52px; left: 12px; }
+  .bottom-left { max-height: calc(100vh - 236px); overflow-y: auto; }
+  /* The spectator count sat under the purse, behind the card. Scoped to
+     the column so the rule outranks the pill's own, which comes later. */
+  .top-centre .watching { display: none; }
 }
 
 /*
@@ -2715,7 +2765,7 @@ button.fold:hover { color: var(--emerald); }
  * keeps its name, and so does the player's own land, because those are the two
  * a player is looking for. Everything else is one tap away in the card below.
  */
-.region-pins.compact .region-pin { padding: 5px; gap: 0; }
+.region-pins.compact .region-pin { padding: 6px; gap: 0; min-width: 24px; min-height: 24px; justify-content: center; }
 .region-pins.compact .pin-label { display: none; }
 .region-pins.compact .region-pin.selected,
 .region-pins.compact .region-pin.owned { padding: 5px 9px 5px 6px; gap: 6px; }
@@ -3149,7 +3199,7 @@ button.fold:hover { color: var(--emerald); }
 .advice:first-of-type { border-top: none; }
 .advice-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .advice-head b { font-size: 12.5px; color: var(--cream); }
-.advice-head button.small { font-size: 10px; letter-spacing: 1px; padding: 3px 9px; border: 1px solid var(--panel-edge-soft); border-radius: 7px; color: var(--emerald); }
+.advice-head button.small { font-size: 10px; letter-spacing: 1px; padding: 3px 10px; min-height: 24px; border: 1px solid var(--panel-edge-soft); border-radius: 7px; color: var(--emerald); }
 .advice span { font-size: 11.5px; color: var(--text); line-height: 1.5; }
 .advice em { font-style: normal; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .advice.improve .advice-head b { color: var(--gold); }
@@ -3161,7 +3211,7 @@ button.fold:hover { color: var(--emerald); }
 
 /* ---- language switch ---- */
 .lang-switch { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid rgba(184, 231, 86, 0.22); border-radius: 999px; background: rgba(1, 10, 6, 0.55); }
-.lang-switch button { border: 0; background: transparent; color: #9db89a; font: inherit; font-size: 12px; letter-spacing: 0.04em; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+.lang-switch button { border: 0; background: transparent; color: #9db89a; font: inherit; font-size: 12px; letter-spacing: 0.04em; padding: 4px 11px; min-height: 27px; border-radius: 999px; cursor: pointer; }
 .lang-switch button.on { background: rgba(184, 231, 86, 0.18); color: #e6f5c8; }
 .lang-switch button:hover:not(.on) { color: #e6f5c8; }
 .landing-lang { position: absolute; top: 16px; right: 16px; z-index: 3; }
@@ -3377,7 +3427,7 @@ button.fold:hover { color: var(--emerald); }
 .first-steps small { display: block; font-size: 11px; line-height: 1.4; color: var(--muted); }
 .first-steps li > button { font: inherit; font-size: 11.5px; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(184, 231, 86, 0.45); background: rgba(184, 231, 86, 0.12); color: #e6f5c8; cursor: pointer; min-height: 34px; }
 .first-steps li > button:hover { background: rgba(184, 231, 86, 0.2); }
-button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
+button.ghost.tiny { padding: 4px 10px; min-height: 24px; font-size: 10.5px; border-radius: 8px; }
 .first-day-more { justify-self: start; margin-top: 8px; }
 
 /* ---- the leaderboard on the world map ---- */
@@ -3553,7 +3603,7 @@ button.ghost.tiny { padding: 4px 10px; font-size: 10.5px; border-radius: 8px; }
 
 .casino-buy-block { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .casino-passes { display: flex; gap: 4px; }
-.casino-passes button { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.04); color: var(--muted); font-size: 10.5px; }
+.casino-passes button { padding: 4px 9px; min-height: 24px; border-radius: 999px; border: 1px solid var(--panel-edge-soft); background: rgba(255,255,255,0.04); color: var(--muted); font-size: 10.5px; }
 .casino-passes button.sel { border-color: var(--gold); color: var(--gold); background: rgba(240, 208, 94, 0.1); }
 
 /* One settled trade, in the exchange's History tab. */

@@ -1361,7 +1361,7 @@ export default function Wiki() {
           </p>
           <p>
             <b>You can spend Gold against any of them, once.</b> The red bar under the clock, and
-            the What could go wrong panel, offer the one thing that answers each: bucket chains,
+            the <b>Attention</b> card, offer the one thing that answers each: bucket chains,
             burning the blighted rows, a night watch, sandbags along the bank, shoring up the
             walls, storm crews, a quarantine. The price scales with how bad it is and how much
             town there is to save, and each does exactly what the panel says. Buildings a disaster
@@ -1385,7 +1385,7 @@ export default function Wiki() {
             </tbody>
           </table>
           <p>
-            The <b>What could go wrong</b> panel shows how ready you are for each, as a percentage,
+            The <b>Attention</b> card shows how ready you are for whatever you are least ready for, as a percentage,
             <em> before</em> anything happens. That is the whole point of it: readiness is something
             to build in a quiet week, not something to read afterwards.
           </p>

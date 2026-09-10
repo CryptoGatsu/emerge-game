@@ -470,9 +470,9 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
         </section>
 
         <section>
-          <h4>The plot helper</h4>
+          <h4>What to build next</h4>
           <p>
-            The side panel&rsquo;s <b>Plot Helper</b> reads the settlement every few seconds and
+            The <b>Attention</b> card on the right reads the settlement every few seconds and
             says what to build next, and why: who is sleeping rough, what is piling up in store with
             no trade to turn it into something, which need is lowest in town, what the busiest
             workshop would give if it were improved. It is the same list the Build panel opens
@@ -621,10 +621,10 @@ function GuidePanel({ view, onClose }: { view: Snapshot; onClose: () => void }) 
             like.
           </p>
           <p>
-            <b>Four plots pay.</b> You may own as many as you can afford, but only the four you
-            claimed first earn {TOKEN.ticker} — so the most anyone can make is four well-run
+            <b>{EARNING_PLOT_LIMIT} plots pay.</b> You may own as many as you can afford, but only the {EARNING_PLOT_LIMIT} you
+            claimed first earn {TOKEN.ticker} — so the most anyone can make is {EARNING_PLOT_LIMIT} well-run
             settlements, {DAILY_EARN_CEILING.toLocaleString()} a real day, and no more. The rest are
-            yours to build in for the pleasure of it. Give one of the four up and the next in line
+            yours to build in for the pleasure of it. Give one of those up and the next in line
             starts earning.
           </p>
           <p>
