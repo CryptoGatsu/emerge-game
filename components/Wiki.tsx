@@ -1454,6 +1454,18 @@ export default function Wiki() {
             fireworks over the square to see the year out.
           </p>
           <p>
+            <b>What a treasury is for.</b> Building is a one-off, so a town that has built
+            everything it can afford would otherwise have nowhere for its Gold to go. Five
+            standing programmes are the answer, funded daily out of the treasury: a night watch,
+            so far fewer people turn on the town; physicians, so a sickness spreads slower and
+            kills less often; apprenticeships, so every day at a trade teaches half again as much;
+            roadworks, so everybody gets about faster; and poor relief, which puts Gold straight
+            into the poorest purses. None of them pays you {'\u0024'}EMERGE. They make the place
+            run better, and how well it runs is exactly what your yield is judged on. A bill grows
+            with the town and its age, and one the treasury cannot cover on the day lapses rather
+            than running on credit.
+          </p>
+          <p>
             <b>On a phone</b> the world is drawn to what the device can afford: thirty frames a
             second, fewer particles, and on a low-end phone half resolution with no bloom pass, so
             it stays cool. If frames still run long, particles are shed first and the bloom after,

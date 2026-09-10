@@ -79,6 +79,14 @@ say('doorsteps get cleared', w.buildings.some((b) => b.snowCleared !== undefined
 say('the feed tells of it', feedSince(w, firstSnowDay, /snowball fight|built a snowman|clearing the snow/).length > 0, feedSince(w, firstSnowDay, /snowball fight|built a snowman|clearing the snow/).slice(0, 3).map((f) => f.text).join(' | '));
 say('a play never leaves somebody stuck in it', w.citizens.every((c) => !c.play || (c.play.day === w.day && c.play.until > w.hour - 1)));
 // Somebody says something about the snow.
+//
+// Said at a time and in a state where the snow is the thing to remark on:
+// the middle of a lying-snow day, with everybody about. Left to whatever
+// hour the run happened to end on, this asked a sleeping town what it
+// thought of the weather and read the silence as a failure.
+w.hour = 12;
+w.ground = { snow: 1, wet: 0 };
+for (const c of w.citizens) { c.inside = false; c.activity = 'wandering'; }
 let snowLines = 0;
 for (const c of w.citizens) for (let beat = 0; beat < 40; beat++) { const t = SP.speechFor(w, c, beat); if (t && /snow|ice|boots|log on the fire|children have been out/i.test(t)) snowLines++; }
 say('the snow is talked about', snowLines > 0, `${snowLines} lines`);

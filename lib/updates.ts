@@ -27,6 +27,22 @@ export function byVersion(a: Update, b: Update): number {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.12.0',
+    date: '2026-09-11',
+    title: 'Somewhere for the Gold to go: five programmes the treasury funds every day',
+    notes: [
+      'Building is a one-off, and a town that has built everything it can afford had nothing left to spend on. That is the complaint, and this is the answer: five standing programmes, each a bill every day for as long as it runs, each changing something the settlement actually does. They are in the Bank, under the city level they are paid out of the same treasury as.',
+      '**The night watch** \u2014 lanterns lit and two on patrol until dawn. Less than half as many people turn on the town. It works alongside a jail rather than instead of one, so a town with both is quieter than a town with either.',
+      '**Physicians** \u2014 somebody paid to attend the sick whether or not there is a clinic. A sickness spreads slower and kills less often, and the town is markedly readier for a plague. A settlement with no clinic yet can still have somebody who knows what to do.',
+      '**Apprenticeships** \u2014 the trades take on learners and the master is paid to teach. Every day at a trade teaches half again as much, so people reach mastery sooner and make more of whatever they make. It stacks with a school and a library.',
+      '**Roadworks** \u2014 the ways kept clear, drained and mended. Everybody gets about fifteen per cent faster, which means a day of walking between a house and a workshop is more of a day at the workshop.',
+      '**Poor relief** \u2014 a daily allowance to everyone the town has left behind. The Gold goes into the poorest purses rather than paying for a service, so they can buy food from the town\u2019s own market and are less wretched for it. It costs nothing at all in a town with nobody poor in it.',
+      'None of them pays you \u0024EMERGE. They make the place run better, and how well the place runs is exactly what your yield is judged on \u2014 so the treasury and the score are one lever now instead of two that had nothing to do with each other. A full treasury turning income away has somewhere for that Gold to go, and spending it is the same decision as earning more.',
+      'A bill scales with the town and with the age it is in: the same watch costs a settlement of twenty about thirty Gold a day and a fifth-age city of two hundred a good deal more, so a programme stays a real decision at every size rather than becoming rounding on a big city\u2019s income.',
+      'A programme the treasury cannot cover on the day lapses rather than running on credit or quietly emptying the town, and the feed says which and why. Nothing starts that could not be paid for tomorrow. Programmes show in the History rows under their own heading, and they survive a save.',
+    ],
+  },
+  {
     version: '2.11.1',
     date: '2026-09-10',
     title: 'Three things players reported, fixed',
@@ -403,6 +419,22 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '2.12.0',
+    date: '2026-09-11',
+    title: '金币终于有了去处：五项由金库每天出资的常设项目',
+    notes: [
+      '建造是一次性的，一个把能建的都建完的镇子就没什么可花钱的了。这正是大家的抱怨，而这是答案：五项常设项目，每一项在办期间都是每天的开销，每一项都会改变聚落的实际运作。它们在银行面板里，就放在与它们共用同一个金库的城市等级下面。',
+      '**巡夜队**——点上灯，两个人巡到天亮。铤而走险的人不到原来的一半。它与监狱并行而非取代监狱，所以两者兼备的镇子比只有其一的更安宁。',
+      '**医师**——不管有没有诊所，都有人拿钱照看病人。疫病传得更慢、致死更少，镇子对瘟疫的准备也明显更足。还没有诊所的聚落，也可以有个懂行的人。',
+      '**学徒制**——各行当收学徒，师傅拿钱教。在行当上的每一天多教一半，人们更快出师，产出也更多。它与学校和图书馆叠加。',
+      '**道路养护**——道路保持通畅、排水良好、及时修补。所有人走得快百分之十五，也就是说在住处和作坊之间走一天路，更多地变成了在作坊里干一天活。',
+      '**济贫**——给镇上被落下的每个人一份日常津贴。这笔金币直接进入最穷的人的口袋，而不是买某种服务，所以他们能在镇子自己的市场上买吃的，也就没那么潦倒。镇上没有穷人时，它一分钱都不花。',
+      '它们都不会给你 \u0024EMERGE。它们让这个地方运转得更好，而运转得多好，正是你的收益被评判的依据——所以金库和评分现在是同一个杠杆，而不是互不相干的两个。装满、只能把收入拒之门外的金库，终于有了去处，而花掉它和多赚钱是同一个决定。',
+      '开销随着镇子的规模和所处的时代增长：同样的巡夜队，二十人的聚落每天大约三十金币，两百人的第五时代城市则要多得多，所以在任何规模下，一个项目都仍然是真实的取舍，而不会变成大城市收入里的零头。',
+      '当天金库付不起的项目会中断，而不是赊账或悄悄掏空镇子，动态里会说明是哪一项、为什么。付不起明天的项目不会开办。项目在历史记录里有自己的条目，也会随存档保留。',
+    ],
+  },
   {
     version: '2.11.1',
     date: '2026-09-10',

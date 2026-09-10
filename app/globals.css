@@ -3389,6 +3389,17 @@ button.fold:hover { color: var(--emerald); }
 .city-festival b { font-size: 13px; color: var(--cream); }
 .city-festival .city-festival-btn { margin-top: 6px; }
 
+/* Standing programmes: a row each, the running ones marked down the side. */
+.programme-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.programme-list li { display: flex; flex-direction: column; gap: 3px; padding: 10px 0 12px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.programme-list li.on { border-left: 2px solid var(--emerald); padding-left: 9px; }
+.programme-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.programme-head b { font-size: 13px; color: var(--cream); }
+.programme-cost { font-size: 11.5px; color: var(--gold); white-space: nowrap; }
+.programme-list li.on .programme-cost { color: var(--emerald); }
+.programme-effect { color: var(--muted); font-style: italic; }
+.programme-list button { margin-top: 6px; align-self: flex-start; }
+
 /* Boons on the On-Chain panel: three rows, each with its own button. */
 .boon-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .boon-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }

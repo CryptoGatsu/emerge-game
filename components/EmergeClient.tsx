@@ -26,7 +26,7 @@ import {
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
   setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, escrowGoods, receiveDelivery, type WorkingJob,
-  dailyCeiling, holdFestival, raiseCity, setCover, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
+  dailyCeiling, holdFestival, raiseCity, setCover, setProgramme, type ProgrammeKey, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { fetchPlayerRecord, pushPlayerRecord } from '@/lib/net/player';
 import { snapshot, type Snapshot } from '@/lib/hud';
@@ -1564,6 +1564,18 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     return null;
   }, []);
 
+  /** Begin or wind up a standing programme, paid daily out of the treasury. */
+  const programmeFor = useCallback((key: ProgrammeKey, on: boolean): string | null => {
+    const world = worldRef.current;
+    if (!world) return null;
+    const result = setProgramme(world, key, on);
+    if (!result.ok) { soundRef.current?.tick('deny'); return result.message; }
+    soundRef.current?.cue(on ? 'hammer' : 'bell');
+    saveWorld(world);
+    setView(snapshot(world, selectedRef.current));
+    return null;
+  }, []);
+
   /** Arm the bridge cursor: the next tap on far land stakes out a crossing. */
   const beginBridge = useCallback(() => {
     const world = worldRef.current;
@@ -2660,6 +2672,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
             onFillPond={() => beginPond('Fill')}
             onRaiseCity={raiseCityFor}
             onFestival={festivalFor}
+            onProgramme={programmeFor}
             onCover={coverFor}
             onBoon={boonFor}
             onRenameWorld={renameWorldFor}

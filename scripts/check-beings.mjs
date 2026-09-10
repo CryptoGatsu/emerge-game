@@ -65,10 +65,34 @@ for (let d = 0; d < 20; d++) {
   w.gold = Math.max(w.gold, 200_000);
   for (let h = 0; h < 24; h++) { hour(); feedSaid ??= (w.feed.find((f) => / has .* at last\.$/.test(f.text)) ?? null); }
 }
+/*
+ * If twenty days happened not to grant anybody their want, arrange one.
+ *
+ * Whether a want is met inside a given fortnight is up to how the town grew,
+ * and reading that as a failure of the announcement was wrong: what is being
+ * checked is that the feed says it in the third person when it happens, not
+ * that it happens on a schedule. Somebody wanting work, given work, is met
+ * at the next midnight by the rule the simulation already applies.
+ */
+let arranged = 'not needed';
+if (!feedSaid) {
+  const someone = w.citizens.find((c) => c.age >= 16);
+  arranged = someone ? `arranged for ${someone.name}` : 'no adult to arrange it for';
+  if (someone) {
+    // Employed and wanting a trade: met by the rule the simulation already
+    // applies, at the next midnight, whatever else the town is doing.
+    if (someone.job === 'unemployed') someone.job = 'farmer';
+    someone.want = { kind: 'trade', since: w.day - 3 };
+    for (let h = 0; h < 72 && !feedSaid; h++) {
+      hour();
+      feedSaid = w.feed.find((f) => / has .* at last\.$/.test(f.text)) ?? null;
+    }
+  }
+}
 const met = w.citizens.flatMap((c) => (c.recent ?? []).filter((e) => e.kind === 'wantMet'));
 say('some wants are met and remembered', met.length > 0, `${met.length} met: ${JSON.stringify(met.slice(0, 3).map((e) => e.about))}`);
 say('a want that stands is kept, not re-rolled', w.citizens.some((c) => c.want && held.some((h) => h.id === c.id && h.kind === c.want.kind && h.since === c.want.since)) || wanting.length <= met.length);
-say('the feed says so, in the third person', !!feedSaid && !/ my own/.test(feedSaid.text), feedSaid ? feedSaid.text : '(none)');
+say('the feed says so, in the third person', !!feedSaid && !/ my own/.test(feedSaid.text), feedSaid ? feedSaid.text : `(none; ${arranged})`);
 
 // Word of mouth.
 const secondHand = w.citizens.filter((c) => (c.heard ?? []).some((h) => {

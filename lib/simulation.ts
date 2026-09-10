@@ -741,6 +741,15 @@ export interface World {
    * size has earned, so nobody who built a city before this loses it.
    */
   works?: { level: number };
+  /**
+   * The standing programmes the treasury funds every day.
+   *
+   * A town that has stopped needing to build has nothing to do with its
+   * Gold; these are what it can do with it. Each is a daily charge and a
+   * change in how the place runs, so the treasury and the settlement are
+   * the same lever rather than two.
+   */
+  programmes?: ProgrammeKey[];
   /** Wall-clock time until which a charter or insurance bought for this plot runs. */
   charterUntil?: number;
   insuredUntil?: number;
@@ -874,7 +883,7 @@ export interface Stewardship {
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
   | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
-  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival';
+  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival' | 'programmes';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
@@ -887,6 +896,7 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
   households: 'Household spending',
   training: 'Training',
   festival: 'Festivals',
+  programmes: 'Programmes',
   food: 'Food sales',
   vault: 'Vault',
   arena: 'The arena',
@@ -4593,14 +4603,15 @@ export const townHallOrder = (world: World) => TOWN_HALL_ORDER * Math.max(0, bes
 /** Transport: whatever people ride goes TRANSPORT_PACE faster per level of the building that provides it. */
 export const TRANSPORT_PACE = 0.1;
 export const TRANSPORT_TYPES = ['Stables', 'Railway Station', 'Bus Depot', 'Pod Hub'];
-export const transportBoost = (world: World) => 1 + TRANSPORT_PACE * Math.max(0, bestLevelOf(world, TRANSPORT_TYPES) - 1);
+export const transportBoost = (world: World) => (1 + TRANSPORT_PACE * Math.max(0, bestLevelOf(world, TRANSPORT_TYPES) - 1)) * (programmeOn(world, 'roadworks') ? ROADWORKS_PACE : 1);
 
 export function learningRate(world: World): number {
   useWorld(world);
   return 1 + SCHOOL_LEARNING * civicStrength(world, 'School') + LIBRARY_LEARNING * civicStrength(world, 'Library')
     + GUILDHALL_LEARNING * civicStrength(world, 'Guildhall') + PRINTER_LEARNING * civicStrength(world, 'Printer')
     + TELEGRAPH_LEARNING * civicStrength(world, 'Telegraph') + DATA_CENTRE_LEARNING * civicStrength(world, 'Data Centre')
-    + CAMPUS_LEARNING * civicStrength(world, 'Research Campus');
+    + CAMPUS_LEARNING * civicStrength(world, 'Research Campus')
+    + (programmeOn(world, 'apprentices') ? APPRENTICE_LEARNING : 0);
 }
 
 /** Lab: better methods, applied to every trade's output. */
@@ -4650,8 +4661,8 @@ export const CLINIC_SURVIVAL = 0.45;
 export const HOSPITAL_SURVIVAL = 0.65;
 export const HOSPITAL_CARE = 0.25;
 /** Whether the town has somewhere to be treated, and how well. */
-export const hasCare = (world: World) => hasCivic(world, 'Clinic') || hasCivic(world, 'Hospital');
-export const careOf = (world: World) => Math.min(0.6, hasCivic(world, 'Hospital') ? HOSPITAL_CARE * civicStrength(world, 'Hospital') : hasCivic(world, 'Clinic') ? CLINIC_CARE * civicStrength(world, 'Clinic') : 0);
+export const hasCare = (world: World) => hasCivic(world, 'Clinic') || hasCivic(world, 'Hospital') || programmeOn(world, 'physicians');
+export const careOf = (world: World) => Math.min(0.6, (hasCivic(world, 'Hospital') ? HOSPITAL_CARE * civicStrength(world, 'Hospital') : hasCivic(world, 'Clinic') ? CLINIC_CARE * civicStrength(world, 'Clinic') : 0) + (programmeOn(world, 'physicians') ? PHYSICIANS_CARE : 0));
 export const survivalOf = (world: World) => Math.min(0.9, hasCivic(world, 'Hospital') ? HOSPITAL_SURVIVAL * civicStrength(world, 'Hospital') : hasCivic(world, 'Clinic') ? CLINIC_SURVIVAL * civicStrength(world, 'Clinic') : 0);
 
 /** Lab and clinic: what they add to readiness for the hazards they can see coming. */
@@ -5747,7 +5758,7 @@ export function readiness(world: World): Record<HazardKind, number> {
     // a burial.
     earthquake: clamp(Math.min(1, world.resources.stone / 40) * 0.6 + warned + (stores ? 0.15 : 0), 0, 1),
     tornado: clamp((stores ? 0.3 : 0) + improved * 0.45 + warned, 0, 1),
-    plague: clamp((hasCare(world) ? 0.45 : 0) + Math.min(1, world.resources.herbs / 12) * 0.35 + warned, 0, 1),
+    plague: clamp((hasCare(world) ? 0.45 : 0) + (programmeOn(world, 'physicians') ? PHYSICIANS_READY : 0) + Math.min(1, world.resources.herbs / 12) * 0.35 + warned, 0, 1),
     // Hunters know the wood, and a lodge with people in it is a lodge wolves keep clear of.
     wolves: clamp(fires / (1 + mouths / 14) + warned + world.citizens.filter((c) => c.job === 'hunter').length * 0.2, 0, 1),
     flood: clamp(backFromBank, 0, 1),
@@ -6512,7 +6523,7 @@ function unrest(world: World) {
   // Every jail halves the chance of anybody turning, down to a tenth of it.
   // Two jails in a town of a hundred and fifty used to make no more
   // difference than one, and that one only halved a chance nobody could see.
-  const chance = 0.05 * jailFactor(world);
+  const chance = rogueChance(world);
   for (const c of world.citizens) {
     if (c.age < 16 || c.jailed || c.sick || c.carried) continue;
     const enemy = rivalsOf(world, c.id).some((r) => r.strength < -65);
@@ -6522,6 +6533,16 @@ function unrest(world: World) {
     return;
   }
 }
+
+/**
+ * The chance, in a day, that somebody turns on the town.
+ *
+ * One definition, read both by the day that rolls against it and by the
+ * trials that check the jail and the night watch actually hold it down.
+ */
+export const ROGUE_BASE_CHANCE = 0.05;
+export const rogueChance = (world: World) =>
+  ROGUE_BASE_CHANCE * jailFactor(world) * (programmeOn(world, 'watch') ? WATCH_CALM : 1);
 
 /** How much the jails hold trouble down: half per jail standing, never below a tenth. */
 export function jailFactor(world: World) {
@@ -9125,6 +9146,7 @@ function daily(world: World) {
   }
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep * bankRelief(world));
+  runProgrammes(world);
   // What a town may hold is a ceiling now, not a daily charge on the pile —
   // see `goldCap`. Income above the ceiling is turned away in `earn`, and the
   // town is told when that has been happening.
@@ -9603,6 +9625,177 @@ export function holdFestival(world: World): { ok: boolean; message: string } {
   pushFeed(world, 'social', `${world.name} held a festival in the square. Everyone went.`);
   notice(world, 'festival', 'the square');
   return { ok: true, message: 'The festival is on.' };
+}
+
+/* ------------------------------------------------------------------ *
+ * Programmes: what the treasury pays for every day
+ * ------------------------------------------------------------------ */
+
+/**
+ * A standing programme the settlement funds out of its treasury.
+ *
+ * Building is a one-off, and a town that has built everything it can afford
+ * has nowhere for its Gold to go — which is exactly the complaint: a full
+ * treasury turning income away, with nothing to spend it on. A programme is
+ * the other shape of spending. It is a bill every day for as long as it
+ * runs, it scales with the size of the place and the age it is in, and each
+ * one changes something the simulation actually does: fewer people turn on
+ * the town, fewer die of a sickness, everybody learns their trade faster,
+ * everybody walks further in a day, the poorest are not left destitute.
+ *
+ * None of them buys yield directly. They buy a better-run settlement, and a
+ * better-run settlement is what stewardship is scored on — so the treasury
+ * and the score are the same lever rather than two unrelated ones.
+ */
+export type ProgrammeKey = 'watch' | 'physicians' | 'apprentices' | 'roadworks' | 'relief';
+
+export interface Programme {
+  key: ProgrammeKey;
+  name: string;
+  /** What the town is paying for, in a phrase. */
+  blurb: string;
+  /** What it changes, in plain words. */
+  effect: string;
+  /** Gold a day for each person it covers. */
+  perHead: number;
+  /** The least it costs, however small the town. */
+  floor: number;
+}
+
+/** How much a programme's night watch calms the town: the chance anybody turns, multiplied. */
+export const WATCH_CALM = 0.45;
+/** Physicians on the payroll: what they add to care, and to readiness for a sickness. */
+export const PHYSICIANS_CARE = 0.18;
+export const PHYSICIANS_READY = 0.2;
+/** Apprenticeships: what they add to how fast a day at the bench teaches. */
+export const APPRENTICE_LEARNING = 0.5;
+/** Roadworks: how much faster everybody gets about. */
+export const ROADWORKS_PACE = 1.15;
+/** Poor relief: Gold a day into the purse of each adult the ranking calls poor. */
+export const RELIEF_PER_POOR = 6;
+
+export const PROGRAMMES: Programme[] = [
+  {
+    key: 'watch', name: 'The night watch', perHead: 0.9, floor: 30,
+    blurb: 'Lanterns lit and two on patrol until dawn.',
+    effect: 'Far fewer people turn on the town. Works with a jail rather than instead of one.',
+  },
+  {
+    key: 'physicians', name: 'Physicians', perHead: 1.4, floor: 45,
+    blurb: 'Somebody paid to attend the sick, whether or not there is a clinic.',
+    effect: 'A sickness spreads slower and kills less often, and the town is readier for a plague.',
+  },
+  {
+    key: 'apprentices', name: 'Apprenticeships', perHead: 1.1, floor: 36,
+    blurb: 'The trades take on learners, and the master is paid to teach.',
+    effect: 'Every day at a trade teaches half again as much, so people reach mastery sooner and make more.',
+  },
+  {
+    key: 'roadworks', name: 'Roadworks', perHead: 1, floor: 32,
+    blurb: 'The ways kept clear, drained and mended.',
+    effect: 'Everybody gets about faster, so a day\u2019s walking is a day\u2019s work.',
+  },
+  {
+    key: 'relief', name: 'Poor relief', perHead: RELIEF_PER_POOR, floor: 0,
+    blurb: 'A daily allowance to everyone the town has left behind.',
+    effect: 'The poorest can buy food and are less wretched for it. Costs nothing when nobody is poor.',
+  },
+];
+
+export const programmeSpec = (key: ProgrammeKey) => PROGRAMMES.find((p) => p.key === key)!;
+
+/**
+ * What an age multiplies a programme's bill by.
+ *
+ * A settlement's night watch is two people with lanterns; an AI city's is a
+ * service. Without this the bill a city of the fifth age pays would be
+ * rounding on its income, and the sink would stop being one exactly where it
+ * is most needed.
+ */
+const PROGRAMME_ERA_BILL = [1, 2.4, 5, 9, 15];
+
+/** Whether a programme is running here. */
+export function programmeOn(world: { programmes?: ProgrammeKey[] }, key: ProgrammeKey): boolean {
+  return !!world.programmes?.includes(key);
+}
+
+/** What a programme costs this town today. */
+export function programmeCost(world: World, key: ProgrammeKey): number {
+  const spec = programmeSpec(key);
+  const era = PROGRAMME_ERA_BILL[clamp(eraOf(world), 1, 5) - 1];
+  // Relief is paid to people rather than for them: it costs what the poorest
+  // are given, and nothing at all in a town with nobody poor in it.
+  if (key === 'relief') return Math.round(spec.perHead * poorAdults(world).length * era);
+  return Math.round(Math.max(spec.floor, spec.perHead * world.citizens.length) * era);
+}
+
+/** Everything the running programmes cost together, a day. */
+export const programmesBill = (world: World) =>
+  (world.programmes ?? []).reduce((sum, key) => sum + programmeCost(world, key), 0);
+
+/** The adults the wealth ranking calls poor, who relief is for. */
+const poorAdults = (world: World) => world.citizens.filter((c) => c.age >= 16 && c.wealth === 'poor');
+
+/**
+ * Start or stop a programme.
+ *
+ * Starting one is refused when the treasury could not pay tomorrow's bill,
+ * because a programme that lapses on its first morning is worse than one
+ * never begun.
+ */
+export function setProgramme(world: World, key: ProgrammeKey, on: boolean): { ok: boolean; message: string } {
+  useWorld(world);
+  const spec = programmeSpec(key);
+  const running = world.programmes ?? [];
+  if (on && running.includes(key)) return { ok: false, message: `${spec.name} is already running.` };
+  if (!on && !running.includes(key)) return { ok: false, message: `${spec.name} is not running.` };
+  if (on) {
+    const cost = programmeCost(world, key);
+    if (world.treasury < cost) return { ok: false, message: `${spec.name} costs ${cost.toLocaleString()} Gold a day, and the treasury holds ${Math.floor(world.treasury).toLocaleString()}.` };
+    world.programmes = [...running, key];
+    pushFeed(world, 'build', `${spec.name} begins: ${cost.toLocaleString()} Gold a day out of the treasury.`);
+  } else {
+    world.programmes = running.filter((k) => k !== key);
+    pushFeed(world, 'build', `${spec.name} was wound up.`);
+  }
+  noteAttention(world);
+  return { ok: true, message: '' };
+}
+
+/**
+ * A day of the programmes: charge for each, and drop what cannot be paid for.
+ *
+ * A programme the treasury cannot cover lapses rather than running on credit
+ * or quietly emptying the town. The feed says which and why, because a
+ * programme that stops without a word is a change the player cannot see.
+ */
+function runProgrammes(world: World) {
+  const running = world.programmes ?? [];
+  if (!running.length) return;
+  const lapsed: string[] = [];
+  for (const key of running) {
+    const cost = programmeCost(world, key);
+    if (cost <= 0) continue;
+    if (world.treasury < cost) {
+      world.programmes = (world.programmes ?? []).filter((k) => k !== key);
+      lapsed.push(programmeSpec(key).name);
+      continue;
+    }
+    spend(world, 'programmes', cost);
+    // Relief is the one that ends up in somebody's hand rather than paying
+    // for a service: the Gold goes into the poorest purses, where it buys
+    // food from the town's own market.
+    if (key === 'relief') {
+      const era = PROGRAMME_ERA_BILL[clamp(eraOf(world), 1, 5) - 1];
+      for (const c of poorAdults(world)) {
+        c.wallet += RELIEF_PER_POOR * era;
+        c.happiness = Math.min(100, c.happiness + 2);
+      }
+    }
+  }
+  if (lapsed.length) {
+    pushFeed(world, 'market', `${lapsed.join(' and ')} lapsed: the treasury could not cover the day.`);
+  }
 }
 
 /* ------------------------------------------------------------------ *

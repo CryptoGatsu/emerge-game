@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, NOTABLE_BASE, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, NOTABLE_BASE, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, type ProgrammeKey, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
 /** The kinds that employ somebody, for the room line on a build card. */
 const WORKPLACE_TYPES = new Set(Object.values(JOBS).map((j) => j.building));
 import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
@@ -84,6 +84,8 @@ interface PanelsProps {
   onRaiseCity: () => string | null;
   /** Hold a festival; the refusal, or null. */
   onFestival: () => string | null;
+  /** Start or wind up a standing programme; the refusal, or null. */
+  onProgramme: (key: ProgrammeKey, on: boolean) => string | null;
   /** Buy a charter, insurance or builders for the plot; the refusal, or null. */
   onCover: (kind: CoverKind) => Promise<string | null>;
   /** Buy a boon for the plot; the refusal, or null. */
@@ -1400,7 +1402,7 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
   );
 }
 
-function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice, onWages, onRaiseCity, onFestival }: {
+function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice, onWages, onRaiseCity, onFestival, onProgramme }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
   onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
@@ -1408,6 +1410,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
   onWages: (rate: number) => void;
   onRaiseCity: () => string | null;
   onFestival: () => string | null;
+  onProgramme: (key: ProgrammeKey, on: boolean) => string | null;
 }) {
   const { wallet } = useWallet();
   const [cityNote, setCityNote] = useState<string | null>(null);
@@ -1781,6 +1784,35 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
             {view.festival.held ? t('Held today') : view.treasury < view.festival.cost ? t('Not enough Gold') : t('Hold a festival')}
           </button>
         </div>
+      </div>
+
+      <div className="connect-card programmes-card">
+        <span className="eyebrow">{t('PROGRAMMES')}</span>
+        <h3>{view.programmesBill > 0
+          ? t('{n} running · {cost} Gold a day', { n: view.programmes.filter((p) => p.running).length, cost: view.programmesBill.toLocaleString() })
+          : t('Nothing standing')}</h3>
+        <p className="muted small">
+          {t('Building is a one-off; these are what a treasury is for once there is nothing left to build. Each is a bill every day for as long as it runs, and each changes how the settlement lives. None of them pays you {ticker} directly — they make the place run better, and how well it runs is exactly what your yield is judged on.', { ticker: TOKEN.ticker })}
+        </p>
+        <ul className="programme-list">
+          {view.programmes.map((p) => (
+            <li key={p.key} className={p.running ? 'on' : ''}>
+              <div className="programme-head">
+                <b>{tn(p.name)}</b>
+                <span className="programme-cost">{p.cost > 0 ? t('{cost} Gold a day', { cost: p.cost.toLocaleString() }) : t('Nothing to pay')}</span>
+              </div>
+              <span className="muted small">{tn(p.blurb)}</span>
+              <span className="muted small programme-effect">{tn(p.effect)}</span>
+              <button
+                className={p.running ? 'ghost' : ''}
+                disabled={!p.running && !p.affordable}
+                onClick={() => setCityNote(onProgramme(p.key, !p.running))}
+              >
+                {p.running ? t('Wind it up') : !p.affordable ? t('Not enough Gold') : t('Begin it')}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
 
       {!earning && (
@@ -2874,7 +2906,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onOpenMap, onExchange, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onOpenMap, onExchange, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onProgramme, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2900,7 +2932,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     return (
       <BankPanel
         view={view} claimed={claimed} player={player} earning={earning}
-        onClose={onClose} onVault={onVault} onNotice={onNotice} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival}
+        onClose={onClose} onVault={onVault} onNotice={onNotice} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival} onProgramme={onProgramme}
       />
     );
   }
