@@ -67,11 +67,25 @@ function mergeHeld(held: Rec | null, incoming: Rec): Rec {
  * registry's word either way, so this can only agree with what the map is
  * already showing.
  *
- * Nothing is taken away. A record naming a plot the registry gives to
- * somebody else is the client's to drop, which it does once it has read the
- * registry — doing it here as well would race that and could strike a plot
- * from a record on the strength of a half-read registry.
+ * Plots the wallet no longer holds are dropped, because a record that keeps
+ * them does more than look untidy. Which of a player's worlds pay is decided
+ * by claim order, and land they had given up sat at the front of that order
+ * pushing the real ones past the limit — a player holding one plot was told
+ * that plot does not pay.
+ *
+ * Two ways a record names land that is not the wallet's. The registry gives
+ * the seed to somebody else, which is plain. Or the registry has never heard
+ * of the seed at all, which is what a plot given up or burnt leaves behind:
+ * releasing a plot deletes its row, so nothing afterwards can contradict the
+ * record's copy and it sits there for good. Both are dropped, and neither
+ * costs the holder anything — payouts are judged from the registry, so a
+ * plot with no row there was never being paid for in the first place. It was
+ * only ever taking up one of the five places that do pay.
+ *
+ * The one thing that must not be swept up is a claim still on its way to the
+ * registry, so a seed the registry does not know is kept while it is new.
  */
+const CLAIM_GRACE_MS = 15 * 60_000;
 async function withHeldPlots(address: string, record: Rec | null): Promise<Rec | null> {
   let rows: { seed: number; region: string; worldName: string; owner: string; price?: number; at: number }[];
   try {
@@ -79,22 +93,31 @@ async function withHeldPlots(address: string, record: Rec | null): Promise<Rec |
   } catch {
     return record; // The registry is the extra, not the record itself.
   }
-  const mine = rows.filter((row) => row.owner?.toLowerCase() === address.toLowerCase());
-  if (!mine.length) return record;
-  const held = Array.isArray(record?.claims) ? (record!.claims as { seed?: unknown }[]) : [];
-  const known = new Set(held.map((c) => (typeof c?.seed === 'number' ? c.seed : -1)));
-  const missing = mine.filter((row) => !known.has(row.seed));
-  if (!missing.length) return record;
-  const added = missing.map((row) => ({
+  const me = address.toLowerCase();
+  const mine = rows.filter((row) => row.owner?.toLowerCase() === me);
+  const known = new Set(rows.map((row) => row.seed));
+  const ours = new Set(mine.map((row) => row.seed));
+  const held = Array.isArray(record?.claims) ? (record!.claims as { seed?: unknown; claimedAt?: unknown }[]) : [];
+  const fresh = Date.now() - CLAIM_GRACE_MS;
+  const kept = held.filter((c) => {
+    if (typeof c?.seed !== 'number') return true;
+    if (ours.has(c.seed)) return true;
+    if (known.has(c.seed)) return false;              // the registry gives it to somebody else
+    const at = typeof c.claimedAt === 'number' ? c.claimedAt : 0;
+    return at > fresh;                                 // unknown to the registry: only a claim still in flight
+  });
+  const carried = new Set(kept.map((c) => (typeof c?.seed === 'number' ? c.seed : -1)));
+  const added = mine.filter((row) => !carried.has(row.seed)).map((row) => ({
     seed: row.seed,
     name: row.worldName,
     region: row.region,
     price: row.price ?? 0,
     claimedAt: row.at,
-    owner: address.toLowerCase(),
+    owner: me,
     txHash: null,
   }));
-  return { ...(record ?? {}), claims: [...held, ...added] };
+  if (!added.length && kept.length === held.length) return record;
+  return { ...(record ?? {}), claims: [...kept, ...added] };
 }
 
 export async function GET(request: Request) {

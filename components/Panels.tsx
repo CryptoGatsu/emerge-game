@@ -1785,7 +1785,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
 
       {!earning && (
         <p className="warn">
-          {t('This world does not pay. Only the first {n} plots you claimed earn {ticker} — this one is yours to build in, and everything you do here still counts towards the settlement, just not towards your balance. Give up one of the four and the next in line starts earning.', { n: EARNING_PLOT_LIMIT, ticker: TOKEN.ticker })}
+          {t('This world does not pay. Only the first {n} plots you claimed earn {ticker} — this one is yours to build in, and everything you do here still counts towards the settlement, just not towards your balance. Give up one of those and the next in line starts earning.', { n: EARNING_PLOT_LIMIT, ticker: TOKEN.ticker })}
         </p>
       )}
 

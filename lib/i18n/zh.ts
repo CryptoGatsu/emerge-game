@@ -783,7 +783,7 @@ export const UI: Record<string, string> = {
   'beyond your first {n} plots': '超出你最先的 {n} 块地',
   'EARNED HERE': '此地累计',
   '{n} uncollected': '{n} 未收取',
-  'This world does not pay. Only the first {n} plots you claimed earn {ticker} — this one is yours to build in, and everything you do here still counts towards the settlement, just not towards your balance. Give up one of the four and the next in line starts earning.': '这个世界不付钱。只有你最先认领的 {n} 块地赚 {ticker}——这块地供你建造，你在这里做的一切仍然算在聚落头上，只是不算进你的余额。放弃四块中的一块，下一块就开始赚。',
+  'This world does not pay. Only the first {n} plots you claimed earn {ticker} — this one is yours to build in, and everything you do here still counts towards the settlement, just not towards your balance. Give up one of those and the next in line starts earning.': '这个世界不付钱。只有你最先认领的 {n} 块地赚 {ticker}——这块地供你建造，你在这里做的一切仍然算在聚落头上，只是不算进你的余额。放弃其中一块，下一块就开始赚。',
   'Both directions are real transfers. A deposit is signed by you and lands in the vault at {vault}; a withdrawal is signed by the vault and lands in your wallet, straight away and without anybody approving it. Everything the game charges goes to the burn address instead and is gone. The {pct}% taken off a withdrawal is the one thing that stays put: it remains in the vault to be burned.': '两个方向都是真实转账。存款由你签名，到达 {vault} 的金库；取款由金库签名，立刻到达你的钱包，无需任何人审批。游戏收取的一切则进销毁地址，一去不回。取款扣除的 {pct}% 是唯一留下的：它留在金库里等待销毁。',
   'This build has no vault key configured, so withdrawals are refused rather than paid — nothing here will pretend otherwise.': '这个构建没有配置金库密钥，所以取款会被拒绝而不是支付——这里不会假装不是这样。',
   'PAID OUT': '已支付',

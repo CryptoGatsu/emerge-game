@@ -160,6 +160,27 @@ const S1 = 1120, S2 = 1365;
      (healed.record?.claims ?? []).find((c) => c.seed === S2)?.name === 'Harbourfall', JSON.stringify(healed.record?.claims ?? []).slice(0, 200));
   const other = (await api('/api/player', undefined, B)).json;
   ok('a wallet is not handed somebody else’s plot', !(other.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(other.record?.claims ?? []).slice(0, 200));
+  // The other half of the same report: a record still naming plots the wallet
+  // sold or sent away. Which worlds pay is decided by claim order, so stale
+  // entries at the front of it push the real ones past the limit — a player
+  // holding one plot was told that plot does not pay.
+  const ghosts = [11, 22, 33, 44, 55].map((seed, i) => ({ seed, name: `Ghost${seed}`, region: 'Gone', price: 0, claimedAt: 1000 + i, owner: A, txHash: null }));
+  const inFlight = { seed: 99, name: 'JustClaimed', region: 'New', price: 0, claimedAt: Date.now(), owner: A, txHash: null };
+  await api('/api/player', { record: { ...record([]), claims: [...ghosts, inFlight, { seed: S2, name: 'Harbourfall', region: 'Test', price: 0, claimedAt: 9_000_000, owner: A, txHash: null }] } }, A);
+  const tidied = (await api('/api/player', undefined, A)).json;
+  const claims = tidied.record?.claims ?? [];
+  ok('land given up long ago, which the registry has forgotten, is swept out',
+     !claims.some((c) => [11, 22, 33, 44, 55].includes(c.seed)), JSON.stringify(claims.map((c) => c.seed)));
+  ok('a claim still on its way to the registry is kept', claims.some((c) => c.seed === 99), JSON.stringify(claims.map((c) => c.seed)));
+  ok('the wallet still holds its real plot', claims.some((c) => c.seed === S2), JSON.stringify(claims.map((c) => c.seed)));
+  ok('and its own plot is inside the earning limit again',
+     [...claims].sort((a, b) => a.claimedAt - b.claimedAt).slice(0, 5).some((c) => c.seed === S2), JSON.stringify(claims.map((c) => c.seed)));
+  // S1 is B's now. A record of A's naming it must not survive a read.
+  await api('/api/player', { record: { ...record([]), claims: [{ seed: S1, name: 'Fernrest', region: 'Test', price: 0, claimedAt: 1, owner: A, txHash: null }] } }, A);
+  const dropped = (await api('/api/player', undefined, A)).json;
+  ok('a plot the registry gives to another wallet is dropped',
+     !(dropped.record?.claims ?? []).some((c) => c.seed === S1), JSON.stringify((dropped.record?.claims ?? []).map((c) => c.seed)));
+
 
   // 9. Burn: the holder burns, the sync releases the row.
   const notHolderBurn = await C.write('b', 'land', 'burn', [BigInt(S2)]).catch((e) => ({ status: 'reverted' }));
