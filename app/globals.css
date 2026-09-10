@@ -25,16 +25,26 @@
   --water: #075141;          /* the channel around the island */
   --gold: #e1d24e;           /* the windows and the path */
 
-  --panel: rgba(4, 20, 14, 0.86);
-  --panel-solid: #04150e;
-  --panel-edge: rgba(184, 231, 86, 0.3);
-  --panel-edge-soft: rgba(184, 231, 86, 0.15);
+  /*
+   * The interface is an observation layer over a living world, so it is made
+   * of glass and hairlines rather than boxes: one dark surface, one thin
+   * luminous edge, and the accent kept for what is alive — the pulse beside
+   * the population, a being's name, a thing that is happening now.
+   */
+  --panel: rgba(5, 16, 11, 0.78);
+  --panel-solid: #06140d;
+  --panel-edge: rgba(184, 231, 86, 0.22);
+  --panel-edge-soft: rgba(184, 231, 86, 0.11);
+  --hair: rgba(184, 231, 86, 0.11);
   --cream: #f1eed6;
-  --text: #d8e6c8;
-  --muted: #7f9a78;
-  --shadow: 0 18px 42px rgba(0, 0, 0, 0.6);
-  --radius: 12px;
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --text: #dce8d0;
+  --muted: #8ba385;
+  --shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  --radius: 14px;
+  --radius-lg: 18px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  /* Eyebrows are the one place letters are spaced; everything else is set plain. */
+  --track: 1.4px;
 }
 
 * { box-sizing: border-box; }
@@ -47,6 +57,9 @@ html, body {
   color: var(--text);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
+  /* Figures line up in columns, which every panel here is full of. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1;
 }
 
 button {
@@ -100,21 +113,22 @@ button {
 .panel {
   position: relative;
   background: var(--panel);
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--panel-edge-soft);
   border-radius: var(--radius);
-  box-shadow: var(--shadow), inset 0 1px 0 rgba(190, 255, 170, 0.08);
-  backdrop-filter: blur(9px);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(190, 255, 170, 0.06);
+  backdrop-filter: blur(14px) saturate(1.15);
   padding: 13px 15px;
 }
 
 .panel h3 {
   margin: 0 0 10px;
   font-size: 10px;
-  letter-spacing: 2.2px;
-  color: var(--emerald);
+  letter-spacing: var(--track);
+  color: var(--emerald-dim);
   display: flex;
   justify-content: space-between;
-  font-weight: 700;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 .panel h3 span { color: var(--emerald-dim); }
 
@@ -452,18 +466,34 @@ button {
 
 .world-chip {
   position: absolute;
-  top: 24px; left: 26px;
+  top: 20px; left: 22px;
   display: flex; align-items: center; gap: 9px;
-  padding: 9px 15px;
+  height: 38px;
+  padding: 0 15px 0 12px;
   border-radius: 999px;
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--panel-edge-soft);
   background: var(--panel);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(9px);
+  backdrop-filter: blur(14px);
   animation: chip-in 0.9s ease both;
 }
-.world-chip span { color: var(--emerald); }
-.world-chip b { font-size: 12.5px; letter-spacing: 1.4px; color: var(--cream); }
+.world-chip span { color: var(--emerald); font-size: 12px; }
+.world-chip b { font-size: 13px; font-weight: 600; letter-spacing: 0.2px; color: var(--cream); }
+
+/* Language and the guide, under the world's name: the two things about the
+   interface itself, kept out of the row of things about the world. */
+.hud-corner { position: absolute; top: 64px; left: 22px; display: flex; align-items: center; gap: 6px; }
+.hud-guide {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--panel-edge-soft);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px; font-weight: 600;
+  backdrop-filter: blur(10px);
+}
+.hud-guide:hover, .hud-guide.on { color: var(--emerald); border-color: var(--panel-edge); }
 .world-chip:hover { border-color: var(--emerald); }
 @keyframes chip-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 /* A soft scrim so the wordmark stays legible over bright terrain. */
@@ -508,33 +538,48 @@ button {
 
 .top-centre {
   position: absolute;
-  top: 22px; left: 50%;
+  top: 20px; left: 50%;
   transform: translateX(-50%);
-  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
 
+/* The pulse beside the population is the one thing on screen that says the
+   world is running on its own: it beats whether or not anybody is looking. */
 .beings-pill {
-  display: flex; align-items: center; gap: 9px;
-  padding: 9px 18px;
+  display: flex; align-items: center; gap: 10px;
+  height: 38px;
+  padding: 0 16px;
   background: var(--panel);
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--panel-edge-soft);
   border-radius: 999px;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(9px);
+  backdrop-filter: blur(14px);
 }
-.beings-pill .spark { color: var(--emerald); }
-.beings-pill b { font-size: 11px; letter-spacing: 2px; color: var(--cream); }
-.beings-pill em { font-style: normal; font-size: 11px; color: var(--muted); }
+.beings-pill .spark {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--emerald);
+  box-shadow: 0 0 0 0 rgba(184, 231, 86, 0.5);
+  animation: heartbeat 2.4s ease-out infinite;
+  font-size: 0;
+}
+@keyframes heartbeat {
+  0% { box-shadow: 0 0 0 0 rgba(184, 231, 86, 0.55); }
+  60% { box-shadow: 0 0 0 7px rgba(184, 231, 86, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(184, 231, 86, 0); }
+}
+.beings-pill b { font-size: 10px; letter-spacing: var(--track); color: var(--emerald-dim); font-weight: 600; }
+.beings-pill em { font-style: normal; font-size: 13px; color: var(--cream); font-weight: 600; }
 
-.time-controls { display: flex; gap: 5px; }
+.time-controls { display: flex; gap: 4px; }
 .time-controls button {
-  font-size: 10.5px; letter-spacing: 1px;
-  padding: 6px 11px;
+  font-size: 11px; letter-spacing: 0.2px;
+  height: 28px;
+  padding: 0 11px;
   border-radius: 999px;
-  border: 1px solid var(--panel-edge-soft);
-  background: rgba(9, 21, 13, 0.8);
+  border: 1px solid transparent;
+  background: rgba(6, 16, 11, 0.7);
   color: var(--muted);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
 }
 .time-controls button:hover { color: var(--text); border-color: var(--panel-edge); }
 .time-controls button.sel, .time-controls button.live { color: var(--emerald); border-color: rgba(184, 231, 86, 0.55); }
@@ -546,12 +591,12 @@ button {
 
 .right-rail {
   position: absolute;
-  top: 22px; right: 22px;
+  top: 20px; right: 20px;
   /* Anchored top and bottom, so the feed flexes rather than being squeezed to
      nothing when the viewport is short. */
-  bottom: 336px;
-  width: 262px;
-  display: flex; flex-direction: column; gap: 10px;
+  bottom: 300px;
+  width: 272px;
+  display: flex; flex-direction: column; gap: 8px;
   overflow-y: auto;
 }
 .right-rail > .panel:not(.feed-panel) { flex: none; }
@@ -567,15 +612,30 @@ button {
 
 .stat-row {
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 16px 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  padding: 3px 0;
   font-size: 12.5px;
 }
-.stat-icon { color: var(--emerald-dim); text-align: center; }
-.stat-label { color: #b6cdac; }
+.stat-icon { color: var(--emerald-dim); text-align: center; font-size: 11px; opacity: 0.85; }
+.stat-label { color: var(--muted); }
 .stat-value { color: var(--cream); font-weight: 600; }
+
+/* The food figure lives with the other figures about the world now, and is
+   the door to the market. It used to be a fourth floating card of its own. */
+.food-row {
+  display: grid; grid-template-columns: 16px 1fr auto auto; align-items: center; gap: 8px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--hair);
+  font-size: 12.5px;
+  width: 100%; text-align: left;
+}
+.food-row .stat-icon { color: var(--gold); }
+.food-row .stat-label { color: var(--muted); }
+.food-row b { color: var(--gold); font-weight: 600; }
+.food-row em { font-style: normal; font-size: 10px; color: var(--emerald-dim); letter-spacing: var(--track); text-transform: uppercase; }
+.food-row:hover em { color: var(--emerald); }
 
 .status-foot {
   margin-top: 9px;
@@ -646,6 +706,15 @@ button {
 .gallery-row span { color: var(--text); }
 .gallery-row em { font-style: normal; color: var(--muted); flex: none; }
 
+/* One card for everything asking for the player: trouble first, then what to
+   build, then what is on today. Three cards said the same thing in three
+   places. */
+.attention-section { padding-top: 8px; }
+.attention-section + .attention-section { margin-top: 8px; border-top: 1px solid var(--hair); }
+.attention-section > .eyebrow { display: block; margin-bottom: 4px; }
+.attention-empty { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.readiness-note { margin: 8px 0 0; }
+
 .feed-panel { flex: 1 1 auto; min-height: 96px; display: flex; flex-direction: column; }
 .feed-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-right: 3px; }
 .feed-scroll::-webkit-scrollbar { width: 5px; }
@@ -664,7 +733,19 @@ button {
  * Selected being
  * ------------------------------------------------------------------ */
 
-.bottom-left { position: absolute; left: 26px; bottom: 24px; width: 320px; }
+.bottom-left { position: absolute; left: 22px; bottom: 22px; width: 320px; }
+
+/* The observe hint is a whisper, not a card: one line, no box, so an empty
+   corner of the world stays an empty corner. */
+.whisper {
+  display: flex; align-items: flex-start; gap: 9px;
+  max-width: 300px;
+  font-size: 12.5px; line-height: 1.55;
+  color: #b9cfae;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9), 0 0 24px rgba(0, 0, 0, 0.7);
+}
+.whisper i { flex: none; margin-top: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 8px var(--emerald); }
+.whisper p { margin: 0; }
 
 .being-card { display: flex; flex-direction: column; gap: 12px; }
 .being-head { display: flex; gap: 13px; align-items: flex-start; }
@@ -681,7 +762,7 @@ button {
 }
 .being-portrait.building { background: linear-gradient(160deg, #d9c98e, #8a7440); }
 
-.being-eyebrow { font-size: 9px; letter-spacing: 2.4px; color: var(--emerald-dim); }
+.being-eyebrow { font-size: 9.5px; letter-spacing: var(--track); color: var(--emerald-dim); text-transform: uppercase; }
 .being-handle { font-size: 11.5px; color: var(--emerald); margin-top: 2px; }
 
 .being-meters { display: flex; flex-direction: column; gap: 7px; }
@@ -745,53 +826,61 @@ button {
  */
 .action-bar {
   position: absolute;
-  bottom: 24px;
+  bottom: 22px;
   left: 362px;
-  right: 300px;
+  right: 312px;
   transform: none;
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(9px);
-  padding: 11px 14px 13px;
+  display: flex; justify-content: center;
+  pointer-events: none;
 }
-.action-title { text-align: center; font-size: 10px; letter-spacing: 2.6px; color: var(--muted); margin-bottom: 10px; }
-.action-row { display: flex; gap: 8px; justify-content: center; }
+.action-title { display: none; }
+/* One glass strip, the doors laid along it in three groups: the settlement,
+   other people, and the chain. The gaps are the grouping; there is no title. */
+.action-row {
+  display: flex; align-items: stretch; gap: 2px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge-soft);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px) saturate(1.15);
+  pointer-events: auto;
+  max-width: 100%;
+}
+.action.group-start { margin-left: 8px; position: relative; }
+.action.group-start::before {
+  content: ""; position: absolute; left: -5px; top: 22%; bottom: 22%;
+  width: 1px; background: var(--hair);
+}
 
 .action {
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: 168px;
-  padding: 12px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--panel-edge-soft);
-  background: rgba(255, 255, 255, 0.03);
+  flex: 0 1 auto;
+  min-width: 64px;
+  padding: 8px 12px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: none;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   text-align: center;
   transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
-.action:hover { border-color: var(--panel-edge); background: rgba(184, 231, 86, 0.07); transform: translateY(-2px); }
-.action.active { border-color: var(--emerald); background: rgba(184, 231, 86, 0.12); }
+.action:hover { background: rgba(184, 231, 86, 0.07); transform: none; }
+.action.active { background: rgba(184, 231, 86, 0.13); border-color: var(--panel-edge-soft); }
 /* A fixed box for the glyph. The six icons come from different fallback fonts
    with different line boxes, so left to themselves they pushed each button's
    label to a slightly different height and the row read as ragged. */
 .action b {
-  font-size: 20px; color: var(--emerald); font-weight: 400;
-  line-height: 1; height: 22px;
+  font-size: 17px; color: var(--emerald); font-weight: 400;
+  line-height: 1; height: 19px;
   display: flex; align-items: center; justify-content: center;
 }
 .action span {
-  font-size: 11px; letter-spacing: 1.6px; color: var(--cream);
+  font-size: 9.5px; letter-spacing: 0.9px; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.action small {
-  font-size: 10px; color: var(--muted); line-height: 1.35;
-  /* Two lines for every button, so the row keeps one baseline whatever the
-     blurb says. */
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; min-height: 27px;
-}
+.action.active span { color: var(--cream); }
+/* The blurb is a tooltip now; the strip says one word per door. */
+.action small { display: none; }
 .action.inspire b { color: #b98ce8; }
 .action.build b { color: #7fc9e8; }
 .action.connect b { color: var(--gold); }
@@ -802,9 +891,9 @@ button {
 
 .bottom-right {
   position: absolute;
-  right: 22px; bottom: 24px;
-  width: 262px;
-  display: flex; flex-direction: column; gap: 10px;
+  right: 20px; bottom: 22px;
+  width: 272px;
+  display: flex; flex-direction: column; gap: 8px;
 }
 
 .minimap-canvas {
@@ -828,7 +917,7 @@ button {
   font-size: 13px;
 }
 .map-tools button:hover { border-color: var(--panel-edge); color: var(--emerald); }
-.map-tools span { margin-left: auto; font-size: 10px; color: var(--muted); letter-spacing: 1px; }
+.map-tools span { margin-left: auto; font-size: 10.5px; color: var(--muted); letter-spacing: 0.2px; }
 
 .economy-row { display: flex; gap: 8px; }
 .market-chip {
@@ -858,9 +947,9 @@ button {
   z-index: 40;
   display: flex; flex-direction: column; gap: 2px;
   padding: 8px 11px;
-  border-radius: 9px;
+  border-radius: 10px;
   background: rgba(6, 16, 10, 0.94);
-  border: 1px solid var(--panel-edge);
+  border: 1px solid var(--panel-edge-soft);
   box-shadow: var(--shadow);
   max-width: 230px;
 }
@@ -920,25 +1009,25 @@ button {
    */
   min-width: 0;
   max-width: 100%;
-  max-height: min(78vh, 760px);
+  max-height: min(80vh, 780px);
   display: flex; flex-direction: column;
-  background: linear-gradient(180deg, rgba(12, 27, 17, 0.97), rgba(7, 17, 11, 0.97));
-  border: 1px solid var(--panel-edge);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
+  background: rgba(7, 18, 12, 0.965);
+  border: 1px solid var(--panel-edge-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(190, 255, 170, 0.06);
 }
 .overlay-panel.wide { width: min(880px, 100%); }
 
 .overlay-panel header {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
-  padding: 20px 22px 14px;
-  border-bottom: 1px solid var(--panel-edge-soft);
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--hair);
 }
-.overlay-panel h2 { margin: 0; font-size: 21px; letter-spacing: 1px; color: var(--cream); }
+.overlay-panel h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.2px; color: var(--cream); }
 .overlay-panel header p { margin: 5px 0 0; font-size: 12px; max-width: 62ch; line-height: 1.55; }
 .overlay-panel .panel-close { position: static; font-size: 22px; }
 
-.overlay-body { padding: 18px 22px 22px; overflow-y: auto; overflow-x: hidden; min-width: 0; }
+.overlay-body { padding: 18px 24px 24px; overflow-y: auto; overflow-x: hidden; min-width: 0; }
 
 /* Every grid and flex container inside a panel, for the same reason. */
 .market-focus, .market-row, .market-rows, .bank-grid, .books, .books-col,
@@ -948,8 +1037,8 @@ button {
 .market-focus > *, .market-row > *, .bank-grid > *, .books-col > *,
 .steward-grid > *, .connect-grid > *, .build-grid > *, .vault-grid > *,
 .token-grid > *, .listing-row > *, .chat-row > * { min-width: 0; }
-.overlay-body h4 { margin: 22px 0 10px; font-size: 10px; letter-spacing: 2.2px; color: var(--emerald); }
-.eyebrow { font-size: 9px; letter-spacing: 2.4px; color: var(--emerald-dim); }
+.overlay-body h4 { margin: 22px 0 10px; font-size: 10px; letter-spacing: var(--track); color: var(--emerald-dim); text-transform: uppercase; }
+.eyebrow { font-size: 9.5px; letter-spacing: var(--track); color: var(--emerald-dim); text-transform: uppercase; }
 
 .market-focus {
   display: grid;
@@ -1045,23 +1134,23 @@ button {
 .purse {
   display: flex; align-items: stretch; gap: 0;
   padding: 0;
-  border-radius: 11px;
+  border-radius: 12px;
   border: 1px solid var(--panel-edge-soft);
-  background: rgba(10, 22, 14, 0.86);
-  backdrop-filter: blur(7px);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
   box-shadow: var(--shadow);
   overflow: hidden;
   z-index: 6;
 }
 .purse:hover { border-color: var(--panel-edge); }
 .purse-cell {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-  padding: 7px 14px;
-  border-right: 1px solid var(--panel-edge-soft);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 15px;
+  border-right: 1px solid var(--hair);
 }
 .purse-cell:last-child { border-right: none; }
-.purse-cell em { font-style: normal; font-size: 8px; letter-spacing: 1.6px; color: var(--muted); }
-.purse-cell b { font-size: 15px; line-height: 1.1; }
+.purse-cell em { font-style: normal; font-size: 9px; letter-spacing: var(--track); color: var(--muted); text-transform: uppercase; }
+.purse-cell b { font-size: 16px; line-height: 1.1; font-weight: 600; }
 .purse-cell i { font-style: normal; font-size: 8.5px; color: var(--muted); }
 /* A full treasury is turning income away, which is worth noticing without
    being an alarm: the town is fine, it just has nothing to do with the Gold. */
@@ -1593,7 +1682,8 @@ button.fold:hover { color: var(--emerald); }
   /* Stops short of the zoom column on the right, which sits at the same
      height — full width, the observe card ran underneath the three buttons. */
   .bottom-left { left: 12px; right: 68px; width: auto; bottom: 84px; }
-  .hint-card p { font-size: 12px; line-height: 1.5; }
+  .whisper { font-size: 12px; }
+  .hud-corner { top: 60px; left: 12px; }
   .being-card { max-height: 40vh; overflow-y: auto; }
   /*
    * The action bar is a tab bar on a phone, not a floating card.
@@ -1609,13 +1699,18 @@ button.fold:hover { color: var(--emerald); }
     bottom: 0;
     transform: none;
     width: 100%;
+  }
+  .action-row {
+    width: 100%;
+    gap: 0;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
     border-radius: 0;
     border-left: none; border-right: none; border-bottom: none;
-    background: rgba(9, 22, 15, 0.94);
-    padding: 7px 6px calc(7px + env(safe-area-inset-bottom));
+    background: rgba(6, 16, 11, 0.94);
+    backdrop-filter: blur(14px);
   }
-  .action-title { display: none; }
-  .action-row { gap: 2px; }
+  .action.group-start { margin-left: 0; }
+  .action.group-start::before { display: none; }
   .action {
     flex: 1 1 0;
     width: auto;
@@ -3068,8 +3163,9 @@ button.fold:hover { color: var(--emerald); }
 .landing-inner { position: relative; }
 .wiki-head { position: relative; }
 .wiki-lang { position: absolute; top: 4px; right: 0; }
-.hud .hud-lang { position: absolute; left: 14px; top: 62px; z-index: 5; transform: scale(0.9); transform-origin: left top; }
-@media (max-width: 780px) { .hud .hud-lang { top: 56px; } .landing-lang { top: 10px; right: 10px; } }
+/* In the corner row beside the guide, not floated on its own: two absolute boxes in one corner always find a width at which they collide. */
+.hud .hud-lang { position: static; z-index: 5; transform: scale(0.9); transform-origin: left center; }
+@media (max-width: 780px) { .landing-lang { top: 10px; right: 10px; } }
 
 /* ---- world count and resale ---- */
 .soft-stake { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px 18px; align-items: center; margin: 0 0 14px; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--panel-edge-soft); background: rgba(255, 255, 255, 0.03); }

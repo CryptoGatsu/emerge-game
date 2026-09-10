@@ -810,7 +810,7 @@ export class EmergeScene {
     const badge = new Container();
     badge.visible = false;
     const bg = new Graphics();
-    bg.roundRect(-19, -11, 38, 22, 11).fill({ color: 0x0b1a10, alpha: 0.88 }).stroke({ width: 1, color: 0x3f6b46 });
+    bg.roundRect(-19, -11, 38, 22, 11).fill({ color: 0x07140d, alpha: 0.9 }).stroke({ width: 1, color: 0xb8e756, alpha: 0.28 });
     const icon = new Sprite(this.assets.get('icon.work'));
     icon.anchor.set(0.5, 0.5);
     icon.position.set(-7, 0);
@@ -872,8 +872,8 @@ export class EmergeScene {
       const label = new Text({
         text: '',
         style: {
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 13, fontWeight: '600',
-          fill: 0x1a2616, wordWrap: true, wordWrapWidth: 176, lineHeight: 17,
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontSize: 12.5, fontWeight: '500',
+          fill: 0xe6efdc, wordWrap: true, wordWrapWidth: 176, lineHeight: 17,
         },
         resolution: 2,
       });
@@ -1215,8 +1215,9 @@ export class EmergeScene {
     const bw = Math.ceil(bubble.label.width) + 18;
     const bh = Math.ceil(bubble.label.height) + 14;
     bubble.bg.clear();
-    bubble.bg.roundRect(0, 0, bw, bh, 7).fill({ color: 0xf6f4e6, alpha: 1 }).stroke({ width: 1.5, color: 0x2a3a24, alpha: 0.55 });
-    bubble.bg.moveTo(bw / 2 - 6, bh).lineTo(bw / 2, bh + 7).lineTo(bw / 2 + 6, bh).fill({ color: 0xf6f4e6, alpha: 1 });
+    // The same glass as the panels: near-black green, a thin luminous edge.
+    bubble.bg.roundRect(0, 0, bw, bh, 9).fill({ color: 0x07140d, alpha: 0.9 }).stroke({ width: 1, color: 0xb8e756, alpha: 0.32 });
+    bubble.bg.moveTo(bw / 2 - 5, bh).lineTo(bw / 2, bh + 6).lineTo(bw / 2 + 5, bh).fill({ color: 0x07140d, alpha: 0.9 });
   }
 
   private setHover(target: PickTarget) {

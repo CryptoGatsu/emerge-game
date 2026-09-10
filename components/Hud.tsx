@@ -488,7 +488,7 @@ function Folding({ id, title, badge, children, defaultOpen = true }: {
   defaultOpen?: boolean;
 }) {
   const key = `emerge.panel.${id}`;
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(defaultOpen !== false);
   // A panel that asks to be open — the danger panel while something is
   // wrong — opens whatever the player folded it to last week.
   useEffect(() => { if (defaultOpen) setOpen(true); }, [defaultOpen]);
@@ -521,10 +521,12 @@ function Folding({ id, title, badge, children, defaultOpen = true }: {
   );
 }
 
-function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['woodland'] }) {
+function StatusPanel({ view, woodland, activePanel, onPanel }: {
+  view: Snapshot; woodland: HudProps['woodland']; activePanel: PanelKey; onPanel: (panel: PanelKey) => void;
+}) {
   useLocale();
   return (
-    <Folding id="status" title={t('WORLD STATUS')} badge={<span>✦</span>}>
+    <Folding id="status" title={t('WORLD')} badge={<span title={tn(view.weather)}>{WEATHER_ICON[view.weather] ?? '☀'}</span>}>
       <Stat icon="◍" label={t('Population')} value={`${view.population}`} />
       <Stat icon="♥" label={t('Happiness')} value={`${view.happiness}%`} />
       <Stat icon="⚡" label={t('Energy')} value={`${view.energy}%`} />
@@ -550,35 +552,130 @@ function StatusPanel({ view, woodland }: { view: Snapshot; woodland: HudProps['w
         <span>{t('{n} working', { n: view.employed })} · {t('{n} outdoors', { n: view.outdoors })}{view.seated > 0 ? ` · ${t('{n} sitting', { n: view.seated })}` : ''}</span>
         <span>{t('{born} born · {died} died here', { born: view.births, died: view.deaths })}</span>
       </div>
+      {/* The food figure, and the door to the market. It was a floating card
+          of its own under the minimap, saying one number. */}
+      <button className="food-row" onClick={() => onPanel(activePanel === 'market' ? null : 'market')}>
+        <span className="stat-icon">◍</span>
+        <span className="stat-label">{t('FOOD IN STORE')}</span>
+        <b>{view.food}</b>
+        <em>{t('MARKET')}</em>
+      </button>
     </Folding>
   );
 }
 
 /**
- * What to build next.
- *
- * Read off the settlement every tick, so the advice moves as the town does:
- * raise the house and the house drops off the list. Each line says what is
- * asking for it and what it will do, because "build a mill" on its own is an
- * instruction and not a reason.
+ * Everything asking for the player, in one place and in order: what is going
+ * wrong, what to build, and what is on today. These were three cards — the
+ * helper, the dangers and the events — and between them they took most of the
+ * rail while saying, on a quiet day, that nothing was happening three times.
  */
-function HelperPanel({ view, onPanel, onRebuild }: { view: Snapshot; onPanel: (panel: PanelKey) => void; onRebuild: (id: string) => void }) {
+function AttentionPanel({ view, visiting, onPanel, onRebuild, onFight }: {
+  view: Snapshot; visiting: boolean; onPanel: (panel: PanelKey) => void; onRebuild: (id: string) => void; onFight: (id: string) => void;
+}) {
+  useLocale();
+  const worst = view.readiness[0];
+  const advice = visiting ? [] : view.advice;
+  const count = view.hazards.length + advice.length + view.events.filter((e) => e.status === 'now').length;
+  const quiet = view.hazards.length === 0 && advice.length === 0 && view.events.length === 0;
   return (
-    <Folding id="helper" title={t('PLOT HELPER')} badge={view.advice.length ? <span>{view.advice.length}</span> : undefined}>
-      {view.advice.length === 0 && (
-        <p className="muted small">{t('Nothing is asking to be built. Put the surplus by, or improve what stands.')}</p>
-      )}
-      {view.advice.map((a, i) => (
-        <div key={`${a.kind}-${a.type ?? ''}-${i}`} className={`advice ${a.kind}`}>
-          <div className="advice-head">
-            <b>{tx(a.title)}</b>
-            {a.kind === 'build' && <button className="ghost small" onClick={() => onPanel('build')}>{t('Build')}</button>}
-            {a.kind === 'rebuild' && a.buildingId && <button className="ghost small rebuild" onClick={() => onRebuild(a.buildingId!)}>{t('Rebuild')}</button>}
-          </div>
-          <span>{tx(a.why)}</span>
-          <em>{tx(a.gain)}</em>
+    <Folding id="attention" title={t('ATTENTION')} badge={count > 0 ? <span>{count}</span> : undefined} defaultOpen={view.hazards.length > 0 || undefined}>
+      {quiet && <p className="attention-empty">{t('Nothing is asking for you. Watch the world, or improve what stands.')}</p>}
+
+      {view.hazards.length > 0 && (
+        <div className="attention-section">
+          {view.hazards.map((h) => (
+            <div key={h.id} className={`hazard ${h.kind} ${DIRE.has(h.kind) ? 'dire' : ''}`}>
+              <div className="hazard-head">
+                <span>{tn(h.label)}</span>
+                <b>{h.hours ? t('{n}h more', { n: h.hours }) : h.days === 1 ? t('today') : t('{n} days', { n: h.days })}</b>
+              </div>
+              <em>{tx(h.effect)}</em>
+              {h.wrecked > 0 && <em className="wrecked">{t('{n} in ruins — rebuild from the building card.', { n: h.wrecked })}</em>}
+              {!visiting && h.severity > 0 && (
+                h.fought ? (
+                  <em className="fought">{t('{what} — done.', { what: tn(h.fight.title) })}</em>
+                ) : (
+                  <button className="fight" disabled={view.treasury < h.fight.gold} onClick={() => onFight(h.id)} title={tx(h.fight.blurb)}>
+                    {t('{what} · {gold} Gold', { what: tn(h.fight.title), gold: h.fight.gold.toLocaleString() })}
+                  </button>
+                )
+              )}
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      {advice.length > 0 && (
+        <div className="attention-section">
+          <span className="eyebrow">{t('TO BUILD')}</span>
+          {advice.map((a, i) => (
+            <div key={`${a.kind}-${a.type ?? ''}-${i}`} className={`advice ${a.kind}`}>
+              <div className="advice-head">
+                <b>{tx(a.title)}</b>
+                {a.kind === 'build' && <button className="ghost small" onClick={() => onPanel('build')}>{t('Build')}</button>}
+                {a.kind === 'rebuild' && a.buildingId && <button className="ghost small rebuild" onClick={() => onRebuild(a.buildingId!)}>{t('Rebuild')}</button>}
+              </div>
+              <span>{tx(a.why)}</span>
+              <em>{tx(a.gain)}</em>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(view.events.length > 0 || view.resolution || view.artworks.length > 0) && (
+        <div className="attention-section">
+          <span className="eyebrow">{t('TODAY')}</span>
+          {view.events.map((e) => (
+            <div key={e.id} className={`event-row ${e.status}`}>
+              <div className="event-head">
+                <span>{tn(e.name)}</span>
+                <b>{tx(e.time)}</b>
+              </div>
+              {e.outcome && <em className="event-outcome">{tx(e.outcome)}</em>}
+              {!e.outcome && e.status === 'now' && e.attendees > 0 && (
+                <em className="event-outcome">{t('{n} there', { n: e.attendees })}</em>
+              )}
+            </div>
+          ))}
+          {view.resolution && (
+            <div className="resolution">
+              <span>{t('THE TOWN RESOLVED')}</span>
+              <p>{tx(view.resolution.text[0].toUpperCase() + view.resolution.text.slice(1))}.</p>
+              <em>{t('{n} in the room, day {day}', { n: view.resolution.voters, day: view.resolution.day })}</em>
+            </div>
+          )}
+          {view.artworks.length > 0 && (
+            <div className="gallery">
+              <span>{t('THE SETTLEMENT’S WORK')}</span>
+              {view.artworks.slice(0, 4).map((a) => (
+                <div key={a.id} className="gallery-row">
+                  <span>&ldquo;{a.title}&rdquo;</span>
+                  <em>{a.maker}</em>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Readiness only when it is worth acting on: a settlement ready for
+          everything has nothing to read here. */}
+      {worst && worst.percent < 75 && (
+        <div className="attention-section">
+          <span className="eyebrow">{t('READINESS')}</span>
+          <div className="readiness">
+            {view.readiness.filter((r) => r.percent < 75).map((r) => (
+              <div key={r.kind} className="ready-row" title={tx(r.defence)}>
+                <span>{tn(r.label)}</span>
+                <div className="ready-bar"><i style={{ width: `${r.percent}%` }} className={r.percent < 40 ? 'low' : 'mid'} /></div>
+                <b>{r.percent}%</b>
+              </div>
+            ))}
+          </div>
+          <p className="muted small readiness-note">{tx(worst.defence)}</p>
+        </div>
+      )}
     </Folding>
   );
 }
@@ -616,97 +713,6 @@ function DangerBanner({ view, onFight, readOnly }: { view: Snapshot; onFight: (i
   );
 }
 
-/**
- * What is going wrong, and how ready the settlement is for the next thing.
- *
- * The readiness bars are here whether or not anything is happening, because
- * the whole point of them is that they are something to act on before the fire
- * rather than a post-mortem after it.
- */
-function DangerPanel({ view, onFight, readOnly }: { view: Snapshot; onFight: (id: string) => void; readOnly: boolean }) {
-  useLocale();
-  const worst = view.readiness[0];
-  return (
-    <Folding id="danger" title={t('WHAT COULD GO WRONG')} defaultOpen={view.hazards.length > 0}>
-      {view.hazards.map((h) => (
-        <div key={h.id} className={`hazard ${h.kind} ${DIRE.has(h.kind) ? 'dire' : ''}`}>
-          <div className="hazard-head">
-            <span>{tn(h.label)}</span>
-            <b>{h.hours ? t('{n}h more', { n: h.hours }) : h.days === 1 ? t('today') : t('{n} days', { n: h.days })}</b>
-          </div>
-          <em>{tx(h.effect)}</em>
-          {h.wrecked > 0 && <em className="wrecked">{t('{n} in ruins — rebuild from the building card.', { n: h.wrecked })}</em>}
-          {!readOnly && h.severity > 0 && (
-            h.fought ? (
-              <em className="fought">{t('{what} — done.', { what: tn(h.fight.title) })}</em>
-            ) : (
-              <button className="fight" disabled={view.treasury < h.fight.gold} onClick={() => onFight(h.id)} title={tx(h.fight.blurb)}>
-                {t('{what} · {gold} Gold', { what: tn(h.fight.title), gold: h.fight.gold.toLocaleString() })}
-              </button>
-            )
-          )}
-        </div>
-      ))}
-      {view.hazards.length === 0 && (
-        <p className="muted small">
-          {t('Nothing is wrong today.')}{worst && worst.percent < 60 ? ` ${t('The settlement is least ready for {hazard}.', { hazard: tn(worst.label).toLowerCase() })}` : ''}
-        </p>
-      )}
-      <div className="readiness">
-        {view.readiness.map((r) => (
-          <div key={r.kind} className="ready-row" title={tx(r.defence)}>
-            <span>{tn(r.label)}</span>
-            <div className="ready-bar"><i style={{ width: `${r.percent}%` }} className={r.percent < 40 ? 'low' : r.percent < 75 ? 'mid' : ''} /></div>
-            <b>{r.percent}%</b>
-          </div>
-        ))}
-      </div>
-      {worst && worst.percent < 75 && <p className="muted small">{tx(worst.defence)}</p>}
-    </Folding>
-  );
-}
-
-function EventsPanel({ view }: { view: Snapshot }) {
-  useLocale();
-  return (
-    <Folding id="events" title={t('ACTIVE EVENTS')}>
-      {view.events.length === 0 && <p className="muted small">{t('Nothing scheduled today.')}</p>}
-      {view.events.map((e) => (
-        <div key={e.id} className={`event-row ${e.status}`}>
-          <div className="event-head">
-            <span>{tn(e.name)}</span>
-            <b>{tx(e.time)}</b>
-          </div>
-          {/* What actually came of it. A meeting that resolved nothing and a
-              showcase nobody attended both say so. */}
-          {e.outcome && <em className="event-outcome">{tx(e.outcome)}</em>}
-          {!e.outcome && e.status === 'now' && e.attendees > 0 && (
-            <em className="event-outcome">{t('{n} there', { n: e.attendees })}</em>
-          )}
-        </div>
-      ))}
-      {view.resolution && (
-        <div className="resolution">
-          <span>{t('THE TOWN RESOLVED')}</span>
-          <p>{tx(view.resolution.text[0].toUpperCase() + view.resolution.text.slice(1))}.</p>
-          <em>{t('{n} in the room, day {day}', { n: view.resolution.voters, day: view.resolution.day })}</em>
-        </div>
-      )}
-      {view.artworks.length > 0 && (
-        <div className="gallery">
-          <span>{t('THE SETTLEMENT’S WORK')}</span>
-          {view.artworks.slice(0, 4).map((a) => (
-            <div key={a.id} className="gallery-row">
-              <span>&ldquo;{a.title}&rdquo;</span>
-              <em>{a.maker}</em>
-            </div>
-          ))}
-        </div>
-      )}
-    </Folding>
-  );
-}
-
 function FeedPanel({ view }: { view: Snapshot }) {
   useLocale();
   return (
@@ -720,23 +726,6 @@ function FeedPanel({ view }: { view: Snapshot }) {
         ))}
       </div>
     </Folding>
-  );
-}
-
-function EconomyRow({ view, activePanel, onPanel }: {
-  view: Snapshot; activePanel: PanelKey; onPanel: (panel: PanelKey) => void;
-}) {
-  return (
-    <div className="economy-row">
-      {/* The treasury chip that used to sit here printed the same Gold as the
-          purse and opened the same panel — two of the same button, one of them
-          always redundant. */}
-      <button className="market-chip" onClick={() => onPanel(activePanel === 'market' ? null : 'market')}>
-        <span>{t('MARKET')}</span>
-        <b>{view.food}</b>
-        <em>{t('FOOD IN STORE')}</em>
-      </button>
-    </div>
   );
 }
 
@@ -824,17 +813,22 @@ function sinceWhen(at: number) {
   return days === 1 ? t('1 day ago') : t('{n} days ago', { n: days });
 }
 
-const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; short: string; blurb: string }[] = [
-  { key: 'guide', icon: '◎', label: 'GAME GUIDE', short: 'GUIDE', blurb: 'How all of this works' },
+/*
+ * The doors, in three groups: the settlement, other people, and the chain.
+ * `group` marks the first door of a group, which the strip draws a hairline
+ * before. The guide is not here: it is about the interface rather than the
+ * world, and lives beside the language switch.
+ */
+const ACTIONS: { key: Exclude<PanelKey, null>; icon: string; label: string; short: string; blurb: string; group?: boolean }[] = [
   { key: 'build', icon: '⚒', label: 'BUILD', short: 'BUILD', blurb: 'Places and resources' },
   { key: 'people', icon: '☺', label: 'PEOPLE', short: 'PEOPLE', blurb: 'Trades, posts and training' },
-  { key: 'market', icon: '◍', label: 'MARKET', short: 'MARKET', blurb: 'Prices and scarcity' },
+  { key: 'market', icon: '◍', label: 'MARKET', short: 'SHOP', blurb: 'Prices and scarcity' },
   { key: 'land', icon: '⌂', label: 'LAND', short: 'LAND', blurb: 'Plots for sale' },
-  { key: 'exchange', icon: '⇄', label: 'TRADE', short: 'TRADE', blurb: 'Buy and sell with other players' },
+  { key: 'exchange', icon: '⇄', label: 'TRADE', short: 'TRADE', blurb: 'Buy and sell with other players', group: true },
   { key: 'chat', icon: '✎', label: 'CHAT', short: 'CHAT', blurb: 'Talk to other players' },
   { key: 'arena', icon: '⚔', label: 'ARENA', short: 'ARENA', blurb: 'Duels and betting' },
   { key: 'casino', icon: '⚄', label: 'CASINO', short: 'CASINO', blurb: 'Coin, cups, Gold or $EMERGE' },
-  { key: 'gacha', icon: '⛏', label: 'PROSPECT', short: 'DIG', blurb: 'Send a party out' },
+  { key: 'gacha', icon: '⛏', label: 'PROSPECT', short: 'DIG', blurb: 'Send a party out', group: true },
   { key: 'connect', icon: '◈', label: 'ON-CHAIN', short: 'CHAIN', blurb: 'Plot, wallet and vault' },
 ];
 
@@ -864,7 +858,7 @@ export function Hud(props: HudProps) {
       // nobody owns: standing in somebody else's settlement is no reason to be
       // shut out of a public place. Everything else here still belongs to the
       // owner alone.
-      ...ACTIONS.filter((a) => a.key === 'guide' || a.key === 'market' || a.key === 'chat' || a.key === 'arena'),
+      ...ACTIONS.filter((a) => a.key === 'market' || a.key === 'chat' || a.key === 'arena').map((a) => ({ ...a, group: false })),
       VISITOR_GIFT,
     ]
     : ACTIONS;
@@ -872,7 +866,17 @@ export function Hud(props: HudProps) {
   return (
     <div className={`hud ${props.visiting ? 'is-visiting' : ''}`}>
       <HoverTip hover={props.hover} />
-      {!introShown && <LanguageSwitch className="hud-lang" />}
+      {!introShown && (
+        <div className="hud-corner">
+          <LanguageSwitch className="hud-lang" />
+          <button
+            className={`hud-guide ${activePanel === 'guide' ? 'on' : ''}`}
+            onClick={() => props.onPanel(activePanel === 'guide' ? null : 'guide')}
+            title={t('How all of this works')}
+            aria-label={t('Game guide')}
+          >?</button>
+        </div>
+      )}
 
       {!introShown && (
         <button className="world-chip" onClick={() => setIntroShown(true)} title={t('About Emerge')}>
@@ -898,8 +902,8 @@ export function Hud(props: HudProps) {
           other the moment the window was narrow enough — the purse covered the
           population pill and the speed controls both. */}
       <div className="top-centre">
-        <div className="beings-pill">
-          <span className="spark">✦</span>
+        <div className="beings-pill" title={t('A living world of autonomous AI beings. They think. They socialise. They build. They evolve.')}>
+          <span className="spark" aria-hidden />
           <b>{t('AI BEINGS')}</b>
           <em>{t('{n} here', { n: view.population })}</em>
           {/* Two different populations, and they are easy to confuse, so they
@@ -986,21 +990,16 @@ export function Hud(props: HudProps) {
             </button>
             <aside className={`phone-sheet ${railOpen ? 'open' : ''}`} aria-hidden={!railOpen}>
               <div className="sheet-grip" />
-              <StatusPanel view={view} woodland={props.woodland} />
-              {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} onRebuild={props.onRebuild} />}
-              <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
-              <EventsPanel view={view} />
-              <DangerPanel view={view} onFight={props.onFight} readOnly={!!props.visiting} />
+              <StatusPanel view={view} woodland={props.woodland} activePanel={activePanel} onPanel={props.onPanel} />
+              <AttentionPanel view={view} visiting={!!props.visiting} onPanel={props.onPanel} onRebuild={props.onRebuild} onFight={props.onFight} />
               <FeedPanel view={view} />
             </aside>
           </>
         )
         : (
           <aside className="right-rail">
-            <StatusPanel view={view} woodland={props.woodland} />
-            {!props.visiting && <HelperPanel view={view} onPanel={props.onPanel} onRebuild={props.onRebuild} />}
-            <EventsPanel view={view} />
-            <DangerPanel view={view} onFight={props.onFight} readOnly={!!props.visiting} />
+            <StatusPanel view={view} woodland={props.woodland} activePanel={activePanel} onPanel={props.onPanel} />
+            <AttentionPanel view={view} visiting={!!props.visiting} onPanel={props.onPanel} onRebuild={props.onRebuild} onFight={props.onFight} />
             <FeedPanel view={view} />
           </aside>
         )}
@@ -1030,32 +1029,31 @@ export function Hud(props: HudProps) {
           : props.firstDay && !props.visiting
             ? <FirstDay steps={props.firstDay.steps} cap={props.firstDay.cap} compact={compact} onGo={props.onFirstDayGo} onDismiss={props.onFirstDayDismiss} />
             : (
-            <section className="panel hint-card">
-              <div className="being-eyebrow">{t('OBSERVE')}</div>
+            <div className="whisper" aria-label={t('OBSERVE')}>
+              <i aria-hidden />
               <p>
                 {t('Tap any being or place to follow their story.')}
                 {compact ? ` ${t('Drag to pan, pinch to zoom.')}` : ` ${t('Drag to pan, scroll to zoom.')}`}
               </p>
-            </section>
+            </div>
           )}
       </div>
 
-      <nav className="action-bar">
-        <div className="action-title">{props.visiting ? t('SOMEBODY ELSE’S WORLD') : t('WHAT WILL YOU DO?')}</div>
+      <nav className="action-bar" aria-label={props.visiting ? t('SOMEBODY ELSE’S WORLD') : t('WHAT WILL YOU DO?')}>
         <div className="action-row">
           {actions.map((action) => {
             const active = action.key === activePanel;
             return (
               <button
                 key={action.key}
-                className={`action ${active ? 'active' : ''} ${action.key}`}
+                className={`action ${active ? 'active' : ''} ${action.key} ${'group' in action && action.group ? 'group-start' : ''}`}
+                title={t(action.blurb)}
                 onClick={() => {
                   props.onPanel(active ? null : (action.key as PanelKey));
                 }}
               >
                 <b>{action.icon}</b>
                 <span>{t(compact ? action.short : action.label)}</span>
-                <small>{t(action.blurb)}</small>
               </button>
             );
           })}
@@ -1084,7 +1082,6 @@ export function Hud(props: HudProps) {
                 <span>{t('{n} areas', { n: view.unlockedAreas.length })}</span>
               </div>
             </section>
-            <EconomyRow view={view} activePanel={activePanel} onPanel={props.onPanel} />
           </aside>
         )}
 
