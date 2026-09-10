@@ -750,6 +750,12 @@ export interface World {
    * the same lever rather than two.
    */
   programmes?: ProgrammeKey[];
+  /**
+   * The monumental projects the city has commissioned: one being built at a
+   * time, and every one finished standing in the streets for as long as its
+   * upkeep is paid.
+   */
+  greatWorks?: GreatWork[];
   /** Wall-clock time until which a charter or insurance bought for this plot runs. */
   charterUntil?: number;
   insuredUntil?: number;
@@ -883,7 +889,7 @@ export interface Stewardship {
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
   | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
-  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival' | 'programmes';
+  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival' | 'programmes' | 'greatworks';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
   wages: 'Wages',
@@ -897,6 +903,7 @@ export const LEDGER_LABELS: Record<LedgerLine, string> = {
   training: 'Training',
   festival: 'Festivals',
   programmes: 'Programmes',
+  greatworks: 'Great works',
   food: 'Food sales',
   vault: 'Vault',
   arena: 'The arena',
@@ -1651,6 +1658,7 @@ const FOOTPRINTS: Record<string, number> = {
   Market: 4.2, 'Town Hall': 4.2, House: 2.6, School: 3.8, Library: 3.6, Lab: 3.7, Cafe: 3.5,
   Fishery: 3.0, Forager: 2.6,
   Chapel: 3.6, Guildhall: 4.0, Brewery: 3.4, Printer: 3.2, Stables: 3.8, Harbour: 3.6, Monument: 2.6,
+  'Terraced Gardens': 4.4, Aqueduct: 4.6, 'Great Library': 4.2, 'Grand Exchange': 4.4, Observatory: 3.4,
   Factory: 4.4, Foundry: 4.0, 'Railway Station': 4.4, Telegraph: 2.8, Gasworks: 4.0,
   Hospital: 4.2, Stadium: 4.8, Supermarket: 4.2, Office: 3.8, 'Bus Depot': 4.2, 'Power Plant': 4.4,
   'Data Centre': 4.2, 'Research Campus': 4.6, 'Vertical Farm': 3.8, 'Pod Hub': 4.0, 'Drone Port': 4.0,
@@ -4593,7 +4601,7 @@ const bestLevelOf = (world: World, types: string[]) =>
   world.buildings.filter((b) => types.includes(b.type) && b.active && !b.ruined).reduce((m, b) => Math.max(m, levelOf(b)), 0);
 /** Exports sell for MARKET_EDGE more per level of the market. */
 export const MARKET_EDGE = 0.05;
-export const marketEdge = (world: World) => 1 + MARKET_EDGE * Math.max(0, bestLevelOf(world, ['Market']) - 1);
+export const marketEdge = (world: World) => (1 + MARKET_EDGE * Math.max(0, bestLevelOf(world, ['Market']) - 1)) * (greatWorkStanding(world, 'exchange') ? EXCHANGE_TRADE : 1);
 /** The bank keeps the books: every building's upkeep BANK_RELIEF cheaper per level. */
 export const BANK_RELIEF = 0.05;
 export const bankRelief = (world: World) => 1 - BANK_RELIEF * Math.max(0, bestLevelOf(world, ['Bank']) - 1) * staffingOf(world, ['Bank']);
@@ -4611,7 +4619,8 @@ export function learningRate(world: World): number {
     + GUILDHALL_LEARNING * civicStrength(world, 'Guildhall') + PRINTER_LEARNING * civicStrength(world, 'Printer')
     + TELEGRAPH_LEARNING * civicStrength(world, 'Telegraph') + DATA_CENTRE_LEARNING * civicStrength(world, 'Data Centre')
     + CAMPUS_LEARNING * civicStrength(world, 'Research Campus')
-    + (programmeOn(world, 'apprentices') ? APPRENTICE_LEARNING : 0);
+    + (programmeOn(world, 'apprentices') ? APPRENTICE_LEARNING : 0)
+    + (greatWorkStanding(world, 'library') ? LIBRARY_OF_AGES : 0);
 }
 
 /** Lab: better methods, applied to every trade's output. */
@@ -5747,11 +5756,11 @@ export function readiness(world: World): Record<HazardKind, number> {
   // readiness for a town of thirty-one, which meant nothing could ever burn.
   // A lab sees fire, blight and wolves coming; a clinic makes a blight a
   // sickness the town gets over rather than one it does not.
-  const warned = hasCivic(world, 'Lab') ? LAB_WARNING : 0;
+  const warned = (hasCivic(world, 'Lab') ? LAB_WARNING : 0) + (greatWorkStanding(world, 'observatory') ? OBSERVATORY_WARNING : 0);
   const cared = careOf(world);
   const improved = world.buildings.filter((b) => levelOf(b) > 1).length / buildings;
   return {
-    fire: clamp(wells / (1 + buildings / 8) + warned, 0, 1),
+    fire: clamp(wells / (1 + buildings / 8) + warned + (greatWorkStanding(world, 'aqueduct') ? AQUEDUCT_FIRE : 0), 0, 1),
     blight: clamp(food / (mouths * 9) * 0.7 + stores * 0.3 + warned + cared, 0, 1),
     // Stone in the yard is what shores a wall up; a storehouse is somewhere
     // to shelter; a clinic and herbs are what stands between a sickness and
@@ -7642,6 +7651,9 @@ const TRADE_BUILD_COST: Record<string, number> = {
   // the water, the chapel and the brewery give people somewhere to be, the
   // guildhall and the printer make them better at what they do.
   Chapel: 505, Guildhall: 610, Brewery: 450, Printer: 480, Stables: 370, Harbour: 560, Monument: 0,
+  // The great works. Priced by `greatWorkCost` and paid when commissioned,
+  // so the build tables carry nought and the panel never offers them.
+  'Terraced Gardens': 0, Aqueduct: 0, 'Great Library': 0, 'Grand Exchange': 0, Observatory: 0,
   // The industrial era: brick and iron, and the first machines.
   Factory: 960, Foundry: 900, 'Railway Station': 1080, Telegraph: 570, Gasworks: 840,
   // The modern era: concrete and glass, and the roads fill up.
@@ -7709,6 +7721,8 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   'Town Hall': { wood: 20, stone: 30 },
   Chapel: { wood: 10, stone: 30 },
   Monument: { wood: 0, stone: 0 },
+  'Terraced Gardens': { wood: 0, stone: 0 }, Aqueduct: { wood: 0, stone: 0 }, 'Great Library': { wood: 0, stone: 0 },
+  'Grand Exchange': { wood: 0, stone: 0 }, Observatory: { wood: 0, stone: 0 },
   Guildhall: { wood: 16, stone: 28 },
   Brewery: { wood: 20, stone: 14 },
   Printer: { wood: 14, stone: 18 },
@@ -8777,6 +8791,7 @@ export function maintenanceCost(type: string) {
     Carpenter: 6, Blacksmith: 10, Tailor: 7, Tavern: 8, 'Town Hall': 12,
     Cafe: 6, School: 7, Library: 6, Studio: 6, Clinic: 8, Lab: 11, Jail: 4,
     Chapel: 5, Guildhall: 8, Brewery: 7, Printer: 7, Stables: 6, Harbour: 10, Monument: 2,
+    'Terraced Gardens': 0, Aqueduct: 0, 'Great Library': 0, 'Grand Exchange': 0, Observatory: 0,
     Factory: 14, Foundry: 13, 'Railway Station': 14, Telegraph: 6, Gasworks: 12,
     Hospital: 17, Stadium: 19, Supermarket: 12, Office: 11, 'Bus Depot': 12, 'Power Plant': 18,
     'Data Centre': 22, 'Research Campus': 24, 'Vertical Farm': 17, 'Pod Hub': 17, 'Drone Port': 14,
@@ -9135,6 +9150,9 @@ function daily(world: World) {
     if (hasCivic(world, 'Vertical Farm')) c.hunger = Math.min(100, c.hunger + VERTICAL_FARM_HUNGER * civicStrength(world, 'Vertical Farm'));
     if (hasCivic(world, 'Drone Port')) { c.social = Math.min(100, c.social + DRONE_PORT_SOCIAL * civicStrength(world, 'Drone Port')); c.purpose = Math.min(100, c.purpose + DRONE_PORT_PURPOSE * civicStrength(world, 'Drone Port')); }
     if (hasCivic(world, 'Monument')) c.happiness = Math.min(100, c.happiness + MONUMENT_PRIDE * civicStrength(world, 'Monument'));
+    // The great works, which keep themselves rather than being staffed.
+    if (greatWorkStanding(world, 'gardens')) c.happiness = Math.min(100, c.happiness + GARDENS_JOY);
+    if (greatWorkStanding(world, 'aqueduct')) { c.hunger = Math.min(100, c.hunger + AQUEDUCT_HEALTH); c.rest = Math.min(100, c.rest + AQUEDUCT_HEALTH); }
     // Smog, until the town lights its gas.
     if (smogged(world)) c.happiness = Math.max(0, c.happiness - SMOG_HAPPINESS);
     // Unpaid work erodes a sense of purpose; paid work slowly builds it — and
@@ -9147,6 +9165,7 @@ function daily(world: World) {
   spend(world, 'wages', payroll * ratio);
   spend(world, 'upkeep', upkeep * bankRelief(world));
   runProgrammes(world);
+  runGreatWorks(world);
   // What a town may hold is a ceiling now, not a daily charge on the pile —
   // see `goldCap`. Income above the ceiling is turned away in `earn`, and the
   // town is told when that has been happening.
@@ -9799,6 +9818,262 @@ function runProgrammes(world: World) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Great works: what a city with more Gold than it needs builds
+ * ------------------------------------------------------------------ */
+
+/**
+ * A monument on the scale of a city rather than a building.
+ *
+ * The programmes are a daily drip, and for a settlement that is the right
+ * size of decision. For a city of the later ages it is rounding: five
+ * programmes cost such a place a few tens of thousands a day against a
+ * treasury that holds millions, and after the fifty city levels are bought
+ * there is nothing left to spend on at all. That is the hoard players are
+ * complaining about.
+ *
+ * A great work is the answer at that scale. It costs a serious fraction of
+ * everything the city may hold, it takes days of building rather than a
+ * click, it stands in the streets afterwards, and it costs money every day
+ * to keep — so commissioning one raises the city's daily burn for good
+ * rather than emptying the treasury once and leaving it to refill.
+ */
+export type GreatWorkKey = 'gardens' | 'aqueduct' | 'library' | 'exchange' | 'observatory';
+
+export interface GreatWork {
+  key: GreatWorkKey;
+  /** Days of building done, against the days it takes. */
+  progress: number;
+  days: number;
+  done: boolean;
+  /**
+   * Standing but unpaid: the effect is off until the upkeep is met again.
+   * A city that cannot keep its works does not lose them, it lets them go.
+   */
+  disrepair?: boolean;
+}
+
+export interface GreatWorkSpec {
+  key: GreatWorkKey;
+  name: string;
+  /** The building it becomes when it is finished. */
+  type: string;
+  blurb: string;
+  effect: string;
+  /** The era it can first be commissioned in, and the city level it asks for. */
+  era: number;
+  level: number;
+  /** What it costs, as a share of everything a city of that age may ever hold. */
+  share: number;
+  /** Days of building. */
+  days: number;
+  /** Timber and stone, before the age multiplies them. */
+  wood: number;
+  stone: number;
+}
+
+/** What each great work does, in the numbers the rest of the simulation reads. */
+export const GARDENS_JOY = 4;
+export const AQUEDUCT_FIRE = 0.45;
+export const AQUEDUCT_HEALTH = 2;
+export const LIBRARY_OF_AGES = 0.6;
+export const EXCHANGE_TRADE = 1.2;
+export const OBSERVATORY_WARNING = 0.3;
+/** A day's keep, as a share of what the work cost to build. */
+export const GREAT_WORK_UPKEEP = 0.004;
+
+export const GREAT_WORKS: GreatWorkSpec[] = [
+  {
+    key: 'gardens', name: 'The Terraced Gardens', type: 'Terraced Gardens', era: 1, level: 4,
+    share: 0.12, days: 6, wood: 90, stone: 140,
+    blurb: 'Walled terraces of green above the square, open to everybody.',
+    effect: 'Everyone in the city is happier every day, for as long as the gardens are kept.',
+  },
+  {
+    key: 'aqueduct', name: 'The Aqueduct', type: 'Aqueduct', era: 2, level: 5,
+    share: 0.2, days: 8, wood: 120, stone: 320,
+    blurb: 'Clean water carried into every quarter on stone arches.',
+    effect: 'Fire has water waiting for it wherever it starts, and everybody keeps better health.',
+  },
+  {
+    key: 'library', name: 'The Great Library', type: 'Great Library', era: 2, level: 6,
+    share: 0.28, days: 10, wood: 200, stone: 300,
+    blurb: 'Every trade\u2019s knowledge under one roof, copied and kept.',
+    effect: 'Every day at a trade teaches far more. It stacks with a school, a library and apprenticeships.',
+  },
+  {
+    key: 'exchange', name: 'The Grand Exchange', type: 'Grand Exchange', era: 3, level: 6,
+    share: 0.38, days: 10, wood: 240, stone: 380,
+    blurb: 'A floor where the city\u2019s goods are sold to the whole archipelago.',
+    effect: 'Everything the city exports fetches a fifth more.',
+  },
+  {
+    key: 'observatory', name: 'The Observatory', type: 'Observatory', era: 4, level: 7,
+    share: 0.55, days: 12, wood: 260, stone: 460,
+    blurb: 'Instruments on a tower, watching the weather and the ground.',
+    effect: 'The city sees every kind of trouble coming, and is readier for all of it.',
+  },
+];
+
+export const greatWorkSpec = (key: GreatWorkKey) => GREAT_WORKS.find((w) => w.key === key)!;
+
+/**
+ * What a great work costs here.
+ *
+ * A share of everything a city of this age may ever hold, so the price is
+ * the same decision at every age rather than a settlement's fortune and a
+ * modern city's rounding error. The timber and the stone grow with the age
+ * too, but far more gently: what changes between the ages is money.
+ */
+export function greatWorkCost(world: World, key: GreatWorkKey): { gold: number; wood: number; stone: number } {
+  const spec = greatWorkSpec(key);
+  const era = clamp(eraOf(world), 1, 5);
+  const ceiling = treasuryCap(MAX_CITY_LEVEL, era);
+  return {
+    gold: Math.round(ceiling * spec.share / 500) * 500,
+    wood: Math.round(spec.wood * (1 + (era - 1) * 0.6)),
+    stone: Math.round(spec.stone * (1 + (era - 1) * 0.6)),
+  };
+}
+
+/** What a finished great work costs to keep, a day. */
+export const greatWorkUpkeep = (world: World, key: GreatWorkKey) =>
+  Math.round(greatWorkCost(world, key).gold * GREAT_WORK_UPKEEP);
+
+/** Everything the finished works cost to keep together, a day. */
+export const greatWorksBill = (world: World) =>
+  (world.greatWorks ?? []).filter((w) => w.done).reduce((sum, w) => sum + greatWorkUpkeep(world, w.key), 0);
+
+/** The record of a great work here, finished or under way. */
+export const greatWorkAt = (world: { greatWorks?: GreatWork[] }, key: GreatWorkKey) =>
+  (world.greatWorks ?? []).find((w) => w.key === key);
+
+/** Whether a work is finished and kept, which is when its effect is felt. */
+export const greatWorkStanding = (world: { greatWorks?: GreatWork[] }, key: GreatWorkKey) => {
+  const w = greatWorkAt(world, key);
+  return !!w && w.done && !w.disrepair;
+};
+
+/** The one being built, if any. One at a time: a city builds a monument, not five. */
+export const greatWorkUnderWay = (world: { greatWorks?: GreatWork[] }) =>
+  (world.greatWorks ?? []).find((w) => !w.done);
+
+/**
+ * Somewhere a great work will actually fit.
+ *
+ * `freeSite` looks for room for an ordinary building, and a great work has a
+ * far bigger footprint than one — an aqueduct is a third of a street. Asking
+ * for an ordinary site got a spot that `placementProblem` then refused for
+ * being too close to a cabin, and the work was paid for, finished, announced
+ * and never raised. So the ground is judged by the thing being put on it:
+ * every plot, spot and open square is tried against the real check, and the
+ * first that passes is where it goes.
+ */
+export function greatWorkSite(world: World, type: string): [number, number] | null {
+  const layout = world.layout;
+  const tried: [number, number][] = [
+    ...layout.workSites, ...layout.wanderSpots, ...layout.housePlots,
+    [layout.plaza.x, layout.plaza.y],
+  ];
+  for (const [x, y] of tried) if (!placementProblem(world, type, x, y)) return [x, y];
+  // Nothing on the plan has room: walk the buildable ground on a coarse grid.
+  const bb = buildBounds(world);
+  for (let y = bb.y0 + 2; y <= bb.y1 - 2; y += 2) {
+    for (let x = bb.x0 + 2; x <= bb.x1 - 2; x += 2) {
+      if (!placementProblem(world, type, x, y)) return [x, y];
+    }
+  }
+  return null;
+}
+
+/** Why this work cannot be commissioned here, or null. */
+export function greatWorkProblem(world: World, key: GreatWorkKey): string | null {
+  useWorld(world);
+  const spec = greatWorkSpec(key);
+  if (greatWorkAt(world, key)) return `${spec.name} has already been begun here.`;
+  if (eraOf(world) < spec.era) return `${spec.name} belongs to the ${eraSpec(spec.era).name.toLowerCase()} era. Advance the plot first.`;
+  if (cityLevel(world) < spec.level) return `${spec.name} asks for a level ${spec.level} city; this one is level ${cityLevel(world)}.`;
+  const under = greatWorkUnderWay(world);
+  if (under) return `${greatWorkSpec(under.key).name} is still being built. One great work at a time.`;
+  const cost = greatWorkCost(world, key);
+  if (world.treasury < cost.gold) return `${spec.name} costs ${cost.gold.toLocaleString()} Gold, and the treasury holds ${Math.floor(world.treasury).toLocaleString()}.`;
+  if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) {
+    return `${spec.name} needs ${cost.wood} timber and ${cost.stone} stone; the yard holds ${Math.floor(world.resources.wood)} and ${Math.floor(world.resources.stone)}.`;
+  }
+  if (!greatWorkSite(world, spec.type)) return `There is no open ground left with room for ${spec.name}.`;
+  return null;
+}
+
+/** Commission a great work: the money and the materials go now, the building comes in days. */
+export function commissionGreatWork(world: World, key: GreatWorkKey): { ok: boolean; message: string } {
+  useWorld(world);
+  const problem = greatWorkProblem(world, key);
+  if (problem) return { ok: false, message: problem };
+  const spec = greatWorkSpec(key);
+  const cost = greatWorkCost(world, key);
+  spend(world, 'greatworks', cost.gold);
+  world.resources.wood -= cost.wood;
+  world.resources.stone -= cost.stone;
+  note(world, 'consumed', 'wood', cost.wood);
+  note(world, 'consumed', 'stone', cost.stone);
+  world.greatWorks = [...(world.greatWorks ?? []), { key, progress: 0, days: spec.days, done: false }];
+  noteAttention(world);
+  pushFeed(world, 'build', `${spec.name} was commissioned: ${cost.gold.toLocaleString()} Gold, ${cost.wood} timber and ${cost.stone} stone. ${spec.days} days of building.`);
+  return { ok: true, message: `${spec.name} is under way.` };
+}
+
+/**
+ * A day of the great works: the one being built gets a day nearer, and every
+ * one already standing is kept or falls into disrepair.
+ *
+ * Disrepair is not ruin. The work stands and its effect stops; the day the
+ * city can pay again, it is kept again. A city should never lose a monument
+ * it spent a fortune on because it had one bad week.
+ */
+function runGreatWorks(world: World) {
+  const works = world.greatWorks ?? [];
+  if (!works.length) return;
+  const under = works.find((w) => !w.done);
+  if (under) {
+    under.progress += 1;
+    if (under.progress >= under.days) {
+      under.done = true;
+      const spec = greatWorkSpec(under.key);
+      const site = greatWorkSite(world, spec.type);
+      if (site) {
+        // Raised without charge: it was paid for when it was commissioned.
+        const gold = world.treasury;
+        constructBuilding(world, spec.type, 0, site[0], site[1]);
+        world.treasury = gold;
+      } else {
+        // Nowhere left to put it. The city keeps what it paid for rather
+        // than losing it: the work waits, and is raised the first day room
+        // appears — a demolition, a wider plot.
+        under.done = false;
+        under.progress = under.days - 1;
+        pushFeed(world, 'build', `${spec.name} is ready to raise, and there is no open ground with room for it. Clear some, and it will go up.`);
+      }
+      for (const c of world.citizens) if (c.age >= 10) noteEpisode(world, c, 'greatWork', spec.name);
+      pushFeed(world, 'build', `${spec.name} is finished. ${world.name} will be known for it.`);
+      notice(world, 'city', spec.name);
+      noteAttention(world);
+    }
+  }
+  const fell: string[] = [], kept: string[] = [];
+  for (const w of works) {
+    if (!w.done) continue;
+    const due = greatWorkUpkeep(world, w.key);
+    if (world.treasury < due) {
+      if (!w.disrepair) { w.disrepair = true; fell.push(greatWorkSpec(w.key).name); }
+      continue;
+    }
+    spend(world, 'greatworks', due);
+    if (w.disrepair) { w.disrepair = false; kept.push(greatWorkSpec(w.key).name); }
+  }
+  if (fell.length) pushFeed(world, 'market', `${fell.join(' and ')} fell into disrepair: the treasury could not cover the keep.`);
+  if (kept.length) pushFeed(world, 'build', `${kept.join(' and ')} put back in order.`);
+}
+
+/* ------------------------------------------------------------------ *
  * Boons: paid for in $EMERGE, delivered at once
  * ------------------------------------------------------------------ */
 
@@ -10230,6 +10505,7 @@ export function expandPlot(world: World): boolean {
  * there from the start.
  */
 export const BUILDING_ERA: Record<string, number> = {
+  Aqueduct: 2, 'Great Library': 2, 'Grand Exchange': 3, Observatory: 4,
   Chapel: 2, Guildhall: 2, Brewery: 2, Printer: 2, Stables: 2, Harbour: 2,
   Factory: 3, Foundry: 3, 'Railway Station': 3, Telegraph: 3, Gasworks: 3,
   Hospital: 4, Stadium: 4, Supermarket: 4, Office: 4, 'Bus Depot': 4, 'Power Plant': 4,
@@ -10243,6 +10519,7 @@ export const BUILDING_CATEGORY: Record<string, BuildingCategory> = {
   Farm: 'Food', Fishery: 'Food', Lodge: 'Food', Forager: 'Food', Mill: 'Food', Bakery: 'Food', Brewery: 'Food',
   Woodcutter: 'Materials', Quarry: 'Materials', Mine: 'Materials', Carpenter: 'Materials', Blacksmith: 'Materials', Tailor: 'Materials',
   'Town Hall': 'Civic', Jail: 'Civic', Storage: 'Civic', Market: 'Civic', Bank: 'Civic', Guildhall: 'Civic', Chapel: 'Civic', Monument: 'Civic',
+  'Terraced Gardens': 'Civic', Aqueduct: 'Civic', 'Great Library': 'Civic', 'Grand Exchange': 'Civic', Observatory: 'Civic',
   School: 'Care & learning', Clinic: 'Care & learning', Library: 'Care & learning', Lab: 'Care & learning', Printer: 'Care & learning',
   Tavern: 'Leisure', Cafe: 'Leisure', Studio: 'Leisure', Stadium: 'Leisure',
   Stables: 'Transport', Harbour: 'Transport', 'Railway Station': 'Transport', 'Bus Depot': 'Transport', 'Pod Hub': 'Transport', 'Drone Port': 'Transport',

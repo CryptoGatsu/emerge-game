@@ -10,7 +10,8 @@
 import { heardLine, wantWord } from './dialogue';
 import { formOf } from './world/forms';
 import { ERAS, eraSpec } from './world/eras';
-import { PROGRAMMES, programmeCost, programmeOn, programmesBill, type ProgrammeKey, cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, holidayFor, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
+import { GREAT_WORKS, greatWorkAt, greatWorkCost, greatWorkProblem, greatWorkUpkeep, greatWorksBill, type GreatWorkKey,
+  PROGRAMMES, programmeCost, programmeOn, programmesBill, type ProgrammeKey, cityGate, dailyCeiling, frozenGold, festivalCost, goldCap, holidayFor, insured, buildersHere, houseRoom, herdOf, keepOf, openPostsOf, upgradeEffect, tradeTitle, notablesOpen, notableAt, roleOf, NOTABLE_ROLES, NOTABLE_TIERS, NOTABLE_BASE, NOTABLE_BONUS, NOTABLE_FROM_ERA, postFor, type NotableRole, type CityGate, type Building } from './simulation';
 import {
   ACTIVITY_LABELS, HAZARD_DEFENCE, HAZARD_FIGHT, HAZARD_LABELS, JOBS, LEDGER_LABELS, fightCost, rebuildCost,
   maxLevelFor, PHASE_LABELS, SKILL_TITLES, daysToNextLevel, levelOf, moveCost, skillDays,
@@ -217,6 +218,17 @@ export interface Snapshot {
   programmes: { key: ProgrammeKey; name: string; blurb: string; effect: string; cost: number; running: boolean; affordable: boolean }[];
   /** What the running programmes cost together, a day. */
   programmesBill: number;
+  /**
+   * The great works: what each costs to commission here, what keeps it, how
+   * far along it is, and why it cannot be begun yet.
+   */
+  greatWorks: {
+    key: GreatWorkKey; name: string; blurb: string; effect: string;
+    gold: number; wood: number; stone: number; upkeep: number; days: number;
+    progress: number; done: boolean; disrepair: boolean; problem: string | null;
+  }[];
+  /** What the finished works cost to keep together, a day. */
+  greatWorksBill: number;
   /** Whether the player has closed the gates to newcomers, and the posts standing open. */
   gates: { closed: boolean; openPosts: number };
   /** The banner the plot flies, or null. */
@@ -717,6 +729,17 @@ export function snapshot(world: World, target: { kind: 'citizen' | 'building'; i
       return { key: p.key, name: p.name, blurb: p.blurb, effect: p.effect, cost, running: programmeOn(world, p.key), affordable: world.treasury >= cost };
     }),
     programmesBill: programmesBill(world),
+    greatWorks: GREAT_WORKS.map((w) => {
+      const held = greatWorkAt(world, w.key);
+      const cost = greatWorkCost(world, w.key);
+      return {
+        key: w.key, name: w.name, blurb: w.blurb, effect: w.effect,
+        gold: cost.gold, wood: cost.wood, stone: cost.stone, upkeep: greatWorkUpkeep(world, w.key), days: w.days,
+        progress: held?.progress ?? 0, done: !!held?.done, disrepair: !!held?.disrepair,
+        problem: held ? null : greatWorkProblem(world, w.key),
+      };
+    }),
+    greatWorksBill: greatWorksBill(world),
     gates: { closed: !!world.gatesClosed, openPosts: openPostsOf(world) },
     banner: world.banner ?? null,
     roster: rosterOf(world),

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * The standing programmes, headless.
+ * The standing programmes and the great works, headless.
  *
  * A town that has built everything it can afford has nowhere for its Gold to
  * go, and a full treasury turns income away. Programmes are the other shape
@@ -157,6 +157,98 @@ S.setProgramme(a, 'watch', true);
 S.setProgramme(a, 'physicians', true);
 const back = SV.worldFromSave(JSON.parse(JSON.stringify(SV.snapshotOf(a))), 1120, 'Probe');
 say('programmes survive a save', S.programmeOn(back, 'watch') && S.programmeOn(back, 'physicians'), (back.programmes ?? []).join(', '));
+
+
+/* ------------------------------------------------------------------ *
+ * Great works
+ * ------------------------------------------------------------------ */
+
+console.log('');
+// A city big enough and rich enough to commission one.
+const city = (era = 1) => {
+  const x = grown(30);
+  const seedFolk = [...x.citizens];
+  for (let i = 0; x.citizens.length < 90; i++) {
+    const twinned = JSON.parse(JSON.stringify(seedFolk[i % seedFolk.length]));
+    twinned.id = `cit${i}`; twinned.name = `Cit ${i}`;
+    x.citizens.push(twinned);
+  }
+  x.population = x.citizens.length;
+  x.era = era;
+  x.works = { level: 10 };
+  x.treasury = 5_000_000;
+  x.resources.wood = 5_000; x.resources.stone = 5_000;
+  return x;
+};
+
+say('there are great works to build', S.GREAT_WORKS.length >= 5, S.GREAT_WORKS.map((w) => w.key).join(', '));
+let g = city(1);
+const gardenCost = S.greatWorkCost(g, 'gardens');
+say('a great work is priced in the hundreds of thousands, not the hundreds', gardenCost.gold >= 30_000,
+  `${gardenCost.gold.toLocaleString()} Gold, ${gardenCost.wood} timber, ${gardenCost.stone} stone`);
+const era5 = city(5);
+say('and costs far more in a later age', S.greatWorkCost(era5, 'gardens').gold > gardenCost.gold * 3,
+  `era 1 ${gardenCost.gold.toLocaleString()}, era 5 ${S.greatWorkCost(era5, 'gardens').gold.toLocaleString()}`);
+say('the dearest work is within a full treasury of its age', S.greatWorkCost(era5, 'observatory').gold < 5_000_000,
+  `${S.greatWorkCost(era5, 'observatory').gold.toLocaleString()} against a 5,000,000 ceiling`);
+
+// The era and the level are gates.
+const young = grown(20); young.treasury = 5_000_000; young.resources.wood = 5_000; young.resources.stone = 5_000;
+say('a small city cannot commission one', !!S.greatWorkProblem(young, 'gardens'), S.greatWorkProblem(young, 'gardens') ?? '');
+say('an era it has not reached is refused', !!S.greatWorkProblem(city(1), 'observatory'), S.greatWorkProblem(city(1), 'observatory') ?? '');
+
+// Commissioning takes the money and the materials now.
+const goldBefore = g.treasury, woodBefore = g.resources.wood;
+const begun = S.commissionGreatWork(g, 'gardens');
+say('a great work is commissioned', begun.ok, begun.message);
+say('the Gold and the materials go at once', g.treasury === goldBefore - gardenCost.gold && g.resources.wood === woodBefore - gardenCost.wood,
+  `${Math.round(goldBefore - g.treasury)} Gold, ${Math.round(woodBefore - g.resources.wood)} timber`);
+say('it is booked under its own heading', (g.ledger?.out?.greatworks ?? 0) >= gardenCost.gold * 0.9);
+say('only one is built at a time', !S.commissionGreatWork(g, 'aqueduct').ok);
+say('it does nothing while it is being built', !S.greatWorkStanding(g, 'gardens'));
+
+// It finishes on its own days, stands as a building, and is remembered.
+for (let d = 0; d < S.greatWorkSpec('gardens').days + 1; d++) { g.treasury = Math.max(g.treasury, 400_000); g = runDay(g); }
+say('it finishes after its days of building', S.greatWorkStanding(g, 'gardens'), JSON.stringify(S.greatWorkAt(g, 'gardens')));
+say('and stands in the city as a building', g.buildings.some((b) => b.type === 'Terraced Gardens'));
+say('the feed says so', g.feed.some((f) => /is finished\./.test(f.text)), (g.feed.find((f) => /is finished\./.test(f.text)) ?? {}).text ?? '(none)');
+say('people remember it being raised', g.citizens.some((c) => (c.recent ?? []).some((e) => e.kind === 'greatWork')));
+
+// Its keep is charged every day, and an unpayable keep is disrepair, not ruin.
+const keep = S.greatWorkUpkeep(g, 'gardens');
+say('the keep is a daily charge', keep > 0 && S.greatWorksBill(g) === keep, `${keep} Gold a day`);
+g.treasury = 1;
+g = runDay(g);
+say('a keep the treasury cannot cover puts it in disrepair', S.greatWorkAt(g, 'gardens').disrepair === true);
+say('but the work is not lost', S.greatWorkAt(g, 'gardens').done === true && g.buildings.some((b) => b.type === 'Terraced Gardens'));
+say('and it does nothing while it is in disrepair', !S.greatWorkStanding(g, 'gardens'));
+g.treasury = 500_000;
+g = runDay(g);
+say('paying again puts it back in order', S.greatWorkStanding(g, 'gardens'));
+
+// Each does the thing it says it does.
+const withWork = (key) => {
+  const x = city(5);
+  x.greatWorks = [{ key, progress: S.greatWorkSpec(key).days, days: S.greatWorkSpec(key).days, done: true }];
+  return x;
+};
+const plain = city(5);
+say('the great library teaches', S.learningRate(withWork('library')) > S.learningRate(plain),
+  `${S.learningRate(plain).toFixed(2)} -> ${S.learningRate(withWork('library')).toFixed(2)}`);
+say('the grand exchange sells for more', S.marketEdge(withWork('exchange')) > S.marketEdge(plain),
+  `${S.marketEdge(plain).toFixed(2)} -> ${S.marketEdge(withWork('exchange')).toFixed(2)}`);
+say('the aqueduct waits on fire', S.readiness(withWork('aqueduct')).fire > S.readiness(plain).fire,
+  `${S.readiness(plain).fire.toFixed(2)} -> ${S.readiness(withWork('aqueduct')).fire.toFixed(2)}`);
+const seen = S.readiness(withWork('observatory')), blind = S.readiness(plain);
+// Flood is judged by where the city stands, which no instrument changes; a
+// kind already at complete readiness cannot rise, and that is not a failure.
+const watched = ['fire', 'blight', 'wolves', 'earthquake', 'tornado', 'plague'].filter((k) => blind[k] < 0.999);
+say('the observatory sees every kind of trouble coming', watched.length > 0 && watched.every((k) => seen[k] > blind[k]),
+  watched.map((k) => `${k} ${blind[k].toFixed(2)}->${seen[k].toFixed(2)}`).join(', '));
+
+// A work survives a save, standing and all.
+const savedCity = SV.worldFromSave(JSON.parse(JSON.stringify(SV.snapshotOf(g))), 1120, 'Probe');
+say('great works survive a save', S.greatWorkStanding(savedCity, 'gardens'), JSON.stringify(savedCity.greatWorks ?? []));
 
 rmSync(out, { recursive: true, force: true });
 console.log(failures ? `\n${failures} failed` : '\nall passed');

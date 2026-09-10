@@ -568,6 +568,9 @@ interface Recipe {
   eraLook?: 1 | 2 | 3 | 4 | 5;
 }
 
+/** The great works keep the look they were raised in, through every age after. */
+const GREAT_WORK_NAMES = new Set(['Terraced Gardens', 'Aqueduct', 'Great Library', 'Grand Exchange', 'Observatory']);
+
 const BOTTOM_MARGIN = 6;
 const TOP_MARGIN = 30;
 
@@ -844,6 +847,231 @@ const RECIPES: Record<string, Recipe> = {
       rect(p, x - 3, top - 4, 6, 6, BUILD.gold);
       rect(p, x - 1, top - 8, 2, 4, BUILD.gold);
       rect(lit, x - 3, top - 4, 6, 6, BUILD.glassLit);
+    },
+  },
+  /*
+   * The great works: a city's monuments, on a scale nothing else is.
+   *
+   * Each is drawn wide and low or tall and narrow so it reads as itself from
+   * across the map, and each keeps its own look through every age rather
+   * than being redressed — a city that built an aqueduct in the township
+   * still has that aqueduct in the AI era.
+   */
+  'Terraced Gardens': {
+    // A wide retaining base with the planted terraces standing on it. The
+    // flat roof is drawn as a thin slab whatever `roofH` says, so the height
+    // here only buys the sprite headroom for what is built on top.
+    bw: 96, wallH: 18, roofH: 22, roof: 'flat', wall: 'stone', roofColor: 'garden', overhang: 3,
+    windows: [], door: ['right', 0.5],
+    extras: (p, _lit, g) => {
+      const x = g.cx;
+      // The middle of the platform: everything above is stacked from here, so
+      // the terraces stand *on* the base rather than hovering over it.
+      const mid = g.wallTopY + g.bh / 2;
+      const tiers: [number, number][] = [[76, 0], [54, 9], [32, 18]];
+      for (const [w, lift] of tiers) {
+        const h = Math.round(w / 2);
+        const topY = Math.round(mid - lift - h / 2);
+        // The retaining wall, then the planted bed laid over the whole top.
+        isoWalls(p, x, topY, w, h, 10, shade(BUILD.stoneWallDark, -0.12), BUILD.stoneWallDark);
+        isoTop(p, x, topY, w, h, BUILD.stoneWallLight);
+        isoTop(p, x, topY + 2, w - 8, h - 4, '#4a8a3a');
+        isoTop(p, x, topY + 3, w - 20, h - 10, '#3f7a34');
+        // Shrubs standing out of the bed, in rows along the terrace.
+        const cy = topY + h / 2;
+        for (let row = -2; row <= 2; row++) {
+          const span = Math.round((w / 2) * (1 - Math.abs(row) / 3.2)) - 8;
+          for (let s = -span; s <= span; s += 9) {
+            const px = Math.round(x + s), py = Math.round(cy + row * (h / 6));
+            rect(p, px - 2, py - 4, 5, 5, '#2f6028');
+            rect(p, px - 2, py - 5, 4, 3, '#6fb04a');
+            rect(p, px - 1, py - 6, 2, 2, '#8fce62');
+          }
+        }
+      }
+      // A cypress at each end of the lowest terrace, for the silhouette.
+      for (const dx of [-40, 40]) {
+        const by = Math.round(mid + Math.abs(dx) * 0.02);
+        rect(p, x + dx - 2, by - 5, 4, 7, '#5a4230');
+        for (let i = 0; i < 20; i++) {
+          const w = Math.max(3, Math.round(11 * (1 - i / 23)));
+          const half = Math.round(w / 2);
+          rect(p, x + dx - half, by - 7 - i, w, 1, i % 4 === 0 ? '#3f7a34' : '#2f6028');
+          rect(p, x + dx + half - 2, by - 7 - i, 1, 1, '#4a8a3a');
+        }
+        rect(p, x + dx - 1, by - 28, 3, 2, '#4a8a3a');
+      }
+    },
+  },
+  Aqueduct: {
+    // A small stone footing under an arcade that strides well past it on both
+    // sides, so the sky shows through the outer arches and the thing reads as
+    // a structure crossing the ground rather than a shed with arches on top.
+    bw: 52, wallH: 14, roofH: 34, roof: 'flat', wall: 'stone', roofColor: 'white', overhang: 2,
+    windows: [], door: ['right', 0.5],
+    extras: (p, _lit, g) => {
+      const x = g.cx;
+      const mid = g.wallTopY + g.bh / 2;
+      // The footing's top, repainted in the same stone as the piers, so the
+      // arcade and what it stands on are plainly one piece of masonry.
+      isoTop(p, x, g.wallTopY - 2, g.bw + 4, g.bh + 2, BUILD.stoneWallLight);
+      isoTop(p, x, g.wallTopY, g.bw - 10, g.bh - 5, BUILD.stoneWall);
+      /**
+       * One tier of an arcade: piers, the spandrel between them, and the
+       * arches cut out of it as real openings rather than painted-on holes,
+       * so the sky shows through the way it does under a real aqueduct.
+       */
+      const arcade = (footY: number, halfW: number, height: number, bays: number) => {
+        const span = (halfW * 2) / bays;
+        const pierW = Math.max(5, Math.round(span * 0.26));
+        const deck = 6;
+        const top = footY - height;
+        // The deck the arches carry, and the piers standing under it.
+        rect(p, x - halfW, top, halfW * 2, deck, BUILD.stoneWall);
+        rect(p, x - halfW, top, halfW * 2, 2, BUILD.stoneWallLight);
+        rect(p, x - halfW, top + deck - 1, halfW * 2, 1, BUILD.stoneWallDark);
+        for (let i = 0; i <= bays; i++) {
+          const px = Math.round(x - halfW + i * span - pierW / 2);
+          rect(p, px, top + deck, pierW, height - deck, BUILD.stoneWall);
+          rect(p, px, top + deck, 2, height - deck, BUILD.stoneWallLight);
+          rect(p, px + pierW - 1, top + deck, 1, height - deck, BUILD.stoneWallDark);
+        }
+        // The spandrel, carried down each side of every opening as an arch.
+        for (let i = 0; i < bays; i++) {
+          const left = Math.round(x - halfW + i * span + pierW / 2);
+          const w = Math.round(span - pierW);
+          const r = Math.round(w / 2);
+          for (let t = 0; t < r; t++) {
+            const half = Math.round(Math.sqrt(Math.max(0, r * r - (r - t) * (r - t))));
+            const fill = r - half;
+            if (fill <= 0) continue;
+            rect(p, left, top + deck + t, fill, 1, BUILD.stoneWall);
+            rect(p, left + w - fill, top + deck + t, fill, 1, BUILD.stoneWall);
+            // The voussoirs on the lit side of each arch.
+            rect(p, left + w - fill, top + deck + t, 1, 1, BUILD.stoneWallLight);
+          }
+        }
+      };
+      // The piers stand on the footing's front face; the upper tier on the
+      // deck of the lower one.
+      const foot = Math.round(mid + 2);
+      arcade(foot, 46, 32, 4);
+      arcade(foot - 32, 38, 24, 6);
+      // The channel along the top, with water catching the light in it.
+      const chan = foot - 56;
+      rect(p, x - 40, chan - 7, 80, 7, BUILD.stoneWallLight);
+      rect(p, x - 40, chan - 7, 80, 1, BUILD.stoneWall);
+      rect(p, x - 37, chan - 5, 74, 3, shade(WATER.deep, 0.25));
+      rect(p, x - 37, chan - 5, 74, 1, WATER.foam);
+    },
+  },
+  'Great Library': {
+    bw: 82, wallH: 40, roofH: 20, roof: 'hip', wall: 'stone', roofColor: 'slate', overhang: 5,
+    windows: [['left', 0.24, 0.34], ['left', 0.62, 0.34], ['right', 0.3, 0.34], ['right', 0.68, 0.34]],
+    door: ['right', 0.5],
+    extras: (p, lit, g) => {
+      // A colonnade across the front, and a pediment with a lit lamp in it.
+      const x = g.cx, top = g.wallTopY;
+      for (let i = -3; i <= 3; i++) {
+        const cx = x + i * 11;
+        rect(p, cx - 3, top + 6, 6, 34, BUILD.stoneWallLight);
+        rect(p, cx - 3, top + 6, 2, 34, BUILD.stoneWall);
+        rect(p, cx - 5, top + 3, 10, 4, BUILD.stoneWallLight);
+        rect(p, cx - 5, top + 38, 10, 4, BUILD.stoneWallDark);
+      }
+      rect(p, x - 40, top - 2, 80, 6, BUILD.stoneWallLight);
+      rect(p, x - 6, top - 12, 12, 10, BUILD.stoneWallDark);
+      rect(p, x - 3, top - 9, 6, 5, BUILD.glassLit);
+      glow(lit, x, top - 7, 12, BUILD.glassLit, 0.5);
+    },
+  },
+  'Grand Exchange': {
+    // A hall with arcaded trading bays down both faces and a glazed lantern
+    // seated on the ridge — not a chapel, so nothing rises to a point.
+    bw: 100, wallH: 36, roofH: 16, roof: 'hip', wall: 'stone', roofColor: 'red', overhang: 6,
+    windows: [],
+    door: ['right', 0.5],
+    extras: (p, lit, g) => {
+      const x = g.cx;
+      // Tall arched bays cut into both visible faces, glazed and lit.
+      for (const side of ['left', 'right'] as Side[]) {
+        for (const t of [0.08, 0.3, 0.52, 0.74]) {
+          if (side === 'right' && t > 0.4 && t < 0.62) continue; // room for the door
+          wallPatch(p, g, side, t, 0.16, 14, 24, shade(BUILD.stoneWallDark, -0.1));
+          wallPatch(p, g, side, t + 0.012, 0.2, 12, 20, side === 'left' ? shade(BUILD.glassDark, -0.1) : BUILD.glassDark);
+          wallPatch(p, g, side, t + 0.05, 0.24, 3, 14, side === 'left' ? '#4a6f86' : '#5f8aa4');
+          wallPatch(p, g, side, t - 0.006, 0.14, 16, 2, BUILD.stoneWallLight);
+          wallPatch(p, g, side, t - 0.006, 0.62, 16, 2, BUILD.stoneWallLight);
+          wallPatch(lit, g, side, t + 0.012, 0.2, 12, 20, BUILD.glassLit);
+        }
+        // A gilded band along the head of the arcade.
+        wallBand(p, g, side, 0.1, 2, BUILD.gold);
+      }
+      // The lantern on the ridge: a glazed drum with a shallow cap, standing
+      // in the roof rather than hovering over it.
+      const ridge = Math.round(g.wallTopY + g.bh / 2 - g.roofH + 4);
+      isoWalls(p, x, ridge - 4, 40, 20, 18, shade(BUILD.stoneWall, -0.2), BUILD.stoneWall);
+      for (let i = 0; i < 5; i++) {
+        const px = x - 18 + i * 8;
+        rect(p, px - 1, ridge + 7, 7, 14, shade(BUILD.stoneWallDark, -0.15));
+        rect(p, px, ridge + 8, 5, 12, shade(BUILD.glassLit, -0.42));
+        rect(p, px + 1, ridge + 10, 3, 7, shade(BUILD.glassLit, -0.18));
+        rect(lit, px, ridge + 8, 5, 12, BUILD.glassLit);
+      }
+      isoTop(p, x, ridge - 12, 46, 23, BUILD.roofRed);
+      isoTop(p, x, ridge - 10, 30, 15, BUILD.roofRedLight);
+      glow(lit, x, ridge + 10, 30, BUILD.glassLit, 0.4);
+      // A weather vane: a bar and a pointer, not a cross.
+      rect(p, x - 1, ridge - 22, 2, 12, BUILD.metal);
+      rect(p, x - 8, ridge - 20, 16, 2, BUILD.gold);
+      rect(p, x + 6, ridge - 22, 4, 6, BUILD.gold);
+      rect(p, x - 2, ridge - 25, 4, 4, BUILD.gold);
+    },
+  },
+  Observatory: {
+    // A drum tower standing in a low stone yard, with a slit dome on it.
+    bw: 58, wallH: 26, roofH: 34, roof: 'flat', wall: 'stone', roofColor: 'slate', overhang: 3,
+    windows: [['left', 0.3, 0.4], ['right', 0.6, 0.4]],
+    door: ['right', 0.5],
+    extras: (p, lit, g) => {
+      const x = g.cx;
+      const mid = g.wallTopY + g.bh / 2;
+      // The drum: its walls run down into the yard, so the two are one thing.
+      const drumTop = Math.round(mid - 30);
+      isoWalls(p, x, drumTop, 34, 17, 42, shade(BUILD.stoneWall, -0.18), BUILD.stoneWall);
+      for (let band = 1; band <= 3; band++) {
+        const by = drumTop + 8 + band * 11;
+        for (let i = 0; i < 17; i++) {
+          rect(p, x - 17 + i, by + Math.round((i * 8.5) / 17), 1, 2, BUILD.stoneWallDark);
+          rect(p, x + i, by + 8 - Math.round((i * 8.5) / 17), 1, 2, BUILD.stoneWallDark);
+        }
+      }
+      isoTop(p, x, drumTop, 34, 17, BUILD.stoneWallLight);
+      // The dome: a ring of shells, each narrower and higher than the last.
+      isoWalls(p, x, drumTop - 4, 40, 20, 5, shade(BUILD.metalLight, -0.28), shade(BUILD.metalLight, -0.06));
+      const shells: [number, number][] = [[40, 0], [34, 4], [26, 7], [16, 9], [8, 10]];
+      for (const [w, lift] of shells) {
+        const h = Math.round(w / 2);
+        const topY = Math.round(drumTop + 6 - lift - h / 2 - 8);
+        isoTop(p, x, topY, w, h, shade(BUILD.metalLight, lift / 40));
+        for (let i = 0; i < w / 2; i++) rect(p, Math.round(x - w / 2 + i), Math.round(topY + h / 2 + (i * h) / w), 1, 1, shade(BUILD.metalLight, -0.22));
+      }
+      // The shutter slit, open, with the instrument sighting out of it.
+      rect(p, x - 4, drumTop - 15, 9, 16, BUILD.glassDark);
+      rect(p, x - 3, drumTop - 14, 7, 15, BUILD.labGlassLit);
+      rect(p, x - 5, drumTop - 16, 2, 18, shade(BUILD.metalLight, -0.3));
+      rect(p, x + 4, drumTop - 16, 2, 18, shade(BUILD.metalLight, -0.3));
+      rect(lit, x - 3, drumTop - 14, 7, 15, BUILD.labGlassLit);
+      // The tube, tilted up to the right, on its mounting.
+      for (let i = 0; i < 20; i++) {
+        const ty = Math.round(drumTop - 10 - i * 0.5);
+        rect(p, x + i, ty, 1, 5, BUILD.metal);
+        rect(p, x + i, ty, 1, 1, BUILD.metalLight);
+      }
+      rect(p, x + 19, drumTop - 22, 5, 9, BUILD.metalLight);
+      rect(p, x + 20, drumTop - 21, 3, 7, shade(BUILD.glassDark, 0.1));
+      rect(p, x + 1, drumTop - 8, 4, 7, shade(BUILD.metal, -0.2));
+      glow(lit, x, drumTop - 6, 20, BUILD.labGlassLit, 0.45);
     },
   },
   // Eight homes with genuinely different outlines: a settlement of twenty
@@ -1405,7 +1633,7 @@ const classOf = (name: string): BuildingClass => name.startsWith('House') ? 'hou
  * township is for.
  */
 function settlementDress(r: Recipe, name = ''): Recipe {
-  if (name === 'Monument') return r;
+  if (name === 'Monument' || GREAT_WORK_NAMES.has(name)) return r;
   const cls = classOf(name);
   const flat = r.roof === 'flat';
   const roof: RoofStyle = flat ? 'flat' : 'gable';
@@ -1423,6 +1651,7 @@ function settlementDress(r: Recipe, name = ''): Recipe {
  * the same way as the homes.
  */
 function townshipDress(r: Recipe, name = ''): Recipe {
+  if (GREAT_WORK_NAMES.has(name)) return r;
   const cls = classOf(name);
   const tile: RoofColor = r.roofColor === 'thatch' || r.roofColor === 'green' || r.roofColor === 'shingle' ? 'red' : r.roofColor;
   const flat = r.roof === 'flat';
@@ -1438,6 +1667,7 @@ function townshipDress(r: Recipe, name = ''): Recipe {
  * tall flat-topped brick blocks for the civic buildings.
  */
 function industrialDress(r: Recipe, name = ''): Recipe {
+  if (GREAT_WORK_NAMES.has(name)) return r;
   const cls = classOf(name);
   if (cls === 'house') return { ...r, wall: 'brick', roofColor: 'iron', roof: 'gable', roofH: Math.max(8, Math.round(r.roofH * 0.5)), wallH: r.wallH + 8, bw: Math.round(r.bw * 1.15), chimneyAt: r.chimneyAt ?? -Math.round(r.bw * 0.34), chimneyH: 22, eraLook: 3 };
   if (cls === 'civic') return { ...r, wall: 'brick', roofColor: 'iron', roof: 'flat', roofH: 8, wallH: r.wallH + 18, eraLook: 3 };
@@ -1449,6 +1679,7 @@ function industrialDress(r: Recipe, name = ''): Recipe {
  * wide flat sheds for the works, and towers for the civic buildings.
  */
 function modernDress(r: Recipe, name = ''): Recipe {
+  if (GREAT_WORK_NAMES.has(name)) return r;
   const cls = classOf(name);
   if (cls === 'house') return { ...r, wall: 'concrete', roofColor: 'white', roof: 'stepped', roofH: 12, wallH: r.wallH + 8, bw: Math.round(r.bw * 0.9), windows: [], eraLook: 4 };
   if (cls === 'civic') return { ...r, wall: 'concrete', roofColor: 'white', roof: 'flat', roofH: 8, wallH: Math.round(r.wallH * 1.9) + 10, bw: Math.round(r.bw * 0.72), windows: [], eraLook: 4 };
@@ -1460,6 +1691,7 @@ function modernDress(r: Recipe, name = ''): Recipe {
  * light over the works, bigger domes over the civic buildings.
  */
 function aiDress(r: Recipe, name = ''): Recipe {
+  if (GREAT_WORK_NAMES.has(name)) return r;
   const cls = classOf(name);
   if (cls === 'house') return { ...r, wall: 'composite', roofColor: 'garden', roof: 'curved', roofH: 10, wallH: r.wallH + 2, bw: Math.round(r.bw * 1.05), windows: [], eraLook: 5 };
   if (cls === 'civic') return { ...r, wall: 'composite', roofColor: 'white', roof: 'dome', roofH: 26, wallH: r.wallH + 10, bw: Math.round(r.bw * 1.1), windows: [], eraLook: 5 };

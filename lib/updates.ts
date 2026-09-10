@@ -27,8 +27,25 @@ export function byVersion(a: Update, b: Update): number {
 
 export const UPDATES: Update[] = [
   {
+    version: '2.13.0',
+    date: '2026-09-10',
+    title: 'Great works: what a city builds when it has more Gold than it needs',
+    notes: [
+      'The programmes 2.12 added are the right size of decision for a settlement and rounding for a city. A city of the later ages holds millions, and once the fifty city levels are bought there is nothing left to spend on at all \u2014 the single dearest thing in the game was a 450,000 Gold public works, bought once. This is the answer at that scale.',
+      '**The Terraced Gardens**, from the settlement age: walled terraces of green above the square. Everyone in the city is happier every day it is kept.',
+      '**The Aqueduct**, from the township: clean water into every quarter on stone arches. Fire has water waiting for it wherever it starts, and everybody keeps better health.',
+      '**The Great Library**, from the township: every trade\u2019s knowledge under one roof. A day at a trade teaches far more, on top of a school, a library and apprenticeships.',
+      '**The Grand Exchange**, from the industrial age: a floor where the city\u2019s goods are sold to the whole archipelago. Everything it exports fetches a fifth more.',
+      '**The Observatory**, from the modern age: instruments on a tower watching the weather and the ground. The city sees every kind of trouble coming and is readier for all of it.',
+      'A great work costs a serious share of everything a city of its age may ever hold \u2014 from 36,000 Gold for the gardens in a settlement to 2,750,000 for the observatory in an AI-era city \u2014 plus timber and stone, and it takes six to twelve days of building. One at a time. It asks for a city level as well as an age, so a hamlet with a windfall cannot buy one.',
+      'And it costs Gold every day to keep, which is the part that matters: commissioning one raises the city\u2019s daily burn for good rather than emptying the treasury once and leaving it to refill. All five standing in a top city cost about thirty thousand a day between them, on top of the programmes.',
+      'A keep that goes unpaid is disrepair, not ruin. The work stands, its effect stops, and the day the city can pay again it is kept again \u2014 nobody loses a monument they spent a fortune on because of one bad week. Each stands in the streets with its own look, and keeps that look through every age after it is raised.',
+      'Booked under its own heading in the day\u2019s books, alongside Programmes, so where the Gold went is on the page rather than inferred.',
+    ],
+  },
+  {
     version: '2.12.0',
-    date: '2026-09-11',
+    date: '2026-09-10',
     title: 'Somewhere for the Gold to go: five programmes the treasury funds every day',
     notes: [
       'Building is a one-off, and a town that has built everything it can afford had nothing left to spend on. That is the complaint, and this is the answer: five standing programmes, each a bill every day for as long as it runs, each changing something the settlement actually does. They are in the Bank, under the city level they are paid out of the same treasury as.',
@@ -420,8 +437,25 @@ export const UPDATES: Update[] = [
 
 export const UPDATES_ZH: Update[] = [
   {
+    version: '2.13.0',
+    date: '2026-09-10',
+    title: '伟大工程：当一座城市的金币多到用不完时，它会建什么',
+    notes: [
+      '2.12 加入的常设项目，对聚落来说是恰当的取舍，对城市来说只是零头。后期时代的城市持有数百万金币，而五十个城市等级买完之后就再没有可花钱的地方了——游戏里最贵的单项曾是 45 万金币的公共工程，还只能买一次。这是针对那个量级的答案。',
+      '**梯台花园**，聚落时代起：广场之上一层层绿意盎然的围墙台地。只要有人打理，全城每天都更开心。',
+      '**引水渠**，城镇时代起：清水沿着石拱送进每一个街区。火不管在哪里烧起来都有水等着，人人也更健康。',
+      '**大图书馆**，城镇时代起：各行各业的知识汇于一处。在行当上的每一天所学多得多，并且叠加在学校、图书馆和学徒制之上。',
+      '**大交易所**，工业时代起：一处交易大厅，把全城的货卖给整个群岛。出口的一切都多卖五分之一。',
+      '**天文台**，现代时代起：塔上的仪器观测天气与地动。这座城市能预见各种麻烦，对每一种都更有准备。',
+      '一项伟大工程要花掉该时代城市所能持有的相当一部分——聚落时代的花园 36,000 金币，人工智能时代城市的天文台 2,750,000——外加木料和石头，并且需要六到十二天的施工。一次只能建一项。它同时要求时代和城市等级，所以一个走了大运的小村子买不了。',
+      '而且它每天都要花金币维护，这才是关键：兴建一项工程会永久提高城市的每日开销，而不是把金库掏空一次然后任其再次装满。顶级城市里五项全部矗立，每天合计约三万金币，这还不算常设项目。',
+      '维护费没付上是年久失修，不是废墟。工程还在，效果停止，等城市付得起的那天又恢复如初——没有人会因为一个糟糕的星期就失去花了大价钱建的丰碑。每一项都以自己的样子矗立在街上，并且在此后的每个时代都保持那个样子。',
+      '在当天的账目里有自己的条目，与常设项目并列，所以金币去了哪里是写在页面上的，不用推测。',
+    ],
+  },
+  {
     version: '2.12.0',
-    date: '2026-09-11',
+    date: '2026-09-10',
     title: '金币终于有了去处：五项由金库每天出资的常设项目',
     notes: [
       '建造是一次性的，一个把能建的都建完的镇子就没什么可花钱的了。这正是大家的抱怨，而这是答案：五项常设项目，每一项在办期间都是每天的开销，每一项都会改变聚落的实际运作。它们在银行面板里，就放在与它们共用同一个金库的城市等级下面。',

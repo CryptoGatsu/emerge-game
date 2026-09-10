@@ -34,7 +34,7 @@ export const TRAIT_LABELS: Record<Trait, string> = {
 export type EpisodeKind =
   | 'hungry' | 'unpaid' | 'roughSleep' | 'sawFight' | 'newFriend' | 'household' | 'child'
   | 'arrived' | 'mastered' | 'freed' | 'sick' | 'recovered' | 'hazard' | 'festival' | 'fellOut' | 'lost'
-  | 'wantMet' | 'holiday' | 'snowman';
+  | 'wantMet' | 'holiday' | 'snowman' | 'greatWork';
 export interface Episode { day: number; kind: EpisodeKind; about?: string; detail?: string }
 
 /**
@@ -167,6 +167,7 @@ export function episodeLine(e: Episode, day: number): string {
     case 'wantMet': { const w = wantFrom(e); return w ? `I have ${wantWord(w, 'first')} at last.` : 'I have what I wanted at last.'; }
     case 'holiday': return ago <= 1 ? `That was a good ${e.about ?? 'holiday'}.` : `${e.about ?? 'The holiday'} was ${when}. Already.`;
     case 'snowman': return ago <= 1 ? 'I built a snowman. It is still standing.' : 'I built a snowman the other day.';
+    case 'greatWork': return ago <= 2 ? `They finished the ${e.about ?? 'great work'}. I watched them raise it.` : `We have the ${e.about ?? 'great work'} now.`;
   }
 }
 
@@ -192,6 +193,7 @@ export function episodeNote(e: Episode): string {
     case 'wantMet': { const w = wantFrom(e); return w ? `Got ${wantWord(w, 'third')}` : 'Got what they wanted'; }
     case 'holiday': return e.about ?? 'A holiday';
     case 'snowman': return 'Built a snowman';
+    case 'greatWork': return `Saw the ${e.about ?? 'great work'} finished`;
   }
 }
 
@@ -206,7 +208,7 @@ type Cut = 'trouble' | 'good' | 'work' | 'weather' | 'town' | 'callback' | 'meet
 const CUT: Record<EpisodeKind, Cut> = {
   hungry: 'trouble', unpaid: 'trouble', roughSleep: 'trouble', sawFight: 'trouble', sick: 'trouble', fellOut: 'trouble', lost: 'trouble',
   newFriend: 'good', household: 'good', child: 'good', mastered: 'good', freed: 'good', recovered: 'good', festival: 'good', hazard: 'good', arrived: 'good',
-  wantMet: 'good', holiday: 'good', snowman: 'good',
+  wantMet: 'good', holiday: 'good', snowman: 'good', greatWork: 'good',
 };
 
 /* ------------------------------------------------------------------ *

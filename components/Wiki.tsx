@@ -1466,6 +1466,16 @@ export default function Wiki() {
             than running on credit.
           </p>
           <p>
+            <b>Great works.</b> Above the programmes sit five monuments a city commissions when it
+            has more Gold than it needs: the Terraced Gardens, the Aqueduct, the Great Library, the
+            Grand Exchange and the Observatory. Each asks for an age and a city level, costs a
+            serious share of everything a city of that age may hold, takes days to raise, and then
+            stands in the streets doing what it says &mdash; happier people, water against fire, a
+            trade learned faster, exports worth a fifth more, every kind of trouble seen coming.
+            One at a time, and each costs Gold every day to keep. A keep that goes unpaid is
+            disrepair rather than ruin: the work stands and does nothing until it is paid for again.
+          </p>
+          <p>
             <b>On a phone</b> the world is drawn to what the device can afford: thirty frames a
             second, fewer particles, and on a low-end phone half resolution with no bloom pass, so
             it stays cool. If frames still run long, particles are shed first and the bloom after,

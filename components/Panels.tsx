@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaimedWorld, PlayerRecord } from '@/lib/world/plots';
 import {
   BUILDING_CATEGORIES, BUILDING_CATEGORY, BUILDING_ERA, BUILD_COSTS, CLEAR_TREE_GOLD, CLEAR_TREE_WOOD, WAGE_MAX, WAGE_MIN, WAGE_STANDARD, buildMaterials, maintenanceCost,
-  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, NOTABLE_BASE, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, type ProgrammeKey, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
+  wageEffort, worldMarketState, type BuildingCategory, TRAIN_HOLD_DAYS, NOTABLE_BASE, BRIDGE_GOLD, HAZARD_SHARE, isUnique, type CoverKind, type ProgrammeKey, type GreatWorkKey, DIG_GOLD, FILL_GOLD, formOf, formName, formPosts, JOBS } from '@/lib/simulation';
 /** The kinds that employ somebody, for the room line on a build card. */
 const WORKPLACE_TYPES = new Set(Object.values(JOBS).map((j) => j.building));
 import { ERAS, eraName, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, BUILDERS_DISCOUNT, MAX_CITY_LEVEL, plotCeiling } from '@/lib/world/eras';
@@ -86,6 +86,8 @@ interface PanelsProps {
   onFestival: () => string | null;
   /** Start or wind up a standing programme; the refusal, or null. */
   onProgramme: (key: ProgrammeKey, on: boolean) => string | null;
+  /** Commission a great work; the refusal, or null. */
+  onGreatWork: (key: GreatWorkKey) => string | null;
   /** Buy a charter, insurance or builders for the plot; the refusal, or null. */
   onCover: (kind: CoverKind) => Promise<string | null>;
   /** Buy a boon for the plot; the refusal, or null. */
@@ -1402,7 +1404,7 @@ function WageControl({ view, onWages }: { view: Snapshot; onWages: (rate: number
   );
 }
 
-function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice, onWages, onRaiseCity, onFestival, onProgramme }: {
+function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice, onWages, onRaiseCity, onFestival, onProgramme, onGreatWork }: {
   view: Snapshot; claimed: ClaimedWorld; player: PlayerRecord; earning: boolean;
   onClose: () => void;
   onVault: (ledger: VaultLedger, goldDelta: number, note: string) => void;
@@ -1411,6 +1413,7 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
   onRaiseCity: () => string | null;
   onFestival: () => string | null;
   onProgramme: (key: ProgrammeKey, on: boolean) => string | null;
+  onGreatWork: (key: GreatWorkKey) => string | null;
 }) {
   const { wallet } = useWallet();
   const [cityNote, setCityNote] = useState<string | null>(null);
@@ -1810,6 +1813,48 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
               >
                 {p.running ? t('Wind it up') : !p.affordable ? t('Not enough Gold') : t('Begin it')}
               </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="connect-card greatworks-card">
+        <span className="eyebrow">{t('GREAT WORKS')}</span>
+        <h3>{view.greatWorks.some((w) => w.done)
+          ? t('{n} standing · {cost} Gold a day to keep', { n: view.greatWorks.filter((w) => w.done).length, cost: view.greatWorksBill.toLocaleString() })
+          : t('None built yet')}</h3>
+        <p className="muted small">
+          {t('What a city builds when it has more Gold than it needs. Each costs a serious share of everything the city may ever hold, takes days to raise, stands in the streets afterwards, and costs Gold every day to keep. One at a time.')}
+        </p>
+        <ul className="greatwork-list">
+          {view.greatWorks.map((w) => (
+            <li key={w.key} className={w.done ? (w.disrepair ? 'disrepair' : 'done') : w.progress > 0 ? 'building' : ''}>
+              <div className="programme-head">
+                <b>{tn(w.name)}</b>
+                <span className="programme-cost">
+                  {w.done ? t('{cost} Gold a day', { cost: w.upkeep.toLocaleString() }) : t('{cost} Gold', { cost: w.gold.toLocaleString() })}
+                </span>
+              </div>
+              <span className="muted small">{tn(w.blurb)}</span>
+              <span className="muted small programme-effect">{tn(w.effect)}</span>
+              {w.done ? (
+                <span className={`greatwork-state ${w.disrepair ? 'bad' : ''}`}>
+                  {w.disrepair ? t('In disrepair: the keep went unpaid, so it does nothing until it is paid again.') : t('Standing, and kept.')}
+                </span>
+              ) : w.progress > 0 ? (
+                <>
+                  <span className="greatwork-state">{t('Being built: day {n} of {days}.', { n: w.progress, days: w.days })}</span>
+                  <div className="greatwork-bar"><i style={{ width: `${Math.round((w.progress / w.days) * 100)}%` }} /></div>
+                </>
+              ) : (
+                <>
+                  <span className="muted small">
+                    {t('{days} days, {wood} timber and {stone} stone. {upkeep} Gold a day to keep once it stands.', { days: w.days, wood: w.wood.toLocaleString(), stone: w.stone.toLocaleString(), upkeep: w.upkeep.toLocaleString() })}
+                  </span>
+                  <button disabled={!!w.problem} onClick={() => setCityNote(onGreatWork(w.key))}>{t('Commission it')}</button>
+                  {w.problem && <span className="muted small">{tn(w.problem)}</span>}
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -2906,7 +2951,7 @@ function ConnectPanel({ view, claimed, player, onPlayer, onClose, onRenameWorld,
   );
 }
 
-export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onOpenMap, onExchange, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onProgramme, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
+export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain, onTrainTrade, onHire, onDismissNotable, onGates, onOpenMap, onExchange, onKeep, onClearTrees, onBridge, onUnbridge, onRaiseCity, onFestival, onProgramme, onGreatWork, onCover, onBoon, onRenameWorld, onExpand, onAdvance, onLeave, onRelease, onVault, onNotice, onWages, onList, onPlayer, onDig, onVisit, spectating, visit, onGift, chatNotices, onToggleNotices, onPond, onFillPond }: PanelsProps) {
   if (panel === 'market') return <MarketPanel view={view} onClose={onClose} onKeep={onKeep} />;
   if (panel === 'gift' && visit) {
     return <GiftPanel player={player} visit={visit} onClose={onClose} onGift={onGift} />;
@@ -2932,7 +2977,7 @@ export function Panels({ panel, view, claimed, player, onClose, onBuild, onTrain
     return (
       <BankPanel
         view={view} claimed={claimed} player={player} earning={earning}
-        onClose={onClose} onVault={onVault} onNotice={onNotice} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival} onProgramme={onProgramme}
+        onClose={onClose} onVault={onVault} onNotice={onNotice} onWages={onWages} onRaiseCity={onRaiseCity} onFestival={onFestival} onProgramme={onProgramme} onGreatWork={onGreatWork}
       />
     );
   }
