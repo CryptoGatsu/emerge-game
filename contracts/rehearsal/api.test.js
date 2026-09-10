@@ -129,11 +129,24 @@ const S1 = 1120, S2 = 1365;
   ok('B holds both tokens', (await C.read('land', 'tokensOf', [C.addr('b')])).map(Number).sort().join() === [S1, S2].sort().join());
 
   // 8. Wallet-to-wallet transfer outside any market, then the cron door.
+  // Both wallets are given a record first: the hand-over only writes into a
+  // record that exists, since a stub carrying one seed would be merged over
+  // the top of a real one on the player's own device.
+  const record = (claims) => ({ name: 'Test', nameChanges: 0, nameTokens: 0, ledger: { earnedEmerge: 7 }, claims, prospected: [], listings: [], savedAt: Date.now() });
+  await api('/api/player', { record: record([{ seed: S2, name: 'Harbourfall', region: 'Test', price: 0, claimedAt: Date.now(), owner: B, txHash: null }]) }, B);
+  await api('/api/player', { record: record([]) }, A);
   await C.write('b', 'land', 'transferFrom', [C.addr('b'), C.addr('a'), BigInt(S2)]);
   const cron = await api('/api/nft?sync=1', undefined, null, OP);
   ok('the cron door syncs the transfer', cron.status === 200 && cron.json.synced?.moved?.some((m) => m.seed === S2 && m.to === A), JSON.stringify(cron.json).slice(0, 200));
   const row2 = (await api('/api/plots', { owner: A, seed: S2, follow: true }, A)).json;
   ok('the row is A’s now, keeping the world name', row2.claim?.owner?.toLowerCase() === A && row2.claim.worldName === 'Harbourfall', JSON.stringify(row2).slice(0, 160));
+  // The receiving wallet has to be told it owns the plot, or the plot is a
+  // thing the map shows and the player's own list of plots does not.
+  const recA = (await api('/api/player', undefined, A)).json;
+  ok('the receiving wallet’s record gains the plot', (recA.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(recA.record?.claims ?? []).slice(0, 200));
+  ok('and keeps what it already had', recA.record?.name === 'Test' && recA.record?.ledger?.earnedEmerge === 7, JSON.stringify(recA.record).slice(0, 160));
+  const recB = (await api('/api/player', undefined, B)).json;
+  ok('the sending wallet’s record lets it go', !(recB.record?.claims ?? []).some((c) => c.seed === S2), JSON.stringify(recB.record?.claims ?? []).slice(0, 200));
 
   // 9. Burn: the holder burns, the sync releases the row.
   const notHolderBurn = await C.write('b', 'land', 'burn', [BigInt(S2)]).catch((e) => ({ status: 'reverted' }));

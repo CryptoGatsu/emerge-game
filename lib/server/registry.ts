@@ -453,6 +453,59 @@ export function priceFor(claim: Claim, buyer: string): number | null {
   return claim.forSale && claim.forSale > 0 ? claim.forSale : null;
 }
 
+/**
+ * A plot changing hands, in both players' records.
+ *
+ * The registry row is the title and the map reads it, so a plot always shows
+ * on the world map under whoever holds it. The player record is the other
+ * half: it is what the "your plots" list and the yield are counted from, and
+ * it only ever had the seller's side done. A plot sent to another wallet left
+ * the sender's record and never arrived in the receiver's, so the wallet that
+ * now held the land was never shown it as one of theirs — and sending it back
+ * did not help, because by then it had been struck from that record too.
+ *
+ * Both halves happen here. The receiver is only written to when they already
+ * have a record: a stub carrying nothing but a seed would be newer than the
+ * copy on their device and would be merged over the top of their name and
+ * their ledger. A wallet that has never played has nothing to lose the plot
+ * from, and picks it up from the registry row the first time it connects.
+ */
+export async function handOverRecords(seed: number, from: string, to: string, claim: Claim): Promise<void> {
+  const seller = from.toLowerCase(), buyer = to.toLowerCase();
+  type Held = { claims?: { seed: number }[]; listings?: { seed: number }[] };
+  if (seller !== buyer) {
+    try {
+      const record = await readPlayerRecord(seller) as Held | null;
+      if (record && (Array.isArray(record.claims) || Array.isArray(record.listings))) {
+        await savePlayerRecord(seller, {
+          ...record,
+          claims: (record.claims ?? []).filter((c) => c.seed !== seed),
+          listings: (record.listings ?? []).filter((l) => l.seed !== seed),
+          savedAt: Date.now(),
+        });
+      }
+    } catch { /* the row is the title; the record catches up on their next visit */ }
+  }
+  try {
+    const record = await readPlayerRecord(buyer) as Held | null;
+    if (!record || !Array.isArray(record.claims)) return;
+    if (record.claims.some((c) => c.seed === seed)) return;
+    await savePlayerRecord(buyer, {
+      ...record,
+      claims: [...record.claims, {
+        seed,
+        name: claim.worldName,
+        region: claim.region,
+        price: claim.price ?? 0,
+        claimedAt: Date.now(),
+        owner: buyer,
+        txHash: null,
+      }],
+      savedAt: Date.now(),
+    });
+  } catch { /* as above: the row still says the plot is theirs */ }
+}
+
 export type TransferResult =
   | { ok: true; claim: Claim; price: number; seller: string }
   | { ok: false; reason: string };
@@ -501,23 +554,8 @@ export async function transferClaim(seed: number, buyer: string, buyerName: stri
     era: row.era ?? 1, level: world?.level ?? null,
   });
 
-  // The seller's record stops carrying it.
-  try {
-    const record = await readPlayerRecord(seller) as {
-      claims?: { seed: number }[]; listings?: { seed: number }[];
-    } | null;
-    if (record && (Array.isArray(record.claims) || Array.isArray(record.listings))) {
-      await savePlayerRecord(seller, {
-        ...record,
-        claims: (record.claims ?? []).filter((c) => c.seed !== seed),
-        listings: (record.listings ?? []).filter((l) => l.seed !== seed),
-        savedAt: Date.now(),
-      });
-    }
-  } catch {
-    // The map and the registry row are the title; the record catches up on
-    // the seller's next visit either way.
-  }
+  // The seller's record lets go of it and the buyer's takes it up.
+  await handOverRecords(seed, seller, row.owner, row);
   return { ok: true, claim: row, price: due, seller };
 }
 

@@ -29,7 +29,7 @@ import { UNISWAP_ON_ROBINHOOD, parseRoute } from '../chain/universal';
 import { ERC20_ABI, LAND_ABI, LAND_ADDRESS, MARKET_ABI, MARKET_ADDRESS, ROYALTIES_ABI, ROYALTIES_ADDRESS, plotsAreTokens } from '../chain/plots';
 import { serverKey } from '../limits';
 import { counter, getValue, hdel, hget, hgetall, hset, incrBy, push, range, releaseLock, setValue, takeLock } from './kv';
-import { allClaims, claimOf, displayNames, publishWorld, readPlayerRecord, readWorld, savePlayerRecord, type Claim } from './registry';
+import { allClaims, claimOf, displayNames, handOverRecords, publishWorld, readWorld, type Claim } from './registry';
 import { callFromVault, receiptOf, vaultAddress, vaultCanSign } from './signer';
 import { DIVIDEND_POOL } from './treasury';
 import { forgetLandMarket } from './landMarket';
@@ -344,18 +344,11 @@ async function moveRow(row: Claim, to: string, toName: string) {
   const world = await readWorld(row.seed).catch(() => null);
   if (world) await publishWorld({ ...world, owner: to, ownerName: moved.ownerName }).catch(() => {});
   await push(TRANSFERS, JSON.stringify({ at: Date.now(), seed: row.seed, from: row.owner.toLowerCase(), to }), 200);
-  // The seller's record stops carrying it.
-  try {
-    const record = await readPlayerRecord(row.owner.toLowerCase()) as { claims?: { seed: number }[]; listings?: { seed: number }[] } | null;
-    if (record && (Array.isArray(record.claims) || Array.isArray(record.listings))) {
-      await savePlayerRecord(row.owner.toLowerCase(), {
-        ...record,
-        claims: (record.claims ?? []).filter((c) => c.seed !== row.seed),
-        listings: (record.listings ?? []).filter((l) => l.seed !== row.seed),
-        savedAt: Date.now(),
-      });
-    }
-  } catch { /* the row is the title; the record catches up on their next visit */ }
+  // The sender's record lets go of it and the receiver's takes it up. A plot
+  // sent between two wallets is the case this exists for: neither browser was
+  // party to the move, so nothing else would ever tell the receiver they have
+  // it.
+  await handOverRecords(row.seed, row.owner.toLowerCase(), to, moved);
 }
 
 async function releaseRow(row: Claim) {
