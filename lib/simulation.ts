@@ -6999,7 +6999,18 @@ export function clearTrees(world: World, x: number, y: number, standing: number)
   useWorld(world);
   const affordable = Math.floor(world.treasury / CLEAR_TREE_GOLD);
   const felled = Math.max(0, Math.min(standing, affordable));
-  if (felled === 0) return { felled: 0, gold: 0, wood: 0 };
+  if (felled === 0) {
+    // Nothing standing to fell, but the tap still says "keep this ground
+    // open": the regrowth is pulled and the spot is noted, so the wood does
+    // not seed straight back into it. There is no timber in a sapling and
+    // nothing to charge for one.
+    if (standing === 0) {
+      world.clearings = [...(world.clearings ?? []).filter(([, , day]) => world.day - day < CLEARING_DAYS), [x, y, world.day]];
+      noteAttention(world);
+      pushFeed(world, 'build', 'The new growth was pulled and the ground left open.');
+    }
+    return { felled: 0, gold: 0, wood: 0 };
+  }
   const gold = felled * CLEAR_TREE_GOLD;
   const wood = felled * CLEAR_TREE_WOOD;
   spend(world, 'works', gold);

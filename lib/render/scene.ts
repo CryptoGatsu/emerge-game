@@ -2318,6 +2318,14 @@ export class EmergeScene {
     const parents = live.filter((t) => t.state === 'standing');
     if (!parents.length) return;
     const water = waterOf(this.world);
+    // Ground the player cleared is theirs to keep clear. Without this the
+    // wood re-seeded straight back into a clearing that had just been paid
+    // for, and the new growth could not be cut again until it had matured —
+    // so a player who wanted the ground open could not have it.
+    const clearings = (this.world.clearings ?? []).filter(([, , day]) => this.world.day - day < CLEARING_DAYS);
+    // The plot's own edges. A hardcoded 3..97 is the base plot's, so nothing
+    // ever took root in the ring an expanded plot had paid to open.
+    const edge = extentOf(this.world);
     let seed = (this.world.seed ^ (this.world.day * 2654435761)) >>> 0;
     const rand = () => { seed = (seed + 0x6d2b79f5) >>> 0; let t = Math.imul(seed ^ (seed >>> 15), seed | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
     let planted = 0;
@@ -2325,7 +2333,8 @@ export class EmergeScene {
       const parent = parents[Math.floor(rand() * parents.length)];
       const ang = rand() * Math.PI * 2, r = 2 + rand() * 3.5;
       const wx = parent.wx + Math.cos(ang) * r, wy = parent.wy + Math.sin(ang) * r;
-      if (wx < 3 || wx > 97 || wy < 3 || wy > 97) continue;
+      if (wx < edge.x0 + 3 || wx > edge.x1 - 3 || wy < edge.y0 + 3 || wy > edge.y1 - 3) continue;
+      if (clearings.some(([cx, cy]) => (cx - wx) ** 2 + (cy - wy) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS)) continue;
       if (!ROOTABLE.has(this.map.tileAt(wx, wy))) continue;
       if (water.blocks(wx, wy) || water.distanceToWater(wx, wy) < 2) continue;
       if (this.world.buildings.some((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < 42)) continue;
@@ -2587,7 +2596,8 @@ export class EmergeScene {
     this.placement = {
       type: 'Clear trees',
       onPlace: (x, y) => {
-        const standing = this.trees.filter((t) => t.state === 'standing' && (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS);
+        const within = (t: TreeEntry) => (t.wx - x) ** 2 + (t.wy - y) ** 2 <= CLEAR_RADIUS * CLEAR_RADIUS;
+        const standing = this.trees.filter((t) => t.state === 'standing' && within(t));
         const allowed = onClear(x, y, standing.length);
         standing
           .sort((a, b) => ((a.wx - x) ** 2 + (a.wy - y) ** 2) - ((b.wx - x) ** 2 + (b.wy - y) ** 2))
@@ -2597,6 +2607,18 @@ export class EmergeScene {
             tree.timer = FALL_SECONDS + i * 0.12;
             tree.sprite.visible = true;
           });
+        // The regrowth goes with it. A sapling is not timber and costs
+        // nothing to pull, but leaving it standing meant clearing the same
+        // ground twice did nothing the second time and the player was told
+        // to wait for it to mature before they could cut it.
+        if (allowed > 0 || !standing.length) {
+          for (const tree of this.trees) {
+            if (tree.state !== 'sapling' && tree.state !== 'stump') continue;
+            if (!within(tree)) continue;
+            tree.state = 'cleared';
+            tree.sprite.visible = false;
+          }
+        }
       },
     };
     this.app.canvas.style.cursor = 'crosshair';

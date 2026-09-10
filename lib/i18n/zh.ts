@@ -2168,6 +2168,7 @@ export const PATTERNS: [RegExp, string | ((m: RegExpExecArray) => string)][] = [
   [/^The Far Shore$/, '对岸'],
   [/^A tree was cleared for (\d+) Gold\. (\d+) timber went to the yard\.$/, '清理了一棵树，花费 $1 金币。$2 木料进了堆场。'],
   [/^(\d+) trees were cleared for (\d+) Gold\. (\d+) timber went to the yard\.$/, '清理了 $1 棵树，花费 $2 金币。$3 木料进了堆场。'],
+  [/^The new growth was pulled and the ground left open\.$/, '新长出的树苗被拔除，这片地保持空旷。'],
   [/^Chart (\d+)$/, '第 $1 号海图'],
   [/^the red corner$/, '红方'],
   [/^the blue corner$/, '蓝方'],
