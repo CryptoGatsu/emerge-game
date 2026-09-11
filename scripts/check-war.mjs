@@ -177,6 +177,24 @@ try {
     say('  and the garrison that lost walks home', (rows.get(3).army?.troops ?? 0) >= 0 && rows.get(3).occupying === undefined);
   }
 
+  // --- A plot that changes hands while its army is away.
+  claim(7, A, 'Alice IV'); await W.buyBase(7, A); published.set(7, 4_000_000);
+  rows.get(7).army = { troops: 20, since: Date.now() };
+  claim(8, B, 'Bobton II'); await W.buyBase(8, B); rows.get(8).army = { troops: 2, since: Date.now() };
+  const took = await W.invade(8, A, 7, 20);
+  if (took.ok && took.battle.winner === 'attacker') {
+    // The token moves: the row keeps the base, the buyer is somebody new.
+    rows.get(7).owner = C; rows.get(7).ownerName = 'Cavil';
+    say('a sold plot still says its old owner’s army is away (the state under test)', rows.get(7).occupying === 8);
+    rows.get(8).occupation.paidUntil = Date.now() - 1000;
+    await W.warRow(8);
+    say('when that expedition lapses, the sold plot stops saying its army is away', rows.get(7).occupying === undefined);
+    say('  and the troops do not go to the buyer, who never sent them', rows.get(7).army.troops === 0, `troops ${rows.get(7).army.troops}`);
+    say('  so the buyer can march from it', (await W.invade(3, C, 7, 3)).reason !== 'Your army is already holding a plot. Withdraw it first.');
+  } else {
+    say('(the sale-mid-occupation check needs an attacking win; skipped this roll)', true);
+  }
+
   // --- The arithmetic everybody reads.
   say('an age fights better than the one before it',
     U.unitOf(5).attack > U.unitOf(1).attack && U.unitOf(2).defence > U.unitOf(1).defence);

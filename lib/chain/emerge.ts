@@ -646,6 +646,9 @@ export const burnTargetBroken = (config: ChainConfig = ACTIVE_CHAIN) =>
  * Reads only — anything that changes state is signed by the player's wallet,
  * never by us, because there is no key in this application to sign with.
  */
+/** How long one RPC round trip may take before it is given up as unanswered. */
+const RPC_TIMEOUT_MS = 20_000;
+
 export async function rpc<T>(
   method: string,
   params: unknown[],
@@ -653,10 +656,14 @@ export async function rpc<T>(
 ): Promise<T | null> {
   if (!config.rpcUrl) return null;
   try {
+    // Bounded. A node that accepts the connection and never answers used to
+    // hold this open for ever, and everything above it with it: a listing
+    // waiting on its approval's receipt sat there until the tab was closed.
     const response = await fetch(config.rpcUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
     });
     const json = (await response.json()) as { result?: T; error?: { message?: string } };
     if (json.error || json.result === undefined || json.result === null) return null;

@@ -10,7 +10,7 @@ const { ok, api, OP } = require('./site.js');
 const C = require('./chain.js');
 const A = C.addr('a').toLowerCase(), B = C.addr('b').toLowerCase();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const SA = 1120, SB = 1365;
+const SA = 1000, SB = 1020;
 const BASE_COST = 250_000;
 
 /** A world small enough to publish, with the treasury the registry should read. */

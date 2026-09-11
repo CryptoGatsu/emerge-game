@@ -104,6 +104,27 @@ export async function warFeed(since = 0, limit = 30): Promise<WarEvent[]> {
 }
 
 /**
+ * An expedition comes home: the plot it marched from gets its troops back
+ * and stops saying it holds anything.
+ *
+ * The troops return only to the wallet that sent them. The flag comes off
+ * regardless: a plot that changed hands while its old owner's army was
+ * away used to keep `occupying` for ever, and a row that says its army is
+ * holding a plot refuses every invasion and has no withdraw that clears it.
+ */
+async function sendHome(fromSeed: number, by: string, heldSeed: number, troops: number, now: number): Promise<void> {
+  const home = await claimOf(fromSeed);
+  if (!home) return;
+  let changed = false;
+  if (same(home.owner, by)) {
+    home.army = { ...(home.army ?? { troops: 0, since: now }), troops: (home.army?.troops ?? 0) + troops };
+    changed = true;
+  }
+  if (home.occupying === heldSeed) { delete home.occupying; changed = true; }
+  if (changed) await writeClaim(home);
+}
+
+/**
  * Send a lapsed occupation home. The occupier's row gets its troops back;
  * the plot is free. Called on every read of a row that could be occupied,
  * under the lock when a write follows.
@@ -111,12 +132,7 @@ export async function warFeed(since = 0, limit = 30): Promise<WarEvent[]> {
 async function settleLapsed(claim: Claim, now: number): Promise<Claim> {
   if (!lapsed(claim, now)) return claim;
   const occ = claim.occupation!;
-  const home = await claimOf(occ.fromSeed);
-  if (home && same(home.owner, occ.by)) {
-    home.army = { ...(home.army ?? { troops: 0, since: now }), troops: (home.army?.troops ?? 0) + occ.troops };
-    delete home.occupying;
-    await writeClaim(home);
-  }
+  await sendHome(occ.fromSeed, occ.by, claim.seed, occ.troops, now);
   delete claim.occupation;
   await writeClaim(claim);
   await note('lapsed', claim.seed, claim, { address: occ.by, name: occ.byName }, { address: claim.owner, name: claim.ownerName }, occ.troops);
@@ -260,12 +276,7 @@ export async function invade(targetSeed: number, attacker: string, fromSeed: num
     if (battle.winner === 'attacker') {
       if (occ) {
         // The old garrison's survivors walk home.
-        const theirs = await claimOf(occ.fromSeed);
-        if (theirs && same(theirs.owner, occ.by)) {
-          theirs.army = { ...(theirs.army ?? { troops: 0, since: now }), troops: (theirs.army?.troops ?? 0) + battle.survivors.defender };
-          delete theirs.occupying;
-          await writeClaim(theirs);
-        }
+        await sendHome(occ.fromSeed, occ.by, targetSeed, battle.survivors.defender, now);
       } else if (target.army) {
         target.army = { ...target.army, troops: battle.survivors.defender };
       }
@@ -309,12 +320,7 @@ export async function retake(seed: number, owner: string, troops: number): Promi
     claim.army = { ...claim.army, troops: claim.army.troops - sent };
     if (battle.winner === 'attacker') {
       claim.army.troops += battle.survivors.attacker;
-      const theirs = await claimOf(occ.fromSeed);
-      if (theirs && same(theirs.owner, occ.by)) {
-        theirs.army = { ...(theirs.army ?? { troops: 0, since: now }), troops: (theirs.army?.troops ?? 0) + battle.survivors.defender };
-        delete theirs.occupying;
-        await writeClaim(theirs);
-      }
+      await sendHome(occ.fromSeed, occ.by, seed, battle.survivors.defender, now);
       delete claim.occupation;
       claim.shieldUntil = now + SHIELD_MS;
     } else {
@@ -335,12 +341,7 @@ export async function withdraw(seed: number, occupier: string): Promise<WarResul
     if (!claim) return { ok: false, reason: 'Nobody holds that plot.', status: 404 };
     const occ = claim.occupation;
     if (!occ || !same(occ.by, occupier)) return { ok: false, reason: 'Your army is not holding that plot.', status: 409 };
-    const home = await claimOf(occ.fromSeed);
-    if (home && same(home.owner, occupier)) {
-      home.army = { ...(home.army ?? { troops: 0, since: Date.now() }), troops: (home.army?.troops ?? 0) + occ.troops };
-      delete home.occupying;
-      await writeClaim(home);
-    }
+    await sendHome(occ.fromSeed, occ.by, seed, occ.troops, Date.now());
     delete claim.occupation;
     await writeClaim(claim);
     await note('withdrew', seed, claim, { address: occupier, name: occ.byName }, { address: claim.owner, name: claim.ownerName }, occ.troops);

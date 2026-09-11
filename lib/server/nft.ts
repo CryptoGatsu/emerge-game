@@ -414,9 +414,16 @@ export async function lastSync(): Promise<Synced | null> {
 const CLAIMS = serverKey('claims');
 const WORLDS_INDEX = serverKey('worlds');
 
-/** The row follows the token: everything the plot has earned goes with it, nothing that was the seller's. */
+/**
+ * The row follows the token: everything the plot has earned goes with it,
+ * nothing that was the seller's. The base and the troops at home are the
+ * land's and go with it; an army the seller marched off somewhere is the
+ * seller's, and carrying `occupying` across left the buyer's row saying its
+ * army held a plot it never sent anybody to — refused every invasion as
+ * "already holding", with no withdraw that could ever clear it.
+ */
 async function moveRow(row: Claim, to: string, toName: string) {
-  const { forSale: _s, listedAt: _l, offers: _o, hiring: _h, hand: _d, ...kept } = row;
+  const { forSale: _s, listedAt: _l, offers: _o, hiring: _h, hand: _d, occupying: _away, ...kept } = row;
   const moved: Claim = { ...kept, owner: to, ownerName: toName || `${to.slice(0, 6)}…${to.slice(-4)}`, at: Date.now() };
   await hset(CLAIMS, String(row.seed), JSON.stringify(moved));
   const world = await readWorld(row.seed).catch(() => null);

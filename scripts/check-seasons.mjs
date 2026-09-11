@@ -96,11 +96,22 @@ say('a play never leaves somebody stuck in it', w.citizens.every((c) => !c.play 
 // the middle of a lying-snow day, with everybody about. Left to whatever
 // hour the run happened to end on, this asked a sleeping town what it
 // thought of the weather and read the silence as a failure.
+//
+// And asked exactly, not by sampling. A line about the day is only reached
+// on six of a hundred roll residues, and the roll is (hash * 31 + beat * 17)
+// mod 100, so a hundred consecutive beats put every citizen on every
+// residue exactly once; anybody mid-conversation says nothing at all, so
+// the conversations are cleared first. And not on a holiday: the day line
+// gives a holiday first and the snow nothing, and how many days the
+// doorstep loop above took decides whether this lands on one. What is
+// left is the mechanism.
+while (S.holidayFor(w.day)) w.day += 1;
 w.hour = 12;
 w.ground = { snow: 1, wet: 0 };
-for (const c of w.citizens) { c.inside = false; c.activity = 'wandering'; }
+w.conversations = [];
+for (const c of w.citizens) { c.inside = false; c.activity = 'wandering'; c.seeking = undefined; }
 let snowLines = 0;
-for (const c of w.citizens) for (let beat = 0; beat < 40; beat++) { const t = SP.speechFor(w, c, beat); if (t && /snow|ice|boots|log on the fire|children have been out/i.test(t)) snowLines++; }
+for (const c of w.citizens) for (let beat = 0; beat < 100; beat++) { const t = SP.speechFor(w, c, beat); if (t && /snow|ice|boots|log on the fire|children have been out/i.test(t)) snowLines++; }
 say('the snow is talked about', snowLines > 0, `${snowLines} lines`);
 
 // The thaw: warm days, rain, and the snowmen go with it.

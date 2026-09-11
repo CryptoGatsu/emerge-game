@@ -162,8 +162,12 @@ export async function judgedFor(address: string): Promise<Judged> {
   // What each of these plots has already been paid today, by this wallet or by
   // whoever held it earlier: a plot's day is the plot's, so handing it on does
   // not hand on a fresh day's room with it.
+  // Both the plots this wallet owns and the ones its army is holding: a held
+  // plot's day is the plot's too, and the occupier's share is judged against
+  // what it has left, not against a fresh day it does not have.
+  const held = rows.filter((c) => c.occupation && c.occupation.paidUntil > now && c.occupation.by.toLowerCase() === me && c.owner.toLowerCase() !== me);
   let already = new Map<number, number>();
-  try { already = await plotsSpentToday(mine.map((c) => c.seed)); } catch { already = new Map(); }
+  try { already = await plotsSpentToday([...mine, ...held].map((c) => c.seed)); } catch { already = new Map(); }
   let ceiling = 0, yieldSum = 0;
   const judge = async (row: Claim, presence: number) => {
     let world: World | null = null;
@@ -197,7 +201,6 @@ export async function judgedFor(address: string): Promise<Judged> {
   }
   // And the plots this wallet's army is holding: their owners' cities, judged
   // as they stand, with the occupier's share of what they make.
-  const held = rows.filter((c) => c.occupation && c.occupation.paidUntil > now && c.occupation.by.toLowerCase() === me && c.owner.toLowerCase() !== me);
   for (const row of held) {
     let theirDays = 0;
     try { theirDays = await presenceDays(row.owner.toLowerCase()); } catch { theirDays = 0; }
