@@ -28,6 +28,7 @@ import {
   MAX_CITY_LEVEL, cityLevelSpec, levelForSize, plotCeiling, treasuryCap, charterMultiplier, ERA_CITY_LEVEL, BUILDERS_DISCOUNT,
 } from './world/eras';
 import { formOf, formName, formPosts, MERGES_ON_ADVANCE, LINEAGE_TYPES } from './world/forms';
+import { OCCUPIER_SHARE, occupyUpkeepGold, unitOf, type Battle, type BattleRound, type Occupation } from './world/war';
 import {
   ANIMAL_LABELS, ANIMAL_PACE, ANIMAL_YIELD, FLEE_RANGE, HERD_CAP, HUNT_RANGE, HUNT_REACH, WATERSIDE, WILDLIFE,
   type Animal, type AnimalKind,
@@ -726,6 +727,10 @@ export interface World {
   eraSince?: number;
   /** The age every building was last rebuilt into (see `rebuildForEra`). Absent on a save from before forms. */
   formed?: number;
+  /** The plot at war: its base and army as the registry has them, whoever holds it, and the battle being played back. */
+  war?: WarState;
+  /** Soldiers on the ground: the garrison drilling, an occupier's patrols, or two sides in a fight. */
+  soldiers?: Soldier[];
   /**
    * Set by every rebuild this code performs. Absent on a town the first
    * build of 2.7 folded in half while it was already in its age — the one
@@ -889,9 +894,10 @@ export interface Stewardship {
 /** The headings a day's Gold is booked under. */
 export type LedgerLine =
   | 'wages' | 'upkeep' | 'imports' | 'building' | 'works' | 'gear'
-  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival' | 'programmes' | 'greatworks';
+  | 'exports' | 'households' | 'food' | 'vault' | 'arena' | 'training' | 'festival' | 'programmes' | 'greatworks' | 'war';
 
 export const LEDGER_LABELS: Record<LedgerLine, string> = {
+  war: 'The army',
   wages: 'Wages',
   upkeep: 'Upkeep',
   imports: 'Imports',
@@ -2041,6 +2047,8 @@ function moveCitizens(world: World, hours: number) {
     else if (c.rogue) phase = 'rogue';
     else if (c.chasing) phase = 'pursuit';
     else if (c.fleeing && c.fleeing > 0) phase = 'fleeing';
+    // A fight in the square: everybody who has a door goes in behind it.
+    else if (world.war?.playing && homeOf(world, c)) phase = 'athome';
     // Anyone genuinely freezing goes in out of it, and stays in until they have
     // properly warmed up. People do not stand in a blizzard until they drop,
     // and children — who wander all day by definition and are never counted as
@@ -7660,6 +7668,8 @@ const TRADE_BUILD_COST: Record<string, number> = {
   Hospital: 1350, Stadium: 1650, Supermarket: 1050, Office: 1140, 'Bus Depot': 1020, 'Power Plant': 1500,
   // The AI era: light and quiet.
   'Data Centre': 2100, 'Research Campus': 2400, 'Vertical Farm': 1800, 'Pod Hub': 1950, 'Drone Port': 1650,
+  // The base: bought in $EMERGE from the On-Chain panel, never for Gold.
+  Barracks: 0,
 };
 
 /** What a building costs to raise, by type, in the settlement age. Everything the panel shows starts from here. */
@@ -7744,6 +7754,7 @@ export const BUILD_MATERIALS: Record<string, { wood: number; stone: number }> = 
   'Vertical Farm': { wood: 50, stone: 60 },
   'Pod Hub': { wood: 30, stone: 70 },
   'Drone Port': { wood: 30, stone: 60 },
+  Barracks: { wood: 0, stone: 0 },
 };
 
 /** What this kind of building takes to raise. Anything unlisted is a modest shed. */
@@ -8795,6 +8806,7 @@ export function maintenanceCost(type: string) {
     Factory: 14, Foundry: 13, 'Railway Station': 14, Telegraph: 6, Gasworks: 12,
     Hospital: 17, Stadium: 19, Supermarket: 12, Office: 11, 'Bus Depot': 12, 'Power Plant': 18,
     'Data Centre': 22, 'Research Campus': 24, 'Vertical Farm': 17, 'Pod Hub': 17, 'Drone Port': 14,
+    Barracks: 7,
   } as Record<string, number>)[type] ?? 2.4;
 }
 
@@ -9235,6 +9247,7 @@ export function advance(world: World, hours: number, realSeconds?: number): Worl
   swimmers(world, hours);
   moveCitizens(world, hours);
   moveWildlife(world, hours);
+  stepWar(world, hours);
   hazardStep(world, hours);
   unrestStep(world, hours);
   runMarket(world, hours);
@@ -10074,6 +10087,457 @@ function runGreatWorks(world: World) {
 }
 
 /* ------------------------------------------------------------------ *
+ * War: the base, the army, the occupation, and the battle on the ground
+ * ------------------------------------------------------------------ */
+
+/**
+ * The registry decides every fight; the settlement shows it. What the
+ * registry has said about this plot is mirrored here — the base, how many
+ * troops it holds, whose army is on the land — and the last battle it
+ * recorded is played out once on the ground, soldier by soldier, in the
+ * order the rounds were fought. Everybody who opens the plot sees the same
+ * fight, because everybody plays the same record.
+ */
+export interface WarState {
+  base: boolean;
+  /** Troops at the base, as the registry counts them. */
+  army: number;
+  /** Troops away holding another plot, and which. */
+  away: number;
+  occupying: number | null;
+  /** Whose army holds this plot, if anybody's. */
+  occupation: { by: string; byName: string; fromName: string; troops: number; era: number; since: number; paidUntil: number } | null;
+  /** Until when the plot cannot be invaded. */
+  shieldUntil: number;
+  /** The last battle the registry recorded here, and whether it has been played. */
+  battle: Battle | null;
+  battleSeen: string | null;
+  /** The fight being played back right now. */
+  playing: BattlePlay | null;
+}
+
+export interface BattlePlay {
+  id: string;
+  rounds: BattleRound[];
+  step: number;
+  /** Hours into the current phase. */
+  t: number;
+  phase: 'march' | 'clash' | 'done';
+  winner: 'attacker' | 'defender';
+  /** Which side on the ground the attacker is: the garrison retaking, or an invader. */
+  attackerSide: 'home' | 'invader';
+  attackerEra: number;
+  defenderEra: number;
+  /** How many soldiers each side fielded on the ground, and what the record says survived. */
+  fielded: { attacker: number; defender: number };
+  survivors: { attacker: number; defender: number };
+  attackerName: string;
+  defenderName: string;
+  /** How many rounds have been played, for the sound of each. */
+  played: number;
+}
+
+export interface Soldier {
+  id: string;
+  side: 'home' | 'invader';
+  /** Fighting for the attacker or the defender in the battle being played, if one is. */
+  role?: 'attacker' | 'defender';
+  era: number;
+  look: number;
+  x: number; y: number; destX: number; destY: number;
+  facing: Facing; moving: boolean;
+  /** Hours left standing where they are. */
+  wait: number;
+  /** Down: hours since they fell, gone after a while. */
+  fallen?: number;
+  /** Marching off the plot, gone at the edge. */
+  leaving?: boolean;
+  /** Crouched behind a wall or a corner. */
+  cover?: boolean;
+  /** Hours left of the shot or the lunge just made, and where it went. */
+  firing?: number;
+  aimX?: number; aimY?: number;
+  /** Inside a building, by id: a patrol clearing it, or a squad holding it. */
+  inside?: string;
+}
+
+/** How many soldiers stand for a force on the ground: a squad, not the whole roll. */
+const SOLDIERS_SHOWN = 12;
+/** Units an hour: soldiers move at a march, about twice a walker's pace. */
+const SOLDIER_PACE = 14;
+const ROUND_HOURS = 0.3;
+/** The attackers close on the square within this, wherever the gate was. */
+const MARCH_HOURS_MAX = 3;
+const FALLEN_HOURS = 8;
+
+const emptyWar = (): WarState => ({ base: false, army: 0, away: 0, occupying: null, occupation: null, shieldUntil: 0, battle: null, battleSeen: null, playing: null });
+
+/** Where an army arrives from: the road node nearest the plot's edge. */
+function plotGate(world: World): [number, number] {
+  const bb = buildBounds(world);
+  let best: [number, number] = [bb.x0 + 2, world.layout.plaza.y];
+  let bestD = Infinity;
+  for (const [x, y] of world.layout.nodes) {
+    const d = Math.min(x - bb.x0, bb.x1 - x, y - bb.y0, bb.y1 - y);
+    if (d < bestD && !waterOf(world).blocks(x, y)) { bestD = d; best = [x, y]; }
+  }
+  return best;
+}
+
+/** Where the garrison stands: round the base, or the square when there is none. */
+function musterPoint(world: World): [number, number] {
+  const base = world.buildings.find((b) => b.type === 'Barracks' && !b.ruined);
+  return base ? [base.x, base.y + 3.5] : [world.layout.plaza.x, world.layout.plaza.y];
+}
+
+let soldierCounter = 0;
+function raiseSoldiers(world: World, side: 'home' | 'invader', era: number, n: number, at: [number, number], role?: 'attacker' | 'defender'): Soldier[] {
+  const out: Soldier[] = [];
+  const water = waterOf(world);
+  for (let i = 0; i < n; i++) {
+    const [ox, oy] = standingOffset(i * 7 + 3, 3);
+    let x = clamp(at[0] + ox, 2, 98), y = clamp(at[1] + oy, 3, 97);
+    if (water.blocks(x, y)) { const c = water.toClear(x, y); if (c.d > 0) { x += c.x * (c.d + 0.5); y += c.y * (c.d + 0.5); } }
+    out.push({ id: `s${world.counter++}-${soldierCounter++}`, side, role, era, look: (i * 31 + world.seed) % 97, x, y, destX: x, destY: y, facing: 's', moving: false, wait: 0.5 + (i % 4) * 0.4 });
+  }
+  return out;
+}
+
+/**
+ * Bring the settlement up to date with the registry's war row. Called each
+ * time the row is read: the base and the army numbers are copied, an
+ * occupation puts patrols on the ground or takes them off, and a battle
+ * not yet seen is set playing.
+ */
+export function applyWar(world: World, row: { army: { troops: number } | null; occupation: Occupation | null; shieldUntil: number; battle: Battle | null; occupying: number | null } | null): void {
+  useWorld(world);
+  const war = world.war ?? (world.war = emptyWar());
+  if (!row) return;
+  war.base = !!row.army;
+  war.army = row.army?.troops ?? 0;
+  war.occupying = row.occupying ?? null;
+  war.shieldUntil = row.shieldUntil ?? 0;
+  war.occupation = row.occupation ? { by: row.occupation.by, byName: row.occupation.byName, fromName: row.occupation.fromName, troops: row.occupation.troops, era: row.occupation.era, since: row.occupation.since, paidUntil: row.occupation.paidUntil } : null;
+  war.away = row.occupation ? 0 : war.away;
+  // The base stands on the ground once the registry says it is bought.
+  if (war.base && !world.buildings.some((b) => b.type === 'Barracks')) raiseBase(world);
+  const battle = row.battle;
+  if (battle && battle.id !== war.battleSeen && !war.playing) {
+    war.battle = battle;
+    startBattle(world, battle);
+  }
+  if (!war.playing) settleGround(world);
+}
+
+/** Raise the base building on open ground near the square, for nothing: the $EMERGE was paid on the registry. */
+export function raiseBase(world: World): Building | null {
+  useWorld(world);
+  if (world.buildings.some((b) => b.type === 'Barracks')) return null;
+  // The base was paid for on the registry, so it must stand somewhere: a work
+  // site, a house plot, or failing those any open ground in rings round the
+  // square. A swamp plot whose last spot went to a fishery used to swallow
+  // the purchase without a building.
+  const tries: [number, number][] = [];
+  for (const site of [freeSite(world, false), freeSite(world, true)]) if (site) tries.push(site);
+  tries.push(...groundRings(world));
+  for (const [x, y] of tries) {
+    if (placementProblem(world, 'Barracks', x, y)) continue;
+    const gold = world.treasury;
+    const raised = constructBuilding(world, 'Barracks', 0, x, y);
+    world.treasury = gold;
+    if (!raised) continue;
+    pushFeed(world, 'build', `A ${formName('Barracks', eraOf(world)).toLowerCase()} was raised. ${world.name} can train an army now.`);
+    return raised;
+  }
+  return null;
+}
+
+/** Put the battle on the ground: both sides in their places, the attackers on the march. */
+function startBattle(world: World, battle: Battle): void {
+  const war = world.war!;
+  const attackerSide: 'home' | 'invader' = battle.kind === 'retake' ? 'home' : 'invader';
+  const defenderSide: 'home' | 'invader' = attackerSide === 'home' ? 'invader' : 'home';
+  const fielded = {
+    attacker: Math.max(1, Math.min(SOLDIERS_SHOWN, battle.attacker.troops)),
+    defender: Math.max(0, Math.min(SOLDIERS_SHOWN, battle.defender.troops)),
+  };
+  world.soldiers = (world.soldiers ?? []).filter((so) => !so.fallen && !so.leaving && so.side === defenderSide).slice(0, fielded.defender);
+  const gate = plotGate(world);
+  const square: [number, number] = [world.layout.plaza.x, world.layout.plaza.y];
+  // The defenders gather in the square; the attackers come in from the gate.
+  while (world.soldiers.length < fielded.defender) world.soldiers.push(...raiseSoldiers(world, defenderSide, battle.defender.era, 1, square));
+  for (const so of world.soldiers) { so.role = 'defender'; so.wait = 99; so.destX = square[0] + (so.x - square[0]) * 0.1; so.destY = square[1] + (so.y - square[1]) * 0.1; so.moving = true; }
+  const attackers = raiseSoldiers(world, attackerSide, battle.attacker.era, fielded.attacker, attackerSide === 'home' ? musterPoint(world) : gate, 'attacker');
+  // The first bound: a line about twelve units short of the square, on the way in.
+  for (const so of attackers) {
+    const [ox, oy] = standingOffset(so.look, 3.2);
+    const d = Math.hypot(square[0] - so.x, square[1] - so.y) || 1;
+    const stop = Math.max(0, d - 12);
+    so.destX = so.x + ((square[0] - so.x) / d) * stop + ox; so.destY = so.y + ((square[1] - so.y) / d) * stop + oy; so.moving = true; so.wait = 99;
+  }
+  world.soldiers.push(...attackers);
+  war.playing = {
+    id: battle.id, rounds: battle.rounds, step: 0, t: 0, phase: 'march', winner: battle.winner, attackerSide,
+    attackerEra: battle.attacker.era, defenderEra: battle.defender.era, fielded, survivors: battle.survivors,
+    attackerName: battle.attacker.name || shortName(battle.attacker.address), defenderName: battle.defender.name || shortName(battle.defender.address),
+    played: 0,
+  };
+  // The defenders take cover at the walls and corners between the square and
+  // the gate; the attackers come on in bounds, cover to cover.
+  const posts = coverPosts(world, gate);
+  const defenders = world.soldiers.filter((so) => so.role === 'defender');
+  defenders.forEach((so, i) => {
+    const post = posts[i % Math.max(1, posts.length)];
+    if (post) { so.destX = post[0]; so.destY = post[1]; so.moving = true; }
+  });
+  pushFeed(world, 'world', 'People run for their homes and bar the doors.');
+  pushFeed(world, 'world', battle.kind === 'retake'
+    ? `${war.playing.attackerName} marches on the garrison holding ${world.name}.`
+    : battle.kind === 'ambush'
+      ? `${war.playing.attackerName} falls on the army holding ${world.name}.`
+      : `${war.playing.attackerName}'s army is at the gate of ${world.name}.`);
+}
+
+const shortName = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+
+/**
+ * After a fight, or on any quiet read: the right soldiers on the ground.
+ * An occupation keeps a patrol of the occupier's troops walking the
+ * buildings; a base keeps its garrison drilling beside it; anybody else
+ * marches off.
+ */
+function settleGround(world: World): void {
+  const war = world.war!;
+  const soldiers = (world.soldiers ?? []).filter((so) => !so.fallen);
+  const wantInvaders = war.occupation ? Math.min(SOLDIERS_SHOWN, war.occupation.troops) : 0;
+  const wantHome = war.base ? Math.min(SOLDIERS_SHOWN, Math.max(0, war.army)) : 0;
+  const keep = (side: 'home' | 'invader', want: number) => {
+    const standing = soldiers.filter((so) => so.side === side && !so.leaving);
+    for (const so of standing.slice(want)) { so.leaving = true; so.role = undefined; const g = side === 'invader' ? plotGate(world) : musterPoint(world); so.destX = g[0]; so.destY = g[1]; so.moving = true; }
+    for (const so of standing.slice(0, want)) so.role = undefined;
+    const short = want - Math.min(want, standing.length);
+    if (short > 0) {
+      const era = side === 'invader' ? (war.occupation?.era ?? 1) : eraOf(world);
+      soldiers.push(...raiseSoldiers(world, side, era, short, side === 'invader' ? plotGate(world) : musterPoint(world)));
+    }
+  };
+  keep('invader', wantInvaders);
+  keep('home', wantHome);
+  world.soldiers = [...soldiers, ...(world.soldiers ?? []).filter((so) => so.fallen)];
+}
+
+/** The buildings an occupier's patrol walks between: everything that is not a home. */
+function patrolTargets(world: World): Building[] {
+  const civic = world.buildings.filter((b) => b.type !== 'House' && !b.ruined);
+  return civic.length ? civic : world.buildings.filter((b) => !b.ruined);
+}
+
+/**
+ * Where a soldier can take cover: beside the buildings that stand between
+ * the square and the gate, on the side facing the enemy, closest to the
+ * square first. A plot with nothing standing fights in the open.
+ */
+function coverPosts(world: World, gate: [number, number]): [number, number][] {
+  const sq: [number, number] = [world.layout.plaza.x, world.layout.plaza.y];
+  const water = waterOf(world);
+  const toGate = Math.atan2(gate[1] - sq[1], gate[0] - sq[0]);
+  const posts: [number, number][] = [];
+  const near = world.buildings.filter((b) => !b.ruined && Math.hypot(b.x - sq[0], b.y - sq[1]) < 30)
+    .sort((a, b) => Math.hypot(a.x - sq[0], a.y - sq[1]) - Math.hypot(b.x - sq[0], b.y - sq[1]));
+  for (const b of near) {
+    const r = footprintRadius(b) + 0.7;
+    for (const turn of [0, 0.7, -0.7]) {
+      const x = b.x + Math.cos(toGate + turn) * r, y = b.y + Math.sin(toGate + turn) * r;
+      if (!water.blocks(x, y)) posts.push([x, y]);
+    }
+  }
+  // The square's edge itself, for a squad with no wall to spare.
+  for (let i = 0; i < 6; i++) posts.push([sq[0] + Math.cos(toGate + (i - 2.5) * 0.5) * 5, sq[1] + Math.sin(toGate + (i - 2.5) * 0.5) * 5]);
+  return posts;
+}
+
+/** The nearest standing enemy to a soldier, for aiming. */
+function nearestEnemy(world: World, so: Soldier): Soldier | null {
+  let best: Soldier | null = null, bestD = Infinity;
+  for (const other of world.soldiers ?? []) {
+    if (other.role === so.role || !other.role || other.fallen !== undefined) continue;
+    const d = Math.hypot(other.x - so.x, other.y - so.y);
+    if (d < bestD) { bestD = d; best = other; }
+  }
+  return best;
+}
+
+/** Move the soldiers, and play the fight. Called every tick. */
+function stepWar(world: World, hours: number): void {
+  const war = world.war;
+  if (!war || !world.soldiers?.length) return;
+  const water = waterOf(world);
+  const play = war.playing;
+  // Walking.
+  for (const so of world.soldiers) {
+    if (so.fallen !== undefined) { so.fallen += hours; continue; }
+    const dx = so.destX - so.x, dy = so.destY - so.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 0.3) {
+      const step = Math.min(d, SOLDIER_PACE * hours);
+      let nx = so.x + (dx / d) * step, ny = so.y + (dy / d) * step;
+      if (water.blocks(nx, ny)) { const c = water.toClear(nx, ny); if (c.d > 0) { nx += c.x * (c.d + 0.3); ny += c.y * (c.d + 0.3); } }
+      so.x = nx; so.y = ny; so.moving = true;
+      so.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'e' : 'w') : (dy > 0 ? 's' : 'n');
+    } else {
+      so.moving = false;
+      if (so.leaving) { so.fallen = FALLEN_HOURS; continue; }
+      if (play && so.role) { so.cover = so.role === 'defender' || play.phase === 'clash'; continue; }
+      so.cover = false;
+      so.wait -= hours;
+      if (so.wait <= 0) {
+        // A new post: an invader walks the buildings it holds, going in to
+        // clear one now and then; the garrison drills round the base.
+        if (so.inside) so.inside = undefined;
+        if (so.side === 'invader' && war.occupation) {
+          const targets = patrolTargets(world);
+          const b = targets[(so.look + Math.floor(world.hour) + Math.floor(so.x)) % Math.max(1, targets.length)];
+          if (b) {
+            const [ox, oy] = standingOffset(so.look + Math.floor(world.hour), 2.6);
+            so.destX = b.x + ox; so.destY = b.y + 2.4 + oy;
+            // One in three goes inside: the door, then out of sight until the next post.
+            if ((so.look + Math.floor(world.hour)) % 3 === 0) { so.inside = b.id; so.destX = b.x; so.destY = b.y + footprintRadius(b) * 0.6; }
+          }
+        } else {
+          const m = musterPoint(world);
+          const [ox, oy] = standingOffset(so.look + Math.floor(world.hour * 3), 3.4);
+          so.destX = m[0] + ox; so.destY = m[1] + oy;
+        }
+        so.wait = 1.5 + (so.look % 5) * 0.8;
+      }
+    }
+  }
+  for (const so of world.soldiers) if (so.firing !== undefined) { so.firing -= hours; if (so.firing <= 0) so.firing = undefined; }
+  // Fallen soldiers are cleared after a while.
+  world.soldiers = world.soldiers.filter((so) => so.fallen === undefined || so.fallen < FALLEN_HOURS);
+  if (!play) return;
+  play.t += hours;
+  if (play.phase === 'march') {
+    const arrived = world.soldiers.filter((so) => so.role === 'attacker').every((so) => !so.moving);
+    if (arrived || play.t > MARCH_HOURS_MAX) { play.phase = 'clash'; play.t = 0; pushFeed(world, 'world', `The fight for ${world.name} is on.`); }
+    return;
+  }
+  if (play.phase === 'clash') {
+    while (play.t >= ROUND_HOURS && play.step < play.rounds.length) {
+      play.t -= ROUND_HOURS;
+      const round = play.rounds[play.step++];
+      play.played = play.step;
+      // The side that landed the blow fires: a few of them level their
+      // weapons at the nearest enemy (a spear lunges, a rifle flashes).
+      const firingSide = round.by;
+      const shooters = world.soldiers.filter((so) => so.role === firingSide && so.fallen === undefined);
+      for (const so of shooters.slice(0, 2 + (play.step % 3))) {
+        const target = nearestEnemy(world, so);
+        if (!target) break;
+        so.firing = 0.12; so.aimX = target.x; so.aimY = target.y;
+        so.facing = Math.abs(target.x - so.x) > Math.abs(target.y - so.y) ? (target.x > so.x ? 'e' : 'w') : (target.y > so.y ? 's' : 'n');
+      }
+      // Whoever was hit loses a share of their squad; the record says how much
+      // fight is left. The exposed go first: cover is worth something.
+      const hitSide: 'attacker' | 'defender' = round.by === 'attacker' ? 'defender' : 'attacker';
+      const left = hitSide === 'attacker' ? round.attackerLeft : round.defenderLeft;
+      const fielded = play.fielded[hitSide];
+      const shouldStand = Math.max(left > 0 ? 1 : 0, Math.round(fielded * left / 100));
+      const standing = world.soldiers.filter((so) => so.role === hitSide && so.fallen === undefined).sort((a, b) => Number(!!a.cover) - Number(!!b.cover));
+      for (const so of standing.slice(shouldStand)) { so.fallen = 0; so.moving = false; so.cover = false; }
+      // Every third round the attackers bound forward to the next cover.
+      if (play.step % 3 === 0) {
+        const sq = world.layout.plaza;
+        for (const so of world.soldiers) {
+          if (so.role !== 'attacker' || so.fallen !== undefined) continue;
+          const d = Math.hypot(sq.x - so.x, sq.y - so.y);
+          if (d > 4) { const step = Math.min(4, d - 3); so.destX = so.x + ((sq.x - so.x) / d) * step; so.destY = so.y + ((sq.y - so.y) / d) * step; so.moving = true; so.cover = false; }
+        }
+      }
+      // Everybody still up faces the enemy.
+      for (const so of world.soldiers) if (so.role && so.fallen === undefined && so.firing === undefined) { const e = nearestEnemy(world, so); if (e) so.facing = Math.abs(e.x - so.x) > Math.abs(e.y - so.y) ? (e.x > so.x ? 'e' : 'w') : (e.y > so.y ? 's' : 'n'); }
+    }
+    if (play.step >= play.rounds.length && play.t >= ROUND_HOURS) {
+      play.phase = 'done'; play.t = 0;
+      finishBattle(world);
+    }
+  }
+}
+
+/** The fight is over: the record's survivors take up their places, the rest march off, and the feed says who holds the plot. */
+function finishBattle(world: World): void {
+  const war = world.war!;
+  const play = war.playing!;
+  const attackerWon = play.winner === 'attacker';
+  const losers: 'attacker' | 'defender' = attackerWon ? 'defender' : 'attacker';
+  for (const so of world.soldiers ?? []) {
+    so.cover = false; so.firing = undefined;
+    if (so.fallen !== undefined) continue;
+    if (so.role === losers) {
+      // The routed side: fewer than fielded walk away.
+      so.leaving = true; so.role = undefined;
+      const g = so.side === 'invader' ? plotGate(world) : musterPoint(world);
+      so.destX = g[0]; so.destY = g[1]; so.moving = true;
+    } else { so.role = undefined; so.wait = 0.5 + (so.look % 4) * 0.4; }
+  }
+  const winnerSide = attackerWon ? play.attackerSide : (play.attackerSide === 'home' ? 'invader' : 'home');
+  const winnerName = attackerWon ? play.attackerName : play.defenderName;
+  const loserName = attackerWon ? play.defenderName : play.attackerName;
+  pushFeed(world, 'world', winnerSide === 'invader'
+    ? `${winnerName}'s army holds ${world.name}. ${loserName}'s survivors fell back. The occupier takes ${Math.round(OCCUPIER_SHARE * 100)}% of the plot's yield until they are thrown out.`
+    : `${winnerName} holds ${world.name}. ${loserName}'s survivors fell back.`);
+  war.battleSeen = play.id;
+  war.playing = null;
+  noteAttention(world);
+  settleGround(world);
+}
+
+/** What one troop costs to train here, in this age: Gold from the treasury and steel from the yard. */
+export function troopCost(world: { era?: number }): { gold: number; steel: number; unit: string; plural: number extends never ? never : string } {
+  const unit = unitOf(eraOf(world));
+  return { gold: unit.gold, steel: unit.steel, unit: unit.name, plural: unit.plural };
+}
+
+/** How many troops the treasury and the yard can pay for right now. */
+export function troopsAffordable(world: World): number {
+  const cost = troopCost(world);
+  const byGold = Math.floor(world.treasury / cost.gold);
+  const bySteel = cost.steel > 0 ? Math.floor((world.resources.steel ?? 0) / cost.steel) : Infinity;
+  return Math.max(0, Math.min(byGold, bySteel));
+}
+
+/** Pay for `n` troops out of the settlement's own stores. The registry is told afterwards. */
+export function payForTroops(world: World, n: number): { ok: boolean; message: string; gold: number } {
+  useWorld(world);
+  if (!world.buildings.some((b) => b.type === 'Barracks' && !b.ruined)) return { ok: false, message: 'There is no base to train them at.', gold: 0 };
+  const cost = troopCost(world);
+  const count = Math.floor(n);
+  if (!(count > 0)) return { ok: false, message: 'Train at least one.', gold: 0 };
+  if (troopsAffordable(world) < count) {
+    return { ok: false, message: cost.steel > 0 ? `${count} ${cost.plural} cost ${(cost.gold * count).toLocaleString()} Gold and ${cost.steel * count} steel.` : `${count} ${cost.plural} cost ${(cost.gold * count).toLocaleString()} Gold.`, gold: 0 };
+  }
+  const gold = cost.gold * count;
+  spend(world, 'war', gold);
+  if (cost.steel > 0) { world.resources.steel -= cost.steel * count; note(world, 'consumed', 'steel', cost.steel * count); }
+  noteAttention(world);
+  pushFeed(world, 'build', `${count} ${count === 1 ? cost.unit : cost.plural} trained at the ${formName('Barracks', eraOf(world)).toLowerCase()} for ${gold.toLocaleString()} Gold${cost.steel > 0 ? ` and ${cost.steel * count} steel` : ''}.`);
+  return { ok: true, message: `${count} trained.`, gold };
+}
+
+/** Pay a day of holding another plot, in this settlement's Gold. */
+export function payForOccupation(world: World, era: number, name: string): { ok: boolean; message: string; gold: number } {
+  useWorld(world);
+  const gold = occupyUpkeepGold(era);
+  if (world.treasury < gold) return { ok: false, message: `Holding ${name} costs ${gold.toLocaleString()} Gold a day and the treasury cannot cover it.`, gold: 0 };
+  spend(world, 'war', gold);
+  pushFeed(world, 'market', `${gold.toLocaleString()} Gold went to the army holding ${name}, for another day.`);
+  return { ok: true, message: `Paid ${gold.toLocaleString()} Gold.`, gold };
+}
+
+/** Whether an invader's patrol holds this building right now. */
+export const occupiedBuilding = (world: World, b: Building) => !!world.war?.occupation && b.type !== 'House' && !b.ruined;
+
+/* ------------------------------------------------------------------ *
  * Boons: paid for in $EMERGE, delivered at once
  * ------------------------------------------------------------------ */
 
@@ -10528,6 +10992,7 @@ export const BUILDING_CATEGORY: Record<string, BuildingCategory> = {
   Hospital: 'Care & learning', 'Research Campus': 'Care & learning', 'Data Centre': 'Care & learning',
   Supermarket: 'Food', 'Vertical Farm': 'Food',
   Gasworks: 'Utilities', 'Power Plant': 'Utilities',
+  Barracks: 'Civic',
 };
 export const BUILDING_CATEGORIES: BuildingCategory[] = ['Homes', 'Food', 'Materials', 'Civic', 'Care & learning', 'Leisure', 'Transport', 'Utilities'];
 

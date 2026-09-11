@@ -17,6 +17,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchClaims, type Claim } from '@/lib/net/registry';
 import { fetchGldWins, gldAmount } from '@/lib/net/casino';
+import { fetchWarFeed, type WarEvent } from '@/lib/net/war';
+import { OCCUPIER_SHARE } from '@/lib/world/war';
 import { channelOf, loadChat, poll, worldChannel, type ChatState } from '@/lib/chat';
 import { TOKEN, shortAddress } from '@/lib/chain/emerge';
 import { t } from '@/lib/i18n';
@@ -245,8 +247,62 @@ export function useNotices({ seed, chatOpen, chatNotices, mine, onOpenChat }: {
   }, [push]);
 
   useGldWinNotices(push, () => mineRef.current.address);
+  useWarNotices(push, () => mineRef.current.address);
 
   return { notices, dismiss, announce: push };
+}
+
+/** What a war event says on a card, to everybody. */
+export function warCard(e: WarEvent): { title: string; body: string } {
+  const actor = e.actorName || shortAddress(e.actor);
+  const other = e.otherName || shortAddress(e.other);
+  const where = e.worldName || e.region;
+  switch (e.kind) {
+    case 'invaded': return { title: t('{who} invaded {where}', { who: actor, where }), body: t('{who}’s army holds {where} now. {other} keeps {pct}% of its yield until they throw them out; the rest goes to the invader.', { who: actor, where, other, pct: Math.round((1 - OCCUPIER_SHARE) * 100) }) };
+    case 'held': return { title: t('{where} held', { where }), body: t('{other}’s garrison threw {who}’s army back from {where}.', { who: actor, other, where }) };
+    case 'retaken': return { title: t('{who} retook {where}', { who: actor, where }), body: t('{other}’s army was thrown out of {where}. The plot is shielded for a day.', { other, where }) };
+    case 'ambushed': return { title: t('{who} ambushed {where}', { who: actor, where }), body: t('{who}’s army fell on {other}’s garrison holding {where}, and holds it now.', { who: actor, other, where }) };
+    case 'withdrew': return { title: t('{who} withdrew from {where}', { who: actor, where }), body: t('{who}’s army marched home from {where}.', { who: actor, where }) };
+    case 'lapsed': return { title: t('{where} is free again', { where }), body: t('{who}’s army went home from {where}: nobody paid for another day.', { who: actor, where }) };
+    default: return { title: t('{who} opened a base', { who: actor }), body: t('{where} can raise an army now.', { where }) };
+  }
+}
+
+/** How far back a war event still counts as news when a screen opens. */
+const WAR_FRESH = 180_000;
+
+/**
+ * Watch the war and raise a card for every fight, on every screen: an
+ * invasion is news to the whole map, whoever it happened to. The people
+ * in it see the cards too — an owner away from their plot learns it is
+ * held from here.
+ */
+export function useWarNotices(push: (notice: Notice) => void, mine: () => string | null) {
+  const mineRef = useRef(mine);
+  mineRef.current = mine;
+  useEffect(() => {
+    let since = Date.now() - WAR_FRESH;
+    const seen = new Set<string>();
+    let live = true;
+    const tick = async () => {
+      const { events, now } = await fetchWarFeed(since);
+      if (!live) return;
+      since = Math.max(since, now - 5_000);
+      for (const e of [...events].reverse()) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        // A base opened is the owner's own business.
+        const me = mineRef.current()?.toLowerCase() ?? null;
+        if (e.kind === 'base' && (!me || e.actor.toLowerCase() !== me)) continue;
+        const card = warCard(e);
+        push({ id: `war-${e.id}`, kind: 'danger', title: card.title, body: card.body, lifetime: 18_000 });
+      }
+      if (seen.size > 400) { for (const id of [...seen].slice(0, 200)) seen.delete(id); }
+    };
+    tick();
+    const timer = window.setInterval(tick, WIN_POLL);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [push]);
 }
 
 /** How often the tables are asked who won, in milliseconds. A win is minutes apart at best. */
@@ -314,6 +370,7 @@ export function GldWinNotices({ address }: { address: string | null }) {
   }, []);
   const mine = useCallback(() => addressRef.current, []);
   useGldWinNotices(push, mine);
+  useWarNotices(push, mine);
   return <Notices notices={notices} onDismiss={(id) => setNotices((held) => held.filter((n) => n.id !== id))} />;
 }
 

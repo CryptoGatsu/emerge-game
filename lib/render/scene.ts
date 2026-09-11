@@ -20,7 +20,7 @@ import { GradeFilter } from './grade';
 import { detectQuality, type Quality } from './quality';
 import {
   ACTIVITY_LABELS, JOB_LABELS, type Building, type Citizen, type World, levelOf } from '../simulation';
-import { waterOf, type Animal, type Hazard } from '../simulation';
+import { waterOf, type Animal, type Hazard, type Soldier } from '../simulation';
 import type { Dir } from './character';
 import { utteranceFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
@@ -337,6 +337,10 @@ export class EmergeScene {
   private gust = 0;
 
   private citizens = new Map<string, CitizenSprite>();
+  /** Soldiers on the ground, drawn as people in their side's colours. */
+  private soldiers = new Map<string, CitizenSprite>();
+  /** The occupier's banner on each building their patrol holds. */
+  private banners = new Map<string, Graphics>();
   private buildings = new Map<string, BuildingView>();
   private propSprites: { sprite: Sprite; prop: PropInstance; phase: number; cleared?: boolean }[] = [];
   /**
@@ -876,6 +880,11 @@ export class EmergeScene {
   }
 
   syncBuildings() {
+    // Nothing to sync against until the art library is loaded. A base bought
+    // on another device arrives from the registry within a second of the world
+    // opening, and calling this while the renderer was still booting threw on
+    // an undefined asset library and left the canvas blank.
+    if (!this.assets || !this.map) return;
     // Anything the settlement no longer has: pull its sprites out of the scene.
     //
     // This used to only ever add. A building the player pulled down vanished
@@ -1641,6 +1650,12 @@ export class EmergeScene {
     }
 
     this.citizens.clear();
+    this.soldiers.clear();
+    for (const v of this.volleys) v.shape.destroy();
+    this.volleys = [];
+    this.volleyFor.clear();
+    this.roundsHeard = 0;
+    this.banners.clear();
     this.wildlife.clear();
     this.casting.clear();
     this.funnel = null;
@@ -1789,6 +1804,8 @@ export class EmergeScene {
     this.updateProps(clamped);
     this.updateBuildings(clamped);
     this.updateCitizens(clamped);
+    this.updateSoldiers(clamped);
+    this.updateBanners();
     this.updateWildlife(clamped);
     this.updateDanger(clamped);
     this.updateRings();
@@ -2066,6 +2083,150 @@ export class EmergeScene {
       const afloat = !!citizen.afloat && (ground === Tile.Water || ground === Tile.WaterShore);
       sprite.update(citizen, dt, height, door, face ?? undefined, afloat);
       sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
+    }
+  }
+
+  /** A soldier as the sprite wants to see one: a person of no trade, in their side's colours. */
+  private soldierAsCitizen(so: Soldier): Citizen {
+    return {
+      // The age's weapon: a spear through the township, a rifle from the industrial age on.
+      id: so.id, name: '', handle: '', familyId: '', age: 26, job: (so.era >= 3 ? 'rifleman' : 'spearman') as Citizen['job'], hash: so.look, look: so.look,
+      x: so.x, y: so.y, destX: so.destX, destY: so.destY, facing: so.facing, moving: so.moving,
+      activity: so.moving ? 'walking' : 'idle', phase: 'wandering', inside: !!so.inside, errand: false, path: [], dwell: 0, wanderIdx: 0,
+      soldier: so.side, cover: !!so.cover, firing: so.firing !== undefined,
+    } as unknown as Citizen;
+  }
+
+  /** Shots and blows drawn for a moment: a flash and a tracer from a rifle, a burst of steel from a spear. */
+  private volleys: { shape: Graphics; timer: number }[] = [];
+  private volleyFor = new Set<string>();
+  /** How many rounds of the fight have been heard, so each new one gets its sound. */
+  private roundsHeard = 0;
+  /** Where each round's sound goes: the soundscape, when the client has one. */
+  onCue: ((cue: 'shot' | 'clash') => void) | null = null;
+
+  private drawVolley(so: Soldier) {
+    if (so.aimX === undefined || so.aimY === undefined) return;
+    const from = worldToScreen(so.x, so.y, this.map.heightAt(so.x, so.y));
+    const to = worldToScreen(so.aimX, so.aimY, this.map.heightAt(so.aimX, so.aimY));
+    const g = new Graphics();
+    if (so.era >= 3) {
+      // Muzzle flash at the shoulder, and a tracer most of the way to the target.
+      const sx = from.x + (to.x > from.x ? 6 : -6), sy = from.y - 12;
+      g.moveTo(sx, sy).lineTo(sx + (to.x - sx) * 0.85, sy + (to.y - 12 - sy) * 0.85).stroke({ width: 2, color: 0xfff1a8, alpha: 0.95 });
+      g.circle(sx, sy, 7).fill({ color: 0xffd27a, alpha: 0.85 });
+      g.circle(sx, sy, 3.5).fill({ color: 0xffffff, alpha: 1 });
+    } else {
+      // Steel meeting steel at the end of this soldier's own reach. Drawn
+      // most of the way to the target it landed in open ground, nowhere near
+      // either fighter, and read as nothing at all.
+      const dx = to.x - from.x, dy = (to.y - 10) - (from.y - 10);
+      const d = Math.hypot(dx, dy) || 1;
+      const reach = Math.min(d * 0.5, 16);
+      const mx = from.x + (dx / d) * reach, my = from.y - 10 + (dy / d) * reach;
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + so.look; g.moveTo(mx, my).lineTo(mx + Math.cos(a) * 12, my + Math.sin(a) * 12).stroke({ width: 2, color: 0xfff1a8, alpha: 0.95 }); }
+      g.circle(mx, my, 4.5).fill({ color: 0xffffff, alpha: 0.95 });
+      g.circle(mx, my, 2).fill({ color: 0xfff1a8, alpha: 1 });
+    }
+    g.zIndex = depthOf(so.x, so.y, 0.6);
+    this.objectLayer.addChild(g);
+    this.volleys.push({ shape: g, timer: 0 });
+  }
+
+  /** Fade the flashes out, and sound each round of the fight once. */
+  private updateVolleys(dt: number) {
+    for (let i = this.volleys.length - 1; i >= 0; i--) {
+      const v = this.volleys[i];
+      v.timer += dt;
+      // A quarter of a second was gone before the eye found it. Half a second
+      // at full brightness, then a fade, is long enough to read as a shot
+      // without leaving the ground littered with light.
+      v.shape.alpha = v.timer < 0.35 ? 1 : Math.max(0, 1 - (v.timer - 0.35) / 0.4);
+      if (v.timer > 0.75) { v.shape.destroy(); this.volleys.splice(i, 1); }
+    }
+    const play = this.world.war?.playing;
+    const played = play?.played ?? 0;
+    if (!play || played < this.roundsHeard) this.roundsHeard = played;
+    if (play && played > this.roundsHeard) {
+      this.roundsHeard = played;
+      const firingEra = play.rounds[played - 1]?.by === 'attacker' ? play.attackerEra : play.defenderEra;
+      this.onCue?.(firingEra >= 3 ? 'shot' : 'clash');
+    }
+  }
+
+  /**
+   * Soldiers: the garrison drilling by the base, an occupier's patrols
+   * walking the buildings, and two sides in a fight. One sprite each, in
+   * the side's colours; a soldier who falls goes down where they stood,
+   * the way a rogue does.
+   */
+  private updateSoldiers(dt: number) {
+    const soldiers = this.world.soldiers ?? [];
+    const seen = new Set<string>();
+    for (const so of soldiers) {
+      if (so.fallen !== undefined) {
+        const gone = this.soldiers.get(so.id);
+        if (gone) {
+          this.dying.push({ container: gone.container, timer: 0, facing: so.facing === 'w' ? -1 : 1 });
+          gone.container.eventMode = 'none';
+          this.soldiers.delete(so.id);
+        }
+        continue;
+      }
+      seen.add(so.id);
+      let sprite = this.soldiers.get(so.id);
+      if (!sprite) {
+        sprite = new CitizenSprite(this.assets, this.soldierAsCitizen(so), so.era);
+        sprite.container.eventMode = 'none';
+        this.objectLayer.addChild(sprite.container);
+        this.soldiers.set(so.id, sprite);
+      }
+      const height = this.map.heightAt(sprite.wx, sprite.wy);
+      // Inside a building the sprite fades at its door, the way a citizen does.
+      const door = so.inside ? this.buildings.get(so.inside)?.door : undefined;
+      sprite.update(this.soldierAsCitizen(so), dt, height, door, undefined, false);
+      sprite.container.zIndex = depthOf(sprite.wx, sprite.wy, 0.1);
+      // A shot or a lunge is drawn once, when it starts.
+      if (so.firing !== undefined) { if (!this.volleyFor.has(so.id)) { this.volleyFor.add(so.id); this.drawVolley(so); } }
+      else this.volleyFor.delete(so.id);
+    }
+    for (const [id, sprite] of this.soldiers) {
+      if (seen.has(id)) continue;
+      sprite.container.destroy({ children: true });
+      this.soldiers.delete(id);
+    }
+    this.updateVolleys(dt);
+  }
+
+  /** The occupier's banner over every building their patrol holds; taken down when they go. */
+  private updateBanners() {
+    const occupied = !!this.world.war?.occupation;
+    const wanted = new Set<string>();
+    if (occupied) {
+      for (const b of this.world.buildings) {
+        if (b.type === 'House' || b.ruined) continue;
+        wanted.add(b.id);
+        const view = this.buildings.get(b.id);
+        if (!view) continue;
+        let flag = this.banners.get(b.id);
+        if (!flag) {
+          flag = new Graphics();
+          flag.rect(0, -30, 2, 30).fill(0x9aa0a6);
+          flag.rect(2, -30, 12, 8).fill(0xc8402a);
+          flag.rect(2, -30, 12, 1).fill(0x1a0a0a);
+          flag.rect(10, -27, 3, 3).fill(0xffd27a);
+          this.objectLayer.addChild(flag);
+          this.banners.set(b.id, flag);
+        }
+        const meta = this.assets.buildingMeta.get(view.artKey);
+        flag.position.set(view.base.x + (meta ? meta.width * 0.3 : 20), view.base.y - (meta ? meta.height * 0.55 : 30));
+        flag.zIndex = depthOf(b.x, b.y, -0.2);
+      }
+    }
+    for (const [id, flag] of this.banners) {
+      if (wanted.has(id)) continue;
+      flag.destroy();
+      this.banners.delete(id);
     }
   }
 

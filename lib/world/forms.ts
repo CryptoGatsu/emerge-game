@@ -241,6 +241,16 @@ const LINEAGES: Record<string, Lineage> = {
       'An automated depot that stacks itself.',
     ],
   },
+  Barracks: {
+    names: ['Barracks', 'Garrison', 'Armoury', 'Base', 'Drone Bay'],
+    blurbs: [
+      'A drill yard and a hall of spears. Militia are trained here.',
+      'A stone garrison with an armoury. Men-at-arms are trained here.',
+      'A brick armoury with a rifle range. Riflemen are trained here.',
+      'A base with motor pool and radio mast. The armoured corps is trained here.',
+      'A drone bay with its handlers. The drone corps is trained here.',
+    ],
+  },
   Tavern: {
     names: ['Tavern', 'Inn', 'Public House', 'Bar', 'Lounge'],
     blurbs: [
@@ -256,10 +266,10 @@ const LINEAGES: Record<string, Lineage> = {
 /** The kinds that have a form for every age, and so are rebuilt and merged on an advance. */
 export const LINEAGE_TYPES = Object.keys(LINEAGES);
 
-/** The kinds that merge in pairs when the plot advances: homes, workplaces and stores. */
 /** Lineage kinds a plot keeps one of: renamed by the age, never merged, one building in any count. */
-const ONE_OF: ReadonlySet<string> = new Set(['Tavern']);
+const ONE_OF: ReadonlySet<string> = new Set(['Tavern', 'Barracks']);
 
+/** The kinds that merge in pairs when the plot advances: homes, workplaces and stores. */
 export const MERGES_ON_ADVANCE = new Set(LINEAGE_TYPES.filter((t) => !ONE_OF.has(t)));
 
 const clampEra = (era: number): FormEra => Math.max(1, Math.min(5, Math.round(era))) as FormEra;

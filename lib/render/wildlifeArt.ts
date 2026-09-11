@@ -184,6 +184,26 @@ export function fishingRod(): Pixels {
   return p;
 }
 
+/** A spear: an ash shaft with an iron head, for the militia and the men-at-arms. */
+export function spear(): Pixels {
+  const p = surface(8, 24);
+  for (let i = 0; i < 18; i++) rect(p, 3, 5 + i, 1, 1, i % 4 === 0 ? '#9a7040' : '#7a5230');
+  rect(p, 2, 1, 3, 4, '#aeb5ba'); rect(p, 3, 0, 1, 1, '#dfe8ea'); rect(p, 2, 4, 3, 1, '#6a7076');
+  rect(p, 1, 5, 5, 1, '#c8402a');
+  outline(p, '#1c2a1a', 0.7);
+  return p;
+}
+
+/** A rifle: a dark stock, a barrel, a sling ring, for the riflemen and every age after. */
+export function rifle(): Pixels {
+  const p = surface(18, 8);
+  rect(p, 0, 3, 7, 3, '#5a3a22'); rect(p, 1, 2, 4, 1, '#7a5230'); rect(p, 0, 5, 3, 2, '#4a2e1a');
+  rect(p, 7, 3, 10, 2, '#3a3f44'); rect(p, 7, 3, 10, 1, '#6a7076'); rect(p, 16, 2, 2, 1, '#8a8f96');
+  rect(p, 8, 5, 2, 1, '#2a2a2e'); rect(p, 6, 1, 1, 2, '#aeb5ba');
+  outline(p, '#1c2a1a', 0.7);
+  return p;
+}
+
 /** A hunting bow, strung. */
 export function huntingBow(): Pixels {
   const p = surface(10, 20);
