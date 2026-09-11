@@ -1308,8 +1308,9 @@ export default function Wiki() {
           </table>
           <h3>Invasion</h3>
           <p>
-            From the world map, pick any plot somebody else holds: the card shows your strongest army
-            against their garrison and the odds. <b>Invade</b> sends at least {MIN_ATTACK} troops; the
+            From the world map, pick any plot somebody else holds <b>that has opened a base of its own</b>:
+            the card shows your strongest army against their garrison and the odds. A plot with no base is
+            not in the war and cannot be marched on, so nobody is dragged into this by owning land. <b>Invade</b> sends at least {MIN_ATTACK} troops; the
             registry fights it at once. The attacker&rsquo;s strength is troops times their age&rsquo;s attack;
             the defender&rsquo;s is troops times their age&rsquo;s defence, times their home bonus on their own
             plot, plus 5% a step for the plot&rsquo;s age. The stronger side lands more blows, never all of them

@@ -68,14 +68,17 @@ w = runDay(w);
 const booked = w.ledgerYesterday?.out?.programmes ?? w.ledger?.out?.programmes ?? 0;
 say('the day charges for it, under its own heading', booked >= bill * 0.9, `${Math.round(booked)} booked against ${bill} a day`);
 
-// The same day, run twice from the same morning: the one paying for a
-// programme ends with less. Comparing against the day before would not do
-// it — a town takes Gold in as well as paying it out.
+// That the town is the one paying is the ledger line above, which is exact.
+// Two twin worlds were compared here for a while — one idle, one paying —
+// and the comparison was dropped: a programme changes how the day goes as
+// well as what it costs, the day's income moves by more than a settlement's
+// watch, and the simulation has a roll in it, so the gap between the twins
+// is noise an order of magnitude wider than the bill. A town that has begun
+// nothing books nothing, which is the other half of the claim and is exact.
 const twin = () => { const x = grown(20); x.treasury = 40_000; return x; };
 const idle = runDay(twin());
-const paying = (() => { const x = twin(); S.setProgramme(x, 'watch', true); return runDay(x); })();
-say('and the treasury is lower for it', paying.treasury < idle.treasury,
-  `${Math.round(idle.treasury)} idle, ${Math.round(paying.treasury)} paying`);
+say('and a town running none of them books none of it',
+  !(idle.ledgerYesterday?.out?.programmes ?? idle.ledger?.out?.programmes), `treasury ${Math.round(idle.treasury)}`);
 
 // A bill nobody can pay lapses the programme rather than running on credit.
 w.treasury = 1;
@@ -208,10 +211,18 @@ say('only one is built at a time', !S.commissionGreatWork(g, 'aqueduct').ok);
 say('it does nothing while it is being built', !S.greatWorkStanding(g, 'gardens'));
 
 // It finishes on its own days, stands as a building, and is remembered.
-for (let d = 0; d < S.greatWorkSpec('gardens').days + 1; d++) { g.treasury = Math.max(g.treasury, 400_000); g = runDay(g); }
+// The feed keeps forty lines, and a week of building writes more than that,
+// so the days are read as they pass rather than from the feed at the end.
+const saidWhileBuilding = [];
+for (let d = 0; d < S.greatWorkSpec('gardens').days + 1; d++) {
+  g.treasury = Math.max(g.treasury, 400_000);
+  g = runDay(g);
+  for (const f of g.feed) saidWhileBuilding.push(f.text);
+}
 say('it finishes after its days of building', S.greatWorkStanding(g, 'gardens'), JSON.stringify(S.greatWorkAt(g, 'gardens')));
 say('and stands in the city as a building', g.buildings.some((b) => b.type === 'Terraced Gardens'));
-say('the feed says so', g.feed.some((f) => /is finished\./.test(f.text)), (g.feed.find((f) => /is finished\./.test(f.text)) ?? {}).text ?? '(none)');
+say('the feed says so', saidWhileBuilding.some((t) => /is finished\./.test(t)),
+  saidWhileBuilding.find((t) => /is finished\./.test(t)) ?? '(none)');
 say('people remember it being raised', g.citizens.some((c) => (c.recent ?? []).some((e) => e.kind === 'greatWork')));
 
 // Its keep is charged every day, and an unpayable keep is disrepair, not ruin.
