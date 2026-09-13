@@ -525,6 +525,12 @@ export const savePlayer = (record: PlayerRecord, address: string | null = null) 
   writeJson(playerKeyFor(address), { ...record, savedAt: Date.now() });
 
 /**
+ * How long a claim this browser made is trusted before the registry has to
+ * know it. The server keeps the same grace when it reconciles a record.
+ */
+export const CLAIM_GRACE_MS = 15 * 60_000;
+
+/**
  * Two copies of the same wallet's record, from two devices.
  *
  * The newer one leads — name, ledger, tokens — because it is the one the
@@ -541,6 +547,23 @@ export function mergeRecords(local: PlayerRecord, remote: PlayerRecord): PlayerR
     for (const item of [...(b ?? []), ...(a ?? [])]) out.set(item.seed, item);
     return [...out.values()];
   };
+  /*
+   * Land is not a union. The server's copy is read back reconciled against
+   * the registry — every plot the wallet holds is on it, and nothing it has
+   * given up — so a plot this browser lists and the server does not is
+   * either a claim made here moments ago, still on its way, or land that
+   * went long since. The union kept the second kind for good: the server
+   * dropped it, this browser put it back and pushed it up, and a plot given
+   * up months ago sat at the front of the claim order, pushing the one
+   * plot the player really holds past the limit that pays. A player with a
+   * single settlement was told it earns nothing.
+   */
+  const fresh = Date.now() - CLAIM_GRACE_MS;
+  const remoteSeeds = new Set((remote.claims ?? []).map((c) => c.seed));
+  const claims = bySeed(
+    newer === remote ? remote.claims : (local.claims ?? []).filter((c) => remoteSeeds.has(c.seed) || (c.claimedAt ?? 0) > fresh),
+    newer === remote ? (local.claims ?? []).filter((c) => remoteSeeds.has(c.seed) || (c.claimedAt ?? 0) > fresh) : remote.claims,
+  );
   // The name follows whoever has actually changed it. "Newer wins" handed a
   // fresh device's random name the day over a name the player had paid to
   // choose elsewhere, and the next push wrote the random one over the
@@ -556,7 +579,7 @@ export function mergeRecords(local: PlayerRecord, remote: PlayerRecord): PlayerR
     },
     nameChanges: Math.max(localChanges, remoteChanges),
     nameTokens: Math.max(local.nameTokens ?? 0, remote.nameTokens ?? 0),
-    claims: bySeed(newer.claims, older.claims),
+    claims,
     prospected: bySeed(newer.prospected, older.prospected),
     listings: bySeed(newer.listings, older.listings),
   };

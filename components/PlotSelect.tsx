@@ -24,7 +24,7 @@ import { resaleFee } from '@/lib/chain/vault';
  * chain's, and nothing above this line changes.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { defaultWorldName } from '@/lib/simulation';
 import {
   CHART_COUNT, HOME_CHART_INDEX, chartCapacity, chartName, chartRoom, claimOf, drawPlotPreview,
@@ -242,6 +242,12 @@ function PlotPreview({ seed }: { seed: number }) {
 /** How much clear air two markers keep between them, in pixels. */
 const MARKER_GAP = 5;
 
+/** How far the map can be pinched or wheeled up, as a multiple of the plate. */
+const MAP_ZOOM_MAX = 3;
+
+/** A finger that travels further than this, in pixels, is moving the map and not tapping a marker. */
+const MAP_DRAG_THRESHOLD = 6;
+
 /** How far a marker may be moved off its plot to make room, as a share of the map's height. */
 const MAX_MARKER_NUDGE = 0.09;
 
@@ -269,6 +275,118 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
   const ref = useRef<HTMLCanvasElement | null>(null);
   const pinsRef = useRef<HTMLDivElement | null>(null);
   /*
+   * The map moves under a finger.
+   *
+   * On a phone the whole chart is a picture the width of the screen, and a
+   * player who tries to drag it about, or pinch it bigger, was pinching the
+   * page instead — and every marker is a finger wide, so a drag that started
+   * on one opened that plot's card. The plate now takes those gestures
+   * itself: two fingers scale the map about the point between them, one
+   * finger moves it once it is bigger than the plate, and a marker is only
+   * a tap when the finger did not travel. On a desktop the wheel with Ctrl
+   * held does the same. The chart is reset whenever a different one is
+   * shown.
+   */
+  const plateRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<HTMLDivElement | null>(null);
+  const view = useRef({ scale: 1, x: 0, y: 0 });
+  const gesture = useRef<{ pointers: Map<number, { x: number; y: number }>; moved: boolean; last: { x: number; y: number; dist: number } | null; from: { x: number; y: number } | null }>({ pointers: new Map(), moved: false, last: null, from: null });
+  const applyView = useCallback(() => {
+    const plate = plateRef.current, inner = viewRef.current;
+    if (!plate || !inner) return;
+    const v = view.current;
+    const w = plate.clientWidth, h = plate.clientHeight;
+    if (v.scale <= 1.001) { v.scale = 1; v.x = 0; v.y = 0; }
+    v.x = Math.min(0, Math.max(w - w * v.scale, v.x));
+    v.y = Math.min(0, Math.max(h - h * v.scale, v.y));
+    inner.style.transform = `translate(${v.x.toFixed(1)}px, ${v.y.toFixed(1)}px) scale(${v.scale.toFixed(3)})`;
+    plate.classList.toggle('zoomed', v.scale > 1);
+  }, []);
+  /** Scale the map by `factor` about a point of the plate, in plate pixels. */
+  const zoomAt = useCallback((px: number, py: number, factor: number) => {
+    const v = view.current;
+    const next = Math.min(MAP_ZOOM_MAX, Math.max(1, v.scale * factor));
+    const k = next / v.scale;
+    v.x = px - (px - v.x) * k;
+    v.y = py - (py - v.y) * k;
+    v.scale = next;
+    applyView();
+  }, [applyView]);
+  const plateXY = (e: { clientX: number; clientY: number }) => {
+    const box = plateRef.current?.getBoundingClientRect();
+    return { x: e.clientX - (box?.left ?? 0), y: e.clientY - (box?.top ?? 0) };
+  };
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    if (g.pointers.size === 0) { g.moved = false; g.from = plateXY(e); }
+    g.pointers.set(e.pointerId, plateXY(e));
+    g.last = null;
+  };
+  // The pointer is captured only once it is dragging the map, and never on
+  // the way down: a pointer captured by the plate delivers its click to the
+  // plate rather than to the marker under it, and a plain mouse click on a
+  // marker stopped opening the plot.
+  const capture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    try { if (!e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.setPointerCapture(e.pointerId); } catch { /* an old browser */ }
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    if (!g.pointers.has(e.pointerId)) return;
+    g.pointers.set(e.pointerId, plateXY(e));
+    const points = [...g.pointers.values()];
+    if (points.length >= 2) {
+      const [a, b] = points;
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (g.last) {
+        if (g.last.dist > 0) zoomAt(mid.x, mid.y, dist / g.last.dist);
+        view.current.x += mid.x - g.last.x;
+        view.current.y += mid.y - g.last.y;
+        applyView();
+      }
+      g.last = { ...mid, dist };
+      g.moved = true;
+      capture(e);
+      return;
+    }
+    const here = points[0];
+    if (g.from && Math.hypot(here.x - g.from.x, here.y - g.from.y) > MAP_DRAG_THRESHOLD) { g.moved = true; capture(e); }
+    if (g.last && view.current.scale > 1) {
+      view.current.x += here.x - g.last.x;
+      view.current.y += here.y - g.last.y;
+      applyView();
+    }
+    if (g.moved || !g.last) g.last = { ...here, dist: 0 };
+  };
+  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    g.pointers.delete(e.pointerId);
+    g.last = null;
+    // A finger lifted while another stays: the one that stays starts afresh
+    // rather than jumping the map by the distance between the two.
+    if (g.pointers.size === 1) { const rest = [...g.pointers.values()][0]; g.from = rest; }
+  };
+  const onClickCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!gesture.current.moved) return;
+    e.preventDefault();
+    e.stopPropagation();
+    gesture.current.moved = false;
+  };
+  useEffect(() => {
+    const plate = plateRef.current;
+    if (!plate) return;
+    // Native rather than React's, which registers wheel as passive and
+    // cannot stop the page zooming along with the map.
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const { x, y } = plateXY(e);
+      zoomAt(x, y, Math.exp(-e.deltaY * 0.0025));
+    };
+    plate.addEventListener('wheel', wheel, { passive: false });
+    return () => plate.removeEventListener('wheel', wheel);
+  }, [zoomAt]);
+  /*
    * On a narrow map, markers are dots.
    *
    * Not a preference — arithmetic. A marker carrying a name is about 140px
@@ -284,7 +402,9 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
   useLocale();
   useEffect(() => {
     if (ref.current) drawRegionMap(ref.current, plots, chart);
-  }, [plots, chart]);
+    view.current = { scale: 1, x: 0, y: 0 };
+    applyView();
+  }, [plots, chart, applyView]);
 
   /*
    * Unpick the markers that landed on top of each other.
@@ -311,7 +431,10 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
     const settle = () => {
       // Enough room for two labels side by side, or there is no point drawing
       // any of them.
-      const wide = container.getBoundingClientRect().width >= LABELS_NEED_WIDTH;
+      // Measured through whatever the map is scaled to, so the marker layout
+      // is worked out in the map's own pixels and holds when it is zoomed.
+      const k = view.current.scale;
+      const wide = container.getBoundingClientRect().width / k >= LABELS_NEED_WIDTH;
       setCompact((was) => (was === !wide ? was : !wide));
 
       const nodes = Array.from(container.querySelectorAll<HTMLElement>('.region-pin'));
@@ -328,18 +451,19 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
         node.style.setProperty('--nudge', '0px');
         node.style.setProperty('--slide', '0px');
       }
-      const box = container.getBoundingClientRect();
-      if (!box.height) { container.classList.remove('settling'); return; }
+      const rect = container.getBoundingClientRect();
+      if (!rect.height) { container.classList.remove('settling'); return; }
+      const box = { left: rect.left, top: rect.top, width: rect.width / k, height: rect.height / k };
 
       const measure = (node: HTMLElement, fixed: boolean) => {
         const r = node.getBoundingClientRect();
         return {
           node,
           fixed,
-          left: r.left - box.left,
-          right: r.right - box.left,
-          mid: r.top - box.top + r.height / 2,
-          height: r.height,
+          left: (r.left - box.left) / k,
+          right: (r.right - box.left) / k,
+          mid: (r.top - box.top + r.height / 2) / k,
+          height: r.height / k,
           dy: 0,
         };
       };
@@ -509,7 +633,16 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
           laid over the whole box, legend included, so a plot on a southern
           island was drawn on top of the line that says how many plots there
           are — which is what made it look cut off. */}
-      <div className="region-plate">
+      <div
+        className="region-plate"
+        ref={plateRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClickCapture={onClickCapture}
+      >
+      <div className="region-view" ref={viewRef}>
       <canvas ref={ref} width={900} height={570} className="region-canvas" aria-hidden />
       <div className={`region-pins ${compact ? 'compact' : ''}`} ref={pinsRef}>
         {/* Every island is named, surveyed or not: an empty coast the player
@@ -558,6 +691,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
         })}
       </div>
       </div>
+      </div>
       <div className="region-legend">
         <span>
           {t('{plots} plots surveyed on {islands} islands', { plots: plots.length, islands: islandsFor(chart).length })}
@@ -568,7 +702,7 @@ function RegionMap({ plots, selected, chart, owned, taken, banners, names, claim
             <> · <b>{claimedEverywhere.toLocaleString()}</b> {t('claimed in all')}</>
           )}
         </span>
-        <span>{plots.length ? t('Tap a marker to inspect the land') : t('Nothing here has been surveyed yet')}</span>
+        <span>{plots.length ? t('Tap a marker to inspect the land · pinch to zoom, drag to move') : t('Nothing here has been surveyed yet')}</span>
       </div>
 
       {/*

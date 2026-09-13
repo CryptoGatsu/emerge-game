@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Module from 'node:module';
+import { gzipSync } from 'node:zlib';
 
 const root = process.cwd();
 const out = mkdtempSync(join(tmpdir(), 'emerge-save-'));
@@ -76,13 +77,56 @@ const perPerson = new Map();
 for (const b of kept) { if (!b.friends && !b.rivals) for (const id of [b.a, b.b]) perPerson.set(id, (perPerson.get(id) ?? 0) + 1); }
 const most = Math.max(0, ...perPerson.values());
 say('bonds are cut to the strongest around each person', kept.length < pairs && kept.length >= Math.min(pairs, people * 4), `${pairs} -> ${kept.length} for ${people} people`);
-say('every friendship is kept', kept.filter((b) => b.friends).length === Object.values(w.bonds).filter((b) => b.friends && b.a !== 'dead').length);
+say('every friendship is kept in a town where nobody has more friends than their quota', kept.filter((b) => b.friends).length === Object.values(w.bonds).filter((b) => b.friends && b.a !== 'dead').length);
 say('a bond to the dead is dropped', !kept.some((b) => b.a === 'dead' || b.b === 'dead'));
 say('nobody carries more than sixteen faint bonds of their own', most <= 16 * 2, `most ${most}`);
 say('empty households are dropped', snap.world.families.length === living, `${w.families.length} -> ${snap.world.families.length}`);
 say('regrown clearings are dropped', snap.world.clearings.length === 1);
 say('unlocked areas are not repeated', snap.world.unlockedAreas.length === 2);
 say('the save is smaller for it', JSON.stringify(snap.world.bonds).length < before / 2, `${before} -> ${JSON.stringify(snap.world.bonds).length}`);
+
+// A city of nine hundred, where a long life has made friends of nearly
+// everyone and each person carries memories older than anything reads.
+// This is the world that was turned away at the relay.
+{
+  const city = JSON.parse(JSON.stringify(w));
+  const folk = [...city.citizens];
+  for (let i = 0; city.citizens.length < 900; i++) {
+    const twin = JSON.parse(JSON.stringify(folk[i % folk.length]));
+    twin.id = `city${i}`; twin.name = `Person ${i}`; twin.x = 10 + (i % 80); twin.y = 10 + Math.floor(i / 80); twin.hash = (i * 2654435761) >>> 0;
+    twin.recent = [{ day: city.day - 30, kind: 'arrived' }, { day: city.day - 2, kind: 'newFriend', about: 'Someone' }];
+    twin.heard = [{ about: 'Maren', kind: 'arrived', day: city.day - 20 }, { about: 'Tam', kind: 'fellOut', day: city.day - 1 }];
+    twin.lastTalk = Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`city${k}`, { topic: 'the weather and the price of bread', day: city.day - k }]));
+    city.citizens.push(twin);
+    city.families.find((f) => f.id === twin.familyId)?.members.push(twin.id);
+  }
+  city.population = city.citizens.length;
+  const cityIds = city.citizens.map((c) => c.id);
+  city.bonds = {};
+  for (let i = 0; i < cityIds.length; i++) for (let j = i + 1; j < Math.min(cityIds.length, i + 120); j++) {
+    const key = cityIds[i] < cityIds[j] ? `${cityIds[i]}|${cityIds[j]}` : `${cityIds[j]}|${cityIds[i]}`;
+    city.bonds[key] = { a: cityIds[i], b: cityIds[j], strength: 90 - ((i * 7 + j * 3) % 120), friends: (j - i) < 60, rivals: false, met: 1, fights: 0 };
+  }
+  const raw = JSON.stringify(SV.snapshotOf(w)).length;
+  const citySnap = SV.snapshotOf(city);
+  const cityKept = Object.values(citySnap.world.bonds);
+  const quota = SV.bondQuota(city.citizens.length);
+  const mostHeld = new Map();
+  for (const b of cityKept) for (const id of [b.a, b.b]) mostHeld.set(id, (mostHeld.get(id) ?? 0) + 1);
+  say('a city keeps fewer bonds a head than a village', quota < 16 && quota >= 4, `${quota} each for ${city.citizens.length} people`);
+  say('and no more than its quota lets each person keep from their own side', cityKept.length <= city.citizens.length * quota, `${Object.keys(city.bonds).length} -> ${cityKept.length}`);
+  say('the bonds kept are the ones felt most strongly', cityKept.every((b) => b.friends || Math.abs(b.strength) >= 30), `weakest kept ${Math.min(...cityKept.map((b) => Math.abs(b.strength)))}`);
+  const someone = citySnap.world.citizens.find((c) => c.id === 'city5');
+  say('memories older than the card reads are dropped', someone.recent.length === 1 && someone.heard.length === 1 && Object.keys(someone.lastTalk).length === 8, JSON.stringify({ recent: someone.recent.length, heard: someone.heard.length }));
+  const cityJson = JSON.stringify({ seed: 1120, owner: '0x0', snapshot: citySnap });
+  const packed = gzipSync(Buffer.from(cityJson)).toString('base64').length;
+  say('a city of nine hundred packs to what the store takes', packed < 900_000, `${Math.round(cityJson.length / 1024)}KB raw, ${Math.round(packed / 1024)}KB packed, village ${Math.round(raw / 1024)}KB`);
+  const cityBack = SV.worldFromSave(JSON.parse(cityJson).snapshot, 1120, 'Probe');
+  say('the city reads back whole', !!cityBack && cityBack.citizens.length === 900);
+  let on = cityBack;
+  for (let h = 0; h < 6; h++) on = S.advance(on, 1);
+  say('and runs on', on.citizens.length > 800);
+}
 
 // Read back: the world is whole and runs on.
 const back = SV.worldFromSave(JSON.parse(JSON.stringify(snap)), 1120, 'Probe');

@@ -195,7 +195,14 @@ export function snapshotOf(world: World): SavedWorld {
   slim.citizens = world.citizens.map((c) => {
     const { detour: _detour, ...rest } = tidy(c) as Citizen & { detour?: unknown };
     void _detour;
-    return { ...rest, path: [], navWait: 0 };
+    const out: Citizen = { ...rest, path: [], navWait: 0 };
+    // What they remember is read back only so far: the card and their talk
+    // look eight days into what happened to them and four into what they
+    // heard, and nothing older is ever spoken. Kept past that, it was more
+    // than half of what a person weighed in the save.
+    if (out.recent) out.recent = out.recent.filter((e) => world.day - e.day <= RECENT_KEPT_DAYS);
+    if (out.heard) out.heard = out.heard.filter((h) => world.day - h.day <= HEARD_KEPT_DAYS);
+    return out;
   });
   /*
    * What grows without bound in a long-lived town, cut back to what play
@@ -214,8 +221,30 @@ export function snapshotOf(world: World): SavedWorld {
   return { version: SAVE_VERSION, seed: world.seed, at: Date.now(), world: slim };
 }
 
-/** How many of a person's strongest bonds the save keeps, besides every friendship and rivalry. */
+/** How far back a person's remembered episodes, and what they heard, are kept. */
+const RECENT_KEPT_DAYS = 8;
+const HEARD_KEPT_DAYS = 4;
+
+/**
+ * How many bonds the save keeps around each person, at most; and the
+ * budget for the town as a whole that cuts that back in a city.
+ *
+ * Sixteen a head with every friendship on top was a megabyte in a city of
+ * nine hundred, where a life of afternoons in the same square makes
+ * friends of nearly everyone, and the flag never comes off. So a person's
+ * quota falls as the town grows, and friendships and rivalries are ranked
+ * with the rest by how strongly they are felt now, rather than kept
+ * because they were once struck: the ones that carry no warmth any more
+ * are the ones that go.
+ */
 const BONDS_KEPT = 16;
+const BONDS_KEPT_LEAST = 4;
+const BOND_BUDGET = 4_000;
+
+/** How many bonds each of `people` keeps in the save. */
+export function bondQuota(people: number): number {
+  return Math.max(BONDS_KEPT_LEAST, Math.min(BONDS_KEPT, Math.floor(BOND_BUDGET / Math.max(1, people))));
+}
 
 function keepBonds(world: World): Record<string, Bond> {
   const alive = new Set(world.citizens.map((c) => c.id));
@@ -223,16 +252,17 @@ function keepBonds(world: World): Record<string, Bond> {
   const kept: Record<string, Bond> = {};
   for (const [key, bond] of Object.entries(world.bonds)) {
     if (!alive.has(bond.a) || !alive.has(bond.b)) continue;
-    if (bond.friends || bond.rivals) { kept[key] = tidy(bond); continue; }
     for (const id of [bond.a, bond.b]) {
       const list = byPerson.get(id) ?? [];
       list.push([key, bond]);
       byPerson.set(id, list);
     }
   }
+  const quota = bondQuota(alive.size);
+  const weight = (b: Bond) => Math.abs(b.strength) + (b.friends || b.rivals ? 100 : 0);
   for (const list of byPerson.values()) {
-    list.sort((x, y) => Math.abs(y[1].strength) - Math.abs(x[1].strength));
-    for (const [key, bond] of list.slice(0, BONDS_KEPT)) kept[key] = tidy(bond);
+    list.sort((x, y) => weight(y[1]) - weight(x[1]));
+    for (const [key, bond] of list.slice(0, quota)) kept[key] = tidy(bond);
   }
   return kept;
 }

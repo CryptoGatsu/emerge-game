@@ -33,6 +33,7 @@
  * at; a gift applied there would vanish with the visit.
  */
 
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { noteLandSale } from './tape';
 import { MAX_GIFT_GOLD, serverKey } from '../limits';
 import type { Army, Battle, Occupation } from '../world/war';
@@ -844,9 +845,35 @@ export function isBehind(held: PublishedWorld, day: number, hour: number): boole
   return heldHour > hour + 1;
 }
 
+/**
+ * The most the store takes in one value.
+ *
+ * The store's own ceiling on a request is a megabyte, and the packed world
+ * has to sit inside it with the command round it. Judged on the packed
+ * size, not the world's: a city of nine hundred people saves at over two
+ * megabytes of JSON and packs to a fifth of that, and it was the unpacked
+ * figure that turned it away, which stopped it advancing an era.
+ */
+export const STORE_LIMIT = 900_000;
+const PACKED = 'gz1:';
+
+/** Thrown by `publishWorld` when the packed world is more than the store takes. */
+export class WorldTooLarge extends Error {
+  constructor(public readonly packed: number) {
+    super('too large');
+  }
+}
+
+/** A world as the store holds it: gzip, then base64, behind a marker so a reader knows. */
+export function packWorld(world: PublishedWorld): string {
+  return PACKED + gzipSync(Buffer.from(JSON.stringify(world), 'utf8')).toString('base64');
+}
+
 /** Put a world up for visitors. */
 export async function publishWorld(world: PublishedWorld): Promise<void> {
-  await setValue(worldKey(world.seed), JSON.stringify(world), WORLD_TTL_SECONDS);
+  const packed = packWorld(world);
+  if (packed.length > STORE_LIMIT) throw new WorldTooLarge(packed.length);
+  await setValue(worldKey(world.seed), packed, WORLD_TTL_SECONDS);
   // The index carries only the headline, so a listing does not have to read
   // every snapshot in the store.
   const { snapshot: _snapshot, ...headline } = world;
@@ -858,7 +885,9 @@ export async function readWorld(seed: number): Promise<PublishedWorld | null> {
   const raw = await getValue(worldKey(seed));
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as PublishedWorld;
+    // Worlds published before the store packed them are still plain JSON.
+    const text = raw.startsWith(PACKED) ? gunzipSync(Buffer.from(raw.slice(PACKED.length), 'base64')).toString('utf8') : raw;
+    return JSON.parse(text) as PublishedWorld;
   } catch {
     return null;
   }

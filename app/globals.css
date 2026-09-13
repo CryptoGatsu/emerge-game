@@ -222,8 +222,13 @@ button {
   image-rendering: pixelated;
 }
 /* The map itself, with the markers over it. Separate from the box so the
-   legend below is not somewhere a marker can be drawn. */
-.region-plate { position: relative; }
+   legend below is not somewhere a marker can be drawn. The plate takes a
+   pinch and a drag itself: the page may still scroll up and down through
+   it, and nothing else. Once the map is bigger than the plate a finger on
+   it moves the map. */
+.region-plate { position: relative; overflow: hidden; touch-action: pan-y; }
+.region-plate.zoomed { touch-action: none; cursor: grab; }
+.region-view { position: relative; transform-origin: 0 0; will-change: transform; }
 .region-pins { position: absolute; inset: 0; }
 .region-pin {
   position: absolute;

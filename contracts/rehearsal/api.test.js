@@ -42,6 +42,29 @@ const S1 = 1120, S2 = 1365;
   const ms2 = (await api(`/api/nft?seed=${S2}`)).json;
   ok('mint state: an unclaimed plot is neither minted nor queued', ms2.minted === false && ms2.queued === null, JSON.stringify(ms2));
 
+  // 1b. A city too large for the old relay publishes now that the store packs it.
+  const crypto = require('node:crypto');
+  const bigWorld = (fill) => ({
+    seed: S1, at: Date.now(),
+    world: {
+      seed: S1, day: 3, hour: 9, treasury: 500, population: 900, name: 'Fernrest',
+      citizens: Array.from({ length: 900 }, (_, i) => ({ id: `c${i}`, name: `Person ${i}`, x: 10 + (i % 80), y: 10 + Math.floor(i / 80), age: 30 + (i % 40), hash: i * 7919, look: fill(i), lastTalk: Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`c${(i + k) % 900}`, { topic: 'the weather and the price of bread', day: 3 - k }])) })),
+      buildings: Array.from({ length: 8 }, (_, i) => ({ id: `b${i}`, type: 'House', x: 40 + i, y: 40, level: 1 })),
+      bonds: Object.fromEntries(Array.from({ length: 3600 }, (_, i) => [`c${i % 900}|c${(i * 7 + 1) % 900}`, { a: `c${i % 900}`, b: `c${(i * 7 + 1) % 900}`, strength: 80 - (i % 60), friends: i % 3 === 0, rivals: false, met: 1, fights: 0 }])),
+      resources: { wood: 50, stone: 50, wheat: 50, steel: 40 },
+    },
+  });
+  const city = bigWorld((i) => `look-${i}-` + 'a'.repeat(1700));
+  const cityBytes = JSON.stringify(city).length;
+  const bigPut = await api('/api/worlds', { seed: S1, owner: A, ownerName: 'Alice', worldName: 'Fernrest', day: 3, hour: 9, population: 900, snapshot: city }, A);
+  ok('a city of nine hundred, over two megabytes, publishes', bigPut.status === 200 && cityBytes > 2_000_000, `${bigPut.status} ${Math.round(cityBytes / 1024)}KB ${bigPut.json?.error ?? ''}`);
+  const bigGet = (await api(`/api/worlds?seed=${S1}`)).json;
+  ok('and reads back whole', bigGet.world?.snapshot?.world?.citizens?.length === 900 && bigGet.world.snapshot.world.citizens[899].look === city.world.citizens[899].look && Object.keys(bigGet.world.snapshot.world.bonds).length === Object.keys(city.world.bonds).length, JSON.stringify(bigGet).slice(0, 120));
+  const noise = bigWorld(() => crypto.randomBytes(1400).toString('base64'));
+  const noisyPut = await api('/api/worlds', { seed: S1, owner: A, ownerName: 'Alice', worldName: 'Fernrest', day: 4, hour: 9, population: 900, snapshot: noise }, A);
+  ok('one that does not pack under the store\'s limit is refused, and told which parts are the bulk', noisyPut.status === 413 && /packs to \d+KB/.test(noisyPut.json?.error ?? '') && /citizens \d+KB/.test(noisyPut.json?.error ?? ''), `${noisyPut.status} ${noisyPut.json?.error ?? ''}`);
+  ok('and the earlier copy still stands', (await api(`/api/worlds?seed=${S1}`)).json.world?.day === 3);
+
   // 2. Metadata as OpenSea would read it.
   const uri = await C.read('land', 'tokenURI', [BigInt(S1)]);
   ok('tokenURI points at the game', uri === `${BASE}/api/nft/${S1}`, uri);

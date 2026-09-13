@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { allClaims, readPlayerRecord, savePlayerRecord } from '@/lib/server/registry';
 import { sessionAddress } from '@/lib/server/session';
 import { normaliseLedger, type VaultLedger } from '@/lib/chain/vault';
+import { CLAIM_GRACE_MS } from '@/lib/world/plots';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,7 +87,6 @@ function mergeHeld(held: Rec | null, incoming: Rec): Rec {
  * The one thing that must not be swept up is a claim still on its way to the
  * registry, so a seed the registry does not know is kept while it is new.
  */
-const CLAIM_GRACE_MS = 15 * 60_000;
 async function withHeldPlots(address: string, record: Rec | null): Promise<Rec | null> {
   let rows: { seed: number; region: string; worldName: string; owner: string; price?: number; at: number }[];
   try {

@@ -27,6 +27,16 @@ export function byVersion(a: Update, b: Update): number {
 
 export const UPDATES: Update[] = [
   {
+    version: '3.0.1',
+    date: '2026-09-13',
+    title: 'Three things players reported',
+    notes: [
+      '**A city that had outgrown the relay can advance again.** A settlement of nine hundred people saved at over two megabytes, and the relay took one, so it could not be published \u2014 and the registry judges an age step on the published copy. The store now keeps every world packed, at about a fifth of its size, and the limit is judged on the packed copy. The save is also lighter: a person in a city keeps their strongest bonds rather than a fixed sixteen plus every friendship ever struck, and nobody carries memories older than anything reads.',
+      '**\u201cThis world does not pay\u201d is no longer shown to somebody holding one plot.** Which of your worlds pay is decided by claim order, and land you had given up long ago was staying at the front of that order: the server dropped it, your browser put it back from its own copy and pushed it up again, and round it went. A browser now trusts the server\u2019s list of what the wallet holds, and keeps only a claim it made itself in the last quarter of an hour on top of it.',
+      '**The world map moves under your fingers.** Pinch to make the chart bigger, drag it about once it is, and let go \u2014 a marker only opens its plot when your finger did not travel. Before, pinching zoomed the page, and a drag that began on a marker opened that plot. On a desktop, the wheel with Ctrl held does the same.',
+    ],
+  },
+  {
     version: '3.0.0',
     date: '2026-09-11',
     title: 'War: bases, armies, invasion and occupation',
@@ -450,6 +460,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '3.0.1',
+    date: '2026-09-13',
+    title: '玩家报告的三件事',
+    notes: [
+      '**超出中继容量的城市可以再次推进时代。** 九百人的城市存档超过两兆，而中继只接受一兆，于是无法发布——而登记处根据已发布的副本判断时代推进。现在存储把每个世界压缩后保存，约为原来的五分之一，限制也按压缩后的大小判断。存档本身也更轻：城市里的每个人只保留最牢固的关系，而不是固定十六条外加曾经结下的每一段友谊；也没有人再携带任何地方都不会读到的旧记忆。',
+      '**只持有一块地的玩家不再看到"这个世界不产出"。** 哪些世界产出由认领顺序决定，而你很久以前放弃的土地一直排在最前面：服务器删掉它，浏览器又从本地副本放回并推送上去，如此往复。现在浏览器信任服务器给出的钱包持有列表，只额外保留自己在一刻钟内发起的认领。',
+      '**世界地图可以随手指移动。** 双指捏合放大海图，放大后拖动，松开即可——只有手指没有移动时，标记才会打开对应地块。以前捏合会缩放整个页面，从标记开始的拖动会打开那块地。在桌面上按住 Ctrl 滚动滚轮效果相同。',
+    ],
+  },
   {
     version: '3.0.0',
     date: '2026-09-11',

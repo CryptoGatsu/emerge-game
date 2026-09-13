@@ -24,7 +24,7 @@
 
 import { gunzipSync } from 'node:zlib';
 import { NextResponse } from 'next/server';
-import { claimOf, isBehind, publishWorld, readWorld } from '@/lib/server/registry';
+import { STORE_LIMIT, WorldTooLarge, claimOf, isBehind, publishWorld, readWorld } from '@/lib/server/registry';
 import { worldFromSave, type SavedWorld } from '@/lib/world/save';
 import { cityLevel, stewardshipScore } from '@/lib/simulation';
 import { holdsAddress, sessionsAvailable } from '@/lib/server/session';
@@ -34,15 +34,24 @@ export const dynamic = 'force-dynamic';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 /**
- * The largest snapshot accepted.
+ * The largest snapshot read at all, before it is packed for the store.
  *
- * A settlement of two hundred people and a hundred buildings, played for
- * months, saves at around 300KB now that the save is trimmed; the old limit
- * of 400KB turned one such world away, and a world that cannot be published
- * cannot advance an era. This leaves room for a world twice that size
- * without letting a caller push arbitrary bulk into the store.
+ * What the store takes is judged on the packed copy, in `publishWorld`; this
+ * is only the ceiling on what one request may ask the server to parse and
+ * judge. A city of nine hundred people saves at around two and a half
+ * megabytes and was turned away at one, and a world that cannot be
+ * published cannot advance an era. Eight leaves room for a city three
+ * times that without letting a caller push arbitrary bulk through.
  */
-const MAX_SNAPSHOT = 1_000_000;
+const MAX_SNAPSHOT = 8_000_000;
+
+/** The heaviest parts of a world, for a refusal that says where it grew. */
+function bulkOf(world: Record<string, unknown> | undefined): string {
+  return Object.entries(world ?? {})
+    .map(([k, v]) => [k, JSON.stringify(v)?.length ?? 0] as const)
+    .sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([k, n]) => `${k} ${Math.round(n / 1024)}KB`).join(', ');
+}
 
 export async function GET(request: Request) {
   const seed = Number(new URL(request.url).searchParams.get('seed'));
@@ -159,11 +168,7 @@ export async function POST(request: Request) {
   if (encoded.length > MAX_SNAPSHOT) {
     // Which parts are the bulk, so the report says where the world grew
     // rather than only that it did.
-    const parts = Object.entries((snap.world ?? {}) as Record<string, unknown>)
-      .map(([k, v]) => [k, JSON.stringify(v)?.length ?? 0] as const)
-      .sort((a, b) => b[1] - a[1]).slice(0, 3)
-      .map(([k, n]) => `${k} ${Math.round(n / 1024)}KB`).join(', ');
-    return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, and the relay takes ${Math.round(MAX_SNAPSHOT / 1024)}KB. The largest parts: ${parts}.` }, { status: 413 });
+    return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, and the relay takes ${Math.round(MAX_SNAPSHOT / 1024)}KB. The largest parts: ${bulkOf(snap.world as Record<string, unknown>)}.` }, { status: 413 });
   }
 
   // Where the settlement is, read from the world itself rather than from
@@ -220,6 +225,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ published: true, bytes: encoded.length });
   } catch (error) {
+    if (error instanceof WorldTooLarge) {
+      return NextResponse.json({ error: `That world is too large to publish: ${Math.round(encoded.length / 1024)}KB, which packs to ${Math.round(error.packed / 1024)}KB, and the store takes ${Math.round(STORE_LIMIT / 1024)}KB packed. The largest parts: ${bulkOf(snap.world as Record<string, unknown>)}.` }, { status: 413 });
+    }
     const why = error instanceof Error && error.message ? error.message.slice(0, 120) : '';
     return NextResponse.json({ error: why ? `The world store refused the copy: ${why}` : 'The world store is not reachable.' }, { status: 502 });
   }
