@@ -174,6 +174,24 @@ export const WALLET_DAILY_CEILING = 1_000_000;
 export const DAILY_EARN_CEILING = WALLET_DAILY_CEILING;
 
 /**
+ * What the vault pays out in a day follows what came in.
+ *
+ * The day's budget used to be a constant, ten wallets' ceilings, with no
+ * connection to what the vault had actually taken. On a quiet fortnight it
+ * paid ten million a day against charges of nearly nothing, and twenty
+ * million left the vault in two days that saw hardly a burn: every token of
+ * it sell pressure, and a vault that goes on like that is empty. Now the
+ * budget is a share of what the vault kept from charges over a trailing
+ * window, a day's worth at a time, and never more than a small share of
+ * what it holds. Quiet days pay little. A burst of burns pays out over the
+ * fortnight that follows rather than the day it lands. Nothing can drain
+ * the vault, because nothing leaves it that charges did not bring.
+ */
+export const EMISSION_WINDOW_DAYS = 14;
+export const EMISSION_INTAKE_SHARE = 0.5;
+export const EMISSION_BALANCE_SHARE = 0.05;
+
+/**
  * Where a charge goes.
  *
  * Every $EMERGE the game charges is paid into the vault in one transfer. The

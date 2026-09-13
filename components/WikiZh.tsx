@@ -2,7 +2,7 @@
 import React from 'react';
 import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling, eraName } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost, EMISSION_WINDOW_DAYS } from '@/lib/chain/vault';
 import { UPKEEP_EMPTY_SHARE, BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 import { BASE_COST_EMERGE, MAX_TRAIN_PER_DAY, MIN_ATTACK, OCCUPIER_SHARE, SHIELD_HOURS, UNITS, armyCap, occupyUpkeepGold } from '@/lib/world/war';
 
@@ -345,6 +345,7 @@ export function WikiZh() {
           )}
                   <h3>当天的额度，以及你的那一份</h3>
           <p>上面那些上限说的是一个钱包能拿多少。它们之上还有第二道限制：金库每天向<em>所有人</em>合计只付出这么多经营收益，这份额度在 UTC 零点重新开始。银行会显示这个数字，以及还剩多少。</p>
+          <p><b>额度跟着收费走。</b>每一笔收费都付进金库，金库留存其中四分之一。每天的额度是<b>金库过去 {EMISSION_WINDOW_DAYS} 天留存总额的一半，每天付一天份</b>——并且永远不超过<b>金库可自由支配持有量的 5%</b>，再加一道硬上限。清淡的两周付得少；一波销毁会在随后两周里陆续付出，而不是当天付完。收费没带来的，金库不会付出，所以金库不可能被掏空，付出的也不可能超过销毁的。银行会说明今天的数字由三条规则中的哪一条决定。</p>
           <p>当所有人被裁定的收益加起来仍在额度之内时，它根本不起作用，每个钱包拿到的就是各自被裁定的数额。装不下时，当天的额度<b>按比例分配</b>：被裁定占总数十分之一的钱包，拿走额度的十分之一。<b>你的那一份整天都在等你，别人拿不走</b>，所以在哪个时辰上线都没有额外好处。</p>
           <p>用来分配的分母，是<b>每个钱包今天可能领取的总额</b>——不是此刻恰好有多少人在线。必须如此，否则你住在哪个时区就决定了你的收入：关注度在你睡觉时衰减，如果分母只算当下醒着的人，那么 UTC 零点醒着的人就会在一个很小的分母上瓜分额度、拿到过大的份额，而地球另一边醒来时池子已经空了。以二十个钱包、其中一半在睡觉来推演：早起的人拿 769,230，晚起的人拿 230,770，而且晚起的人里有一半一分也拿不到。改用“所有人可能领取的总额”来分，两边都是 500,000。</p>
           <p>关注度仍然决定<em>你自己</em>的数字——一块你从不看的地收益很少，本该如此。它只是不再决定别人的数字了。</p>

@@ -27,6 +27,16 @@ export function byVersion(a: Update, b: Update): number {
 
 export const UPDATES: Update[] = [
   {
+    version: '3.1.0',
+    date: '2026-09-13',
+    title: 'Payouts follow what is burned',
+    notes: [
+      '**The vault pays out only what charges bring in.** The day\u2019s budget across everybody used to be a fixed ten million, whatever the vault had actually taken; on a quiet fortnight it went on paying against charges of nearly nothing, and twenty million left in two days that saw hardly a burn. Every token of that was sell pressure, and a vault that goes on like that is empty. Now each day\u2019s budget is **half of what the vault kept from charges over the last 14 days, a day\u2019s worth at a time**, and never more than **5% of what the vault holds** free and clear, under the same hard cap as before.',
+      'What this means for you: your plots accrue as they always have, and your share of the day is judged as it always was, but the day itself is only as big as the fortnight\u2019s burns make it. A quiet stretch pays little; a busy one pays out over the fortnight that follows rather than the day it lands. The Bank now says where today\u2019s figure came from and which rule set it. Nothing you have accrued is lost: it waits in your balance for a day with room.',
+      'Every charge in the game — claims, surveys, eras, expansions, bases, boons, names, the tables — counts toward the intake. The more the game is played, the more it pays.',
+    ],
+  },
+  {
     version: '3.0.2',
     date: '2026-09-13',
     title: 'Fill the plot\u2019s own water in',
@@ -469,6 +479,16 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '3.1.0',
+    date: '2026-09-13',
+    title: '付出跟着销毁走',
+    notes: [
+      '**金库只付出收费带来的。** 过去每天所有人合计的额度固定为一千万，与金库实际收到多少无关；清淡的两周里它照样按几乎为零的收费付钱，两天里付出了两千万，而这两天几乎没有销毁。这些全是抛压，照这样下去金库会空。现在每天的额度是**金库过去 14 天从收费中留存总额的一半，每天付一天份**，并且永远不超过**金库可自由支配持有量的 5%**，硬上限不变。',
+      '这对你意味着：地块照常累积，你的当日份额照常裁定，但一天的大小只取决于这两周的销毁。清淡时付得少；繁忙时会在随后两周里陆续付出，而不是当天付完。银行现在会说明今天的数字从哪来、由哪条规则决定。你累积的不会丢失：它留在你的余额里，等有余量的一天。',
+      '游戏里的每一笔收费——认领、勘探、时代、扩张、基地、恩惠、改名、赌桌——都计入留存。玩的人越多，付出越多。',
+    ],
+  },
   {
     version: '3.0.2',
     date: '2026-09-13',

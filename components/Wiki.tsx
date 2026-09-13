@@ -2,7 +2,7 @@
 import React from 'react';
 import { cityLevels, cityLevelSpec, treasuryCap, ERAS, LADDER_RUNGS, CHARTER_BONUS, CHARTER_DAYS, INSURANCE_DAYS, BUILDERS_DAYS, PLOT_CEILING_MAX, PLOT_CEILING_MIN, plotCeiling, eraName } from '@/lib/world/eras';
 import { formNames } from '@/lib/world/forms';
-import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost } from '@/lib/chain/vault';
+import { INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, STAKE_MIN_EMERGE, WALLET_DAILY_CEILING, HIRE_FEE_EMERGE, RESALE_FEE_RATE, GOLD_SALE_BURN_RATE, advanceCost, charterCost, EMISSION_WINDOW_DAYS } from '@/lib/chain/vault';
 import { UPKEEP_EMPTY_SHARE, BRIDGE_GOLD, DIG_GOLD, FESTIVAL_GOLD_PER_HEAD, FILL_GOLD, HAZARD_SHARE, HOUSE_ROOM_PER_LEVEL, UNBRIDGE_WOOD_PER_UNIT } from '@/lib/simulation';
 import { BASE_COST_EMERGE, MAX_TRAIN_PER_DAY, MIN_ATTACK, OCCUPIER_SHARE, SHIELD_HOURS, UNITS, armyCap, occupyUpkeepGold } from '@/lib/world/war';
 
@@ -450,6 +450,16 @@ export default function Wiki() {
             vault pays out only so much stewardship in a day across <em>everybody</em>, and that
             budget starts again at midnight UTC. The Bank shows the figure and how much of it is
             left.
+          </p>
+          <p>
+            <b>The budget follows what charges bring in.</b> Every charge pays into the vault and
+            the vault keeps a quarter of it. Each day&rsquo;s budget is <b>half of what the vault
+            kept over the last {EMISSION_WINDOW_DAYS} days, a day&rsquo;s worth at a time</b> &mdash;
+            and never more than <b>5% of what the vault holds</b> free and clear, under a hard cap.
+            A quiet fortnight pays little; a burst of burns pays out over the fortnight that
+            follows rather than the day it lands. Nothing leaves the vault that charges did not
+            bring, so the vault cannot be drained, and what it pays cannot outrun what is burned.
+            The Bank says which of the three rules set today&rsquo;s figure.
           </p>
           <p>
             When what everybody is judged to earn fits inside the budget, it does not bind at all

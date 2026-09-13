@@ -52,6 +52,13 @@ export interface EmissionRoom {
   emitted?: number;
   share?: number | null;
   demand?: number | null;
+  /** Which rule set the day's budget: what charges brought in over the window, what the vault holds, or the hard cap. */
+  bound?: 'intake' | 'balance' | 'cap';
+  /** What the vault kept from charges over the window. */
+  kept?: number;
+  /** What the vault holds free and clear, or null when the chain could not be asked. */
+  free?: number | null;
+  windowDays?: number;
 }
 
 export interface PayoutHistory {

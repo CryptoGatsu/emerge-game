@@ -12,9 +12,9 @@ import 'server-only';
  * worth a transaction, after each charge and on demand.
  */
 
-import { chargeSplit, CHARGE_VAULT_SHARE, CHARGE_DIVIDEND_SHARE } from '../chain/vault';
+import { chargeSplit, CHARGE_VAULT_SHARE, CHARGE_DIVIDEND_SHARE, EMISSION_WINDOW_DAYS } from '../chain/vault';
 import { serverKey } from '../limits';
-import { counter, incrBy, push, range, releaseLock, takeLock } from './kv';
+import { counter, incrBy, incrWindow, push, range, releaseLock, setValue, takeLock } from './kv';
 import { burnFromVault, vaultCanSign } from './signer';
 
 const RECEIVED = serverKey('vault:received');
@@ -27,6 +27,12 @@ const SWEEP_LOCK = serverKey('vault:sweep');
 /** Below this the burn share waits: a transaction's gas is worth more than the tidiness. */
 export const MIN_SWEEP_EMERGE = 10_000;
 
+/** What the vault kept from charges on one UTC day: the intake the day's payouts are judged from. */
+const keptKey = (day: string) => serverKey(`vault:kept:${day}`);
+const dayOf = (at: number) => new Date(at).toISOString().slice(0, 10);
+/** Where the day's computed payout budget is cached; a charge landing clears it so the Bank sees it at once. */
+export const emissionBudgetKey = (day: string) => serverKey(`emission:budget:${day}`);
+
 /** Book a charge the vault has received, and try to burn what it now owes. */
 export async function noteCharge(whole: number): Promise<void> {
   const split = chargeSplit(whole);
@@ -34,7 +40,21 @@ export async function noteCharge(whole: number): Promise<void> {
   await incrBy(RECEIVED, split.whole);
   await incrBy(OWED, split.burned);
   if (split.dividend > 0) await incrBy(DIVIDEND_POOL, split.dividend);
+  // The day's kept share, which expires once it has fallen out of the window.
+  if (split.kept > 0) await incrWindow(keptKey(dayOf(Date.now())), split.kept, (EMISSION_WINDOW_DAYS + 2) * 86_400).catch(() => {});
+  await setValue(emissionBudgetKey(dayOf(Date.now())), '', 1).catch(() => {});
   void sweepBurn().catch(() => {});
+}
+
+/**
+ * What the vault kept from charges over the last `days` UTC days, today
+ * included. This is the intake the payout budget is a share of.
+ */
+export async function keptOver(days = EMISSION_WINDOW_DAYS, now = Date.now()): Promise<number> {
+  const keys: string[] = [];
+  for (let i = 0; i < days; i++) keys.push(keptKey(dayOf(now - i * 86_400_000)));
+  const each = await Promise.all(keys.map((k) => counter(k).catch(() => 0)));
+  return each.reduce((sum, n) => sum + n, 0);
 }
 
 /**

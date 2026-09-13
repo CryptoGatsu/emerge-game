@@ -14,6 +14,9 @@ const S1 = 1120, S2 = 1365;
   ok('status: the vault is the minter and can sign', st.minter?.toLowerCase() === VAULT && st.canSign === true && (await C.read('land', 'minter')).toLowerCase() === VAULT);
   ok('status: nothing minted yet', st.mintedCount === 0 && st.rows === 0, `minted ${st.mintedCount} rows ${st.rows}`);
   ok('operator door refuses without the secret', (await api('/api/nft', { sync: true })).status === 401);
+  // 0b. Nothing charged yet: the vault has nothing to pay out, and says which rule says so.
+  const quiet = (await api(`/api/payouts?address=${A}`)).json.room;
+  ok('with nothing charged the day\'s budget is nought, bound by intake', quiet?.budget === 0 && quiet?.bound === 'intake' && quiet?.kept === 0, JSON.stringify(quiet));
 
   // 1. A claims S1: reserve, pay the vault in $EMERGE on chain, claim with the hash.
   const held = await api('/api/plots', { owner: A, reserve: true, seed: S1 }, A);
@@ -41,6 +44,15 @@ const S1 = 1120, S2 = 1365;
   ok('mint state: the minted plot reads as minted', ms1.minted === true && ms1.queued === null, JSON.stringify(ms1));
   const ms2 = (await api(`/api/nft?seed=${S2}`)).json;
   ok('mint state: an unclaimed plot is neither minted nor queued', ms2.minted === false && ms2.queued === null, JSON.stringify(ms2));
+
+  // 1a. The claim's charge sets the budget: half of what the vault kept, a day of the window at a time.
+  {
+    const book = (await api('/api/vault')).json;
+    const roomNow = (await api(`/api/payouts?address=${A}`)).json.room;
+    const keptNow = Math.floor(book.received * 0.25);
+    const expected = Math.floor((keptNow * 0.5) / 14);
+    ok('a charge that has just landed raises the budget to half its kept share, a day of the window at a time', roomNow?.bound === 'intake' && Math.abs((roomNow?.budget ?? -1) - expected) <= 3 && roomNow.kept >= keptNow - 3, `${JSON.stringify(roomNow)} expected ${expected} from received ${book.received}`);
+  }
 
   // 1b. A city too large for the old relay publishes now that the store packs it.
   const crypto = require('node:crypto');

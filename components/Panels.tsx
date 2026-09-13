@@ -26,8 +26,7 @@ import {
   claimEarnings, creditPendingDeposits, deposit, liveToken, quoteWithdraw, withdraw,
   type VaultLedger,
   CHARTER_COST_EMERGE, INSURANCE_COST_EMERGE, BUILDERS_COST_EMERGE, BOON_COST_EMERGE, CHARGE_VAULT_SHARE, type BoonKind,
-  advanceCost, charterCost, HIRE_FEE_EMERGE,
-} from '@/lib/chain/vault';
+  advanceCost, charterCost, HIRE_FEE_EMERGE, EMISSION_WINDOW_DAYS } from '@/lib/chain/vault';
 import { EMBLEMS, EMBLEM_GLYPH, EMBLEM_NAME, isEmblem } from '@/lib/world/emblems';
 import { claimDividend, fetchDividend, registerSoftStake, stakeWords, type DividendStanding } from '@/lib/net/dividend';
 import { CHARGE_BURN_SHARE, CHARGE_DIVIDEND_SHARE, DIVIDEND_DEV_SHARE, DIVIDEND_LAND_SHARE, DIVIDEND_STAKE_SHARE, LEVEL_PRESENCE_DAYS, STAKE_MIN_EMERGE } from '@/lib/chain/vault';
@@ -1970,6 +1969,20 @@ function BankPanel({ view, claimed, player, earning, onClose, onVault, onNotice,
         {history?.room && collectable !== null && collectable > 0 && typeof history.room.share === 'number' && typeof history.room.demand === 'number' && typeof history.room.budget === 'number' && (
           <p className="muted small">
             {t('Your share of today’s vault: {share} of {budget} {ticker}, with {demand} judged across everybody. It waits for you all day; nobody else can take it.', { share: history.room.share.toLocaleString(), budget: history.room.budget.toLocaleString(), demand: history.room.demand.toLocaleString(), ticker: TOKEN.ticker })}
+          </p>
+        )}
+        {/*
+          * Where the day's budget comes from. It follows what charges brought
+          * in, so a player on a quiet fortnight sees a small figure and is
+          * told why, rather than left to think the vault is short.
+          */}
+        {history?.room && typeof history.room.budget === 'number' && history.room.bound && (
+          <p className="muted small">
+            {history.room.bound === 'intake'
+              ? t('Today’s budget across everybody is {budget} {ticker}: half of the {kept} the vault kept from charges over the last {days} days, a day at a time. More charges mean more to pay; nothing leaves the vault that charges did not bring.', { budget: history.room.budget.toLocaleString(), kept: (history.room.kept ?? 0).toLocaleString(), days: history.room.windowDays ?? EMISSION_WINDOW_DAYS, ticker: TOKEN.ticker })
+              : history.room.bound === 'balance'
+                ? t('Today’s budget across everybody is {budget} {ticker}: 5% of what the vault holds free and clear, which is the most it pays in a day whatever charges brought in.', { budget: history.room.budget.toLocaleString(), ticker: TOKEN.ticker })
+                : t('Today’s budget across everybody is {budget} {ticker}, the most the vault pays in a day.', { budget: history.room.budget.toLocaleString(), ticker: TOKEN.ticker })}
           </p>
         )}
         {history?.judged && (

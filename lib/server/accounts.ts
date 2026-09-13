@@ -36,9 +36,11 @@
  * than a proof, and it is written down here so nobody has to infer it.
  */
 
-import { DAILY_EARN_CEILING, EMERGE_PER_GOLD, WITHDRAW_BURN_RATE } from '../chain/vault';
+import { DAILY_EARN_CEILING, EMERGE_PER_GOLD, EMISSION_BALANCE_SHARE, EMISSION_INTAKE_SHARE, EMISSION_WINDOW_DAYS, WITHDRAW_BURN_RATE } from '../chain/vault';
 import { serverKey, untilUtcMidnight } from '../limits';
-import { counter, hget, hsetnx, incrBy, incrWindow } from './kv';
+import { counter, getValue, hget, hsetnx, incrBy, incrWindow, setValue } from './kv';
+import { emissionBudgetKey, keptOver, vaultBook } from './treasury';
+import { vaultHealth } from './signer';
 
 /** Today, in UTC, as a plain key. The server's day, not the player's. */
 export const utcDay = () => new Date().toISOString().slice(0, 10);
@@ -132,13 +134,21 @@ const principalKey = (address: string) => serverKey(`principal:${address.toLower
 /** Whole $EMERGE this address has deposited and not yet taken back. */
 export const principalOf = (address: string) => counter(principalKey(address));
 
+/** Every wallet's principal added up: money in the vault that is the depositors', not the game's to pay out. */
+const PRINCIPAL_TOTAL = serverKey('principal:total');
+export const principalHeld = () => counter(PRINCIPAL_TOTAL);
+
 /** Credit a verified deposit. Only ever called after the chain has confirmed it. */
-export const creditPrincipal = (address: string, whole: number) =>
-  incrBy(principalKey(address), Math.floor(whole));
+export const creditPrincipal = async (address: string, whole: number) => {
+  await incrBy(PRINCIPAL_TOTAL, Math.floor(whole)).catch(() => {});
+  return incrBy(principalKey(address), Math.floor(whole));
+};
 
 /** Debit principal on the way out. */
-export const debitPrincipal = (address: string, whole: number) =>
-  incrBy(principalKey(address), -Math.floor(whole));
+export const debitPrincipal = async (address: string, whole: number) => {
+  await incrBy(PRINCIPAL_TOTAL, -Math.floor(whole)).catch(() => {});
+  return incrBy(principalKey(address), -Math.floor(whole));
+};
 
 /* ------------------------------------------------------------------ *
  * Deposits already seen
@@ -169,18 +179,85 @@ const earnedKey = (address: string, day: string) => serverKey(`earned:${day}:${a
 const globalKey = (day: string) => serverKey(`emitted:${day}`);
 
 /**
- * The most the vault will pay out in stewardship in one UTC day, across
- * everybody.
+ * The hard stop on what the vault will pay out in stewardship in one UTC
+ * day, across everybody, whatever the intake says.
  *
  * Ten addresses' worth of the per-address ceiling. Not a limit any honest
  * population is likely to reach, and a hard stop on the day a bug or a
  * borrowed key tries to empty the vault overnight. Override with
- * `EMERGE_DAILY_EMISSION` once the real player count is known.
+ * `EMERGE_DAILY_EMISSION`.
  */
-export const dailyEmissionBudget = () => {
+export const emissionCap = () => {
   const configured = Number(process.env.EMERGE_DAILY_EMISSION);
   return Number.isFinite(configured) && configured > 0 ? configured : DAILY_EARN_CEILING * 10;
 };
+
+/** Where the day's budget comes from, and what it is. */
+export interface EmissionBudget {
+  /** What the vault pays across everybody today. */
+  budget: number;
+  /** Which rule set it: the intake over the window, the balance the vault holds, or the hard cap. */
+  bound: 'intake' | 'balance' | 'cap';
+  /** What the vault kept from charges over the window. */
+  kept: number;
+  /** Whole $EMERGE the vault holds that is nobody's principal and not owed to the burn or the dividend. */
+  free: number | null;
+  /** The three figures the budget is the least of. */
+  fromIntake: number;
+  fromBalance: number | null;
+  cap: number;
+  windowDays: number;
+}
+
+const budgetKey = emissionBudgetKey;
+const BUDGET_TTL_SECONDS = 120;
+
+/**
+ * The day's budget: what the vault pays out across everybody today.
+ *
+ * The least of three figures. A share of what the vault kept from charges
+ * over the trailing window, a day's worth at a time, so what goes out
+ * follows what came in. A share of what the vault holds free and clear, so
+ * a run of withdrawals cannot take the vault down faster than a few percent
+ * a day whatever the intake. And the hard cap above. It used to be the cap
+ * alone, and a quiet fortnight paid ten million a day against charges of
+ * nearly nothing.
+ *
+ * Cached for two minutes, since it costs a chain read; the same figure is
+ * shown in the Bank, judged against in the room, and reserved against in
+ * the payout, so all three agree.
+ */
+export async function emissionBudget(now = Date.now()): Promise<EmissionBudget> {
+  const day = new Date(now).toISOString().slice(0, 10);
+  try {
+    const cached = await getValue(budgetKey(day));
+    if (cached) {
+      const parsed = JSON.parse(cached) as EmissionBudget & { at?: number };
+      if (parsed && Number.isFinite(parsed.budget) && typeof parsed.at === 'number' && now - parsed.at < BUDGET_TTL_SECONDS * 1000) return parsed;
+    }
+  } catch { /* recomputed below */ }
+  const cap = emissionCap();
+  const kept = await keptOver(EMISSION_WINDOW_DAYS, now).catch(() => 0);
+  const fromIntake = Math.floor((kept * EMISSION_INTAKE_SHARE) / EMISSION_WINDOW_DAYS);
+  // What the vault holds that is actually the game's: not the depositors'
+  // principal, not the burn it owes, not the dividend pool waiting on the week.
+  let free: number | null = null;
+  let fromBalance: number | null = null;
+  try {
+    const [health, book, principal] = await Promise.all([vaultHealth(), vaultBook(), principalHeld()]);
+    if (health.tokens > 0 || health.ok) {
+      free = Math.max(0, Math.floor(health.tokens - book.owed - book.dividendPool - principal));
+      fromBalance = Math.floor(free * EMISSION_BALANCE_SHARE);
+    }
+  } catch { /* the chain could not be asked: the intake rule stands alone */ }
+  let budget = Math.min(cap, fromIntake);
+  let bound: EmissionBudget['bound'] = fromIntake <= cap ? 'intake' : 'cap';
+  if (fromBalance !== null && fromBalance < budget) { budget = fromBalance; bound = 'balance'; }
+  const out: EmissionBudget = { budget: Math.max(0, budget), bound, kept, free, fromIntake, fromBalance, cap, windowDays: EMISSION_WINDOW_DAYS };
+  try { await setValue(budgetKey(day), JSON.stringify({ ...out, at: now }), BUDGET_TTL_SECONDS); } catch { /* served uncached */ }
+  return out;
+}
+
 
 /**
  * The day's budget is shared out, not raced for.
@@ -209,24 +286,34 @@ export interface EmissionRoom {
   share: number | null;
   /** What everybody is judged to earn today, added up. */
   demand: number | null;
+  /** Which rule set the budget, and the figures behind it, so the Bank can say why. */
+  bound: EmissionBudget['bound'];
+  kept: number;
+  free: number | null;
+  windowDays: number;
 }
 
 /** How much stewardship this address may still be paid today. */
-export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING, share: number | null = null, demand: number | null = null): Promise<EmissionRoom> {
+export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING, share: number | null = null, demand: number | null = null, emission?: EmissionBudget): Promise<EmissionRoom> {
   const day = utcDay();
-  const [spent, emitted] = await Promise.all([
+  const [spent, emitted, budget] = await Promise.all([
     counter(earnedKey(address, day)),
     counter(globalKey(day)),
+    emission ? Promise.resolve(emission) : emissionBudget(),
   ]);
   const bound = share === null ? ceiling : Math.min(ceiling, share);
   return {
     spent,
     left: Math.max(0, bound - spent),
-    globalLeft: Math.max(0, dailyEmissionBudget() - emitted),
-    budget: dailyEmissionBudget(),
+    globalLeft: Math.max(0, budget.budget - emitted),
+    budget: budget.budget,
     emitted,
     share,
     demand,
+    bound: budget.bound,
+    kept: budget.kept,
+    free: budget.free,
+    windowDays: budget.windowDays,
   };
 }
 
@@ -240,11 +327,12 @@ export async function emissionRoom(address: string, ceiling = DAILY_EARN_CEILING
  * atomically, and a reservation that turns out to breach either is rolled back
  * before anything is signed.
  */
-export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING, share: number | null = null): Promise<boolean> {
+export async function reserveEmission(address: string, whole: number, ceiling = DAILY_EARN_CEILING, share: number | null = null, budget?: number): Promise<boolean> {
   const day = utcDay();
   const amount = Math.floor(whole);
   if (!(amount > 0)) return false;
   const bound = share === null ? ceiling : Math.min(ceiling, share);
+  const most = budget ?? (await emissionBudget()).budget;
 
   // Expiring, so a day's tally does not become a key that lives for ever.
   const mine = await incrWindow(earnedKey(address, day), amount, 26 * 3600);
@@ -253,7 +341,7 @@ export async function reserveEmission(address: string, whole: number, ceiling = 
     return false;
   }
   const all = await incrWindow(globalKey(day), amount, 26 * 3600);
-  if (all > dailyEmissionBudget()) {
+  if (all > most) {
     await incrBy(globalKey(day), -amount);
     await incrBy(earnedKey(address, day), -amount);
     return false;
