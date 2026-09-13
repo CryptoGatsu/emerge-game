@@ -173,8 +173,13 @@ function buildChannels(seed: number, profile: BiomeProfile, extent: Extent): Pol
  * privately, so the mask and the painted tiles agree by construction rather
  * than by two pieces of code happening to round the same way.
  */
-/** A pond or channel the player dug: a circle of water where there was ground. */
-export interface DugWater { x: number; y: number; r: number }
+/**
+ * A pond or channel the player dug: a circle of water where there was
+ * ground. Or, with `fill`, the other way about: a circle of ground where
+ * there was water, the plot's own pond and river included. Applied in the
+ * order they were made, so the last hand on a spot decides it.
+ */
+export interface DugWater { x: number; y: number; r: number; fill?: boolean }
 
 export function buildWater(seed: number, profile: BiomeProfile, extent: Extent = BASE_EXTENT, dug: DugWater[] = []): WaterField {
   const river = buildChannels(seed, profile, extent);
@@ -187,19 +192,17 @@ export function buildWater(seed: number, profile: BiomeProfile, extent: Extent =
     // without this a highland settlement is planned on a river that runs
     // along the ridge it is standing on.
     const raised = heightField(seed, wx, wy, profile.plateau) > 0.5;
-    if (river.pts.length && !raised) {
-      const hit = nearestOn(river, wx, wy);
-      if (hit.d < hit.w) return true;
-    }
     if (raised) return false;
-    // What the player dug, with a little noise on the rim so it reads as
-    // water and not as a stamp.
-    for (const d of dug) {
-      if (Math.hypot(wx - d.x, wy - d.y) < d.r + (valueNoise(seed + 77, wx * 0.3, wy * 0.3) - 0.5) * 1.4) return true;
-    }
+    const river_ = river.pts.length ? nearestOn(river, wx, wy) : null;
     const pondD = Math.hypot(wx - pond.x, wy - pond.y);
     const edge = pond.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
-    return pondD < edge;
+    let wet = pondD < edge || (river_ !== null && river_.d < river_.w);
+    // What the player dug or filled, in the order they did it, with a little
+    // noise on the rim so it reads as water and not as a stamp.
+    for (const d of dug) {
+      if (Math.hypot(wx - d.x, wy - d.y) < d.r + (valueNoise(seed + 77, wx * 0.3, wy * 0.3) - 0.5) * 1.4) wet = !d.fill;
+    }
+    return wet;
   };
 
   // Sample once, then work from the grid. The cell is a fixed size in world

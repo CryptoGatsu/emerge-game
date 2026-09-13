@@ -1147,8 +1147,11 @@ export default function Wiki() {
             <b>{DIG_GOLD} Gold</b> a dig, on open ground clear of the square, the buildings and the
             bridges. Dig beside a pond and the two join into a channel; keep going and you have a
             river. Fishers cast into it, people walk round it, a road that ran through it is cut,
-            and an island it makes is bridged like any other. A pond you dug can be filled in
-            again for <b>{FILL_GOLD} Gold</b>. Natural water stays where it is.
+            and an island it makes is bridged like any other. <b>Fill water in</b> does the
+            opposite, for <b>{FILL_GOLD} Gold</b> a tap: a pond you dug goes in one tap, and the
+            plot&rsquo;s own pond or river is filled a circle at a time, so a settlement whose
+            pond sits across the ground a city needs can take that ground back. A crossing has
+            to come down before the water under it can be filled.
           </p>
           <h3>Clearing trees</h3>
           <p>

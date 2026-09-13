@@ -1103,7 +1103,7 @@ export const ARROW_WOOD = 1;
  * plots does not accumulate fields for all of them.
  */
 const waterCache = new Map<string, WaterField>();
-const dugKey = (dug?: DugWater[]) => (dug?.length ? dug.map((d) => `${d.x.toFixed(1)},${d.y.toFixed(1)},${d.r.toFixed(1)}`).join(';') : '');
+const dugKey = (dug?: DugWater[]) => (dug?.length ? dug.map((d) => `${d.fill ? 'f' : ''}${d.x.toFixed(1)},${d.y.toFixed(1)},${d.r.toFixed(1)}`).join(';') : '');
 export function waterOf(world: { seed: number; biome: BiomeKind; expanded?: boolean; dug?: DugWater[] }): WaterField {
   // An expanded plot is a different field: the same channels, carried on
   // into the new ground, over a bigger grid. So is a plot with a pond dug.
@@ -7068,14 +7068,25 @@ export function digProblem(world: World, x: number, y: number): string | null {
   return null;
 }
 
-/** The dug pond under a point, or null. */
+/** The dug pond under a point, or null. Ground the player filled is not a pond. */
 export function dugAt(world: World, x: number, y: number): DugWater | null {
   let best: DugWater | null = null, bestD = Infinity;
   for (const d of world.dug ?? []) {
+    if (d.fill) continue;
     const dist = Math.hypot(x - d.x, y - d.y) - d.r;
     if (dist < 0.8 && dist < bestD) { bestD = dist; best = d; }
   }
   return best;
+}
+
+/** Why the water here cannot be filled in, or null when it can. */
+export function fillProblem(world: World, x: number, y: number): string | null {
+  useWorld(world);
+  const b = buildBounds(world);
+  if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) return 'That is off the plot.';
+  if (!waterOf(world).isWater(x, y)) return 'That is not water.';
+  if (world.layout.bridges.some((br) => Math.hypot(x - br.x, y - br.y) < br.span + 1)) return 'Not under a bridge. Take the crossing down first.';
+  return null;
 }
 
 /**
@@ -7127,11 +7138,29 @@ export function digWater(world: World, x: number, y: number): { ok: boolean; mes
   return { ok: true, message: `The pond is dug, for ${DIG_GOLD} Gold.` };
 }
 
-/** Fill a dug pond back in. Only water the player made can be filled. */
+/**
+ * Fill water in where the player tapped.
+ *
+ * A pond they dug is taken out whole. Anything else — the plot's own pond,
+ * its river — is filled a circle at a time, the size of a dig, so a big
+ * pond takes a good few taps and a good few Gold. Players asked for this:
+ * a settlement's pond can sit across a third of the ground a city needs,
+ * and "natural water stays where it is" was the one thing about the plot
+ * the owner could not change.
+ */
 export function fillWater(world: World, x: number, y: number): { ok: boolean; message: string } {
   useWorld(world);
   const d = dugAt(world, x, y);
-  if (!d) return { ok: false, message: 'There is nothing dug there. Only a pond you dug can be filled in.' };
+  if (!d) {
+    const problem = fillProblem(world, x, y);
+    if (problem) return { ok: false, message: problem };
+    if (world.treasury < FILL_GOLD) return { ok: false, message: `Filling water in costs ${FILL_GOLD} Gold.` };
+    spend(world, 'works', FILL_GOLD);
+    world.dug = [...(world.dug ?? []), { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, r: DIG_RADIUS, fill: true }];
+    settleAfterWaterChange(world);
+    pushFeed(world, 'build', `Water was filled in for ${FILL_GOLD} Gold. It was dry ground by evening.`);
+    return { ok: true, message: `The water is filled in, for ${FILL_GOLD} Gold. Tap again to fill more of it.` };
+  }
   if (world.treasury < FILL_GOLD) return { ok: false, message: `Filling a pond costs ${FILL_GOLD} Gold.` };
   spend(world, 'works', FILL_GOLD);
   world.dug = (world.dug ?? []).filter((v) => v !== d);

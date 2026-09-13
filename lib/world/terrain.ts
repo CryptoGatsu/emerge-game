@@ -216,9 +216,15 @@ export function generateWorldMap(world: World, options: MapOptions = {}): WorldM
       const pondD = Math.hypot(wx - water.pond.x, wy - water.pond.y);
       const pondEdge = water.pond.r + (valueNoise(seed + 55, wx * 0.14, wy * 0.14) - 0.5) * 5;
       // Dug water: how far outside (positive) or inside (negative) its rim.
-      let dugEdge = Infinity;
-      for (const d of world.dug ?? []) dugEdge = Math.min(dugEdge, Math.hypot(wx - d.x, wy - d.y) - d.r);
-      const nearWater = riverHit.d < riverHit.w + 0.9 || pondD < pondEdge + 1.1 || dugEdge < 1.1;
+      let dugEdge = Infinity, filledEdge = Infinity;
+      for (const d of world.dug ?? []) {
+        if (d.fill) filledEdge = Math.min(filledEdge, Math.hypot(wx - d.x, wy - d.y) - d.r);
+        else dugEdge = Math.min(dugEdge, Math.hypot(wx - d.x, wy - d.y) - d.r);
+      }
+      // Ground the player filled in is ground, not a bank: the pond's own
+      // rim is still where it was, but nothing is wet inside it any more.
+      const nearWater = !inWater && filledEdge < -1.1 ? false
+        : riverHit.d < riverHit.w + 0.9 || pondD < pondEdge + 1.1 || dugEdge < 1.1;
 
       const roadHit = nearest(roads, wx, wy);
       const roadEdge = roadHit.w + (valueNoise(seed + 191, wx * 0.3, wy * 0.3) - 0.5) * 1.0;

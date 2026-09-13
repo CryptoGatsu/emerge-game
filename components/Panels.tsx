@@ -2341,20 +2341,18 @@ function BuildPanel({ view, onClose, onBuild, onClearTrees, onBridge, onUnbridge
         <div className="build-card tool">
           <div className="build-icon">💧</div>
           <h3>{t('Pond')}</h3>
-          <p>{t('Dig a pond where you tap, on open ground clear of the square, the buildings and the bridges. Dig beside it again and the two join into a channel; fishers cast into it and people walk round it. A pond you dug can be filled in again.')}</p>
+          <p>{t('Dig a pond where you tap, on open ground clear of the square, the buildings and the bridges. Dig beside it again and the two join into a channel; fishers cast into it and people walk round it. Any water can be filled in, the plot\u2019s own pond and river included: a pond you dug goes in one tap, natural water a circle at a time.')}</p>
           <div className="build-cost">
             <b>{t('{n} Gold a dig', { n: DIG_GOLD })}</b>
-            <small>{t('{n} Gold to fill one in', { n: FILL_GOLD })}</small>
+            <small>{t('{n} Gold a fill', { n: FILL_GOLD })}</small>
           </div>
           <div className="build-actions">
             <button disabled={view.treasury < DIG_GOLD} onClick={onPond}>
               {view.treasury < DIG_GOLD ? t('Not enough Gold') : t('Dig a pond')}
             </button>
-            {view.dug > 0 && (
-              <button className="ghost" onClick={onFillPond} title={t('Tap a pond you dug to fill it back in.')}>
-                {t('Fill a pond in')}
-              </button>
-            )}
+            <button className="ghost" disabled={view.treasury < FILL_GOLD} onClick={onFillPond} title={t('Tap water to fill it in. A pond you dug goes in one tap; the plot\u2019s own water a circle at a time.')}>
+              {t('Fill water in')}
+            </button>
           </div>
         </div>
       </div>

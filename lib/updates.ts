@@ -27,6 +27,15 @@ export function byVersion(a: Update, b: Update): number {
 
 export const UPDATES: Update[] = [
   {
+    version: '3.0.2',
+    date: '2026-09-13',
+    title: 'Fill the plot\u2019s own water in',
+    notes: [
+      'The Pond tool\u2019s **Fill water in** now works on any water, the pond and river the plot came with included. A pond you dug still goes in one tap; natural water is filled a circle at a time, the size of a dig, for 120 Gold a tap, so a big pond takes a good few taps. Players asked: a settlement\u2019s pond can sit across a third of the ground a city needs, and it was the one thing about the plot its owner could not change.',
+      'Filled ground is ground: people walk on it, buildings go on it, roads run over it, and the terrain is redrawn without the bank. A crossing has to come down before the water under it can be filled. Digging on filled ground brings water back.',
+    ],
+  },
+  {
     version: '3.0.1',
     date: '2026-09-13',
     title: 'Three things players reported',
@@ -460,6 +469,15 @@ export const UPDATES: Update[] = [
 ];
 
 export const UPDATES_ZH: Update[] = [
+  {
+    version: '3.0.2',
+    date: '2026-09-13',
+    title: '填掉地块自带的水',
+    notes: [
+      '池塘工具的**填水**现在对任何水面都有效，包括地块自带的池塘和河流。自己挖的池塘仍然一次填平；天然的水一圈一圈地填，每圈和一次挖掘一样大，每点一次 120 金币，所以大池塘要点不少次。这是玩家提出的：定居点的池塘可能占去城市所需土地的三分之一，而它曾是地块上唯一由不得主人的东西。',
+      '填出来的地就是地：人在上面走，建筑盖在上面，路从上面过，地形重绘时不再有岸。桥下的水要先把桥拆掉才能填。在填过的地上再挖，水就回来了。',
+    ],
+  },
   {
     version: '3.0.1',
     date: '2026-09-13',

@@ -26,7 +26,7 @@ import { utteranceFor } from '../speech';
 import { AMBIENT, BUILD, SEASON_TINT, UI, WEATHER_TINT } from './palette';
 import { backdropTexture, cloudTexture, loadAssets, type AssetLibrary } from './assets';
 import { buildingArtKey } from './buildings';
-import { CLEARING_DAYS, CLEAR_RADIUS, bridgeAt, buildBounds, decorFor, digProblem, dugAt, placementProblem, type HolidayKey } from '../simulation';
+import { CLEARING_DAYS, CLEAR_RADIUS, bridgeAt, buildBounds, decorFor, digProblem, dugAt, fillProblem, placementProblem, type HolidayKey } from '../simulation';
 import { CitizenSprite } from './citizenSprite';
 import { ELEVATION, GRID, SCENE_BOUNDS, TILE_H, TILE_W, depthOf, sceneBoundsOf, screenToTile, screenToWorld, tileToScreen, tileToWorld, worldToScreen, worldToTile, type SceneBounds } from '../world/iso';
 import { extentOf } from '../world/extent';
@@ -3840,7 +3840,8 @@ export class EmergeScene {
     const ring = new Sprite(this.assets.get('fx.select'));
     ring.anchor.set(0.5, 0.5);
     ring.alpha = 0.8;
-    ring.scale.set(type === 'Dig' ? 2.4 : 1.6);
+    // Both tools work a circle the size of a dig now that any water can be filled.
+    ring.scale.set(2.4);
     ring.zIndex = 1e6;
     this.objectLayer.addChild(ring);
     this.ghost = ring;
@@ -3910,7 +3911,7 @@ export class EmergeScene {
           : this.placement?.type === 'Dig'
             ? digProblem(this.world, wx, wy) === null
             : this.placement?.type === 'Fill'
-              ? dugAt(this.world, wx, wy) !== null
+              ? dugAt(this.world, wx, wy) !== null || fillProblem(this.world, wx, wy) === null
               : this.canBuildAt(wx, wy);
     const height = this.map.heightAt(wx, wy);
     const pos = worldToScreen(wx, wy, height);

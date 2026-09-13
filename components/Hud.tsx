@@ -1120,7 +1120,7 @@ export function Hud(props: HudProps) {
               : placing === 'Dig'
                 ? <>{t('Dig a pond')} — {compact ? t('tap open ground where the ring is green.') : t('click open ground where the ring is green; Esc to cancel.')}</>
               : placing === 'Fill'
-                ? <>{t('Fill a pond in')} — {compact ? t('tap a pond you dug.') : t('click a pond you dug; Esc to cancel.')}</>
+                ? <>{t('Fill water in')} — {compact ? t('tap the water you want filled; a big pond takes a few taps.') : t('click the water you want filled; a big pond takes a few clicks. Esc to cancel.')}</>
                 : <>{t('Placing')} <b>{tn(placing)}</b> — {compact ? t('tap open ground to build.') : t('click open ground to build, Esc to cancel.')}</>}
           </span>
           <button onClick={props.onCancelBuild}>{t('Cancel')}</button>

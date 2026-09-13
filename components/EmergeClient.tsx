@@ -25,7 +25,7 @@ import {
   applyWar, payForOccupation, payForTroops, raiseBase,
   advanceEra, attendedFrom, demolishBuilding, dropCitizen, drawFromTreasury, eraGate, eraOf, expandPlot, fightHazard, frozenGold, fundTreasury, setFrozenGold, grantResource, marketReport, noteAttention, rebuildBuilding, setEra, setWalletAttention, trial, walletAttentionAt, FOLD_CUTOFF, restoreFoldedForms,
   RESOURCE_LABELS, moveBuilding, pickUpCitizen, renameCitizen, renameWorld, setWageRate,
-  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, casinoStake, casinoPayout,
+  setWorldPrices, settleBout, stakeOnBout, takeSales, upgradeBuilding, upgradeAllOfType, removeBridge, digWater, fillWater, digProblem, FILL_GOLD, casinoStake, casinoPayout,
   type World, clearTrees, trainCitizen, trainTrade, hireNotable, dismissNotable, escrowGoods, receiveDelivery, type WorkingJob,
   dailyCeiling, holdFestival, raiseCity, setCover, setProgramme, type ProgrammeKey, commissionGreatWork, type GreatWorkKey, startBridgeAt, applyBoon, boonCheck, type BoonKind, type CoverKind, buildDiscount, cityLevel, setBanner, returnYield, dismissCitizen, setGates, placementProblem, setKeep, type Resource } from '@/lib/simulation';
 import { clearWorld, loadWorld, saveWorld, snapshotOf, worldFromSave, type SavedWorld } from '@/lib/world/save';
@@ -1692,7 +1692,7 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
     if (!world || !scene) return;
     setPanel(null);
     setPlacing(mode);
-    scene.startWaterTool(mode, (x, y) => {
+    const arm = () => scene.startWaterTool(mode, (x, y) => {
       setPlacing(null);
       const result = mode === 'Dig' ? digWater(world, x, y) : fillWater(world, x, y);
       if (!result.ok) {
@@ -1700,10 +1700,15 @@ function WorldView({ claimed, player, hidden, visit, onLeave, onRelease, onRenam
         announce({ id: `pond-${Date.now()}`, kind: 'sync', title: t('Nothing dug'), body: tx(result.message), lifetime: 8_000 });
       } else {
         soundRef.current?.cue('hammer');
-        announce({ id: `pond-${Date.now()}`, kind: 'sync', title: mode === 'Dig' ? t('Pond dug') : t('Pond filled'), body: tx(result.message), lifetime: 6_000 });
+        announce({ id: `pond-${Date.now()}`, kind: 'sync', title: mode === 'Dig' ? t('Pond dug') : t('Water filled'), body: tx(result.message), lifetime: 6_000 });
       }
       setView(snapshot(world, selectedRef.current));
+      // Filling stays armed: the plot's own pond goes a circle at a time,
+      // and going back to the Build panel for every one of them is what
+      // would make a big pond feel impossible. Esc, or the bar, puts it down.
+      if (mode === 'Fill' && result.ok && world.treasury >= FILL_GOLD) { setPlacing(mode); arm(); }
     });
+    arm();
   }, [announce]);
 
   const beginUnbridge = useCallback(() => {
